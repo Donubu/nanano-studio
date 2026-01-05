@@ -1,36 +1,117 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# NANANO Studio
 
-## Getting Started
+Plataforma de chat con inteligencia artificial que integra Google Generative AI (Vertex AI) para conversaciones y generación de imágenes.
 
-First, run the development server:
+## Características
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- **Conversaciones en tabs**: Múltiples conversaciones abiertas simultáneamente con persistencia de estado
+- **Proyectos**: Organización de conversaciones por proyectos con configuraciones personalizadas
+- **Generación de imágenes**: Soporte para modelos con capacidad de generación de imágenes (Imagen 3, Gemini)
+- **Galería de generaciones**: Visualización de todas las imágenes generadas por proyecto
+- **Archivado**: Sistema de archivado de conversaciones
+- **Multi-usuario**: Asignación de usuarios a proyectos con acceso compartido
+- **Streaming**: Respuestas en tiempo real con Server-Sent Events
+- **Adjuntos**: Soporte para enviar imágenes y archivos en el chat
+- **System Instructions**: Instrucciones de sistema por proyecto y por conversación
+
+## Stack Tecnológico
+
+- **Framework**: Next.js 16 (App Router)
+- **Base de datos**: MySQL
+- **Autenticación**: NextAuth.js v5
+- **AI**: Google Generative AI SDK (@google/genai)
+- **Almacenamiento**: AWS S3 + CloudFront CDN
+- **UI**: Tailwind CSS + Radix UI + Lucide Icons
+- **Markdown**: react-markdown + remark-gfm
+
+## Requisitos
+
+- Node.js 20+
+- MySQL 8+
+- Cuenta de Google Cloud con Vertex AI habilitado
+- Cuenta de AWS (S3 + CloudFront)
+
+## Variables de Entorno
+
+```env
+# Base de datos
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=
+DB_NAME=nanano
+
+# Autenticación
+AUTH_SECRET=
+AUTH_GOOGLE_ID=
+AUTH_GOOGLE_SECRET=
+
+# Google AI (Vertex AI)
+GOOGLE_CLOUD_PROJECT=
+GOOGLE_CLOUD_LOCATION=us-central1
+GOOGLE_APPLICATION_CREDENTIALS=
+
+# AWS S3
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_S3_BUCKET=
+AWS_S3_FOLDER=
+AWS_CLOUDFRONT_DOMAIN=
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Instalación
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+# Instalar dependencias
+npm install
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# Ejecutar migraciones
+npm run migrate
 
-## Learn More
+# Iniciar servidor de desarrollo
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Scripts
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Comando | Descripción |
+|---------|-------------|
+| `npm run dev` | Servidor de desarrollo |
+| `npm run build` | Build de producción |
+| `npm run start` | Iniciar en producción |
+| `npm run lint` | Ejecutar ESLint |
+| `npm run migrate` | Ejecutar migraciones de BD |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Estructura de Proyecto
 
-## Deploy on Vercel
+```
+├── app/
+│   ├── api/              # API Routes
+│   │   ├── auth/         # Autenticación
+│   │   ├── conversations/# CRUD conversaciones
+│   │   ├── messages/     # Mensajes y streaming
+│   │   └── projects/     # Proyectos y generaciones
+│   ├── chat/             # Página principal del chat
+│   └── page.tsx          # Landing page
+├── components/
+│   ├── chat/             # Componentes del chat
+│   └── ui/               # Componentes UI reutilizables
+├── lib/
+│   ├── db.ts             # Conexión a MySQL
+│   ├── google-ai.ts      # Cliente de Google AI
+│   └── s3.ts             # Cliente de AWS S3
+└── scripts/
+    └── migrations/       # Migraciones de BD
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Modelos Soportados
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Gemini 2.0 Flash
+- Gemini 2.5 Pro
+- Gemini 2.5 Flash (con generación de imágenes)
+- Imagen 3
+
+## Licencia
+
+Proyecto privado. Todos los derechos reservados.
