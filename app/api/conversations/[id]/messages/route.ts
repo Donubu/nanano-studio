@@ -1,0 +1,233 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/auth";
+import pool from "@/lib/db";
+import { RowDataPacket, ResultSetHeader } from "mysql2";
+import { sendMessage, ChatMessage, isConfigured, Labels } from "@/lib/google-ai";
+
+interface MessageRow extends RowDataPacket {
+  id: number;
+  conversation_id: number;
+  role: "user" | "model";
+  content: string;
+  content_type: "text" | "image" | "mixed";
+  image_url: string | null;
+  image_mime_type: string | null;
+  tokens_input: number;
+  tokens_output: number;
+  created_at: Date;
+}
+
+interface ConversationRow extends RowDataPacket {
+  id: number;
+  user_id: number;
+  model_id: number;
+  model_model_id: string;
+  system_instruction: string | null;
+  temperature: number;
+  top_p: number;
+  top_k: number;
+  max_output_tokens: number;
+  image_aspect_ratio: string;
+  image_size: string;
+  supports_image_generation: boolean;
+  project_name: string | null;
+}
+
+// GET - Obtener mensajes de una conversación
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await auth();
+
+    if (!session?.user) {
+      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    }
+
+    const { id } = await params;
+
+    // Verificar que la conversación pertenece al usuario
+    const [conversation] = await pool.execute<RowDataPacket[]>(
+      "SELECT id FROM conversations WHERE id = ? AND user_id = ?",
+      [id, session.user.id]
+    );
+
+    if (conversation.length === 0) {
+      return NextResponse.json(
+        { error: "Conversación no encontrada" },
+        { status: 404 }
+      );
+    }
+
+    const [messages] = await pool.execute<MessageRow[]>(
+      `SELECT id, conversation_id, role, content_type, content, image_url, image_mime_type,
+              tokens_input, tokens_output, created_at
+       FROM messages
+       WHERE conversation_id = ?
+       ORDER BY created_at ASC`,
+      [id]
+    );
+
+    return NextResponse.json(messages);
+  } catch (error) {
+    console.error("Error obteniendo mensajes:", error);
+    return NextResponse.json(
+      { error: "Error interno del servidor" },
+      { status: 500 }
+    );
+  }
+}
+
+// POST - Enviar mensaje y obtener respuesta del modelo (sin streaming)
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await auth();
+
+    if (!session?.user) {
+      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    }
+
+    const { id } = await params;
+    const body = await request.json();
+    const { content, image_url, image_mime_type } = body;
+
+    if (!content || content.trim() === "") {
+      return NextResponse.json(
+        { error: "El contenido del mensaje es requerido" },
+        { status: 400 }
+      );
+    }
+
+    // Obtener conversación con configuración y nombre del proyecto
+    const [conversations] = await pool.execute<ConversationRow[]>(
+      `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, p.title as project_name
+       FROM conversations c
+       JOIN models m ON c.model_id = m.id
+       LEFT JOIN projects p ON c.project_id = p.id
+       WHERE c.id = ? AND c.user_id = ?`,
+      [id, session.user.id]
+    );
+
+    if (conversations.length === 0) {
+      return NextResponse.json(
+        { error: "Conversación no encontrada" },
+        { status: 404 }
+      );
+    }
+
+    const conversation = conversations[0];
+
+    // Determinar tipo de contenido
+    const contentType = image_url ? (content ? "mixed" : "image") : "text";
+
+    // Guardar mensaje del usuario
+    const [userMessageResult] = await pool.execute<ResultSetHeader>(
+      `INSERT INTO messages (conversation_id, role, content_type, content, image_url, image_mime_type)
+       VALUES (?, 'user', ?, ?, ?, ?)`,
+      [id, contentType, content, image_url || null, image_mime_type || null]
+    );
+
+    // Obtener historial de mensajes para contexto
+    const [historyRows] = await pool.execute<MessageRow[]>(
+      `SELECT role, content, image_url, image_mime_type
+       FROM messages
+       WHERE conversation_id = ?
+       ORDER BY created_at ASC`,
+      [id]
+    );
+
+    // Convertir historial al formato de ChatMessage
+    const messages: ChatMessage[] = historyRows.map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+      imageUrl: msg.image_url,
+      imageMimeType: msg.image_mime_type,
+    }));
+
+    // Actualizar timestamp de la conversación
+    await pool.execute(
+      "UPDATE conversations SET updated_at = NOW() WHERE id = ?",
+      [id]
+    );
+
+    let modelResponse: string;
+    let tokensInput = 0;
+    let tokensOutput = 0;
+
+    // Preparar labels para tracking en Vertex AI
+    // Usar solo la parte inicial del email para no exponer datos sensibles
+    const userIdentifier = session.user.email?.split("@")[0] || "unknown";
+    const labels: Labels = {
+      project_name: conversation.project_name || "sin_proyecto",
+      user_name: userIdentifier,
+    };
+
+    // Intentar usar Google AI si está configurado
+    if (isConfigured()) {
+      try {
+        const result = await sendMessage(
+          conversation.model_model_id,
+          messages,
+          conversation.system_instruction,
+          {
+            temperature: Number(conversation.temperature),
+            topP: Number(conversation.top_p),
+            topK: conversation.top_k,
+            maxOutputTokens: conversation.max_output_tokens,
+            // Incluir configuración de imagen solo si el modelo lo soporta
+            ...(conversation.supports_image_generation && {
+              imageConfig: {
+                aspectRatio: conversation.image_aspect_ratio as "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9",
+                imageSize: conversation.image_size as "1K" | "2K" | "4K",
+              },
+            }),
+          },
+          labels
+        );
+        modelResponse = result.text;
+        tokensInput = result.tokenCount.input;
+        tokensOutput = result.tokenCount.output;
+      } catch (aiError) {
+        console.error("Error llamando a Google AI:", aiError);
+        modelResponse = `Error al generar respuesta: ${aiError instanceof Error ? aiError.message : "Error desconocido"}`;
+      }
+    } else {
+      modelResponse = `API de Google AI no configurada. Por favor, configure GOOGLE_API_KEY en las variables de entorno.`;
+    }
+
+    // Guardar respuesta del modelo
+    const [modelMessageResult] = await pool.execute<ResultSetHeader>(
+      `INSERT INTO messages (conversation_id, role, content_type, content, tokens_input, tokens_output)
+       VALUES (?, 'model', 'text', ?, ?, ?)`,
+      [id, modelResponse, tokensInput, tokensOutput]
+    );
+
+    return NextResponse.json({
+      userMessage: {
+        id: userMessageResult.insertId,
+        role: "user",
+        content,
+        content_type: contentType,
+        image_url: image_url || null,
+      },
+      modelMessage: {
+        id: modelMessageResult.insertId,
+        role: "model",
+        content: modelResponse,
+        content_type: "text",
+        tokens_input: tokensInput,
+        tokens_output: tokensOutput,
+      },
+    });
+  } catch (error) {
+    console.error("Error enviando mensaje:", error);
+    return NextResponse.json(
+      { error: "Error interno del servidor" },
+      { status: 500 }
+    );
+  }
+}

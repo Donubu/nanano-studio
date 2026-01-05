@@ -1,0 +1,143 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/auth";
+import pool from "@/lib/db";
+import { RowDataPacket, ResultSetHeader } from "mysql2";
+
+interface ConversationRow extends RowDataPacket {
+  id: number;
+  user_id: number;
+  project_id: number | null;
+  model_id: number;
+  model_display_name: string;
+  project_title: string | null;
+  title: string;
+  system_instruction: string | null;
+  temperature: number;
+  top_p: number;
+  top_k: number;
+  max_output_tokens: number;
+  created_at: Date;
+  updated_at: Date;
+  last_message: string | null;
+  message_count: number;
+}
+
+// GET - Listar conversaciones del usuario
+export async function GET(request: NextRequest) {
+  try {
+    const session = await auth();
+
+    if (!session?.user) {
+      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const projectId = searchParams.get("project_id");
+
+    let query = `
+      SELECT
+        c.*,
+        m.display_name as model_display_name,
+        p.title as project_title,
+        (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message,
+        (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id) as message_count
+      FROM conversations c
+      JOIN models m ON c.model_id = m.id
+      LEFT JOIN projects p ON c.project_id = p.id
+      WHERE c.user_id = ? AND c.deleted_at IS NULL
+    `;
+
+    const params: (number | string)[] = [session.user.id];
+
+    if (projectId) {
+      query += " AND c.project_id = ?";
+      params.push(projectId);
+    }
+
+    query += " ORDER BY c.updated_at DESC";
+
+    const [rows] = await pool.execute<ConversationRow[]>(query, params);
+
+    return NextResponse.json(rows);
+  } catch (error) {
+    console.error("Error obteniendo conversaciones:", error);
+    return NextResponse.json(
+      { error: "Error interno del servidor" },
+      { status: 500 }
+    );
+  }
+}
+
+// POST - Crear nueva conversación
+export async function POST(request: NextRequest) {
+  try {
+    const session = await auth();
+
+    if (!session?.user) {
+      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const {
+      project_id,
+      model_id,
+      title = "Nueva conversación",
+      system_instruction,
+      temperature = 1.0,
+      top_p = 0.95,
+      top_k = 40,
+      max_output_tokens = 8192,
+      image_aspect_ratio = "1:1",
+      image_size = "1K",
+    } = body;
+
+    if (!model_id) {
+      return NextResponse.json(
+        { error: "model_id es requerido" },
+        { status: 400 }
+      );
+    }
+
+    // Verificar que el modelo existe y está activo
+    const [model] = await pool.execute<RowDataPacket[]>(
+      "SELECT id FROM models WHERE id = ? AND is_active = TRUE",
+      [model_id]
+    );
+
+    if (model.length === 0) {
+      return NextResponse.json(
+        { error: "Modelo no encontrado o inactivo" },
+        { status: 400 }
+      );
+    }
+
+    const [result] = await pool.execute<ResultSetHeader>(
+      `INSERT INTO conversations (user_id, project_id, model_id, title, system_instruction, temperature, top_p, top_k, max_output_tokens, image_aspect_ratio, image_size)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        session.user.id,
+        project_id || null,
+        model_id,
+        title,
+        system_instruction || null,
+        temperature,
+        top_p,
+        top_k,
+        max_output_tokens,
+        image_aspect_ratio,
+        image_size,
+      ]
+    );
+
+    return NextResponse.json(
+      { id: result.insertId, title, model_id },
+      { status: 201 }
+    );
+  } catch (error) {
+    console.error("Error creando conversación:", error);
+    return NextResponse.json(
+      { error: "Error interno del servidor" },
+      { status: 500 }
+    );
+  }
+}
