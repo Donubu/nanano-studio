@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Download } from "lucide-react";
+import { Download, ZoomIn, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface MessageContentProps {
@@ -22,7 +22,7 @@ interface ImageMetadata {
 }
 
 // Función para descargar imagen
-const downloadImage = async (imageUrl: string) => {
+const downloadImage = async (imageUrl: string, suffix?: string) => {
   try {
     const response = await fetch(imageUrl);
     const blob = await response.blob();
@@ -30,7 +30,13 @@ const downloadImage = async (imageUrl: string) => {
     const link = document.createElement("a");
     link.href = url;
     // Extraer nombre del archivo de la URL o generar uno
-    const fileName = imageUrl.split("/").pop() || `imagen_${Date.now()}.png`;
+    let fileName = imageUrl.split("/").pop() || `imagen_${Date.now()}.png`;
+    if (suffix) {
+      const lastDotIndex = fileName.lastIndexOf(".");
+      if (lastDotIndex !== -1) {
+        fileName = fileName.slice(0, lastDotIndex) + suffix + fileName.slice(lastDotIndex);
+      }
+    }
     link.download = fileName;
     document.body.appendChild(link);
     link.click();
@@ -95,6 +101,41 @@ export function MessageContent({
   isStreaming = false,
 }: MessageContentProps) {
   const [imageMetadata, setImageMetadata] = useState<ImageMetadata | null>(null);
+  const [upscaling, setUpscaling] = useState(false);
+
+  // Verificar si la imagen puede ser upscaleada (ancho <= 1920)
+  const canUpscale = imageMetadata && imageMetadata.width <= 1920;
+
+  // Manejar descarga 2X (upscale)
+  const handle2xDownload = async () => {
+    if (!imageUrl || !imageMetadata) return;
+
+    setUpscaling(true);
+    try {
+      const response = await fetch("/api/images/upscale", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageUrl,
+          width: imageMetadata.width,
+          height: imageMetadata.height,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Error al procesar imagen");
+      }
+
+      const result = await response.json();
+      await downloadImage(result.url, "--2x");
+    } catch (err) {
+      console.error("Error upscaling image:", err);
+      alert(err instanceof Error ? err.message : "Error al procesar imagen");
+    } finally {
+      setUpscaling(false);
+    }
+  };
 
   // Cargar metadatos de la imagen cuando se monta el componente
   useEffect(() => {
@@ -157,15 +198,34 @@ export function MessageContent({
               alt="Imagen adjunta"
               className="w-full h-auto object-cover"
             />
-            {/* Botón de descarga - solo para imágenes del modelo (no del usuario) */}
+            {/* Botones de descarga - solo para imágenes del modelo (no del usuario) */}
             {!isUser && (
-              <button
-                onClick={() => downloadImage(imageUrl)}
-                className="absolute top-2 right-2 p-2 bg-black/60 hover:bg-black/80 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                title="Descargar imagen"
-              >
-                <Download className="h-4 w-4 text-white" />
-              </button>
+              <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={() => downloadImage(imageUrl)}
+                  className="p-2 bg-black/60 hover:bg-black/80 rounded-lg"
+                  title="Descargar imagen original"
+                >
+                  <Download className="h-4 w-4 text-white" />
+                </button>
+                {canUpscale && (
+                  <button
+                    onClick={handle2xDownload}
+                    disabled={upscaling}
+                    className="p-2 bg-green-600/80 hover:bg-green-600 disabled:bg-green-600/50 rounded-lg flex items-center gap-1"
+                    title="Descargar en 2X (upscale)"
+                  >
+                    {upscaling ? (
+                      <Loader2 className="h-4 w-4 text-white animate-spin" />
+                    ) : (
+                      <>
+                        <ZoomIn className="h-4 w-4 text-white" />
+                        <span className="text-xs text-white font-medium">2X</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
             )}
           </div>
           {/* Metadatos de la imagen - solo para imágenes del modelo */}

@@ -131,6 +131,9 @@ export function ChatInterface() {
     // Project system instruction
     const [useProjectSystemInstruction, setUseProjectSystemInstruction] = useState(true);
 
+    // Usage tracking
+    const [projectUsage, setProjectUsage] = useState<{ used: number; limit: number; unlimited: boolean } | null>(null);
+
     // Get current tab's conversation and messages
     const activeTab = openTabs.find((t) => t.id === activeTabId);
     const currentConversation = activeTab ? tabConversations[activeTab.id] : null;
@@ -264,6 +267,21 @@ export function ChatInterface() {
         }
     }, []);
 
+    const fetchProjectUsage = useCallback(async (projectId: number) => {
+        try {
+            const res = await fetch(`/api/projects/${projectId}/usage`);
+            if (res.ok) {
+                const data = await res.json();
+                setProjectUsage(data);
+            } else {
+                setProjectUsage(null);
+            }
+        } catch (err) {
+            console.error("Error fetching project usage:", err);
+            setProjectUsage(null);
+        }
+    }, []);
+
     const fetchConversations = useCallback(async () => {
         // Solo cargar conversaciones si hay un proyecto seleccionado
         if (!selectedProjectId) {
@@ -334,6 +352,7 @@ export function ChatInterface() {
     useEffect(() => {
         if (selectedProjectId) {
             fetchProjectModels(selectedProjectId);
+            fetchProjectUsage(selectedProjectId);
             // Clear tabs when changing project
             setOpenTabs([]);
             setActiveTabId(null);
@@ -347,8 +366,9 @@ export function ChatInterface() {
             setSelectedModelId(null);
             setArchivedConversations([]);
             setShowArchived(false);
+            setProjectUsage(null);
         }
-    }, [selectedProjectId, fetchProjectModels]);
+    }, [selectedProjectId, fetchProjectModels, fetchProjectUsage]);
 
     useEffect(() => {
         fetchConversations();
@@ -935,6 +955,10 @@ export function ChatInterface() {
             }
 
             fetchConversations();
+            // Actualizar contador de uso
+            if (selectedProjectId) {
+                fetchProjectUsage(selectedProjectId);
+            }
         } catch (err) {
             console.error("Error sending message:", err);
             // Remove streaming message on error
@@ -1013,6 +1037,34 @@ export function ChatInterface() {
                                 </option>
                             ))}
                         </select>
+                        {selectedProjectId && projectUsage && (
+                            <div className="mt-2 px-2 py-1.5 bg-[#1a1a22] rounded-lg border border-border/30">
+                                <div className="flex items-center justify-between text-xs">
+                                    <span className="text-muted-foreground">Mensajes este mes</span>
+                                    <span className={projectUsage.unlimited ? "text-green-400" : projectUsage.used >= projectUsage.limit ? "text-red-400" : "text-foreground"}>
+                                        {projectUsage.unlimited ? (
+                                            <span className="text-green-400">Ilimitado</span>
+                                        ) : (
+                                            <>{projectUsage.used} / {projectUsage.limit}</>
+                                        )}
+                                    </span>
+                                </div>
+                                {!projectUsage.unlimited && (
+                                    <div className="mt-1.5 h-1.5 bg-[#24242e] rounded-full overflow-hidden">
+                                        <div
+                                            className={`h-full rounded-full transition-all ${
+                                                projectUsage.used >= projectUsage.limit
+                                                    ? "bg-red-500"
+                                                    : projectUsage.used >= projectUsage.limit * 0.8
+                                                        ? "bg-yellow-500"
+                                                        : "bg-primary"
+                                            }`}
+                                            style={{ width: `${Math.min((projectUsage.used / projectUsage.limit) * 100, 100)}%` }}
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        )}
                         {selectedProjectId && (
                             <Button
                                 onClick={handleOpenGallery}
@@ -1267,6 +1319,7 @@ export function ChatInterface() {
                         <div className="flex-1 overflow-hidden">
                             <GenerationsGallery
                                 projectId={selectedProjectId!}
+                                currentUserId={Number(session?.user?.id) || 0}
                                 onOpenConversation={handleOpenConversationFromGallery}
                             />
                         </div>

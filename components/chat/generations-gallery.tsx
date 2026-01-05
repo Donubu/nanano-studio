@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Loader2, ExternalLink, Image as ImageIcon, Calendar, FileType, Maximize2, RatioIcon, Ruler, Download, HardDrive } from "lucide-react";
+import { X, Loader2, ExternalLink, Image as ImageIcon, Calendar, FileType, Maximize2, RatioIcon, Ruler, Download, HardDrive, ZoomIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface Generation {
   id: number;
   conversation_id: number;
+  conversation_user_id: number;
   conversation_title: string;
   image_url: string;
   image_mime_type: string;
@@ -16,15 +17,23 @@ interface Generation {
   created_at: string;
 }
 
+interface ImageDimensions {
+  width: number;
+  height: number;
+}
+
 interface GenerationsGalleryProps {
   projectId: number;
+  currentUserId: number;
   onOpenConversation: (conversationId: number) => void;
 }
 
-export function GenerationsGallery({ projectId, onOpenConversation }: GenerationsGalleryProps) {
+export function GenerationsGallery({ projectId, currentUserId, onOpenConversation }: GenerationsGalleryProps) {
   const [generations, setGenerations] = useState<Generation[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState<Generation | null>(null);
+  const [imageDimensions, setImageDimensions] = useState<ImageDimensions | null>(null);
+  const [upscaling, setUpscaling] = useState(false);
 
   useEffect(() => {
     const fetchGenerations = async () => {
@@ -105,6 +114,71 @@ export function GenerationsGallery({ projectId, onOpenConversation }: Generation
       console.error("Error downloading image:", err);
     }
   };
+
+  // Cargar dimensiones de imagen cuando se selecciona
+  useEffect(() => {
+    if (!selectedImage) {
+      setImageDimensions(null);
+      return;
+    }
+
+    const img = new Image();
+    img.onload = () => {
+      setImageDimensions({
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+      });
+    };
+    img.src = selectedImage.image_url;
+  }, [selectedImage]);
+
+  // Manejar descarga 2X (upscale)
+  const handle2xDownload = async (e: React.MouseEvent, gen: Generation) => {
+    e.stopPropagation();
+    if (!imageDimensions) return;
+
+    setUpscaling(true);
+    try {
+      // Llamar al endpoint de upscale
+      const response = await fetch("/api/images/upscale", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageUrl: gen.image_url,
+          width: imageDimensions.width,
+          height: imageDimensions.height,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Error al procesar imagen");
+      }
+
+      const result = await response.json();
+
+      // Descargar la imagen 2x
+      const imageResponse = await fetch(result.url);
+      const blob = await imageResponse.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const ext = gen.image_mime_type?.split("/")[1] || "png";
+      a.download = `generation-${gen.id}--2x.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Error upscaling image:", err);
+      alert(err instanceof Error ? err.message : "Error al procesar imagen");
+    } finally {
+      setUpscaling(false);
+    }
+  };
+
+  // Verificar si la imagen puede ser upscaleada (ancho <= 1920)
+  const canUpscale = imageDimensions && imageDimensions.width <= 1920;
 
   if (loading) {
     return (
@@ -230,7 +304,7 @@ export function GenerationsGallery({ projectId, onOpenConversation }: Generation
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Ruler className="h-4 w-4" />
-                  <span>{formatImageSize(selectedImage.image_size)}</span>
+                  <span>{imageDimensions ? `${imageDimensions.width}x${imageDimensions.height}` : formatImageSize(selectedImage.image_size)}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <RatioIcon className="h-4 w-4" />
@@ -256,19 +330,36 @@ export function GenerationsGallery({ projectId, onOpenConversation }: Generation
                   variant="outline"
                 >
                   <Download className="h-4 w-4" />
-                  Descargar
+                  Descargar original
                 </Button>
-                <Button
-                  onClick={() => {
-                    setSelectedImage(null);
-                    onOpenConversation(selectedImage.conversation_id);
-                  }}
-                  className="flex-1 gap-2"
-                  variant="outline"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  Ir a la conversación
-                </Button>
+                {canUpscale && (
+                  <Button
+                    onClick={(e) => handle2xDownload(e, selectedImage)}
+                    disabled={upscaling}
+                    className="flex-1 gap-2 text-green-400 border-green-500/30 hover:bg-green-500/10 hover:text-green-300"
+                    variant="outline"
+                  >
+                    {upscaling ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}
+                    {upscaling ? "Procesando..." : "Descargar @2x"}
+                  </Button>
+                )}
+                {selectedImage.conversation_user_id === currentUserId && (
+                  <Button
+                    onClick={() => {
+                      setSelectedImage(null);
+                      onOpenConversation(selectedImage.conversation_id);
+                    }}
+                    className="flex-1 gap-2"
+                    variant="outline"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    Ir a la conversación
+                  </Button>
+                )}
               </div>
             </div>
           </div>

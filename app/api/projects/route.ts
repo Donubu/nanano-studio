@@ -19,18 +19,34 @@ export async function GET() {
   try {
     const session = await auth();
 
-    if (!session?.user || session.user.role !== "admin") {
+    if (!session?.user) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 
+    // Admin ve todos los proyectos, usuarios normales solo los asignados
+    if (session.user.role === "admin") {
+      const [rows] = await pool.execute<ProjectRow[]>(`
+        SELECT
+          p.id, p.title, p.description, p.client_id, p.status, p.created_at,
+          c.name as client_name, c.logo as client_logo
+        FROM projects p
+        LEFT JOIN clients c ON p.client_id = c.id
+        ORDER BY p.created_at DESC
+      `);
+      return NextResponse.json(rows);
+    }
+
+    // Usuario normal: solo proyectos asignados
     const [rows] = await pool.execute<ProjectRow[]>(`
       SELECT
         p.id, p.title, p.description, p.client_id, p.status, p.created_at,
         c.name as client_name, c.logo as client_logo
       FROM projects p
+      INNER JOIN project_users pu ON p.id = pu.project_id
       LEFT JOIN clients c ON p.client_id = c.id
+      WHERE pu.user_id = ?
       ORDER BY p.created_at DESC
-    `);
+    `, [session.user.id]);
 
     return NextResponse.json(rows);
   } catch (error) {

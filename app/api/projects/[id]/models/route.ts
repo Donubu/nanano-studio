@@ -29,6 +29,17 @@ export async function GET(
 
     const { id } = await params;
 
+    // Verificar acceso al proyecto (admin o usuario asignado)
+    if (session.user.role !== "admin") {
+      const [access] = await pool.execute<RowDataPacket[]>(
+        "SELECT 1 FROM project_users WHERE project_id = ? AND user_id = ?",
+        [id, session.user.id]
+      );
+      if (access.length === 0) {
+        return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+      }
+    }
+
     const [rows] = await pool.execute<ProjectModelRow[]>(`
       SELECT
         pm.id, pm.project_id, pm.model_id, pm.is_default, pm.system_instruction, pm.created_at,

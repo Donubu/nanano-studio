@@ -6,6 +6,7 @@ import { RowDataPacket } from "mysql2";
 interface GenerationRow extends RowDataPacket {
   id: number;
   conversation_id: number;
+  conversation_user_id: number;
   conversation_title: string;
   image_url: string;
   image_mime_type: string;
@@ -52,6 +53,7 @@ export async function GET(
       `SELECT
         m.id,
         m.conversation_id,
+        c.user_id as conversation_user_id,
         c.title as conversation_title,
         m.image_url,
         m.image_mime_type,

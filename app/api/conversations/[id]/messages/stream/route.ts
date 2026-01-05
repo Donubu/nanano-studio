@@ -67,6 +67,11 @@ interface ProjectModelRow extends RowDataPacket {
   system_instruction: string | null;
 }
 
+interface UserLimitRow extends RowDataPacket {
+  max_monthly_generations: number;
+  current_month_count: number;
+}
+
 // POST - Enviar mensaje y obtener respuesta con streaming
 export async function POST(
   request: NextRequest,
@@ -127,6 +132,40 @@ export async function POST(
     }
 
     const conversation = conversations[0];
+
+    // Verificar límite de generaciones mensuales del usuario en el proyecto
+    if (conversation.project_id && session.user.role !== "admin") {
+      const [limitRows] = await pool.execute<UserLimitRow[]>(`
+        SELECT
+          pu.max_monthly_generations,
+          (
+            SELECT COUNT(*)
+            FROM messages m
+            JOIN conversations c ON m.conversation_id = c.id
+            WHERE c.project_id = ?
+              AND c.user_id = ?
+              AND m.role = 'user'
+              AND m.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01')
+          ) as current_month_count
+        FROM project_users pu
+        WHERE pu.project_id = ? AND pu.user_id = ?
+      `, [conversation.project_id, session.user.id, conversation.project_id, session.user.id]);
+
+      if (limitRows.length > 0) {
+        const { max_monthly_generations, current_month_count } = limitRows[0];
+        // 0 = sin límite, mayor a 0 = límite activo
+        if (max_monthly_generations > 0 && current_month_count >= max_monthly_generations) {
+          return new Response(JSON.stringify({
+            error: "Has alcanzado el límite de mensajes mensuales para este proyecto",
+            limit: max_monthly_generations,
+            used: current_month_count
+          }), {
+            status: 429,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      }
+    }
 
     // Obtener system instruction del proyecto-modelo si existe
     let projectSystemInstruction: string | null = null;
