@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get("project_id");
+    const archived = searchParams.get("archived") === "true";
 
     let query = `
       SELECT
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest) {
       FROM conversations c
       JOIN models m ON c.model_id = m.id
       LEFT JOIN projects p ON c.project_id = p.id
-      WHERE c.user_id = ? AND c.deleted_at IS NULL
+      WHERE c.user_id = ? AND ${archived ? "c.deleted_at IS NOT NULL" : "c.deleted_at IS NULL"}
     `;
 
     const params: (number | string)[] = [session.user.id];
@@ -54,7 +55,7 @@ export async function GET(request: NextRequest) {
       params.push(projectId);
     }
 
-    query += " ORDER BY c.updated_at DESC";
+    query += archived ? " ORDER BY c.deleted_at DESC" : " ORDER BY c.updated_at DESC";
 
     const [rows] = await pool.execute<ConversationRow[]>(query, params);
 

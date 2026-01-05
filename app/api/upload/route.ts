@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { writeFile } from "fs/promises";
+import { uploadToS3 } from "@/lib/s3";
 import path from "path";
 
 export async function POST(request: NextRequest) {
@@ -26,15 +26,18 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(bytes);
 
     // Generar nombre único
-    const ext = path.extname(file.name);
-    const filename = `${Date.now()}-${Math.random().toString(36).substring(7)}${ext}`;
-    const uploadPath = path.join(process.cwd(), "public", "uploads", folder, filename);
+    const ext = path.extname(file.name).slice(1) || "bin";
+    const filename = `${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
 
-    await writeFile(uploadPath, buffer);
+    // Subir a S3
+    const result = await uploadToS3(
+      buffer,
+      filename,
+      file.type || "application/octet-stream",
+      folder
+    );
 
-    const url = `/uploads/${folder}/${filename}`;
-
-    return NextResponse.json({ url, filename });
+    return NextResponse.json({ url: result.url, filename });
   } catch (error) {
     console.error("Error uploading file:", error);
     return NextResponse.json(

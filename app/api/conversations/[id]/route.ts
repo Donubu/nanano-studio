@@ -37,8 +37,10 @@ export async function GET(
     }
 
     const { id } = await params;
+    const { searchParams } = new URL(request.url);
+    const includeArchived = searchParams.get("archived") === "true";
 
-    // Obtener conversación
+    // Obtener conversación (incluir archivadas si se solicita)
     const [conversations] = await pool.execute<ConversationRow[]>(
       `SELECT
         c.*,
@@ -49,7 +51,7 @@ export async function GET(
       FROM conversations c
       JOIN models m ON c.model_id = m.id
       LEFT JOIN projects p ON c.project_id = p.id
-      WHERE c.id = ? AND c.user_id = ? AND c.deleted_at IS NULL`,
+      WHERE c.id = ? AND c.user_id = ? ${includeArchived ? "" : "AND c.deleted_at IS NULL"}`,
       [id, session.user.id]
     );
 

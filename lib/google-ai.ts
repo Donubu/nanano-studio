@@ -3,6 +3,77 @@ import { GoogleGenAI, Content, Part, GenerateContentConfig } from "@google/genai
 // Determinar si usar Vertex AI o Gemini API
 const isVertexAI = process.env.GOOGLE_GENAI_USE_VERTEXAI === "true";
 
+// Configuración de retry
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  initialDelayMs: 2000, // 2 segundos inicial
+  maxDelayMs: 30000,    // máximo 30 segundos
+  backoffMultiplier: 2, // duplicar cada vez
+};
+
+// Helper para esperar
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Verificar si el error es retriable (429, 503, etc.)
+function isRetriableError(error: unknown): boolean {
+  if (error && typeof error === 'object') {
+    const errorObj = error as { status?: number; code?: number; message?: string };
+    // Códigos HTTP retriables
+    if (errorObj.status === 429 || errorObj.status === 503 || errorObj.status === 500) {
+      return true;
+    }
+    if (errorObj.code === 429 || errorObj.code === 503 || errorObj.code === 500) {
+      return true;
+    }
+    // Verificar en el mensaje
+    const message = errorObj.message?.toLowerCase() || '';
+    if (message.includes('resource_exhausted') ||
+        message.includes('rate limit') ||
+        message.includes('quota') ||
+        message.includes('429') ||
+        message.includes('503')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Ejecutar función con retry y backoff exponencial
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  operationName: string
+): Promise<T> {
+  let lastError: Error | undefined;
+  let delay = RETRY_CONFIG.initialDelayMs;
+
+  for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Si no es retriable o ya no quedan intentos, lanzar error
+      if (!isRetriableError(error) || attempt === RETRY_CONFIG.maxRetries) {
+        throw lastError;
+      }
+
+      // Log del retry
+      console.warn(
+        `[Google AI] ${operationName} falló (intento ${attempt + 1}/${RETRY_CONFIG.maxRetries + 1}). ` +
+        `Reintentando en ${delay / 1000}s... Error: ${lastError.message}`
+      );
+
+      // Esperar antes de reintentar
+      await sleep(delay);
+
+      // Aumentar delay para el siguiente intento (backoff exponencial)
+      delay = Math.min(delay * RETRY_CONFIG.backoffMultiplier, RETRY_CONFIG.maxDelayMs);
+    }
+  }
+
+  throw lastError;
+}
+
 // Inicializar cliente según configuración
 function createClient(): GoogleGenAI {
   if (isVertexAI) {
@@ -19,11 +90,21 @@ function createClient(): GoogleGenAI {
 
 const ai = createClient();
 
+export interface AttachedFile {
+  dataUrl: string;
+  mimeType: string;
+  name?: string;
+  type: "image" | "document" | "audio";
+}
+
 export interface ChatMessage {
   role: "user" | "model";
   content: string;
+  // Legacy single file support
   imageUrl?: string | null;
   imageMimeType?: string | null;
+  // New multiple files support
+  files?: AttachedFile[];
 }
 
 export interface ImageGenerationConfig {
@@ -67,8 +148,22 @@ function convertToGoogleFormat(messages: ChatMessage[]): Content[] {
   return messages.map((msg) => {
     const parts: Part[] = [];
 
-    // Agregar imagen si existe
-    if (msg.imageUrl && msg.imageMimeType) {
+    // Agregar archivos múltiples si existen (nuevo formato)
+    if (msg.files && msg.files.length > 0) {
+      for (const file of msg.files) {
+        if (file.dataUrl.startsWith("data:")) {
+          const base64Data = file.dataUrl.split(",")[1];
+          parts.push({
+            inlineData: {
+              mimeType: file.mimeType,
+              data: base64Data,
+            },
+          });
+        }
+      }
+    }
+    // Legacy: Agregar imagen única si existe (compatibilidad hacia atrás)
+    else if (msg.imageUrl && msg.imageMimeType) {
       if (msg.imageUrl.startsWith("data:")) {
         const base64Data = msg.imageUrl.split(",")[1];
         parts.push({
@@ -190,11 +285,14 @@ export async function sendMessage(
     }),
   };
 
-  const response = await ai.models.generateContent({
-    model: normalizeModelId(modelId),
-    contents,
-    config,
-  });
+  const response = await withRetry(
+    () => ai.models.generateContent({
+      model: normalizeModelId(modelId),
+      contents,
+      config,
+    }),
+    "generateContent"
+  );
 
   // Extraer partes del primer candidato
   const parts = response.candidates?.[0]?.content?.parts;
@@ -240,22 +338,17 @@ export async function sendMessageStream(
       }),
     };
 
-    // Debug: log config being sent
-    console.log("[Google AI] Config being sent:", JSON.stringify({
-      model: normalizeModelId(modelId),
-      settingsImageConfig: settings.imageConfig,
-      configImageConfig: config.imageConfig,
-      responseModalities: config.responseModalities,
-    }, null, 2));
-
     // Nota: Gemini 2.5 Flash Image tiene un bug conocido donde ignora aspectRatio
     // Ver: https://discuss.ai.google.dev/t/gemini-2-5-flash-nano-banana-auto-aspect-ratio-issue/108225
 
-    const responseStream = await ai.models.generateContentStream({
-      model: normalizeModelId(modelId),
-      contents,
-      config,
-    });
+    const responseStream = await withRetry(
+      () => ai.models.generateContentStream({
+        model: normalizeModelId(modelId),
+        contents,
+        config,
+      }),
+      "generateContentStream"
+    );
 
     let fullText = "";
     const allImages: GeneratedImage[] = [];
@@ -327,16 +420,19 @@ Reglas:
       labels: buildLabels(labels),
     };
 
-    const response = await ai.models.generateContent({
-      model: normalizeModelId(TITLE_MODEL),
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: `Genera un título corto para esta conversación:\n\n${userMessage}` }],
-        },
-      ],
-      config,
-    });
+    const response = await withRetry(
+      () => ai.models.generateContent({
+        model: normalizeModelId(TITLE_MODEL),
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: `Genera un título corto para esta conversación:\n\n${userMessage}` }],
+          },
+        ],
+        config,
+      }),
+      "generateTitle"
+    );
 
     const parts = response.candidates?.[0]?.content?.parts;
     let title = extractTextFromParts(parts).trim();

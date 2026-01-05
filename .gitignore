@@ -39,8 +39,7 @@ credentials.json
 *.credentials.json
 
 # Generated uploads
-public/uploads/generated/
-
+public/uploads/*
 # vercel
 .vercel
 

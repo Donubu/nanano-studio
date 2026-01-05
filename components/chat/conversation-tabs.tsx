@@ -1,6 +1,6 @@
 "use client";
 
-import { X, Plus, Loader2, MessageSquare } from "lucide-react";
+import { X, Plus, Loader2, MessageSquare, Archive, Image } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface Tab {
@@ -8,6 +8,9 @@ export interface Tab {
   conversationId: number;
   title: string;
   isLoading: boolean;
+  isArchived?: boolean;
+  isGallery?: boolean;
+  isDraft?: boolean; // Tab sin conversación creada aún
 }
 
 interface ConversationTabsProps {
@@ -38,13 +41,25 @@ export function ConversationTabs({
             className={cn(
               "group flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm cursor-pointer transition-all min-w-0 max-w-[200px]",
               activeTabId === tab.id
-                ? "bg-[#1a1a22] text-foreground border border-border/50"
-                : "text-muted-foreground hover:bg-[#1a1a22]/50 hover:text-foreground",
+                ? tab.isGallery
+                  ? "bg-purple-500/10 text-purple-400 border border-purple-500/30"
+                  : tab.isArchived
+                    ? "bg-orange-500/10 text-orange-400 border border-orange-500/30"
+                    : "bg-[#1a1a22] text-foreground border border-border/50"
+                : tab.isGallery
+                  ? "text-purple-400/60 hover:bg-purple-500/10 hover:text-purple-400"
+                  : tab.isArchived
+                    ? "text-orange-400/60 hover:bg-orange-500/10 hover:text-orange-400"
+                    : "text-muted-foreground hover:bg-[#1a1a22]/50 hover:text-foreground",
               disabled && "opacity-50 cursor-not-allowed"
             )}
           >
             {tab.isLoading ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+            ) : tab.isGallery ? (
+              <Image className="h-3.5 w-3.5 shrink-0" />
+            ) : tab.isArchived ? (
+              <Archive className="h-3.5 w-3.5 shrink-0" />
             ) : (
               <MessageSquare className="h-3.5 w-3.5 shrink-0" />
             )}

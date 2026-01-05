@@ -2,30 +2,35 @@ import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
-import { sendMessageStream, ChatMessage, isConfigured, Labels, GeneratedImage, generateConversationTitle } from "@/lib/google-ai";
-import { writeFile, mkdir } from "fs/promises";
-import path from "path";
+import { sendMessageStream, ChatMessage, isConfigured, Labels, GeneratedImage, generateConversationTitle, AttachedFile } from "@/lib/google-ai";
+import { uploadToS3, generateFileName, isS3Configured } from "@/lib/s3";
 
-// Guardar imagen base64 en archivo y retornar la URL pública
-async function saveGeneratedImage(image: GeneratedImage, conversationId: string): Promise<string> {
-  const uploadsDir = path.join(process.cwd(), "public", "uploads", "generated");
-
-  // Asegurar que el directorio existe
-  await mkdir(uploadsDir, { recursive: true });
-
-  // Generar nombre único para el archivo
-  const timestamp = Date.now();
-  const randomId = Math.random().toString(36).substring(2, 8);
+// Guardar imagen generada en S3 y retornar la URL de CloudFront y tamaño
+async function saveGeneratedImage(image: GeneratedImage, conversationId: string): Promise<{ url: string; fileSize: number }> {
   const extension = image.mimeType.split("/")[1] || "png";
-  const fileName = `${conversationId}_${timestamp}_${randomId}.${extension}`;
-  const filePath = path.join(uploadsDir, fileName);
-
-  // Decodificar base64 y guardar
+  const fileName = generateFileName(conversationId, extension);
   const buffer = Buffer.from(image.data, "base64");
-  await writeFile(filePath, buffer);
 
-  // Retornar URL pública
-  return `/uploads/generated/${fileName}`;
+  const result = await uploadToS3(buffer, fileName, image.mimeType, "generated");
+
+  return {
+    url: result.url,
+    fileSize: result.fileSize
+  };
+}
+
+// Guardar archivo adjunto del usuario en S3 y retornar la URL de CloudFront
+async function saveUploadedFile(file: AttachedFile, conversationId: string): Promise<string> {
+  const extension = file.mimeType.split("/")[1] || "bin";
+  const fileName = generateFileName(conversationId, extension);
+
+  // Extraer base64 del dataUrl
+  const base64Data = file.dataUrl.split(",")[1];
+  const buffer = Buffer.from(base64Data, "base64");
+
+  const result = await uploadToS3(buffer, fileName, file.mimeType, "chat");
+
+  return result.url;
 }
 
 interface MessageRow extends RowDataPacket {
@@ -86,13 +91,22 @@ export async function POST(
 
     const { id } = await params;
     const body = await request.json();
-    const { content, image_url, image_mime_type, useProjectSystemInstruction = true } = body;
+    const { content, files, useProjectSystemInstruction = true } = body as {
+      content: string;
+      files?: AttachedFile[];
+      useProjectSystemInstruction?: boolean;
+    };
 
     if (!content || content.trim() === "") {
       return new Response(JSON.stringify({ error: "El contenido del mensaje es requerido" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
+    }
+
+    // Log de archivos recibidos
+    if (files && files.length > 0) {
+      console.log("[Stream] Files received:", files.map(f => ({ name: f.name, type: f.type, mimeType: f.mimeType })));
     }
 
     // Obtener conversación con configuración y nombre del proyecto
@@ -137,30 +151,27 @@ export async function POST(
       finalSystemInstruction = conversation.system_instruction;
     }
 
-    // Debug: log system instructions
-    console.log("[Stream] System Instructions:", {
-      conversationId: conversation.id,
-      useProjectSystemInstruction,
-      projectSystemInstruction: projectSystemInstruction ? `"${projectSystemInstruction.substring(0, 100)}${projectSystemInstruction.length > 100 ? '...' : ''}"` : null,
-      conversationSystemInstruction: conversation.system_instruction ? `"${conversation.system_instruction.substring(0, 100)}${conversation.system_instruction.length > 100 ? '...' : ''}"` : null,
-      finalSystemInstruction: finalSystemInstruction ? `"${finalSystemInstruction.substring(0, 200)}${finalSystemInstruction.length > 200 ? '...' : ''}"` : null,
-    });
-
-    // Debug: log image settings
-    console.log("[Stream] Image settings:", {
-      supports_image_generation: conversation.supports_image_generation,
-      image_aspect_ratio: conversation.image_aspect_ratio,
-      image_size: conversation.image_size,
-    });
 
     // Determinar tipo de contenido
-    const contentType = image_url ? (content ? "mixed" : "image") : "text";
+    const hasFiles = files && files.length > 0;
+    const firstImage = files?.find(f => f.type === "image");
+    const contentType = hasFiles ? "mixed" : "text";
 
-    // Guardar mensaje del usuario
+    // Guardar primera imagen en disco si existe (para preview en historial)
+    let savedImageUrl: string | null = null;
+    if (firstImage) {
+      try {
+        savedImageUrl = await saveUploadedFile(firstImage, id);
+      } catch (err) {
+        console.error("Error guardando imagen del usuario:", err);
+      }
+    }
+
+    // Guardar mensaje del usuario (con URL de imagen guardada, no base64)
     const [userMessageResult] = await pool.execute<ResultSetHeader>(
       `INSERT INTO messages (conversation_id, role, content_type, content, image_url, image_mime_type)
        VALUES (?, 'user', ?, ?, ?, ?)`,
-      [id, contentType, content, image_url || null, image_mime_type || null]
+      [id, contentType, content, savedImageUrl, firstImage?.mimeType || null]
     );
 
     const userMessageId = userMessageResult.insertId;
@@ -175,12 +186,26 @@ export async function POST(
     );
 
     // Convertir historial al formato de ChatMessage
-    const messages: ChatMessage[] = historyRows.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-      imageUrl: msg.image_url,
-      imageMimeType: msg.image_mime_type,
-    }));
+    const messages: ChatMessage[] = historyRows.map((msg, index) => {
+      const isLastMessage = index === historyRows.length - 1;
+
+      // Para el último mensaje (el actual del usuario), incluir todos los archivos
+      if (isLastMessage && hasFiles && files) {
+        return {
+          role: msg.role,
+          content: msg.content,
+          files: files, // Incluir todos los archivos en el mensaje actual
+        };
+      }
+
+      // Para mensajes históricos, usar el formato legacy (solo una imagen)
+      return {
+        role: msg.role,
+        content: msg.content,
+        imageUrl: msg.image_url,
+        imageMimeType: msg.image_mime_type,
+      };
+    });
 
     // Detectar si es el primer mensaje (solo hay 1 mensaje en el historial)
     const isFirstMessage = historyRows.length === 1;
@@ -231,24 +256,59 @@ export async function POST(
             });
         }
 
+        // Construir configuración de generación
+        const generationConfig = {
+          temperature: Number(conversation.temperature),
+          topP: Number(conversation.top_p),
+          topK: conversation.top_k,
+          maxOutputTokens: conversation.max_output_tokens,
+          ...(conversation.supports_image_generation && {
+            imageConfig: {
+              aspectRatio: conversation.image_aspect_ratio as "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9",
+              imageSize: conversation.image_size as "1K" | "2K" | "4K",
+            },
+          }),
+        };
+
+        // Construir objeto de request para debug y almacenamiento
+        const requestData = {
+          model: conversation.model_model_id,
+          systemInstruction: finalSystemInstruction,
+          generationConfig,
+          labels,
+          messages: messages.map(m => ({
+            role: m.role,
+            content: m.content,
+            files: m.files?.map(f => ({ name: f.name, type: f.type, mimeType: f.mimeType })),
+            imageUrl: m.imageUrl || undefined,
+          })),
+        };
+
+        // Debug: log completo de la solicitud al modelo
+        console.log("\n========== [GOOGLE AI REQUEST] ==========");
+        console.log(JSON.stringify(requestData, null, 2));
+        console.log("==========================================\n");
+
+        // Guardar request_data en el mensaje del usuario
+        await pool.execute(
+          "UPDATE messages SET request_data = ? WHERE id = ?",
+          [JSON.stringify(requestData), userMessageId]
+        );
+
+        // Variables para trackear imagen guardada durante streaming
+        let savedImageUrl: string | null = null;
+        let savedImageFileSize: number | null = null;
+        let savedImageMimeType: string | null = null;
+        let imageUploadStarted = false; // Flag síncrono para evitar race condition
+        let imageUploadPromise: Promise<void> | null = null; // Promise para esperar upload
+        let controllerClosed = false; // Flag para saber si el controller ya cerró
+
         try {
           await sendMessageStream(
             conversation.model_model_id,
             messages,
             finalSystemInstruction,
-            {
-              temperature: Number(conversation.temperature),
-              topP: Number(conversation.top_p),
-              topK: conversation.top_k,
-              maxOutputTokens: conversation.max_output_tokens,
-              // Incluir configuración de imagen solo si el modelo lo soporta
-              ...(conversation.supports_image_generation && {
-                imageConfig: {
-                  aspectRatio: conversation.image_aspect_ratio as "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9",
-                  imageSize: conversation.image_size as "1K" | "2K" | "4K",
-                },
-              }),
-            },
+            generationConfig,
             {
               onChunk: (text) => {
                 fullResponse += text;
@@ -257,27 +317,52 @@ export async function POST(
                 );
               },
               onImage: async (image: GeneratedImage) => {
-                // Guardar imagen en archivo y enviar URL
-                try {
-                  const savedUrl = await saveGeneratedImage(image, id);
-                  controller.enqueue(
-                    encoder.encode(`data: ${JSON.stringify({ type: "image", imageUrl: savedUrl, mimeType: image.mimeType })}\n\n`)
-                  );
-                } catch (err) {
-                  console.error("Error guardando imagen:", err);
-                }
+                // Guardar imagen en S3 solo una vez (flag síncrono para evitar race condition)
+                if (imageUploadStarted) return;
+                imageUploadStarted = true;
+
+                // Guardar la promesa para que onComplete pueda esperarla
+                imageUploadPromise = (async () => {
+                  try {
+                    const savedImage = await saveGeneratedImage(image, id);
+                    savedImageUrl = savedImage.url;
+                    savedImageFileSize = savedImage.fileSize;
+                    savedImageMimeType = image.mimeType;
+                    // Solo enviar si el controller no está cerrado
+                    if (!controllerClosed) {
+                      controller.enqueue(
+                        encoder.encode(`data: ${JSON.stringify({ type: "image", imageUrl: savedImage.url, mimeType: image.mimeType })}\n\n`)
+                      );
+                    }
+                  } catch (err) {
+                    console.error("Error guardando imagen:", err);
+                  }
+                })();
               },
               onComplete: async (text, tokenCount, images) => {
-                // Determinar tipo de contenido y guardar imagen si existe
-                let contentType: "text" | "image" | "mixed" = "text";
-                let imageUrl: string | null = null;
-                let imageMimeType: string | null = null;
+                // Esperar a que termine el upload de imagen si está en progreso
+                if (imageUploadPromise) {
+                  await imageUploadPromise;
+                }
 
-                if (images && images.length > 0) {
-                  // Guardar la primera imagen en archivo
+                // Determinar tipo de contenido
+                let contentType: "text" | "image" | "mixed" = "text";
+                let imageUrl: string | null = savedImageUrl;
+                let imageMimeType: string | null = savedImageMimeType;
+                let imageFileSize: number | null = savedImageFileSize;
+
+                // Si hay imagen guardada durante streaming, usar esa
+                if (imageUploadStarted && savedImageUrl) {
+                  contentType = text ? "mixed" : "image";
+                }
+                // Si no se inició upload durante streaming pero llegó imagen en onComplete, guardarla ahora
+                else if (!imageUploadStarted && images && images.length > 0) {
+                  imageUploadStarted = true;
                   const firstImage = images[0];
                   try {
-                    imageUrl = await saveGeneratedImage(firstImage, id);
+                    const savedImage = await saveGeneratedImage(firstImage, id);
+                    imageUrl = savedImage.url;
+                    imageFileSize = savedImage.fileSize;
                     imageMimeType = firstImage.mimeType;
                     contentType = text ? "mixed" : "image";
                   } catch (err) {
@@ -287,23 +372,45 @@ export async function POST(
 
                 // Guardar respuesta del modelo en la base de datos
                 const [modelResult] = await pool.execute<ResultSetHeader>(
-                  `INSERT INTO messages (conversation_id, role, content_type, content, image_url, image_mime_type, tokens_input, tokens_output)
-                   VALUES (?, 'model', ?, ?, ?, ?, ?, ?)`,
-                  [id, contentType, text || "", imageUrl, imageMimeType, tokenCount.input, tokenCount.output]
+                  `INSERT INTO messages (conversation_id, role, content_type, content, image_url, image_mime_type, image_file_size, tokens_input, tokens_output)
+                   VALUES (?, 'model', ?, ?, ?, ?, ?, ?, ?)`,
+                  [id, contentType, text || "", imageUrl, imageMimeType, imageFileSize, tokenCount.input, tokenCount.output]
                 );
                 modelMessageId = modelResult.insertId;
 
-                // Enviar evento de finalización
+                // Acumular tokens en la conversación
+                await pool.execute(
+                  `UPDATE conversations
+                   SET total_tokens_input = total_tokens_input + ?,
+                       total_tokens_output = total_tokens_output + ?
+                   WHERE id = ?`,
+                  [tokenCount.input, tokenCount.output, id]
+                );
+
+                // Obtener totales actualizados
+                const [totalsResult] = await pool.execute<RowDataPacket[]>(
+                  `SELECT total_tokens_input, total_tokens_output FROM conversations WHERE id = ?`,
+                  [id]
+                );
+
+                const totalTokens = {
+                  input: totalsResult[0]?.total_tokens_input || 0,
+                  output: totalsResult[0]?.total_tokens_output || 0,
+                };
+
+                // Enviar evento de finalización con tokens del mensaje y totales de conversación
                 controller.enqueue(
                   encoder.encode(
                     `data: ${JSON.stringify({
                       type: "complete",
                       id: modelMessageId,
                       tokens: tokenCount,
+                      totalTokens,
                       imageUrl: imageUrl,
                     })}\n\n`
                   )
                 );
+                controllerClosed = true;
                 controller.close();
               },
               onError: async (error) => {
@@ -317,16 +424,19 @@ export async function POST(
                   [id, errorMessage]
                 );
 
-                controller.enqueue(
-                  encoder.encode(
-                    `data: ${JSON.stringify({
-                      type: "error",
-                      message: error.message,
-                      id: modelResult.insertId,
-                    })}\n\n`
-                  )
-                );
-                controller.close();
+                if (!controllerClosed) {
+                  controller.enqueue(
+                    encoder.encode(
+                      `data: ${JSON.stringify({
+                        type: "error",
+                        message: error.message,
+                        id: modelResult.insertId,
+                      })}\n\n`
+                    )
+                  );
+                  controllerClosed = true;
+                  controller.close();
+                }
               },
             },
             labels
@@ -342,16 +452,19 @@ export async function POST(
             [id, `Error: ${errorMessage}`]
           );
 
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: "error",
-                message: errorMessage,
-                id: modelResult.insertId,
-              })}\n\n`
-            )
-          );
-          controller.close();
+          if (!controllerClosed) {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  type: "error",
+                  message: errorMessage,
+                  id: modelResult.insertId,
+                })}\n\n`
+              )
+            );
+            controllerClosed = true;
+            controller.close();
+          }
         }
       },
     });

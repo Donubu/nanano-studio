@@ -61,7 +61,7 @@ export function Header() {
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          
+
           <DropdownMenuItem
             className="text-red-400 cursor-pointer focus:text-red-400"
             onClick={() => signOut({ callbackUrl: "/login" })}

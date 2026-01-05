@@ -2,56 +2,118 @@
 
 import { useState, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Send, ImagePlus, X, Loader2 } from "lucide-react";
+import { Send, Paperclip, X, Loader2, FileText, Music, Image as ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-interface AttachedImage {
+export interface AttachedFile {
   dataUrl: string;
   mimeType: string;
   name: string;
+  type: "image" | "document" | "audio";
+  size: number;
 }
 
 interface MessageInputProps {
-  onSend: (content: string, image?: { dataUrl: string; mimeType: string }) => void;
+  onSend: (content: string, files?: AttachedFile[]) => void;
   disabled?: boolean;
   placeholder?: string;
-  supportsImages?: boolean;
+  supportsFiles?: boolean;
+}
+
+const MAX_FILES = 5;
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+
+// Tipos de archivo soportados
+const SUPPORTED_TYPES = {
+  image: ["image/jpeg", "image/png", "image/gif", "image/webp"],
+  document: ["application/pdf"],
+  audio: ["audio/mp3", "audio/mpeg", "audio/wav", "audio/ogg", "audio/webm"],
+};
+
+function getFileType(mimeType: string): "image" | "document" | "audio" | null {
+  if (SUPPORTED_TYPES.image.includes(mimeType)) return "image";
+  if (SUPPORTED_TYPES.document.includes(mimeType)) return "document";
+  if (SUPPORTED_TYPES.audio.includes(mimeType)) return "audio";
+  return null;
+}
+
+function getAcceptString(): string {
+  return [
+    ...SUPPORTED_TYPES.image,
+    ...SUPPORTED_TYPES.document,
+    ...SUPPORTED_TYPES.audio,
+  ].join(",");
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function MessageInput({
   onSend,
   disabled = false,
   placeholder = "Escribe un mensaje...",
-  supportsImages = true,
+  supportsFiles = true,
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
-  const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const handleFileSelect = useCallback((file: File) => {
-    if (!file.type.startsWith("image/")) {
-      alert("Solo se permiten archivos de imagen");
+  const handleFileSelect = useCallback(async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    const remainingSlots = MAX_FILES - attachedFiles.length;
+
+    if (remainingSlots <= 0) {
+      alert(`Máximo ${MAX_FILES} archivos permitidos`);
       return;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      alert("La imagen no puede superar los 10MB");
-      return;
+    const filesToProcess = fileArray.slice(0, remainingSlots);
+    setIsProcessing(true);
+
+    const newFiles: AttachedFile[] = [];
+
+    for (const file of filesToProcess) {
+      const fileType = getFileType(file.type);
+
+      if (!fileType) {
+        alert(`Tipo de archivo no soportado: ${file.name}\n\nFormatos permitidos:\n- Imágenes: JPG, PNG, GIF, WebP\n- Documentos: PDF\n- Audio: MP3, WAV, OGG, WebM`);
+        continue;
+      }
+
+      if (file.size > MAX_FILE_SIZE) {
+        alert(`El archivo "${file.name}" supera el límite de 20MB`);
+        continue;
+      }
+
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        newFiles.push({
+          dataUrl,
+          mimeType: file.type,
+          name: file.name,
+          type: fileType,
+          size: file.size,
+        });
+      } catch (error) {
+        console.error("Error reading file:", error);
+      }
     }
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      setAttachedImage({
-        dataUrl,
-        mimeType: file.type,
-        name: file.name,
-      });
-    };
-    reader.readAsDataURL(file);
-  }, []);
+    setAttachedFiles((prev) => [...prev, ...newFiles]);
+    setIsProcessing(false);
+  }, [attachedFiles.length]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -68,9 +130,9 @@ export function MessageInput({
       e.preventDefault();
       setIsDragging(false);
 
-      const file = e.dataTransfer.files[0];
-      if (file) {
-        handleFileSelect(file);
+      const files = e.dataTransfer.files;
+      if (files.length > 0) {
+        handleFileSelect(files);
       }
     },
     [handleFileSelect]
@@ -78,9 +140,9 @@ export function MessageInput({
 
   const handleFileInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) {
-        handleFileSelect(file);
+      const files = e.target.files;
+      if (files && files.length > 0) {
+        handleFileSelect(files);
       }
       // Reset input
       if (fileInputRef.current) {
@@ -91,18 +153,13 @@ export function MessageInput({
   );
 
   const handleSend = useCallback(() => {
-    if ((!message.trim() && !attachedImage) || disabled) return;
+    if ((!message.trim() && attachedFiles.length === 0) || disabled) return;
 
-    onSend(
-      message.trim(),
-      attachedImage
-        ? { dataUrl: attachedImage.dataUrl, mimeType: attachedImage.mimeType }
-        : undefined
-    );
+    onSend(message.trim(), attachedFiles.length > 0 ? attachedFiles : undefined);
 
     setMessage("");
-    setAttachedImage(null);
-  }, [message, attachedImage, disabled, onSend]);
+    setAttachedFiles([]);
+  }, [message, attachedFiles, disabled, onSend]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -114,9 +171,56 @@ export function MessageInput({
     [handleSend]
   );
 
-  const removeImage = useCallback(() => {
-    setAttachedImage(null);
+  const removeFile = useCallback((index: number) => {
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
   }, []);
+
+  const renderFilePreview = (file: AttachedFile, index: number) => {
+    return (
+      <div
+        key={index}
+        className="relative group rounded-lg overflow-hidden border border-border/50 bg-[#1a1a22]"
+      >
+        {file.type === "image" ? (
+          <div className="w-20 h-20 relative">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={file.dataUrl}
+              alt={file.name}
+              className="w-full h-full object-cover"
+            />
+          </div>
+        ) : (
+          <div className="w-20 h-20 flex flex-col items-center justify-center p-2">
+            {file.type === "document" ? (
+              <FileText className="h-8 w-8 text-red-400" />
+            ) : (
+              <Music className="h-8 w-8 text-green-400" />
+            )}
+            <span className="text-[10px] text-muted-foreground mt-1 uppercase">
+              {file.mimeType.split("/")[1]}
+            </span>
+          </div>
+        )}
+
+        {/* Overlay con nombre y botón eliminar */}
+        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center p-1">
+          <button
+            onClick={() => removeFile(index)}
+            className="p-1 rounded-full bg-red-500/80 hover:bg-red-500 transition-colors"
+          >
+            <X className="h-3 w-3 text-white" />
+          </button>
+          <p className="text-[9px] text-white mt-1 text-center truncate w-full px-1">
+            {file.name}
+          </p>
+          <p className="text-[8px] text-white/70">
+            {formatFileSize(file.size)}
+          </p>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div
@@ -124,56 +228,55 @@ export function MessageInput({
         "border-t border-border/50 p-4 transition-colors",
         isDragging && "bg-primary/5 border-primary/50"
       )}
-      onDragOver={supportsImages ? handleDragOver : undefined}
-      onDragLeave={supportsImages ? handleDragLeave : undefined}
-      onDrop={supportsImages ? handleDrop : undefined}
+      onDragOver={supportsFiles ? handleDragOver : undefined}
+      onDragLeave={supportsFiles ? handleDragLeave : undefined}
+      onDrop={supportsFiles ? handleDrop : undefined}
     >
       <div className="max-w-4xl mx-auto space-y-3">
-        {/* Preview de imagen adjunta */}
-        {attachedImage && (
-          <div className="relative inline-block">
-            <div className="relative rounded-lg overflow-hidden border border-border/50 max-w-[200px]">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={attachedImage.dataUrl}
-                alt={attachedImage.name}
-                className="max-h-32 w-auto object-cover"
-              />
+        {/* Preview de archivos adjuntos */}
+        {attachedFiles.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {attachedFiles.map((file, index) => renderFilePreview(file, index))}
+            {attachedFiles.length < MAX_FILES && (
               <button
-                onClick={removeImage}
-                className="absolute top-1 right-1 p-1 rounded-full bg-black/50 hover:bg-black/70 transition-colors"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled || isProcessing}
+                className="w-20 h-20 rounded-lg border-2 border-dashed border-border/50 hover:border-primary/50 flex flex-col items-center justify-center text-muted-foreground hover:text-primary transition-colors"
               >
-                <X className="h-3 w-3 text-white" />
+                <Paperclip className="h-5 w-5" />
+                <span className="text-[10px] mt-1">Agregar</span>
               </button>
-            </div>
-            <p className="text-xs text-muted-foreground mt-1 truncate max-w-[200px]">
-              {attachedImage.name}
-            </p>
+            )}
           </div>
         )}
 
         {/* Input y botones */}
         <div className="flex gap-2 items-end">
-          {/* Botón de imagen */}
-          {supportsImages && (
+          {/* Botón de adjuntar archivo */}
+          {supportsFiles && (
             <>
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept={getAcceptString()}
                 onChange={handleFileInputChange}
                 className="hidden"
+                multiple
               />
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={disabled}
+                disabled={disabled || isProcessing || attachedFiles.length >= MAX_FILES}
                 className="shrink-0 h-10 w-10"
-                title="Adjuntar imagen"
+                title={`Adjuntar archivos (${attachedFiles.length}/${MAX_FILES})`}
               >
-                <ImagePlus className="h-5 w-5" />
+                {isProcessing ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <Paperclip className="h-5 w-5" />
+                )}
               </Button>
             </>
           )}
@@ -210,7 +313,7 @@ export function MessageInput({
           {/* Botón enviar */}
           <Button
             onClick={handleSend}
-            disabled={disabled || (!message.trim() && !attachedImage)}
+            disabled={disabled || (!message.trim() && attachedFiles.length === 0)}
             className="shrink-0 h-10"
           >
             {disabled ? (
@@ -223,8 +326,18 @@ export function MessageInput({
 
         {/* Indicador de drag & drop */}
         {isDragging && (
-          <div className="text-center text-sm text-primary">
-            Suelta la imagen aquí
+          <div className="text-center text-sm text-primary flex items-center justify-center gap-2">
+            <ImageIcon className="h-4 w-4" />
+            <FileText className="h-4 w-4" />
+            <Music className="h-4 w-4" />
+            <span>Suelta los archivos aquí</span>
+          </div>
+        )}
+
+        {/* Contador de archivos */}
+        {attachedFiles.length > 0 && (
+          <div className="text-xs text-muted-foreground text-center">
+            {attachedFiles.length} de {MAX_FILES} archivos adjuntos
           </div>
         )}
       </div>
