@@ -79,6 +79,52 @@ export function generateFileName(
 }
 
 /**
+ * Sube un video a S3 y retorna la URL de CloudFront
+ * Usa el subfolder "videos" para organizar los archivos
+ */
+export async function uploadVideoToS3(
+  buffer: Buffer,
+  fileName: string,
+  mimeType: string = "video/mp4"
+): Promise<UploadResult> {
+  return uploadToS3(buffer, fileName, mimeType, "videos");
+}
+
+/**
+ * Genera un nombre único para un archivo de video
+ */
+export function generateVideoFileName(
+  conversationId: string,
+  extension: string = "mp4"
+): string {
+  return generateFileName(conversationId, extension);
+}
+
+/**
+ * Sube una imagen subida por usuario a S3
+ * Usa el subfolder "uploads" para organizar los archivos
+ */
+export async function uploadImageToS3(
+  buffer: Buffer,
+  fileName: string,
+  mimeType: string = "image/jpeg"
+): Promise<UploadResult> {
+  return uploadToS3(buffer, fileName, mimeType, "uploads");
+}
+
+/**
+ * Genera un nombre único para una imagen subida por usuario
+ */
+export function generateUploadFileName(
+  projectId: number,
+  extension: string = "jpg"
+): string {
+  const timestamp = Date.now();
+  const randomId = Math.random().toString(36).substring(2, 8);
+  return `project_${projectId}_${timestamp}_${randomId}.${extension}`;
+}
+
+/**
  * Verifica si S3 está configurado
  */
 export function isS3Configured(): boolean {

@@ -90,6 +90,12 @@ export async function POST(request: NextRequest) {
       max_output_tokens = 8192,
       image_aspect_ratio = "1:1",
       image_size = "1K",
+      // Video settings
+      video_duration = 8,
+      video_resolution = "720p",
+      video_aspect_ratio = "16:9",
+      video_audio_enabled = true,
+      video_negative_prompt = null,
     } = body;
 
     if (!model_id) {
@@ -113,8 +119,8 @@ export async function POST(request: NextRequest) {
     }
 
     const [result] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO conversations (user_id, project_id, model_id, title, system_instruction, temperature, top_p, top_k, max_output_tokens, image_aspect_ratio, image_size)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO conversations (user_id, project_id, model_id, title, system_instruction, temperature, top_p, top_k, max_output_tokens, image_aspect_ratio, image_size, video_duration, video_resolution, video_aspect_ratio, video_audio_enabled, video_negative_prompt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         session.user.id,
         project_id || null,
@@ -127,6 +133,11 @@ export async function POST(request: NextRequest) {
         max_output_tokens,
         image_aspect_ratio,
         image_size,
+        video_duration,
+        video_resolution,
+        video_aspect_ratio,
+        video_audio_enabled ? 1 : 0,
+        video_negative_prompt,
       ]
     );
 

@@ -5,10 +5,24 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Download, ZoomIn, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { VideoPlayer } from "./video-player";
+import { VideoProgress } from "./video-progress";
+import { VideoGenerationStatus } from "@/types/video";
 
 interface MessageContentProps {
   content: string;
   imageUrl?: string | null;
+  // Video fields
+  videoUrl?: string | null;
+  videoDuration?: number | null;
+  videoHasAudio?: boolean;
+  videoAspectRatio?: string;
+  isVideoGenerating?: boolean;
+  videoProgress?: {
+    status: VideoGenerationStatus;
+    message: string;
+    progress?: number;
+  };
   isUser?: boolean;
   isStreaming?: boolean;
 }
@@ -97,6 +111,12 @@ const getImageFormat = (url: string): string => {
 export function MessageContent({
   content,
   imageUrl,
+  videoUrl,
+  videoDuration,
+  videoHasAudio = true,
+  videoAspectRatio = "16:9",
+  isVideoGenerating = false,
+  videoProgress,
   isUser = false,
   isStreaming = false,
 }: MessageContentProps) {
@@ -238,6 +258,25 @@ export function MessageContent({
             </div>
           )}
         </div>
+      )}
+
+      {/* Video en progreso de generación */}
+      {isVideoGenerating && videoProgress && (
+        <VideoProgress
+          status={videoProgress.status}
+          message={videoProgress.message}
+          progress={videoProgress.progress}
+        />
+      )}
+
+      {/* Video generado */}
+      {videoUrl && !isVideoGenerating && (
+        <VideoPlayer
+          videoUrl={videoUrl}
+          duration={videoDuration || undefined}
+          hasAudio={videoHasAudio}
+          aspectRatio={videoAspectRatio}
+        />
       )}
 
       {/* Contenido de texto con Markdown */}

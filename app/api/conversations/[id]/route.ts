@@ -11,6 +11,7 @@ interface ConversationRow extends RowDataPacket {
   model_model_id: string;
   model_display_name: string;
   model_supports_image_generation: boolean;
+  model_supports_video_generation: boolean;
   project_title: string | null;
   title: string;
   system_instruction: string | null;
@@ -20,6 +21,12 @@ interface ConversationRow extends RowDataPacket {
   max_output_tokens: number;
   image_aspect_ratio: string;
   image_size: string;
+  // Video settings
+  video_duration: number;
+  video_resolution: string;
+  video_aspect_ratio: string;
+  video_audio_enabled: boolean;
+  video_negative_prompt: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -47,6 +54,7 @@ export async function GET(
         m.model_id as model_model_id,
         m.display_name as model_display_name,
         m.supports_image_generation as model_supports_image_generation,
+        m.supports_video_generation as model_supports_video_generation,
         p.title as project_title
       FROM conversations c
       JOIN models m ON c.model_id = m.id
@@ -68,9 +76,20 @@ export async function GET(
       [id]
     );
 
+    // Convert MySQL TINYINT to boolean for video_has_audio in messages
+    const messagesWithBooleans = messages.map(msg => ({
+      ...msg,
+      video_has_audio: Boolean(msg.video_has_audio),
+    }));
+
+    const conv = conversations[0];
     return NextResponse.json({
-      ...conversations[0],
-      messages,
+      ...conv,
+      // Convert MySQL TINYINT to proper booleans
+      video_audio_enabled: Boolean(conv.video_audio_enabled),
+      model_supports_image_generation: Boolean(conv.model_supports_image_generation),
+      model_supports_video_generation: Boolean(conv.model_supports_video_generation),
+      messages: messagesWithBooleans,
     });
   } catch (error) {
     console.error("Error obteniendo conversación:", error);
@@ -105,6 +124,12 @@ export async function PUT(
       model_id,
       image_aspect_ratio,
       image_size,
+      // Video settings
+      video_duration,
+      video_resolution,
+      video_aspect_ratio,
+      video_audio_enabled,
+      video_negative_prompt,
     } = body;
 
     // Debug: log received body
@@ -134,7 +159,12 @@ export async function PUT(
         max_output_tokens = COALESCE(?, max_output_tokens),
         model_id = COALESCE(?, model_id),
         image_aspect_ratio = COALESCE(?, image_aspect_ratio),
-        image_size = COALESCE(?, image_size)
+        image_size = COALESCE(?, image_size),
+        video_duration = COALESCE(?, video_duration),
+        video_resolution = COALESCE(?, video_resolution),
+        video_aspect_ratio = COALESCE(?, video_aspect_ratio),
+        video_audio_enabled = COALESCE(?, video_audio_enabled),
+        video_negative_prompt = COALESCE(?, video_negative_prompt)
        WHERE id = ?`,
       [
         title ?? null,
@@ -146,6 +176,11 @@ export async function PUT(
         model_id ?? null,
         image_aspect_ratio ?? null,
         image_size ?? null,
+        video_duration ?? null,
+        video_resolution ?? null,
+        video_aspect_ratio ?? null,
+        video_audio_enabled !== undefined ? (video_audio_enabled ? 1 : 0) : null,
+        video_negative_prompt ?? null,
         id,
       ]
     );

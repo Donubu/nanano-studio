@@ -37,6 +37,9 @@ import {ConversationTabs, Tab} from "./conversation-tabs";
 import {MessageContent} from "./message-content";
 import {MessageInput, AttachedFile} from "./message-input";
 import {GenerationsGallery} from "./generations-gallery";
+import {VideoSettings} from "./video-settings";
+import {VideoInputFrames, ReferenceImage} from "./video-input-frames";
+import {VideoDuration, VideoResolution, VideoAspectRatio, VideoGenerationStatus} from "@/types/video";
 
 interface ProjectModel {
     id: number;
@@ -45,6 +48,7 @@ interface ProjectModel {
     model_display_name: string;
     is_default: boolean;
     supports_image_generation: boolean;
+    supports_video_generation: boolean;
     system_instruction: string | null;
 }
 
@@ -58,8 +62,19 @@ interface Message {
     id: number;
     role: "user" | "model";
     content: string;
-    content_type?: "text" | "image" | "mixed";
+    content_type?: "text" | "image" | "video" | "mixed";
     image_url?: string | null;
+    // Video fields
+    video_url?: string | null;
+    video_duration?: number | null;
+    video_has_audio?: boolean;
+    video_aspect_ratio?: string | null;
+    isVideoGenerating?: boolean;
+    videoProgress?: {
+        status: VideoGenerationStatus;
+        message: string;
+        progress?: number;
+    };
     created_at: string;
     isStreaming?: boolean;
 }
@@ -70,6 +85,7 @@ interface Conversation {
     model_id: number;
     model_display_name: string;
     model_supports_image_generation?: boolean;
+    model_supports_video_generation?: boolean;
     project_id: number | null;
     project_title: string | null;
     last_message: string | null;
@@ -82,6 +98,12 @@ interface Conversation {
     system_instruction: string | null;
     image_aspect_ratio: string;
     image_size: string;
+    // Video settings
+    video_duration: number;
+    video_resolution: string;
+    video_aspect_ratio: string;
+    video_audio_enabled: boolean;
+    video_negative_prompt: string | null;
     isArchived?: boolean;
 }
 
@@ -127,6 +149,18 @@ export function ChatInterface() {
     // Image generation settings
     const [imageAspectRatio, setImageAspectRatio] = useState("1:1");
     const [imageSize, setImageSize] = useState("1K");
+
+    // Video generation settings
+    const [videoDuration, setVideoDuration] = useState<VideoDuration>(8);
+    const [videoResolution, setVideoResolution] = useState<VideoResolution>("720p");
+    const [videoAspectRatio, setVideoAspectRatio] = useState<VideoAspectRatio>("16:9");
+    const [videoAudioEnabled, setVideoAudioEnabled] = useState(true);
+    const [videoNegativePrompt, setVideoNegativePrompt] = useState("");
+
+    // Video input frames
+    const [videoFirstFrame, setVideoFirstFrame] = useState<string | null>(null);
+    const [videoLastFrame, setVideoLastFrame] = useState<string | null>(null);
+    const [videoReferenceImages, setVideoReferenceImages] = useState<ReferenceImage[]>([]);
 
     // Project system instruction
     const [useProjectSystemInstruction, setUseProjectSystemInstruction] = useState(true);
@@ -326,6 +360,12 @@ export function ChatInterface() {
                         image_aspect_ratio: data.image_aspect_ratio || "1:1",
                         image_size: data.image_size || "1K",
                         model_supports_image_generation: data.model_supports_image_generation,
+                        model_supports_video_generation: data.model_supports_video_generation,
+                        video_duration: data.video_duration || 8,
+                        video_resolution: data.video_resolution || "720p",
+                        video_aspect_ratio: data.video_aspect_ratio || "16:9",
+                        video_audio_enabled: data.video_audio_enabled !== false,
+                        video_negative_prompt: data.video_negative_prompt || null,
                     },
                 }));
                 // If this is the active tab, update settings
@@ -338,6 +378,12 @@ export function ChatInterface() {
                     setSelectedModelId(data.model_id);
                     setImageAspectRatio(data.image_aspect_ratio || "1:1");
                     setImageSize(data.image_size || "1K");
+                    // Video settings
+                    setVideoDuration(data.video_duration || 8);
+                    setVideoResolution(data.video_resolution || "720p");
+                    setVideoAspectRatio(data.video_aspect_ratio || "16:9");
+                    setVideoAudioEnabled(data.video_audio_enabled !== false);
+                    setVideoNegativePrompt(data.video_negative_prompt || "");
                 }
             }
         } catch (err) {
@@ -390,6 +436,16 @@ export function ChatInterface() {
             setSelectedModelId(conv.model_id);
             setImageAspectRatio(conv.image_aspect_ratio || "1:1");
             setImageSize(conv.image_size || "1K");
+            // Video settings
+            setVideoDuration((conv.video_duration || 8) as VideoDuration);
+            setVideoResolution((conv.video_resolution || "720p") as VideoResolution);
+            setVideoAspectRatio((conv.video_aspect_ratio || "16:9") as VideoAspectRatio);
+            setVideoAudioEnabled(conv.video_audio_enabled !== false);
+            setVideoNegativePrompt(conv.video_negative_prompt || "");
+            // Clear video frames when switching tabs
+            setVideoFirstFrame(null);
+            setVideoLastFrame(null);
+            setVideoReferenceImages([]);
         }
     }, [activeTabId, tabConversations]);
 
@@ -405,6 +461,11 @@ export function ChatInterface() {
             model_id?: number;
             image_aspect_ratio?: string;
             image_size?: string;
+            video_duration?: number;
+            video_resolution?: string;
+            video_aspect_ratio?: string;
+            video_audio_enabled?: boolean;
+            video_negative_prompt?: string;
         }
     ) => {
         try {
@@ -438,6 +499,8 @@ export function ChatInterface() {
 
     // Manejar cambio de modelo (requiere confirmación si hay mensajes)
     const handleModelChange = async (newModelId: number) => {
+        const newModel = projectModels.find(m => m.model_id === newModelId);
+
         if (!currentConversation) {
             setSelectedModelId(newModelId);
             return;
@@ -457,14 +520,30 @@ export function ChatInterface() {
         } else {
             // Sin mensajes, permitir cambio directo
             setSelectedModelId(newModelId);
-            await updateConversationSettings(currentConversation.id, {model_id: newModelId});
+
+            // Si es una conversación draft (no guardada en BD), solo actualizar el estado local
+            if (activeTab?.isDraft || currentConversation.id === 0) {
+                setTabConversations(prev => ({
+                    ...prev,
+                    [activeTabId!]: {
+                        ...prev[activeTabId!],
+                        model_id: newModelId,
+                        model_display_name: newModel?.model_display_name || "",
+                        model_supports_image_generation: newModel?.supports_image_generation,
+                        model_supports_video_generation: newModel?.supports_video_generation,
+                    }
+                }));
+            } else {
+                // Conversación existente en BD, actualizar
+                await updateConversationSettings(currentConversation.id, {model_id: newModelId});
+            }
         }
     };
 
     // Manejar cambios de settings (excepto modelo)
     const handleSettingChange = async (
-        setting: "system_instruction" | "temperature" | "top_p" | "top_k" | "max_output_tokens" | "image_aspect_ratio" | "image_size",
-        value: string | number
+        setting: "system_instruction" | "temperature" | "top_p" | "top_k" | "max_output_tokens" | "image_aspect_ratio" | "image_size" | "video_duration" | "video_resolution" | "video_aspect_ratio" | "video_audio_enabled" | "video_negative_prompt",
+        value: string | number | boolean
     ) => {
         // Actualizar estado local inmediatamente
         switch (setting) {
@@ -488,6 +567,21 @@ export function ChatInterface() {
                 break;
             case "image_size":
                 setImageSize(value as string);
+                break;
+            case "video_duration":
+                setVideoDuration(value as VideoDuration);
+                break;
+            case "video_resolution":
+                setVideoResolution(value as VideoResolution);
+                break;
+            case "video_aspect_ratio":
+                setVideoAspectRatio(value as VideoAspectRatio);
+                break;
+            case "video_audio_enabled":
+                setVideoAudioEnabled(value as boolean);
+                break;
+            case "video_negative_prompt":
+                setVideoNegativePrompt(value as string);
                 break;
         }
 
@@ -517,6 +611,11 @@ export function ChatInterface() {
                     system_instruction: systemInstruction || null,
                     image_aspect_ratio: imageAspectRatio,
                     image_size: imageSize,
+                    video_duration: videoDuration,
+                    video_resolution: videoResolution,
+                    video_aspect_ratio: videoAspectRatio,
+                    video_audio_enabled: videoAudioEnabled,
+                    video_negative_prompt: videoNegativePrompt || null,
                 }),
             });
 
@@ -529,6 +628,7 @@ export function ChatInterface() {
                     model_id: modelIdToUse,
                     model_display_name: modelForConversation?.model_display_name || "",
                     model_supports_image_generation: modelForConversation?.supports_image_generation,
+                    model_supports_video_generation: modelForConversation?.supports_video_generation,
                     project_id: selectedProjectId,
                     project_title: null,
                     last_message: null,
@@ -541,6 +641,11 @@ export function ChatInterface() {
                     system_instruction: systemInstruction,
                     image_aspect_ratio: imageAspectRatio,
                     image_size: imageSize,
+                    video_duration: videoDuration,
+                    video_resolution: videoResolution,
+                    video_aspect_ratio: videoAspectRatio,
+                    video_audio_enabled: videoAudioEnabled,
+                    video_negative_prompt: videoNegativePrompt,
                 };
                 return newConversation;
             }
@@ -603,6 +708,7 @@ export function ChatInterface() {
             model_id: modelIdToUse,
             model_display_name: modelForTab?.model_display_name || "",
             model_supports_image_generation: modelForTab?.supports_image_generation,
+            model_supports_video_generation: modelForTab?.supports_video_generation,
             project_id: selectedProjectId,
             project_title: null,
             last_message: null,
@@ -615,6 +721,11 @@ export function ChatInterface() {
             system_instruction: systemInstruction,
             image_aspect_ratio: imageAspectRatio,
             image_size: imageSize,
+            video_duration: videoDuration,
+            video_resolution: videoResolution,
+            video_aspect_ratio: videoAspectRatio,
+            video_audio_enabled: videoAudioEnabled,
+            video_negative_prompt: videoNegativePrompt,
         };
 
         setOpenTabs((prev) => [...prev, draftTab]);
@@ -678,6 +789,11 @@ export function ChatInterface() {
                             system_instruction: data.system_instruction,
                             image_aspect_ratio: data.image_aspect_ratio || "1:1",
                             image_size: data.image_size || "1K",
+                            video_duration: data.video_duration || 8,
+                            video_resolution: data.video_resolution || "720p",
+                            video_aspect_ratio: data.video_aspect_ratio || "16:9",
+                            video_audio_enabled: data.video_audio_enabled !== false,
+                            video_negative_prompt: data.video_negative_prompt || null,
                             isArchived: data.deleted_at !== null,
                         };
                         openConversationInTab(conversation);
@@ -965,6 +1081,246 @@ export function ChatInterface() {
             setTabMessages((prev) => ({
                 ...prev,
                 [tabId]: prev[tabId].filter((m) => m.id !== streamingMessageId),
+            }));
+        } finally {
+            setSendingTabs((prev) => ({...prev, [tabId]: false}));
+        }
+    };
+
+    // Send video generation message
+    const sendVideoMessage = async (content: string) => {
+        if (!activeTabId || !content.trim()) return;
+
+        let tabId = activeTabId;
+        const currentTab = openTabs.find(t => t.id === tabId);
+        let conversationId = tabConversations[tabId]?.id;
+
+        // Si es un tab draft, crear la conversación real en BD
+        if (currentTab?.isDraft || !conversationId) {
+            const draftConv = tabConversations[tabId];
+            const newConv = await createNewConversation(draftConv?.model_id);
+            if (!newConv) return;
+            conversationId = newConv.id;
+            setTabConversations((prev) => ({...prev, [tabId]: newConv}));
+            setOpenTabs((prev) =>
+                prev.map((t) =>
+                    t.id === tabId ? {...t, conversationId: newConv.id, title: newConv.title, isDraft: false} : t
+                )
+            );
+        }
+
+        setSendingTabs((prev) => ({...prev, [tabId]: true}));
+
+        // Debug: log video settings being sent
+        console.log("[Video Debug] Sending with settings:", {
+            audioEnabled: videoAudioEnabled,
+            duration: videoDuration,
+            resolution: videoResolution,
+            aspectRatio: videoAspectRatio,
+        });
+
+        // Add optimistic user message
+        const tempUserMessage: Message = {
+            id: Date.now(),
+            role: "user",
+            content,
+            content_type: "text",
+            created_at: new Date().toISOString(),
+        };
+
+        setTabMessages((prev) => ({
+            ...prev,
+            [tabId]: [...(prev[tabId] || []), tempUserMessage],
+        }));
+
+        // Add video generating placeholder for model response
+        const videoMessageId = Date.now() + 1;
+        const videoMessage: Message = {
+            id: videoMessageId,
+            role: "model",
+            content: "",
+            content_type: "video",
+            created_at: new Date().toISOString(),
+            isVideoGenerating: true,
+            videoProgress: {
+                status: "pending",
+                message: "Iniciando generación de video...",
+            },
+        };
+
+        setTabMessages((prev) => ({
+            ...prev,
+            [tabId]: [...(prev[tabId] || []), videoMessage],
+        }));
+
+        try {
+            const response = await fetch(`/api/conversations/${conversationId}/messages/video`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    content,
+                    videoSettings: {
+                        duration: videoDuration,
+                        resolution: videoResolution,
+                        aspectRatio: videoAspectRatio,
+                        audioEnabled: videoAudioEnabled,
+                        negativePrompt: videoNegativePrompt || undefined,
+                    },
+                    videoInputs: {
+                        firstFrame: videoFirstFrame,
+                        lastFrame: videoLastFrame,
+                        referenceImages: videoReferenceImages.length > 0 ? videoReferenceImages : undefined,
+                    },
+                    referenceImages: videoReferenceImages.length > 0 ? videoReferenceImages : undefined,
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error("Error generating video");
+            }
+
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+            let realUserMessageId: number | null = null;
+            let realModelMessageId: number | null = null;
+
+            if (reader) {
+                while (true) {
+                    const {done, value} = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split("\n");
+
+                    for (const line of lines) {
+                        if (line.startsWith("data: ")) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+
+                                if (data.type === "user_message") {
+                                    realUserMessageId = data.id;
+                                    setTabMessages((prev) => ({
+                                        ...prev,
+                                        [tabId]: prev[tabId].map((m) =>
+                                            m.id === tempUserMessage.id ? {...m, id: realUserMessageId!} : m
+                                        ),
+                                    }));
+                                } else if (data.type === "progress") {
+                                    setTabMessages((prev) => ({
+                                        ...prev,
+                                        [tabId]: prev[tabId].map((m) =>
+                                            m.id === videoMessageId
+                                                ? {
+                                                    ...m,
+                                                    videoProgress: {
+                                                        status: data.status,
+                                                        message: data.message,
+                                                        progress: data.progress,
+                                                    },
+                                                }
+                                                : m
+                                        ),
+                                    }));
+                                } else if (data.type === "video") {
+                                    setTabMessages((prev) => ({
+                                        ...prev,
+                                        [tabId]: prev[tabId].map((m) =>
+                                            m.id === videoMessageId
+                                                ? {
+                                                    ...m,
+                                                    video_url: data.videoUrl,
+                                                    video_duration: data.duration,
+                                                    video_has_audio: data.hasAudio,
+                                                    video_aspect_ratio: data.aspectRatio,
+                                                    isVideoGenerating: false,
+                                                    videoProgress: undefined,
+                                                }
+                                                : m
+                                        ),
+                                    }));
+                                } else if (data.type === "complete") {
+                                    realModelMessageId = data.id;
+                                    setTabMessages((prev) => ({
+                                        ...prev,
+                                        [tabId]: prev[tabId].map((m) =>
+                                            m.id === videoMessageId
+                                                ? {
+                                                    ...m,
+                                                    id: realModelMessageId!,
+                                                    video_url: data.videoUrl,
+                                                    video_duration: data.duration,
+                                                    video_has_audio: data.hasAudio,
+                                                    video_aspect_ratio: data.aspectRatio,
+                                                    isVideoGenerating: false,
+                                                    videoProgress: undefined,
+                                                }
+                                                : m
+                                        ),
+                                    }));
+                                } else if (data.type === "title") {
+                                    const newTitle = data.title;
+                                    setOpenTabs((prev) =>
+                                        prev.map((t) =>
+                                            t.id === tabId ? {...t, title: newTitle} : t
+                                        )
+                                    );
+                                    setTabConversations((prev) => ({
+                                        ...prev,
+                                        [tabId]: {...prev[tabId], title: newTitle},
+                                    }));
+                                    setConversations((prev) =>
+                                        prev.map((c) =>
+                                            c.id === conversationId ? {...c, title: newTitle} : c
+                                        )
+                                    );
+                                } else if (data.type === "error") {
+                                    realModelMessageId = data.id;
+                                    setTabMessages((prev) => ({
+                                        ...prev,
+                                        [tabId]: prev[tabId].map((m) =>
+                                            m.id === videoMessageId
+                                                ? {
+                                                    ...m,
+                                                    id: realModelMessageId!,
+                                                    content: `Error: ${data.message}`,
+                                                    isVideoGenerating: false,
+                                                    videoProgress: undefined,
+                                                }
+                                                : m
+                                        ),
+                                    }));
+                                }
+                            } catch (e) {
+                                // Ignore parse errors for incomplete chunks
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Clear video frames after successful generation
+            setVideoFirstFrame(null);
+            setVideoLastFrame(null);
+            setVideoReferenceImages([]);
+
+            fetchConversations();
+            if (selectedProjectId) {
+                fetchProjectUsage(selectedProjectId);
+            }
+        } catch (err) {
+            console.error("Error generating video:", err);
+            setTabMessages((prev) => ({
+                ...prev,
+                [tabId]: prev[tabId].map((m) =>
+                    m.id === videoMessageId
+                        ? {
+                            ...m,
+                            content: "Error al generar el video. Por favor intenta de nuevo.",
+                            isVideoGenerating: false,
+                            videoProgress: undefined,
+                        }
+                        : m
+                ),
             }));
         } finally {
             setSendingTabs((prev) => ({...prev, [tabId]: false}));
@@ -1377,6 +1733,12 @@ export function ChatInterface() {
                                                 <MessageContent
                                                     content={msg.content}
                                                     imageUrl={msg.image_url}
+                                                    videoUrl={msg.video_url}
+                                                    videoDuration={msg.video_duration}
+                                                    videoHasAudio={msg.video_has_audio}
+                                                    videoAspectRatio={msg.video_aspect_ratio || videoAspectRatio}
+                                                    isVideoGenerating={msg.isVideoGenerating}
+                                                    videoProgress={msg.videoProgress}
                                                     isUser={msg.role === "user"}
                                                     isStreaming={msg.isStreaming}
                                                 />
@@ -1408,9 +1770,16 @@ export function ChatInterface() {
                             </div>
                         ) : (
                             <MessageInput
-                                onSend={sendMessage}
+                                onSend={(content, files) => {
+                                    // Route to video or text endpoint based on model
+                                    if (selectedProjectModel?.supports_video_generation) {
+                                        sendVideoMessage(content);
+                                    } else {
+                                        sendMessage(content, files);
+                                    }
+                                }}
                                 disabled={isSending || !selectedModelId}
-                                supportsFiles={true}
+                                supportsFiles={!selectedProjectModel?.supports_video_generation}
                             />
                         )
                     )}
@@ -1603,6 +1972,58 @@ export function ChatInterface() {
                                         <option value="4K">4K (Ultra alta definición)</option>
                                     </select>
                                 </div>
+                            </div>
+                        )}
+
+                        {/* Video Generation Settings - Only show for models that support it and not archived */}
+                        {selectedProjectModel?.supports_video_generation && !activeTab?.isArchived && (
+                            <div className="space-y-4 p-4 bg-[#1a1a22] rounded-lg border border-border/50">
+                                <VideoSettings
+                                    duration={videoDuration}
+                                    resolution={videoResolution}
+                                    aspectRatio={videoAspectRatio}
+                                    audioEnabled={videoAudioEnabled}
+                                    negativePrompt={videoNegativePrompt}
+                                    disabled={isSending}
+                                    onChange={(settings) => {
+                                        if (settings.duration !== undefined) {
+                                            setVideoDuration(settings.duration);
+                                            handleSettingChange("video_duration", settings.duration);
+                                        }
+                                        if (settings.resolution !== undefined) {
+                                            setVideoResolution(settings.resolution);
+                                            handleSettingChange("video_resolution", settings.resolution);
+                                        }
+                                        if (settings.aspectRatio !== undefined) {
+                                            setVideoAspectRatio(settings.aspectRatio);
+                                            handleSettingChange("video_aspect_ratio", settings.aspectRatio);
+                                        }
+                                        if (settings.audioEnabled !== undefined) {
+                                            setVideoAudioEnabled(settings.audioEnabled);
+                                            handleSettingChange("video_audio_enabled", settings.audioEnabled);
+                                        }
+                                        if (settings.negativePrompt !== undefined) {
+                                            setVideoNegativePrompt(settings.negativePrompt);
+                                            handleSettingChange("video_negative_prompt", settings.negativePrompt);
+                                        }
+                                    }}
+                                />
+                            </div>
+                        )}
+
+                        {/* Video Input Frames - Only show for models that support video and not archived */}
+                        {selectedProjectModel?.supports_video_generation && !activeTab?.isArchived && (
+                            <div className="space-y-4 p-4 bg-[#1a1a22] rounded-lg border border-border/50">
+                                <VideoInputFrames
+                                    projectId={selectedProjectId!}
+                                    firstFrame={videoFirstFrame}
+                                    lastFrame={videoLastFrame}
+                                    referenceImages={videoReferenceImages}
+                                    onFirstFrameChange={setVideoFirstFrame}
+                                    onLastFrameChange={setVideoLastFrame}
+                                    onReferenceImagesChange={setVideoReferenceImages}
+                                    disabled={isSending}
+                                />
                             </div>
                         )}
 
