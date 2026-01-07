@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -36,6 +37,9 @@ import {
   Star,
   FileText,
   Save,
+  ImageIcon,
+  Video,
+  Eye,
 } from "lucide-react";
 import Image from "next/image";
 import { formatDateLocal } from "@/lib/utils";
@@ -64,7 +68,8 @@ interface ProjectUser {
   user_name: string | null;
   user_image: string | null;
   role: string;
-  max_monthly_generations: number;
+  max_monthly_image_generations: number;
+  max_monthly_video_generations: number;
 }
 
 interface User {
@@ -103,6 +108,7 @@ const statusColors: Record<string, string> = {
 };
 
 export default function ProjectsPage() {
+  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -124,11 +130,15 @@ export default function ProjectsPage() {
   const [saving, setSaving] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState("");
-  const [maxGenerations, setMaxGenerations] = useState("10");
-  const [unlimitedGenerations, setUnlimitedGenerations] = useState(false);
+  const [maxImageGenerations, setMaxImageGenerations] = useState("10");
+  const [maxVideoGenerations, setMaxVideoGenerations] = useState("10");
+  const [unlimitedImageGenerations, setUnlimitedImageGenerations] = useState(false);
+  const [unlimitedVideoGenerations, setUnlimitedVideoGenerations] = useState(false);
   const [editingUserLimit, setEditingUserLimit] = useState<number | null>(null);
-  const [editMaxGenerations, setEditMaxGenerations] = useState("");
-  const [editUnlimited, setEditUnlimited] = useState(false);
+  const [editMaxImageGenerations, setEditMaxImageGenerations] = useState("");
+  const [editMaxVideoGenerations, setEditMaxVideoGenerations] = useState("");
+  const [editUnlimitedImage, setEditUnlimitedImage] = useState(false);
+  const [editUnlimitedVideo, setEditUnlimitedVideo] = useState(false);
 
   // Models state
   const [isModelsDialogOpen, setIsModelsDialogOpen] = useState(false);
@@ -253,8 +263,10 @@ export default function ProjectsPage() {
   const openUsersDialog = (project: Project) => {
     setSelectedProject(project);
     setSelectedUserId("");
-    setMaxGenerations("10");
-    setUnlimitedGenerations(false);
+    setMaxImageGenerations("10");
+    setMaxVideoGenerations("10");
+    setUnlimitedImageGenerations(false);
+    setUnlimitedVideoGenerations(false);
     setEditingUserLimit(null);
     fetchProjectUsers(project.id);
     setIsUsersDialogOpen(true);
@@ -419,14 +431,17 @@ export default function ProjectsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: Number(selectedUserId),
-          max_monthly_generations: unlimitedGenerations ? 0 : (Number(maxGenerations) || 10),
+          max_monthly_image_generations: unlimitedImageGenerations ? 0 : (Number(maxImageGenerations) || 10),
+          max_monthly_video_generations: unlimitedVideoGenerations ? 0 : (Number(maxVideoGenerations) || 10),
         }),
       });
 
       if (res.ok) {
         setSelectedUserId("");
-        setMaxGenerations("10");
-        setUnlimitedGenerations(false);
+        setMaxImageGenerations("10");
+        setMaxVideoGenerations("10");
+        setUnlimitedImageGenerations(false);
+        setUnlimitedVideoGenerations(false);
         fetchProjectUsers(selectedProject.id);
       } else {
         const data = await res.json();
@@ -449,13 +464,15 @@ export default function ProjectsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: userId,
-          max_monthly_generations: editUnlimited ? 0 : (Number(editMaxGenerations) || 10),
+          max_monthly_image_generations: editUnlimitedImage ? 0 : (Number(editMaxImageGenerations) || 10),
+          max_monthly_video_generations: editUnlimitedVideo ? 0 : (Number(editMaxVideoGenerations) || 10),
         }),
       });
 
       if (res.ok) {
         setEditingUserLimit(null);
-        setEditUnlimited(false);
+        setEditUnlimitedImage(false);
+        setEditUnlimitedVideo(false);
         fetchProjectUsers(selectedProject.id);
       } else {
         const data = await res.json();
@@ -534,7 +551,7 @@ export default function ProjectsPage() {
               <TableHead className="text-muted-foreground">Cliente</TableHead>
               <TableHead className="text-muted-foreground">Estado</TableHead>
               <TableHead className="text-muted-foreground">Fecha</TableHead>
-              <TableHead className="w-[140px] text-muted-foreground">Acciones</TableHead>
+              <TableHead className="w-[180px] text-muted-foreground">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -548,14 +565,17 @@ export default function ProjectsPage() {
               projects.map((project) => (
                 <TableRow key={project.id} className="border-border/50 hover:bg-accent/50">
                   <TableCell>
-                    <div>
+                    <button
+                      onClick={() => router.push(`/dashboard/projects/${project.id}`)}
+                      className="text-left hover:text-primary transition-colors"
+                    >
                       <div className="font-medium">{project.title}</div>
                       {project.description && (
                         <div className="text-sm text-muted-foreground truncate max-w-[300px]">
                           {project.description}
                         </div>
                       )}
-                    </div>
+                    </button>
                   </TableCell>
                   <TableCell>
                     {project.client_name ? (
@@ -587,6 +607,15 @@ export default function ProjectsPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 hover:bg-primary/10"
+                        onClick={() => router.push(`/dashboard/projects/${project.id}`)}
+                        title="Ver proyecto"
+                      >
+                        <Eye className="h-4 w-4 text-primary" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -761,27 +790,51 @@ export default function ProjectsPage() {
                 </Button>
               </div>
               {selectedUserId && (
-                <div className="flex items-center gap-3 pl-1">
-                  <Zap className="h-4 w-4 text-yellow-400" />
-                  <span className="text-sm text-muted-foreground">Límite mensual:</span>
-                  <Input
-                    type="number"
-                    min="1"
-                    value={maxGenerations}
-                    onChange={(e) => setMaxGenerations(e.target.value)}
-                    className="w-20 h-8 bg-muted border-border/50 text-sm"
-                    placeholder="10"
-                    disabled={unlimitedGenerations}
-                  />
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={unlimitedGenerations}
-                      onChange={(e) => setUnlimitedGenerations(e.target.checked)}
-                      className="w-4 h-4 rounded border-border/50 bg-muted accent-primary"
+                <div className="space-y-2 pl-1">
+                  <div className="flex items-center gap-3">
+                    <ImageIcon className="h-4 w-4 text-blue-400" />
+                    <span className="text-sm text-muted-foreground w-16">Imágenes:</span>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={maxImageGenerations}
+                      onChange={(e) => setMaxImageGenerations(e.target.value)}
+                      className="w-20 h-8 bg-muted border-border/50 text-sm"
+                      placeholder="10"
+                      disabled={unlimitedImageGenerations}
                     />
-                    <span className="text-sm text-muted-foreground">Sin límite</span>
-                  </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={unlimitedImageGenerations}
+                        onChange={(e) => setUnlimitedImageGenerations(e.target.checked)}
+                        className="w-4 h-4 rounded border-border/50 bg-muted accent-primary"
+                      />
+                      <span className="text-sm text-muted-foreground">∞</span>
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Video className="h-4 w-4 text-purple-400" />
+                    <span className="text-sm text-muted-foreground w-16">Videos:</span>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={maxVideoGenerations}
+                      onChange={(e) => setMaxVideoGenerations(e.target.value)}
+                      className="w-20 h-8 bg-muted border-border/50 text-sm"
+                      placeholder="10"
+                      disabled={unlimitedVideoGenerations}
+                    />
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={unlimitedVideoGenerations}
+                        onChange={(e) => setUnlimitedVideoGenerations(e.target.checked)}
+                        className="w-4 h-4 rounded border-border/50 bg-muted accent-primary"
+                      />
+                      <span className="text-sm text-muted-foreground">∞</span>
+                    </label>
+                  </div>
                 </div>
               )}
             </div>
@@ -820,59 +873,91 @@ export default function ProjectsPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       {editingUserLimit === pu.user_id ? (
-                        <div className="flex items-center gap-1">
-                          <Input
-                            type="number"
-                            min="1"
-                            value={editMaxGenerations}
-                            onChange={(e) => setEditMaxGenerations(e.target.value)}
-                            className="w-16 h-7 bg-card border-border/50 text-xs"
-                            autoFocus
-                            disabled={editUnlimited}
-                          />
-                          <label className="flex items-center gap-1 cursor-pointer text-xs text-muted-foreground">
-                            <input
-                              type="checkbox"
-                              checked={editUnlimited}
-                              onChange={(e) => setEditUnlimited(e.target.checked)}
-                              className="w-3 h-3 rounded accent-primary"
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1">
+                            <ImageIcon className="h-3 w-3 text-blue-400" />
+                            <Input
+                              type="number"
+                              min="1"
+                              value={editMaxImageGenerations}
+                              onChange={(e) => setEditMaxImageGenerations(e.target.value)}
+                              className="w-14 h-6 bg-card border-border/50 text-xs"
+                              autoFocus
+                              disabled={editUnlimitedImage}
                             />
-                            ∞
-                          </label>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 hover:bg-green-500/10"
-                            onClick={() => handleUpdateUserLimit(pu.user_id)}
-                            disabled={saving}
-                          >
-                            <Check className="h-3 w-3 text-green-400" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 hover:bg-accent"
-                            onClick={() => {
-                              setEditingUserLimit(null);
-                              setEditUnlimited(false);
-                            }}
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
+                            <label className="flex items-center gap-1 cursor-pointer text-xs text-muted-foreground">
+                              <input
+                                type="checkbox"
+                                checked={editUnlimitedImage}
+                                onChange={(e) => setEditUnlimitedImage(e.target.checked)}
+                                className="w-3 h-3 rounded accent-primary"
+                              />
+                              ∞
+                            </label>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Video className="h-3 w-3 text-purple-400" />
+                            <Input
+                              type="number"
+                              min="1"
+                              value={editMaxVideoGenerations}
+                              onChange={(e) => setEditMaxVideoGenerations(e.target.value)}
+                              className="w-14 h-6 bg-card border-border/50 text-xs"
+                              disabled={editUnlimitedVideo}
+                            />
+                            <label className="flex items-center gap-1 cursor-pointer text-xs text-muted-foreground">
+                              <input
+                                type="checkbox"
+                                checked={editUnlimitedVideo}
+                                onChange={(e) => setEditUnlimitedVideo(e.target.checked)}
+                                className="w-3 h-3 rounded accent-primary"
+                              />
+                              ∞
+                            </label>
+                          </div>
+                          <div className="flex gap-1 justify-end">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 hover:bg-green-500/10"
+                              onClick={() => handleUpdateUserLimit(pu.user_id)}
+                              disabled={saving}
+                            >
+                              <Check className="h-3 w-3 text-green-400" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 hover:bg-accent"
+                              onClick={() => {
+                                setEditingUserLimit(null);
+                                setEditUnlimitedImage(false);
+                                setEditUnlimitedVideo(false);
+                              }}
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
                         </div>
                       ) : (
                         <button
-                          className="flex items-center gap-1 px-2 py-1 rounded hover:bg-accent/50 transition-colors"
+                          className="flex flex-col items-start gap-0.5 px-2 py-1 rounded hover:bg-accent/50 transition-colors"
                           onClick={() => {
                             setEditingUserLimit(pu.user_id);
-                            setEditMaxGenerations(pu.max_monthly_generations === 0 ? "10" : pu.max_monthly_generations.toString());
-                            setEditUnlimited(pu.max_monthly_generations === 0);
+                            setEditMaxImageGenerations(pu.max_monthly_image_generations === 0 ? "10" : pu.max_monthly_image_generations.toString());
+                            setEditMaxVideoGenerations(pu.max_monthly_video_generations === 0 ? "10" : pu.max_monthly_video_generations.toString());
+                            setEditUnlimitedImage(pu.max_monthly_image_generations === 0);
+                            setEditUnlimitedVideo(pu.max_monthly_video_generations === 0);
                           }}
-                          title="Editar límite"
+                          title="Editar límites"
                         >
-                          <Zap className="h-3 w-3 text-yellow-400" />
-                          <span className="text-xs text-muted-foreground">
-                            {pu.max_monthly_generations === 0 ? "∞" : pu.max_monthly_generations}
+                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <ImageIcon className="h-3 w-3 text-blue-400" />
+                            {pu.max_monthly_image_generations === 0 ? "∞" : pu.max_monthly_image_generations}
+                          </span>
+                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <Video className="h-3 w-3 text-purple-400" />
+                            {pu.max_monthly_video_generations === 0 ? "∞" : pu.max_monthly_video_generations}
                           </span>
                         </button>
                       )}

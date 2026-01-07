@@ -22,9 +22,9 @@ interface ConversationRow extends RowDataPacket {
   project_name: string | null;
 }
 
-interface UserLimitRow extends RowDataPacket {
-  max_monthly_generations: number;
-  current_month_count: number;
+interface VideoLimitRow extends RowDataPacket {
+  max_monthly_video_generations: number;
+  current_month_video_count: number;
 }
 
 interface MessageRow extends RowDataPacket {
@@ -132,31 +132,33 @@ export async function POST(
       });
     }
 
-    // Verificar límite de generaciones mensuales
+    // Verificar límite de generaciones de video mensuales
     if (conversation.project_id && session.user.role !== "admin") {
-      const [limitRows] = await pool.execute<UserLimitRow[]>(`
+      const [limitRows] = await pool.execute<VideoLimitRow[]>(`
         SELECT
-          pu.max_monthly_generations,
+          COALESCE(pu.max_monthly_video_generations, 0) as max_monthly_video_generations,
           (
             SELECT COUNT(*)
             FROM messages m
             JOIN conversations c ON m.conversation_id = c.id
             WHERE c.project_id = ?
               AND c.user_id = ?
-              AND m.role = 'user'
+              AND m.role = 'model'
+              AND m.video_url IS NOT NULL
               AND m.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01')
-          ) as current_month_count
+          ) as current_month_video_count
         FROM project_users pu
         WHERE pu.project_id = ? AND pu.user_id = ?
       `, [conversation.project_id, session.user.id, conversation.project_id, session.user.id]);
 
       if (limitRows.length > 0) {
-        const { max_monthly_generations, current_month_count } = limitRows[0];
-        if (max_monthly_generations > 0 && current_month_count >= max_monthly_generations) {
+        const { max_monthly_video_generations, current_month_video_count } = limitRows[0];
+        if (max_monthly_video_generations > 0 && current_month_video_count >= max_monthly_video_generations) {
           return new Response(JSON.stringify({
-            error: "Has alcanzado el límite de mensajes mensuales para este proyecto",
-            limit: max_monthly_generations,
-            used: current_month_count
+            error: "Has alcanzado el límite de generaciones de video mensuales para este proyecto",
+            type: "video_limit",
+            limit: max_monthly_video_generations,
+            used: current_month_video_count
           }), {
             status: 429,
             headers: { "Content-Type": "application/json" },

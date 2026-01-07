@@ -67,9 +67,9 @@ interface ProjectModelRow extends RowDataPacket {
   system_instruction: string | null;
 }
 
-interface UserLimitRow extends RowDataPacket {
-  max_monthly_generations: number;
-  current_month_count: number;
+interface ImageLimitRow extends RowDataPacket {
+  max_monthly_image_generations: number;
+  current_month_image_count: number;
 }
 
 interface ModelRow extends RowDataPacket {
@@ -173,32 +173,34 @@ export async function POST(
       console.log(`[Stream] Using image settings override: ${effectiveImageAspectRatio}, ${effectiveImageSize}`);
     }
 
-    // Verificar límite de generaciones mensuales del usuario en el proyecto
-    if (conversation.project_id && session.user.role !== "admin") {
-      const [limitRows] = await pool.execute<UserLimitRow[]>(`
+    // Verificar límite de generaciones de imágenes si el modelo soporta imagen
+    if (conversation.project_id && session.user.role !== "admin" && effectiveSupportsImageGeneration) {
+      const [limitRows] = await pool.execute<ImageLimitRow[]>(`
         SELECT
-          pu.max_monthly_generations,
+          COALESCE(pu.max_monthly_image_generations, 0) as max_monthly_image_generations,
           (
             SELECT COUNT(*)
             FROM messages m
             JOIN conversations c ON m.conversation_id = c.id
             WHERE c.project_id = ?
               AND c.user_id = ?
-              AND m.role = 'user'
+              AND m.role = 'model'
+              AND m.image_url IS NOT NULL
               AND m.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01')
-          ) as current_month_count
+          ) as current_month_image_count
         FROM project_users pu
         WHERE pu.project_id = ? AND pu.user_id = ?
       `, [conversation.project_id, session.user.id, conversation.project_id, session.user.id]);
 
       if (limitRows.length > 0) {
-        const { max_monthly_generations, current_month_count } = limitRows[0];
+        const { max_monthly_image_generations, current_month_image_count } = limitRows[0];
         // 0 = sin límite, mayor a 0 = límite activo
-        if (max_monthly_generations > 0 && current_month_count >= max_monthly_generations) {
+        if (max_monthly_image_generations > 0 && current_month_image_count >= max_monthly_image_generations) {
           return new Response(JSON.stringify({
-            error: "Has alcanzado el límite de mensajes mensuales para este proyecto",
-            limit: max_monthly_generations,
-            used: current_month_count
+            error: "Has alcanzado el límite de generaciones de imágenes mensuales para este proyecto",
+            type: "image_limit",
+            limit: max_monthly_image_generations,
+            used: current_month_image_count
           }), {
             status: 429,
             headers: { "Content-Type": "application/json" },

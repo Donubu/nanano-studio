@@ -1,0 +1,57 @@
+import { NextResponse } from "next/server";
+import { auth } from "@/auth";
+import pool from "@/lib/db";
+import { RowDataPacket } from "mysql2";
+
+interface StatsRow extends RowDataPacket {
+  totalUsers: number;
+  totalProjects: number;
+  totalConversations: number;
+  totalImages: number;
+  totalVideos: number;
+  totalTokensInput: number;
+  totalTokensOutput: number;
+}
+
+// GET - Get global dashboard statistics (admin only)
+export async function GET() {
+  try {
+    const session = await auth();
+
+    if (!session?.user) {
+      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    }
+
+    if (session.user.role !== "admin") {
+      return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+    }
+
+    // Get all stats in one query
+    const [stats] = await pool.execute<StatsRow[]>(`
+      SELECT
+        (SELECT COUNT(*) FROM users) as totalUsers,
+        (SELECT COUNT(*) FROM projects) as totalProjects,
+        (SELECT COUNT(*) FROM conversations) as totalConversations,
+        (SELECT COUNT(*) FROM messages WHERE role = 'model' AND image_url IS NOT NULL AND image_url != '' AND deleted_at IS NULL) as totalImages,
+        (SELECT COUNT(*) FROM messages WHERE role = 'model' AND video_url IS NOT NULL AND video_url != '' AND deleted_at IS NULL) as totalVideos,
+        (SELECT COALESCE(SUM(tokens_input), 0) FROM messages) as totalTokensInput,
+        (SELECT COALESCE(SUM(tokens_output), 0) FROM messages) as totalTokensOutput
+    `);
+
+    return NextResponse.json(stats[0] || {
+      totalUsers: 0,
+      totalProjects: 0,
+      totalConversations: 0,
+      totalImages: 0,
+      totalVideos: 0,
+      totalTokensInput: 0,
+      totalTokensOutput: 0,
+    });
+  } catch (error) {
+    console.error("Error fetching dashboard stats:", error);
+    return NextResponse.json(
+      { error: "Error interno del servidor" },
+      { status: 500 }
+    );
+  }
+}

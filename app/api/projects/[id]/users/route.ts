@@ -10,7 +10,8 @@ interface ProjectUserRow extends RowDataPacket {
   user_name: string | null;
   user_image: string | null;
   role: string;
-  max_monthly_generations: number;
+  max_monthly_image_generations: number;
+  max_monthly_video_generations: number;
   created_at: Date;
 }
 
@@ -30,7 +31,10 @@ export async function GET(
 
     const [rows] = await pool.execute<ProjectUserRow[]>(`
       SELECT
-        pu.id, pu.user_id, pu.role, pu.max_monthly_generations, pu.created_at,
+        pu.id, pu.user_id, pu.role,
+        COALESCE(pu.max_monthly_image_generations, 0) as max_monthly_image_generations,
+        COALESCE(pu.max_monthly_video_generations, 0) as max_monthly_video_generations,
+        pu.created_at,
         u.email as user_email, u.name as user_name, u.image as user_image
       FROM project_users pu
       JOIN users u ON pu.user_id = u.id
@@ -62,7 +66,12 @@ export async function POST(
 
     const { id } = await params;
     const body = await request.json();
-    const { user_id, role = "member", max_monthly_generations = 0 } = body;
+    const {
+      user_id,
+      role = "member",
+      max_monthly_image_generations = 0,
+      max_monthly_video_generations = 0,
+    } = body;
 
     if (!user_id) {
       return NextResponse.json(
@@ -85,12 +94,20 @@ export async function POST(
     }
 
     const [result] = await pool.execute<ResultSetHeader>(
-      "INSERT INTO project_users (project_id, user_id, role, max_monthly_generations) VALUES (?, ?, ?, ?)",
-      [id, user_id, role, max_monthly_generations]
+      `INSERT INTO project_users (project_id, user_id, role, max_monthly_image_generations, max_monthly_video_generations)
+       VALUES (?, ?, ?, ?, ?)`,
+      [id, user_id, role, max_monthly_image_generations, max_monthly_video_generations]
     );
 
     return NextResponse.json(
-      { id: result.insertId, project_id: Number(id), user_id, role, max_monthly_generations },
+      {
+        id: result.insertId,
+        project_id: Number(id),
+        user_id,
+        role,
+        max_monthly_image_generations,
+        max_monthly_video_generations,
+      },
       { status: 201 }
     );
   } catch (error) {
@@ -102,7 +119,7 @@ export async function POST(
   }
 }
 
-// PUT - Actualizar límite de generaciones del usuario en proyecto
+// PUT - Actualizar límites de generaciones del usuario en proyecto
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -116,7 +133,12 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
-    const { user_id, max_monthly_generations, role } = body;
+    const {
+      user_id,
+      max_monthly_image_generations,
+      max_monthly_video_generations,
+      role,
+    } = body;
 
     if (!user_id) {
       return NextResponse.json(
@@ -142,9 +164,14 @@ export async function PUT(
     const updates: string[] = [];
     const values: (string | number)[] = [];
 
-    if (max_monthly_generations !== undefined) {
-      updates.push("max_monthly_generations = ?");
-      values.push(max_monthly_generations);
+    if (max_monthly_image_generations !== undefined) {
+      updates.push("max_monthly_image_generations = ?");
+      values.push(max_monthly_image_generations);
+    }
+
+    if (max_monthly_video_generations !== undefined) {
+      updates.push("max_monthly_video_generations = ?");
+      values.push(max_monthly_video_generations);
     }
 
     if (role !== undefined) {

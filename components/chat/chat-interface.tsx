@@ -35,6 +35,7 @@ import {
     Sun,
     Moon,
     Monitor,
+    Video,
 } from "lucide-react";
 import Link from "next/link";
 import {ConversationTabs, Tab} from "./conversation-tabs";
@@ -180,7 +181,10 @@ export function ChatInterface() {
     const [useProjectSystemInstruction, setUseProjectSystemInstruction] = useState(true);
 
     // Usage tracking
-    const [projectUsage, setProjectUsage] = useState<{ used: number; limit: number; unlimited: boolean } | null>(null);
+    const [projectUsage, setProjectUsage] = useState<{
+        images: { used: number; limit: number; unlimited: boolean };
+        videos: { used: number; limit: number; unlimited: boolean };
+    } | null>(null);
 
     // Get current tab's conversation and messages
     const activeTab = openTabs.find((t) => t.id === activeTabId);
@@ -1442,31 +1446,67 @@ export function ChatInterface() {
                             ))}
                         </select>
                         {selectedProjectId && projectUsage && (
-                            <div className="mt-2 px-2 py-1.5 bg-card rounded-lg border border-border/30">
-                                <div className="flex items-center justify-between text-xs">
-                                    <span className="text-muted-foreground">Mensajes este mes</span>
-                                    <span className={projectUsage.unlimited ? "text-green-400" : projectUsage.used >= projectUsage.limit ? "text-red-400" : "text-foreground"}>
-                                        {projectUsage.unlimited ? (
-                                            <span className="text-green-400">Ilimitado</span>
-                                        ) : (
-                                            <>{projectUsage.used} / {projectUsage.limit}</>
-                                        )}
-                                    </span>
-                                </div>
-                                {!projectUsage.unlimited && (
-                                    <div className="mt-1.5 h-1.5 bg-muted rounded-full overflow-hidden">
-                                        <div
-                                            className={`h-full rounded-full transition-all ${
-                                                projectUsage.used >= projectUsage.limit
-                                                    ? "bg-red-500"
-                                                    : projectUsage.used >= projectUsage.limit * 0.8
-                                                        ? "bg-yellow-500"
-                                                        : "bg-primary"
-                                            }`}
-                                            style={{ width: `${Math.min((projectUsage.used / projectUsage.limit) * 100, 100)}%` }}
-                                        />
+                            <div className="mt-2 px-2 py-1.5 bg-card rounded-lg border border-border/30 space-y-2">
+                                {/* Image generations */}
+                                <div>
+                                    <div className="flex items-center justify-between text-xs">
+                                        <span className="text-muted-foreground flex items-center gap-1">
+                                            <ImageIcon className="h-3 w-3" />
+                                            Imágenes
+                                        </span>
+                                        <span className={projectUsage.images.unlimited ? "text-green-400" : projectUsage.images.used >= projectUsage.images.limit ? "text-red-400" : "text-foreground"}>
+                                            {projectUsage.images.unlimited ? (
+                                                <span className="text-green-400">∞</span>
+                                            ) : (
+                                                <>{projectUsage.images.used} / {projectUsage.images.limit}</>
+                                            )}
+                                        </span>
                                     </div>
-                                )}
+                                    {!projectUsage.images.unlimited && (
+                                        <div className="mt-1 h-1 bg-muted rounded-full overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full transition-all ${
+                                                    projectUsage.images.used >= projectUsage.images.limit
+                                                        ? "bg-red-500"
+                                                        : projectUsage.images.used >= projectUsage.images.limit * 0.8
+                                                            ? "bg-yellow-500"
+                                                            : "bg-blue-500"
+                                                }`}
+                                                style={{ width: `${Math.min((projectUsage.images.used / projectUsage.images.limit) * 100, 100)}%` }}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                                {/* Video generations */}
+                                <div>
+                                    <div className="flex items-center justify-between text-xs">
+                                        <span className="text-muted-foreground flex items-center gap-1">
+                                            <Video className="h-3 w-3" />
+                                            Videos
+                                        </span>
+                                        <span className={projectUsage.videos.unlimited ? "text-green-400" : projectUsage.videos.used >= projectUsage.videos.limit ? "text-red-400" : "text-foreground"}>
+                                            {projectUsage.videos.unlimited ? (
+                                                <span className="text-green-400">∞</span>
+                                            ) : (
+                                                <>{projectUsage.videos.used} / {projectUsage.videos.limit}</>
+                                            )}
+                                        </span>
+                                    </div>
+                                    {!projectUsage.videos.unlimited && (
+                                        <div className="mt-1 h-1 bg-muted rounded-full overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full transition-all ${
+                                                    projectUsage.videos.used >= projectUsage.videos.limit
+                                                        ? "bg-red-500"
+                                                        : projectUsage.videos.used >= projectUsage.videos.limit * 0.8
+                                                            ? "bg-yellow-500"
+                                                            : "bg-purple-500"
+                                                }`}
+                                                style={{ width: `${Math.min((projectUsage.videos.used / projectUsage.videos.limit) * 100, 100)}%` }}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         )}
                         {selectedProjectId && (
