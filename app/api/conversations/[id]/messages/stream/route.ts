@@ -72,6 +72,12 @@ interface UserLimitRow extends RowDataPacket {
   current_month_count: number;
 }
 
+interface ModelRow extends RowDataPacket {
+  id: number;
+  model_id: string;
+  supports_image_generation: boolean;
+}
+
 // POST - Enviar mensaje y obtener respuesta con streaming
 export async function POST(
   request: NextRequest,
@@ -96,10 +102,12 @@ export async function POST(
 
     const { id } = await params;
     const body = await request.json();
-    const { content, files, useProjectSystemInstruction = true } = body as {
+    const { content, files, useProjectSystemInstruction = true, modelIdOverride, imageSettings } = body as {
       content: string;
       files?: AttachedFile[];
       useProjectSystemInstruction?: boolean;
+      modelIdOverride?: number;
+      imageSettings?: { aspectRatio: string; size: string };
     };
 
     if (!content || content.trim() === "") {
@@ -132,6 +140,38 @@ export async function POST(
     }
 
     const conversation = conversations[0];
+
+    // Handle model override if provided
+    let effectiveModelId = conversation.model_model_id;
+    let effectiveSupportsImageGeneration = conversation.supports_image_generation;
+    let effectiveImageAspectRatio = conversation.image_aspect_ratio;
+    let effectiveImageSize = conversation.image_size;
+
+    if (modelIdOverride && conversation.project_id) {
+      // Verify the override model belongs to the same project
+      const [overrideRows] = await pool.execute<ModelRow[]>(
+        `SELECT m.id, m.model_id, m.supports_image_generation
+         FROM models m
+         JOIN project_models pm ON m.id = pm.model_id
+         WHERE pm.project_id = ? AND m.id = ?`,
+        [conversation.project_id, modelIdOverride]
+      );
+
+      if (overrideRows.length > 0) {
+        effectiveModelId = overrideRows[0].model_id;
+        effectiveSupportsImageGeneration = overrideRows[0].supports_image_generation;
+        console.log(`[Stream] Using model override: ${effectiveModelId}`);
+      } else {
+        console.warn(`[Stream] Model override ${modelIdOverride} not found in project ${conversation.project_id}, using default`);
+      }
+    }
+
+    // Apply image settings override if provided
+    if (imageSettings) {
+      effectiveImageAspectRatio = imageSettings.aspectRatio;
+      effectiveImageSize = imageSettings.size;
+      console.log(`[Stream] Using image settings override: ${effectiveImageAspectRatio}, ${effectiveImageSize}`);
+    }
 
     // Verificar límite de generaciones mensuales del usuario en el proyecto
     if (conversation.project_id && session.user.role !== "admin") {
@@ -225,29 +265,38 @@ export async function POST(
     );
 
     // Convertir historial al formato de ChatMessage
-    const messages: ChatMessage[] = historyRows.map((msg, index) => {
-      const isLastMessage = index === historyRows.length - 1;
+    const messages: ChatMessage[] = historyRows
+      .map((msg, index) => {
+        const isLastMessage = index === historyRows.length - 1;
 
-      // Para el último mensaje (el actual del usuario), incluir todos los archivos
-      if (isLastMessage && hasFiles && files) {
+        // Para el último mensaje (el actual del usuario), incluir todos los archivos
+        if (isLastMessage && hasFiles && files) {
+          return {
+            role: msg.role,
+            content: msg.content,
+            files: files, // Incluir todos los archivos en el mensaje actual
+          };
+        }
+
+        // Para mensajes históricos, usar el formato legacy (solo una imagen)
         return {
           role: msg.role,
           content: msg.content,
-          files: files, // Incluir todos los archivos en el mensaje actual
+          imageUrl: msg.image_url,
+          imageMimeType: msg.image_mime_type,
         };
-      }
+      })
+      // Filter out messages with empty content (can happen from error responses)
+      .filter((msg) => msg.content && msg.content.trim() !== "");
 
-      // Para mensajes históricos, usar el formato legacy (solo una imagen)
-      return {
-        role: msg.role,
-        content: msg.content,
-        imageUrl: msg.image_url,
-        imageMimeType: msg.image_mime_type,
-      };
-    });
+    // Si hay model override (generando imagen desde conversación de video),
+    // solo enviar el mensaje actual sin el historial de video
+    const messagesToSend = modelIdOverride
+      ? messages.slice(-1) // Solo el último mensaje (el actual)
+      : messages;
 
-    // Detectar si es el primer mensaje (solo hay 1 mensaje en el historial)
-    const isFirstMessage = historyRows.length === 1;
+    // Detectar si es el primer mensaje (solo hay 1 mensaje válido en el historial)
+    const isFirstMessage = messagesToSend.length === 1;
 
     // Actualizar timestamp de la conversación
     await pool.execute(
@@ -301,21 +350,21 @@ export async function POST(
           topP: Number(conversation.top_p),
           topK: conversation.top_k,
           maxOutputTokens: conversation.max_output_tokens,
-          ...(conversation.supports_image_generation && {
+          ...(effectiveSupportsImageGeneration && {
             imageConfig: {
-              aspectRatio: conversation.image_aspect_ratio as "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9",
-              imageSize: conversation.image_size as "1K" | "2K" | "4K",
+              aspectRatio: effectiveImageAspectRatio as "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9",
+              imageSize: effectiveImageSize as "1K" | "2K" | "4K",
             },
           }),
         };
 
         // Construir objeto de request para debug y almacenamiento
         const requestData = {
-          model: conversation.model_model_id,
+          model: effectiveModelId,
           systemInstruction: finalSystemInstruction,
           generationConfig,
           labels,
-          messages: messages.map(m => ({
+          messages: messagesToSend.map(m => ({
             role: m.role,
             content: m.content,
             files: m.files?.map(f => ({ name: f.name, type: f.type, mimeType: f.mimeType })),
@@ -344,8 +393,8 @@ export async function POST(
 
         try {
           await sendMessageStream(
-            conversation.model_model_id,
-            messages,
+            effectiveModelId,
+            messagesToSend,
             finalSystemInstruction,
             generationConfig,
             {

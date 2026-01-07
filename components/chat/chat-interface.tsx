@@ -2,6 +2,7 @@
 
 import {useState, useEffect, useRef, useCallback} from "react";
 import {useSession, signOut} from "next-auth/react";
+import {useTheme} from "next-themes";
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
 import {Avatar, AvatarFallback, AvatarImage} from "@/components/ui/avatar";
@@ -31,15 +32,20 @@ import {
     SlidersHorizontal,
     ImageIcon,
     Lock,
+    Sun,
+    Moon,
+    Monitor,
 } from "lucide-react";
 import Link from "next/link";
 import {ConversationTabs, Tab} from "./conversation-tabs";
 import {MessageContent} from "./message-content";
-import {MessageInput, AttachedFile} from "./message-input";
+import {MessageInput, AttachedFile, PreselectedImage} from "./message-input";
 import {GenerationsGallery} from "./generations-gallery";
 import {VideoSettings} from "./video-settings";
 import {VideoInputFrames, ReferenceImage} from "./video-input-frames";
 import {VideoDuration, VideoResolution, VideoAspectRatio, VideoGenerationStatus} from "@/types/video";
+import {GenerationModeSelector, GenerationMode} from "./generation-mode-selector";
+import {ImageModelSelector} from "./image-model-selector";
 
 interface ProjectModel {
     id: number;
@@ -114,6 +120,7 @@ const STORAGE_KEY_PROJECT = "nanano_selected_project";
 
 export function ChatInterface() {
     const {data: session} = useSession();
+    const {theme, setTheme} = useTheme();
     const [mounted, setMounted] = useState(false);
     const [projectModels, setProjectModels] = useState<ProjectModel[]>([]);
     const [projects, setProjects] = useState<Project[]>([]);
@@ -162,6 +169,13 @@ export function ChatInterface() {
     const [videoLastFrame, setVideoLastFrame] = useState<string | null>(null);
     const [videoReferenceImages, setVideoReferenceImages] = useState<ReferenceImage[]>([]);
 
+    // Generation mode (for video models that can also generate images)
+    const [generationMode, setGenerationMode] = useState<GenerationMode>("video");
+    const [imageModelIdForGeneration, setImageModelIdForGeneration] = useState<number | null>(null);
+
+    // Selected images from conversation (for use as attachments)
+    const [selectedConversationImages, setSelectedConversationImages] = useState<string[]>([]);
+
     // Project system instruction
     const [useProjectSystemInstruction, setUseProjectSystemInstruction] = useState(true);
 
@@ -195,6 +209,16 @@ export function ChatInterface() {
             localStorage.removeItem(STORAGE_KEY_PROJECT);
         }
     }, [selectedProjectId]);
+
+    // Auto-select first image model when switching to image mode
+    useEffect(() => {
+        if (generationMode === "image" && !imageModelIdForGeneration) {
+            const imageModels = projectModels.filter(m => m.supports_image_generation);
+            if (imageModels.length > 0) {
+                setImageModelIdForGeneration(imageModels[0].model_id);
+            }
+        }
+    }, [generationMode, projectModels, imageModelIdForGeneration]);
 
     // Restore tabs from localStorage after conversations are loaded
     useEffect(() => {
@@ -446,6 +470,9 @@ export function ChatInterface() {
             setVideoFirstFrame(null);
             setVideoLastFrame(null);
             setVideoReferenceImages([]);
+            // Reset generation mode and selected images when switching tabs
+            setGenerationMode("video");
+            setSelectedConversationImages([]);
         }
     }, [activeTabId, tabConversations]);
 
@@ -875,7 +902,9 @@ export function ChatInterface() {
 
     const sendMessage = async (
         content: string,
-        files?: AttachedFile[]
+        files?: AttachedFile[],
+        modelIdOverride?: number | null,
+        imageSettings?: { aspectRatio: string; size: string }
     ) => {
         if (!activeTabId || (!content.trim() && (!files || files.length === 0))) return;
 
@@ -952,6 +981,8 @@ export function ChatInterface() {
                     content,
                     files: filesToSend,
                     useProjectSystemInstruction,
+                    ...(modelIdOverride && { modelIdOverride }),
+                    ...(imageSettings && { imageSettings }),
                 }),
             });
 
@@ -1085,6 +1116,23 @@ export function ChatInterface() {
         } finally {
             setSendingTabs((prev) => ({...prev, [tabId]: false}));
         }
+    };
+
+    // Handle image selection from conversation
+    const handleConversationImageSelect = (imageUrl: string) => {
+        setSelectedConversationImages((prev) => {
+            const isSelected = prev.includes(imageUrl);
+            if (isSelected) {
+                // Deselect
+                return prev.filter((url) => url !== imageUrl);
+            } else {
+                // Select - and auto-switch to image mode if on video model
+                if (selectedProjectModel?.supports_video_generation && generationMode === "video") {
+                    setGenerationMode("image");
+                }
+                return [...prev, imageUrl];
+            }
+        });
     };
 
     // Send video generation message
@@ -1599,6 +1647,46 @@ export function ChatInterface() {
                                     </a>
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator className="bg-border/50"/>
+                                {/* Theme Selector */}
+                                <div className="px-2 py-1.5">
+                                    <div className="text-xs text-muted-foreground mb-2 px-2">Tema</div>
+                                    <div className="flex gap-1">
+                                        <button
+                                            onClick={() => setTheme("light")}
+                                            className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-xs transition-colors ${
+                                                theme === "light"
+                                                    ? "bg-primary text-primary-foreground"
+                                                    : "hover:bg-accent"
+                                            }`}
+                                        >
+                                            <Sun className="h-3.5 w-3.5"/>
+                                            Claro
+                                        </button>
+                                        <button
+                                            onClick={() => setTheme("dark")}
+                                            className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-xs transition-colors ${
+                                                theme === "dark"
+                                                    ? "bg-primary text-primary-foreground"
+                                                    : "hover:bg-accent"
+                                            }`}
+                                        >
+                                            <Moon className="h-3.5 w-3.5"/>
+                                            Oscuro
+                                        </button>
+                                        <button
+                                            onClick={() => setTheme("system")}
+                                            className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-xs transition-colors ${
+                                                theme === "system"
+                                                    ? "bg-primary text-primary-foreground"
+                                                    : "hover:bg-accent"
+                                            }`}
+                                        >
+                                            <Monitor className="h-3.5 w-3.5"/>
+                                            Auto
+                                        </button>
+                                    </div>
+                                </div>
+                                <DropdownMenuSeparator className="bg-border/50"/>
                                 <DropdownMenuItem
                                     onClick={() => signOut({callbackUrl: "/login"})}
                                     className="text-red-400 focus:text-red-400 cursor-pointer"
@@ -1741,6 +1829,9 @@ export function ChatInterface() {
                                                     videoProgress={msg.videoProgress}
                                                     isUser={msg.role === "user"}
                                                     isStreaming={msg.isStreaming}
+                                                    allowImageSelection={!activeTab?.isArchived && !!msg.image_url}
+                                                    isImageSelected={msg.image_url ? selectedConversationImages.includes(msg.image_url) : false}
+                                                    onImageSelect={handleConversationImageSelect}
                                                 />
                                             </div>
                                             {msg.role === "user" && (
@@ -1769,18 +1860,47 @@ export function ChatInterface() {
                                 </div>
                             </div>
                         ) : (
-                            <MessageInput
-                                onSend={(content, files) => {
-                                    // Route to video or text endpoint based on model
-                                    if (selectedProjectModel?.supports_video_generation) {
-                                        sendVideoMessage(content);
-                                    } else {
-                                        sendMessage(content, files);
-                                    }
-                                }}
-                                disabled={isSending || !selectedModelId}
-                                supportsFiles={!selectedProjectModel?.supports_video_generation}
-                            />
+                            <div className="flex flex-col">
+                                {/* Generation Mode Selector - Only for video models */}
+                                {selectedProjectModel?.supports_video_generation && (
+                                    <div className="flex justify-center py-2 border-t border-border/50">
+                                        <GenerationModeSelector
+                                            mode={generationMode}
+                                            onChange={(mode) => {
+                                                setGenerationMode(mode);
+                                                // Clear selected images when switching to video mode
+                                                if (mode === "video") {
+                                                    setSelectedConversationImages([]);
+                                                }
+                                            }}
+                                            disabled={isSending}
+                                            imageDisabled={!projectModels.some(m => m.supports_image_generation)}
+                                        />
+                                    </div>
+                                )}
+                                <MessageInput
+                                    onSend={(content, files) => {
+                                        // Route based on generation mode and model capabilities
+                                        if (selectedProjectModel?.supports_video_generation && generationMode === "video") {
+                                            sendVideoMessage(content);
+                                        } else {
+                                            // Use image model if in image mode, otherwise use current model
+                                            const modelOverride = generationMode === "image" ? imageModelIdForGeneration : undefined;
+                                            const imgSettings = generationMode === "image" ? {
+                                                aspectRatio: imageAspectRatio,
+                                                size: imageSize,
+                                            } : undefined;
+                                            sendMessage(content, files, modelOverride, imgSettings);
+                                        }
+                                        // Clear selected images after sending
+                                        setSelectedConversationImages([]);
+                                    }}
+                                    disabled={isSending || !selectedModelId}
+                                    supportsFiles={generationMode === "image" || !selectedProjectModel?.supports_video_generation}
+                                    preselectedImages={selectedConversationImages.map(url => ({ url }))}
+                                    onRemovePreselectedImage={(url) => setSelectedConversationImages(prev => prev.filter(u => u !== url))}
+                                />
+                            </div>
                         )
                     )}
                 </div>
@@ -1975,8 +2095,8 @@ export function ChatInterface() {
                             </div>
                         )}
 
-                        {/* Video Generation Settings - Only show for models that support it and not archived */}
-                        {selectedProjectModel?.supports_video_generation && !activeTab?.isArchived && (
+                        {/* Video Generation Settings - Only show for video models when in video mode */}
+                        {selectedProjectModel?.supports_video_generation && !activeTab?.isArchived && generationMode === "video" && (
                             <div className="space-y-4 p-4 bg-[#1a1a22] rounded-lg border border-border/50">
                                 <VideoSettings
                                     duration={videoDuration}
@@ -2011,8 +2131,8 @@ export function ChatInterface() {
                             </div>
                         )}
 
-                        {/* Video Input Frames - Only show for models that support video and not archived */}
-                        {selectedProjectModel?.supports_video_generation && !activeTab?.isArchived && (
+                        {/* Video Input Frames - Only show for video models when in video mode */}
+                        {selectedProjectModel?.supports_video_generation && !activeTab?.isArchived && generationMode === "video" && (
                             <div className="space-y-4 p-4 bg-[#1a1a22] rounded-lg border border-border/50">
                                 <VideoInputFrames
                                     projectId={selectedProjectId!}
@@ -2025,6 +2145,68 @@ export function ChatInterface() {
                                     disabled={isSending}
                                 />
                             </div>
+                        )}
+
+                        {/* Image Settings when video model is in image mode */}
+                        {selectedProjectModel?.supports_video_generation && !activeTab?.isArchived && generationMode === "image" && (
+                            <>
+                                {/* Image Model Selector */}
+                                <div className="space-y-4 p-4 bg-[#1a1a22] rounded-lg border border-border/50">
+                                    <ImageModelSelector
+                                        projectModels={projectModels}
+                                        selectedModelId={imageModelIdForGeneration}
+                                        onChange={setImageModelIdForGeneration}
+                                        disabled={isSending}
+                                    />
+                                </div>
+
+                                {/* Image Generation Settings */}
+                                <div className="space-y-4 p-4 bg-[#1a1a22] rounded-lg border border-border/50">
+                                    <div className="flex items-center gap-2 text-sm font-medium">
+                                        <ImageIcon className="h-4 w-4 text-primary"/>
+                                        Configuración de Imagen
+                                    </div>
+
+                                    {/* Aspect Ratio */}
+                                    <div>
+                                        <label className="text-xs text-muted-foreground mb-2 block">
+                                            Relación de aspecto
+                                        </label>
+                                        <select
+                                            className="w-full bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm"
+                                            value={imageAspectRatio}
+                                            onChange={(e) => setImageAspectRatio(e.target.value)}
+                                            disabled={isSending}
+                                        >
+                                            <option value="1:1">1:1 (Cuadrado)</option>
+                                            <option value="2:3">2:3 (Retrato)</option>
+                                            <option value="3:2">3:2 (Paisaje)</option>
+                                            <option value="3:4">3:4 (Retrato)</option>
+                                            <option value="4:3">4:3 (Paisaje)</option>
+                                            <option value="9:16">9:16 (Móvil vertical)</option>
+                                            <option value="16:9">16:9 (Panorámico)</option>
+                                            <option value="21:9">21:9 (Ultra panorámico)</option>
+                                        </select>
+                                    </div>
+
+                                    {/* Image Size */}
+                                    <div>
+                                        <label className="text-xs text-muted-foreground mb-2 block">
+                                            Tamaño de imagen
+                                        </label>
+                                        <select
+                                            className="w-full bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm"
+                                            value={imageSize}
+                                            onChange={(e) => setImageSize(e.target.value)}
+                                            disabled={isSending}
+                                        >
+                                            <option value="1K">1K (Estándar)</option>
+                                            <option value="2K">2K (Alta definición)</option>
+                                            <option value="4K">4K (Ultra alta definición)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </>
                         )}
 
                         {/* Advanced Settings Toggle - Only show if not archived */}
