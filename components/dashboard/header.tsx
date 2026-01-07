@@ -1,6 +1,7 @@
 "use client";
 
 import { signOut, useSession } from "next-auth/react";
+import { useTheme } from "next-themes";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,10 +11,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { LogOut, User, ChevronDown } from "lucide-react";
+import { LogOut, ChevronDown, Sun, Moon, Monitor } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export function Header() {
   const { data: session } = useSession();
+  const { theme, setTheme } = useTheme();
 
   const getInitials = (name: string | null | undefined) => {
     if (!name) return "U";
@@ -60,6 +63,50 @@ export function Header() {
               </span>
             </div>
           </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+
+          <div className="px-2 py-1.5">
+            <span className="text-xs text-muted-foreground mb-2 block">Tema</span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setTheme("light")}
+                className={cn(
+                  "p-2 rounded-md transition-colors",
+                  theme === "light"
+                    ? "bg-primary/20 text-primary"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                )}
+                title="Tema claro"
+              >
+                <Sun className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setTheme("dark")}
+                className={cn(
+                  "p-2 rounded-md transition-colors",
+                  theme === "dark"
+                    ? "bg-primary/20 text-primary"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                )}
+                title="Tema oscuro"
+              >
+                <Moon className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setTheme("system")}
+                className={cn(
+                  "p-2 rounded-md transition-colors",
+                  theme === "system"
+                    ? "bg-primary/20 text-primary"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                )}
+                title="Tema del sistema"
+              >
+                <Monitor className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
           <DropdownMenuSeparator />
 
           <DropdownMenuItem

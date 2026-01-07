@@ -154,7 +154,7 @@ export function ChatInterface() {
     const [systemInstruction, setSystemInstruction] = useState("");
 
     // Image generation settings
-    const [imageAspectRatio, setImageAspectRatio] = useState("1:1");
+    const [imageAspectRatio, setImageAspectRatio] = useState("16:9");
     const [imageSize, setImageSize] = useState("1K");
 
     // Video generation settings
@@ -1730,16 +1730,11 @@ export function ChatInterface() {
                                     <PanelLeft className="h-4 w-4"/>
                                 )}
                             </Button>
-                            <span className="text-sm font-medium">
-                {activeTab?.isGallery ? "Generaciones" : (currentConversation?.title || "Nueva conversación")}
-              </span>
+
                         </div>
                         <div className="flex items-center gap-2">
                             {activeTabId !== null && !activeTab?.isGallery && (
                                 <>
-                  <span className="text-sm text-muted-foreground">
-                    {selectedProjectModel?.model_display_name || "Selecciona un modelo"}
-                  </span>
                                     <Button
                                         variant="ghost"
                                         size="icon"
