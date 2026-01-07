@@ -381,7 +381,7 @@ export function ChatInterface() {
                         max_output_tokens: data.max_output_tokens,
                         system_instruction: data.system_instruction,
                         model_id: data.model_id,
-                        image_aspect_ratio: data.image_aspect_ratio || "1:1",
+                        image_aspect_ratio: data.image_aspect_ratio || "16:9",
                         image_size: data.image_size || "1K",
                         model_supports_image_generation: data.model_supports_image_generation,
                         model_supports_video_generation: data.model_supports_video_generation,
@@ -400,7 +400,7 @@ export function ChatInterface() {
                     setMaxOutputTokens(data.max_output_tokens);
                     setSystemInstruction(data.system_instruction || "");
                     setSelectedModelId(data.model_id);
-                    setImageAspectRatio(data.image_aspect_ratio || "1:1");
+                    setImageAspectRatio(data.image_aspect_ratio || "16:9");
                     setImageSize(data.image_size || "1K");
                     // Video settings
                     setVideoDuration(data.video_duration || 8);
@@ -458,7 +458,7 @@ export function ChatInterface() {
             setMaxOutputTokens(conv.max_output_tokens);
             setSystemInstruction(conv.system_instruction || "");
             setSelectedModelId(conv.model_id);
-            setImageAspectRatio(conv.image_aspect_ratio || "1:1");
+            setImageAspectRatio(conv.image_aspect_ratio || "16:9");
             setImageSize(conv.image_size || "1K");
             // Video settings
             setVideoDuration((conv.video_duration || 8) as VideoDuration);
@@ -814,7 +814,7 @@ export function ChatInterface() {
                             top_k: data.top_k,
                             max_output_tokens: data.max_output_tokens,
                             system_instruction: data.system_instruction,
-                            image_aspect_ratio: data.image_aspect_ratio || "1:1",
+                            image_aspect_ratio: data.image_aspect_ratio || "16:9",
                             image_size: data.image_size || "1K",
                             video_duration: data.video_duration || 8,
                             video_resolution: data.video_resolution || "720p",
@@ -1784,7 +1784,7 @@ export function ChatInterface() {
                                         </div>
                                     </div>
                                     <p className="text-muted-foreground max-w-md">
-                                        Comienza una conversación con los modelos de IA de Nano Banana. Escribe tu
+                                        Comienza una conversación con los modelos de IA disponibles. Escribe tu
                                         mensaje abajo para empezar.
                                     </p>
                                 </div>
@@ -2060,13 +2060,13 @@ export function ChatInterface() {
                                         onChange={(e) => handleSettingChange("image_aspect_ratio", e.target.value)}
                                         disabled={isSending}
                                     >
-                                        <option value="1:1">1:1 (Cuadrado)</option>
-                                        <option value="2:3">2:3 (Retrato)</option>
-                                        <option value="3:2">3:2 (Paisaje)</option>
-                                        <option value="3:4">3:4 (Retrato)</option>
-                                        <option value="4:3">4:3 (Paisaje)</option>
-                                        <option value="9:16">9:16 (Móvil vertical)</option>
                                         <option value="16:9">16:9 (Panorámico)</option>
+                                        <option value="1:1">1:1 (Cuadrado)</option>
+                                        <option value="9:16">9:16 (Móvil vertical)</option>
+                                        <option value="4:3">4:3 (Paisaje)</option>
+                                        <option value="3:4">3:4 (Retrato)</option>
+                                        <option value="3:2">3:2 (Paisaje)</option>
+                                        <option value="2:3">2:3 (Retrato)</option>
                                         <option value="21:9">21:9 (Ultra panorámico)</option>
                                     </select>
                                 </div>
@@ -2173,13 +2173,13 @@ export function ChatInterface() {
                                             onChange={(e) => setImageAspectRatio(e.target.value)}
                                             disabled={isSending}
                                         >
-                                            <option value="1:1">1:1 (Cuadrado)</option>
-                                            <option value="2:3">2:3 (Retrato)</option>
-                                            <option value="3:2">3:2 (Paisaje)</option>
-                                            <option value="3:4">3:4 (Retrato)</option>
-                                            <option value="4:3">4:3 (Paisaje)</option>
-                                            <option value="9:16">9:16 (Móvil vertical)</option>
                                             <option value="16:9">16:9 (Panorámico)</option>
+                                            <option value="1:1">1:1 (Cuadrado)</option>
+                                            <option value="9:16">9:16 (Móvil vertical)</option>
+                                            <option value="4:3">4:3 (Paisaje)</option>
+                                            <option value="3:4">3:4 (Retrato)</option>
+                                            <option value="3:2">3:2 (Paisaje)</option>
+                                            <option value="2:3">2:3 (Retrato)</option>
                                             <option value="21:9">21:9 (Ultra panorámico)</option>
                                         </select>
                                     </div>

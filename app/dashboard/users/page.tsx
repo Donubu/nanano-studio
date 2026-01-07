@@ -22,6 +22,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Plus, Pencil, Trash2, Loader2, Eye, Ban, RotateCcw, Zap, FolderOpen } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { formatDateLocal } from "@/lib/utils";
 
 interface User {
   id: number;
@@ -314,7 +315,7 @@ export default function UsersPage() {
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {new Date(user.created_at).toLocaleDateString("es-CL")}
+                    {formatDateLocal(user.created_at)}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
@@ -577,7 +578,7 @@ export default function UsersPage() {
 
               {/* Información adicional */}
               <div className="text-xs text-muted-foreground border-t border-border/50 pt-4">
-                Registrado el {new Date(selectedUser.created_at).toLocaleDateString("es-CL", {
+                Registrado el {formatDateLocal(selectedUser.created_at, {
                   year: "numeric",
                   month: "long",
                   day: "numeric",

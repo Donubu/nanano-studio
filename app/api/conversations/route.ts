@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
       top_p = 0.95,
       top_k = 40,
       max_output_tokens = 8192,
-      image_aspect_ratio = "1:1",
+      image_aspect_ratio = "16:9",
       image_size = "1K",
       // Video settings
       video_duration = 8,

@@ -296,7 +296,8 @@ export async function POST(
       : messages;
 
     // Detectar si es el primer mensaje (solo hay 1 mensaje válido en el historial)
-    const isFirstMessage = messagesToSend.length === 1;
+    // Usar messages.length, no messagesToSend.length (que puede ser recortado con modelIdOverride)
+    const isFirstMessage = messages.length === 1;
 
     // Actualizar timestamp de la conversación
     await pool.execute(
@@ -459,10 +460,14 @@ export async function POST(
                 }
 
                 // Guardar respuesta del modelo en la base de datos
+                // Si hay imagen, guardar también los settings usados para generarla
+                const imageAspectRatioToSave = imageUrl ? effectiveImageAspectRatio : null;
+                const imageSizeToSave = imageUrl ? effectiveImageSize : null;
+
                 const [modelResult] = await pool.execute<ResultSetHeader>(
-                  `INSERT INTO messages (conversation_id, role, content_type, content, image_url, image_mime_type, image_file_size, tokens_input, tokens_output)
-                   VALUES (?, 'model', ?, ?, ?, ?, ?, ?, ?)`,
-                  [id, contentType, text || "", imageUrl, imageMimeType, imageFileSize, tokenCount.input, tokenCount.output]
+                  `INSERT INTO messages (conversation_id, role, content_type, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output)
+                   VALUES (?, 'model', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  [id, contentType, text || "", imageUrl, imageMimeType, imageFileSize, imageAspectRatioToSave, imageSizeToSave, tokenCount.input, tokenCount.output]
                 );
                 modelMessageId = modelResult.insertId;
 

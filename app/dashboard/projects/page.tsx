@@ -38,6 +38,7 @@ import {
   Save,
 } from "lucide-react";
 import Image from "next/image";
+import { formatDateLocal } from "@/lib/utils";
 
 interface Client {
   id: number;
@@ -582,7 +583,7 @@ export default function ProjectsPage() {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {new Date(project.created_at).toLocaleDateString("es-CL")}
+                    {formatDateLocal(project.created_at)}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">

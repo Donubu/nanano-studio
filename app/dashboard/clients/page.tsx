@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import { Plus, Pencil, Trash2, Loader2, Upload, Building2 } from "lucide-react";
 import Image from "next/image";
+import { formatDateLocal } from "@/lib/utils";
 
 interface Client {
   id: number;
@@ -226,7 +227,7 @@ export default function ClientsPage() {
                   </TableCell>
                   <TableCell className="font-medium">{client.name}</TableCell>
                   <TableCell className="text-muted-foreground">
-                    {new Date(client.created_at).toLocaleDateString("es-CL")}
+                    {formatDateLocal(client.created_at)}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">

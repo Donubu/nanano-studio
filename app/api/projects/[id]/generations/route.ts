@@ -5,9 +5,15 @@ import { RowDataPacket } from "mysql2";
 
 interface GenerationRow extends RowDataPacket {
   id: number;
+  conversation_id: number;
+  conversation_user_id: number;
+  conversation_title: string;
   image_url: string;
+  image_mime_type: string | null;
+  image_file_size: number | null;
+  image_aspect_ratio: string | null;
+  image_size: string | null;
   created_at: Date;
-  source: "generated" | "uploaded";
 }
 
 // GET - Obtener todas las imágenes del proyecto (generadas + subidas)
@@ -42,35 +48,28 @@ export async function GET(
       }
     }
 
-    // Obtener imágenes generadas + subidas usando UNION
+    // Obtener imágenes generadas con información del mensaje y la conversación
+    // Usar COALESCE para las imágenes antiguas que no tienen los campos en el mensaje
     const [generations] = await pool.execute<GenerationRow[]>(
-      `SELECT id, image_url, created_at, source FROM (
-        -- Imágenes generadas por IA
-        SELECT
-          m.id,
-          m.image_url,
-          m.created_at,
-          'generated' as source
-        FROM messages m
-        JOIN conversations c ON m.conversation_id = c.id
-        WHERE c.project_id = ?
-          AND m.role = 'model'
-          AND m.image_url IS NOT NULL
-          AND m.image_url != ''
-
-        UNION ALL
-
-        -- Imágenes subidas por usuarios
-        SELECT
-          pu.id,
-          pu.image_url,
-          pu.created_at,
-          'uploaded' as source
-        FROM project_uploads pu
-        WHERE pu.project_id = ?
-      ) combined
-      ORDER BY created_at DESC`,
-      [projectId, projectId]
+      `SELECT
+        m.id,
+        c.id as conversation_id,
+        c.user_id as conversation_user_id,
+        c.title as conversation_title,
+        m.image_url,
+        m.image_mime_type,
+        m.image_file_size,
+        COALESCE(m.image_aspect_ratio, c.image_aspect_ratio) as image_aspect_ratio,
+        COALESCE(m.image_size, c.image_size) as image_size,
+        m.created_at
+      FROM messages m
+      JOIN conversations c ON m.conversation_id = c.id
+      WHERE c.project_id = ?
+        AND m.role = 'model'
+        AND m.image_url IS NOT NULL
+        AND m.image_url != ''
+      ORDER BY m.created_at DESC`,
+      [projectId]
     );
 
     return NextResponse.json(generations);

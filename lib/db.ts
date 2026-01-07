@@ -9,6 +9,8 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
+  timezone: "+00:00", // Interpretar fechas como UTC
+  dateStrings: true, // Devolver fechas como strings para mejor control
 });
 
 export default pool;
