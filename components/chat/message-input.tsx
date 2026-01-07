@@ -13,11 +13,18 @@ export interface AttachedFile {
   size: number;
 }
 
+export interface PreselectedImage {
+  url: string;
+  dataUrl?: string; // Will be populated when sent
+}
+
 interface MessageInputProps {
   onSend: (content: string, files?: AttachedFile[]) => void;
   disabled?: boolean;
   placeholder?: string;
   supportsFiles?: boolean;
+  preselectedImages?: PreselectedImage[];
+  onRemovePreselectedImage?: (url: string) => void;
 }
 
 const MAX_FILES = 5;
@@ -56,6 +63,8 @@ export function MessageInput({
   disabled = false,
   placeholder = "Escribe un mensaje...",
   supportsFiles = true,
+  preselectedImages = [],
+  onRemovePreselectedImage,
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
@@ -66,7 +75,8 @@ export function MessageInput({
 
   const handleFileSelect = useCallback(async (files: FileList | File[]) => {
     const fileArray = Array.from(files);
-    const remainingSlots = MAX_FILES - attachedFiles.length;
+    const totalCurrentFiles = attachedFiles.length + preselectedImages.length;
+    const remainingSlots = MAX_FILES - totalCurrentFiles;
 
     if (remainingSlots <= 0) {
       alert(`Máximo ${MAX_FILES} archivos permitidos`);
@@ -113,7 +123,7 @@ export function MessageInput({
 
     setAttachedFiles((prev) => [...prev, ...newFiles]);
     setIsProcessing(false);
-  }, [attachedFiles.length]);
+  }, [attachedFiles.length, preselectedImages.length]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -152,14 +162,40 @@ export function MessageInput({
     [handleFileSelect]
   );
 
-  const handleSend = useCallback(() => {
-    if ((!message.trim() && attachedFiles.length === 0) || disabled) return;
+  const handleSend = useCallback(async () => {
+    const hasContent = message.trim() || attachedFiles.length > 0 || preselectedImages.length > 0;
+    if (!hasContent || disabled) return;
 
-    onSend(message.trim(), attachedFiles.length > 0 ? attachedFiles : undefined);
+    // Convert preselected images to AttachedFile format
+    const preselectedAsFiles: AttachedFile[] = [];
+    for (const img of preselectedImages) {
+      try {
+        const response = await fetch(img.url);
+        const blob = await response.blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        preselectedAsFiles.push({
+          dataUrl,
+          mimeType: blob.type || "image/png",
+          name: img.url.split("/").pop() || "image.png",
+          type: "image",
+          size: blob.size,
+        });
+      } catch (error) {
+        console.error("Error loading preselected image:", error);
+      }
+    }
+
+    const allFiles = [...preselectedAsFiles, ...attachedFiles];
+    onSend(message.trim(), allFiles.length > 0 ? allFiles : undefined);
 
     setMessage("");
     setAttachedFiles([]);
-  }, [message, attachedFiles, disabled, onSend]);
+  }, [message, attachedFiles, preselectedImages, disabled, onSend]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -233,11 +269,42 @@ export function MessageInput({
       onDrop={supportsFiles ? handleDrop : undefined}
     >
       <div className="max-w-4xl mx-auto space-y-3">
-        {/* Preview de archivos adjuntos */}
-        {attachedFiles.length > 0 && (
+        {/* Preview de archivos adjuntos e imágenes preseleccionadas */}
+        {(attachedFiles.length > 0 || preselectedImages.length > 0) && (
           <div className="flex flex-wrap gap-2">
+            {/* Imágenes preseleccionadas de la conversación */}
+            {preselectedImages.map((img, index) => (
+              <div
+                key={`preselected-${index}`}
+                className="relative group rounded-lg overflow-hidden border-2 border-primary/50 bg-[#1a1a22]"
+              >
+                <div className="w-20 h-20 relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={img.url}
+                    alt="Preseleccionada"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                {/* Badge indicador */}
+                <div className="absolute top-0 left-0 right-0 bg-primary/90 text-[8px] text-primary-foreground text-center py-0.5 font-medium">
+                  Del chat
+                </div>
+                {/* Overlay con botón eliminar */}
+                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <button
+                    onClick={() => onRemovePreselectedImage?.(img.url)}
+                    className="p-1 rounded-full bg-red-500/80 hover:bg-red-500 transition-colors"
+                  >
+                    <X className="h-3 w-3 text-white" />
+                  </button>
+                </div>
+              </div>
+            ))}
+            {/* Archivos adjuntos subidos */}
             {attachedFiles.map((file, index) => renderFilePreview(file, index))}
-            {attachedFiles.length < MAX_FILES && (
+            {/* Botón agregar más */}
+            {(attachedFiles.length + preselectedImages.length) < MAX_FILES && supportsFiles && (
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled || isProcessing}
@@ -268,9 +335,9 @@ export function MessageInput({
                 variant="ghost"
                 size="icon"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={disabled || isProcessing || attachedFiles.length >= MAX_FILES}
+                disabled={disabled || isProcessing || (attachedFiles.length + preselectedImages.length) >= MAX_FILES}
                 className="shrink-0 h-10 w-10"
-                title={`Adjuntar archivos (${attachedFiles.length}/${MAX_FILES})`}
+                title={`Adjuntar archivos (${attachedFiles.length + preselectedImages.length}/${MAX_FILES})`}
               >
                 {isProcessing ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
@@ -313,7 +380,7 @@ export function MessageInput({
           {/* Botón enviar */}
           <Button
             onClick={handleSend}
-            disabled={disabled || (!message.trim() && attachedFiles.length === 0)}
+            disabled={disabled || (!message.trim() && attachedFiles.length === 0 && preselectedImages.length === 0)}
             className="shrink-0 h-10"
           >
             {disabled ? (
@@ -335,9 +402,14 @@ export function MessageInput({
         )}
 
         {/* Contador de archivos */}
-        {attachedFiles.length > 0 && (
+        {(attachedFiles.length > 0 || preselectedImages.length > 0) && (
           <div className="text-xs text-muted-foreground text-center">
-            {attachedFiles.length} de {MAX_FILES} archivos adjuntos
+            {attachedFiles.length + preselectedImages.length} de {MAX_FILES} archivos adjuntos
+            {preselectedImages.length > 0 && (
+              <span className="text-primary ml-1">
+                ({preselectedImages.length} del chat)
+              </span>
+            )}
           </div>
         )}
       </div>

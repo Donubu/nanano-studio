@@ -42,6 +42,20 @@ export function ImagePickerModal({
   // Check if selected image is a new upload (base64) vs from gallery (URL)
   const isNewUpload = selectedImage?.startsWith("data:");
 
+  // Handle Escape key to close modal
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   useEffect(() => {
     if (!isOpen) {
       setSelectedImage(null);

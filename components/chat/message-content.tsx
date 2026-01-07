@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Download, ZoomIn, Loader2 } from "lucide-react";
+import { Download, ZoomIn, Loader2, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VideoPlayer } from "./video-player";
 import { VideoProgress } from "./video-progress";
@@ -25,6 +25,10 @@ interface MessageContentProps {
   };
   isUser?: boolean;
   isStreaming?: boolean;
+  // Image selection
+  isImageSelected?: boolean;
+  onImageSelect?: (imageUrl: string) => void;
+  allowImageSelection?: boolean;
 }
 
 interface ImageMetadata {
@@ -119,6 +123,9 @@ export function MessageContent({
   videoProgress,
   isUser = false,
   isStreaming = false,
+  isImageSelected = false,
+  onImageSelect,
+  allowImageSelection = false,
 }: MessageContentProps) {
   const [imageMetadata, setImageMetadata] = useState<ImageMetadata | null>(null);
   const [upscaling, setUpscaling] = useState(false);
@@ -210,7 +217,10 @@ export function MessageContent({
     <div className="space-y-2">
       {/* Imagen si existe */}
       {imageUrl && (
-        <div className="rounded-lg overflow-hidden max-w-sm">
+        <div className={cn(
+          "rounded-lg overflow-hidden max-w-sm",
+          isImageSelected && "ring-2 ring-primary ring-offset-2 ring-offset-background"
+        )}>
           <div className="relative group">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -218,6 +228,27 @@ export function MessageContent({
               alt="Imagen adjunta"
               className="w-full h-auto object-cover"
             />
+            {/* Botón de selección - esquina inferior izquierda */}
+            {allowImageSelection && onImageSelect && (
+              <button
+                onClick={() => onImageSelect(imageUrl)}
+                className={cn(
+                  "absolute bottom-2 left-2 p-1.5 rounded-full transition-all",
+                  isImageSelected
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-black/60 hover:bg-black/80 text-white opacity-0 group-hover:opacity-100"
+                )}
+                title={isImageSelected ? "Quitar selección" : "Seleccionar imagen"}
+              >
+                <Check className="h-4 w-4" />
+              </button>
+            )}
+            {/* Indicador de selección permanente */}
+            {isImageSelected && (
+              <div className="absolute top-2 left-2 bg-primary text-primary-foreground text-xs px-2 py-0.5 rounded-full font-medium">
+                Seleccionada
+              </div>
+            )}
             {/* Botones de descarga - solo para imágenes del modelo (no del usuario) */}
             {!isUser && (
               <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
