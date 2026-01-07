@@ -204,7 +204,7 @@ export default function ModelsPage() {
         </Button>
       </div>
 
-      <div className="bg-[#1a1a22] rounded-xl border border-border/50 overflow-hidden">
+      <div className="bg-card rounded-xl border border-border/50 overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow className="border-border/50 hover:bg-transparent">
@@ -300,7 +300,7 @@ export default function ModelsPage() {
 
       {/* Dialog para crear/editar */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="bg-[#1a1a22] border-border/50">
+        <DialogContent className="bg-card border-border/50">
           <DialogHeader>
             <DialogTitle>
               {editingModel ? "Editar Modelo" : "Nuevo Modelo"}
@@ -329,7 +329,7 @@ export default function ModelsPage() {
                       setFormData({ ...formData, model_id: e.target.value })
                     }
                     required
-                    className="bg-[#24242e] border-border/50 font-mono text-sm"
+                    className="bg-muted border-border/50 font-mono text-sm"
                   />
                 </div>
                 <div className="space-y-2">
@@ -342,7 +342,7 @@ export default function ModelsPage() {
                       setFormData({ ...formData, display_name: e.target.value })
                     }
                     required
-                    className="bg-[#24242e] border-border/50"
+                    className="bg-muted border-border/50"
                   />
                 </div>
               </div>
@@ -355,7 +355,7 @@ export default function ModelsPage() {
                     setFormData({ ...formData, description: e.target.value })
                   }
                   rows={2}
-                  className="w-full bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm resize-none"
+                  className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm resize-none"
                 />
               </div>
               <div className="space-y-2">
@@ -367,7 +367,7 @@ export default function ModelsPage() {
                   onChange={(e) =>
                     setFormData({ ...formData, max_tokens: parseInt(e.target.value) || 8192 })
                   }
-                  className="bg-[#24242e] border-border/50"
+                  className="bg-muted border-border/50"
                 />
               </div>
               <div className="space-y-2">
@@ -443,7 +443,7 @@ export default function ModelsPage() {
 
       {/* Dialog para confirmar eliminación */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="bg-[#1a1a22] border-border/50">
+        <DialogContent className="bg-card border-border/50">
           <DialogHeader>
             <DialogTitle>Eliminar Modelo</DialogTitle>
             <DialogDescription>

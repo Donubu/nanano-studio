@@ -31,7 +31,7 @@ export function ConversationTabs({
   disabled = false,
 }: ConversationTabsProps) {
   return (
-    <div className="flex items-center gap-1 bg-[#0f0f14] border-b border-border/50 px-2 overflow-x-auto">
+    <div className="flex items-center gap-1 bg-background border-b border-border/50 px-2 overflow-x-auto">
       {/* Tabs */}
       <div className="flex items-center gap-1 py-1.5 min-w-0 flex-1 overflow-x-auto scrollbar-thin scrollbar-thumb-border/50">
         {tabs.map((tab) => (
@@ -45,12 +45,12 @@ export function ConversationTabs({
                   ? "bg-purple-500/10 text-purple-400 border border-purple-500/30"
                   : tab.isArchived
                     ? "bg-orange-500/10 text-orange-400 border border-orange-500/30"
-                    : "bg-[#1a1a22] text-foreground border border-border/50"
+                    : "bg-primary/10 text-foreground border border-primary/30 shadow-sm"
                 : tab.isGallery
                   ? "text-purple-400/60 hover:bg-purple-500/10 hover:text-purple-400"
                   : tab.isArchived
                     ? "text-orange-400/60 hover:bg-orange-500/10 hover:text-orange-400"
-                    : "text-muted-foreground hover:bg-[#1a1a22]/50 hover:text-foreground",
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground border border-transparent",
               disabled && "opacity-50 cursor-not-allowed"
             )}
           >
@@ -88,7 +88,7 @@ export function ConversationTabs({
         onClick={onNewTab}
         disabled={disabled || tabs.length >= 10}
         className={cn(
-          "p-1.5 rounded-lg text-muted-foreground hover:bg-[#1a1a22] hover:text-foreground transition-colors shrink-0",
+          "p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0 border border-transparent hover:border-border/50",
           (disabled || tabs.length >= 10) && "opacity-50 cursor-not-allowed"
         )}
         title="Nueva conversación"

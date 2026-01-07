@@ -150,7 +150,7 @@ export function ImagePickerModal({
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-4xl max-h-[85vh] flex flex-col bg-[#131318] rounded-xl overflow-hidden"
+        className="relative w-full max-w-4xl max-h-[85vh] flex flex-col bg-sidebar rounded-xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

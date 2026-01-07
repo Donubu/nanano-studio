@@ -215,7 +215,7 @@ export function MessageInput({
     return (
       <div
         key={index}
-        className="relative group rounded-lg overflow-hidden border border-border/50 bg-[#1a1a22]"
+        className="relative group rounded-lg overflow-hidden border border-border/50 bg-card"
       >
         {file.type === "image" ? (
           <div className="w-20 h-20 relative">
@@ -276,7 +276,7 @@ export function MessageInput({
             {preselectedImages.map((img, index) => (
               <div
                 key={`preselected-${index}`}
-                className="relative group rounded-lg overflow-hidden border-2 border-primary/50 bg-[#1a1a22]"
+                className="relative group rounded-lg overflow-hidden border-2 border-primary/50 bg-card"
               >
                 <div className="w-20 h-20 relative">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -359,7 +359,7 @@ export function MessageInput({
               disabled={disabled}
               rows={1}
               className={cn(
-                "w-full bg-[#1a1a22] border border-border/50 rounded-lg px-4 py-2.5 text-sm resize-none",
+                "w-full bg-card border border-border/50 rounded-lg px-4 py-2.5 text-sm resize-none",
                 "focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50",
                 "placeholder:text-muted-foreground",
                 "min-h-[44px] max-h-[200px]",

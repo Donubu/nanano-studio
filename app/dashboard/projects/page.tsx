@@ -525,7 +525,7 @@ export default function ProjectsPage() {
         </Button>
       </div>
 
-      <div className="bg-[#1a1a22] rounded-xl border border-border/50 overflow-hidden">
+      <div className="bg-card rounded-xl border border-border/50 overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow className="border-border/50 hover:bg-transparent">
@@ -631,7 +631,7 @@ export default function ProjectsPage() {
 
       {/* Dialog para crear/editar */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="bg-[#1a1a22] border-border/50">
+        <DialogContent className="bg-card border-border/50">
           <DialogHeader>
             <DialogTitle>
               {editingProject ? "Editar Proyecto" : "Nuevo Proyecto"}
@@ -659,7 +659,7 @@ export default function ProjectsPage() {
                     setFormData({ ...formData, title: e.target.value })
                   }
                   required
-                  className="bg-[#24242e] border-border/50"
+                  className="bg-muted border-border/50"
                 />
               </div>
               <div className="space-y-2">
@@ -671,13 +671,13 @@ export default function ProjectsPage() {
                     setFormData({ ...formData, description: e.target.value })
                   }
                   rows={3}
-                  className="w-full bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm resize-none"
+                  className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm resize-none"
                 />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Cliente</label>
                 <select
-                  className="w-full bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm"
+                  className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
                   value={formData.client_id}
                   onChange={(e) =>
                     setFormData({ ...formData, client_id: e.target.value })
@@ -694,7 +694,7 @@ export default function ProjectsPage() {
               <div className="space-y-2">
                 <label className="text-sm font-medium">Estado</label>
                 <select
-                  className="w-full bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm"
+                  className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
                   value={formData.status}
                   onChange={(e) =>
                     setFormData({ ...formData, status: e.target.value })
@@ -727,7 +727,7 @@ export default function ProjectsPage() {
 
       {/* Dialog para gestionar usuarios */}
       <Dialog open={isUsersDialogOpen} onOpenChange={setIsUsersDialogOpen}>
-        <DialogContent className="bg-[#1a1a22] border-border/50 max-w-lg">
+        <DialogContent className="bg-card border-border/50 max-w-lg">
           <DialogHeader>
             <DialogTitle>Usuarios del Proyecto</DialogTitle>
             <DialogDescription>
@@ -740,7 +740,7 @@ export default function ProjectsPage() {
             <div className="space-y-2">
               <div className="flex gap-2">
                 <select
-                  className="flex-1 bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm"
+                  className="flex-1 bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
                   value={selectedUserId}
                   onChange={(e) => setSelectedUserId(e.target.value)}
                 >
@@ -768,7 +768,7 @@ export default function ProjectsPage() {
                     min="1"
                     value={maxGenerations}
                     onChange={(e) => setMaxGenerations(e.target.value)}
-                    className="w-20 h-8 bg-[#24242e] border-border/50 text-sm"
+                    className="w-20 h-8 bg-muted border-border/50 text-sm"
                     placeholder="10"
                     disabled={unlimitedGenerations}
                   />
@@ -777,7 +777,7 @@ export default function ProjectsPage() {
                       type="checkbox"
                       checked={unlimitedGenerations}
                       onChange={(e) => setUnlimitedGenerations(e.target.checked)}
-                      className="w-4 h-4 rounded border-border/50 bg-[#24242e] accent-primary"
+                      className="w-4 h-4 rounded border-border/50 bg-muted accent-primary"
                     />
                     <span className="text-sm text-muted-foreground">Sin límite</span>
                   </label>
@@ -799,7 +799,7 @@ export default function ProjectsPage() {
                 projectUsers.map((pu) => (
                   <div
                     key={pu.id}
-                    className="flex items-center justify-between p-3 bg-[#24242e] rounded-lg"
+                    className="flex items-center justify-between p-3 bg-muted rounded-lg"
                   >
                     <div className="flex items-center gap-3">
                       <Avatar className="h-8 w-8">
@@ -825,7 +825,7 @@ export default function ProjectsPage() {
                             min="1"
                             value={editMaxGenerations}
                             onChange={(e) => setEditMaxGenerations(e.target.value)}
-                            className="w-16 h-7 bg-[#1a1a22] border-border/50 text-xs"
+                            className="w-16 h-7 bg-card border-border/50 text-xs"
                             autoFocus
                             disabled={editUnlimited}
                           />
@@ -904,7 +904,7 @@ export default function ProjectsPage() {
 
       {/* Dialog para confirmar eliminación */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="bg-[#1a1a22] border-border/50">
+        <DialogContent className="bg-card border-border/50">
           <DialogHeader>
             <DialogTitle>Eliminar Proyecto</DialogTitle>
             <DialogDescription>
@@ -936,7 +936,7 @@ export default function ProjectsPage() {
 
       {/* Dialog para gestionar modelos */}
       <Dialog open={isModelsDialogOpen} onOpenChange={setIsModelsDialogOpen}>
-        <DialogContent className="bg-[#1a1a22] border-border/50 max-w-2xl">
+        <DialogContent className="bg-card border-border/50 max-w-2xl">
           <DialogHeader>
             <DialogTitle>Modelos del Proyecto</DialogTitle>
             <DialogDescription>
@@ -948,7 +948,7 @@ export default function ProjectsPage() {
             {/* Agregar modelo */}
             <div className="flex gap-2">
               <select
-                className="flex-1 bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm"
+                className="flex-1 bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
                 value={selectedModelId}
                 onChange={(e) => setSelectedModelId(e.target.value)}
               >
@@ -982,7 +982,7 @@ export default function ProjectsPage() {
                 projectModels.map((pm) => (
                   <div
                     key={pm.id}
-                    className="p-3 bg-[#24242e] rounded-lg space-y-3"
+                    className="p-3 bg-muted rounded-lg space-y-3"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -1039,7 +1039,7 @@ export default function ProjectsPage() {
                             onChange={(e) => setSystemInstructionText(e.target.value)}
                             placeholder="Ej: Eres un asistente experto en desarrollo de software..."
                             rows={3}
-                            className="w-full bg-[#1a1a22] border border-border/50 rounded-lg px-3 py-2 text-sm resize-none"
+                            className="w-full bg-card border border-border/50 rounded-lg px-3 py-2 text-sm resize-none"
                             autoFocus
                           />
                           <div className="flex justify-end gap-2">
@@ -1070,7 +1070,7 @@ export default function ProjectsPage() {
                             setEditingSystemInstruction(pm.model_id);
                             setSystemInstructionText(pm.system_instruction || "");
                           }}
-                          className="w-full text-left p-2 rounded border border-dashed border-border/50 hover:border-primary/50 hover:bg-[#1a1a22] transition-colors"
+                          className="w-full text-left p-2 rounded border border-dashed border-border/50 hover:border-primary/50 hover:bg-card transition-colors"
                         >
                           {pm.system_instruction ? (
                             <p className="text-sm text-foreground line-clamp-2">

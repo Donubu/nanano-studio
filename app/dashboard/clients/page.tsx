@@ -189,7 +189,7 @@ export default function ClientsPage() {
         </Button>
       </div>
 
-      <div className="bg-[#1a1a22] rounded-xl border border-border/50 overflow-hidden">
+      <div className="bg-card rounded-xl border border-border/50 overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow className="border-border/50 hover:bg-transparent">
@@ -257,7 +257,7 @@ export default function ClientsPage() {
 
       {/* Dialog para crear/editar */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="bg-[#1a1a22] border-border/50">
+        <DialogContent className="bg-card border-border/50">
           <DialogHeader>
             <DialogTitle>
               {editingClient ? "Editar Cliente" : "Agregar Cliente"}
@@ -289,7 +289,7 @@ export default function ClientsPage() {
                       className="rounded-lg object-cover"
                     />
                   ) : (
-                    <div className="w-16 h-16 rounded-lg bg-[#24242e] flex items-center justify-center">
+                    <div className="w-16 h-16 rounded-lg bg-muted flex items-center justify-center">
                       <Building2 className="h-8 w-8 text-muted-foreground" />
                     </div>
                   )}
@@ -330,7 +330,7 @@ export default function ClientsPage() {
                     setFormData({ ...formData, name: e.target.value })
                   }
                   required
-                  className="bg-[#24242e] border-border/50"
+                  className="bg-muted border-border/50"
                 />
               </div>
             </div>
@@ -354,7 +354,7 @@ export default function ClientsPage() {
 
       {/* Dialog para confirmar eliminación */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="bg-[#1a1a22] border-border/50">
+        <DialogContent className="bg-card border-border/50">
           <DialogHeader>
             <DialogTitle>Eliminar Cliente</DialogTitle>
             <DialogDescription>

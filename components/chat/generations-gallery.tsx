@@ -343,7 +343,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
             <div
               key={gen.id}
               onClick={() => setSelectedImage(gen)}
-              className="group relative aspect-square rounded-lg overflow-hidden cursor-pointer bg-[#1a1a22] border border-border/50 hover:border-primary/50 transition-all"
+              className="group relative aspect-square rounded-lg overflow-hidden cursor-pointer bg-card border border-border/50 hover:border-primary/50 transition-all"
             >
               <img
                 src={gen.image_url}
@@ -392,7 +392,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
               <div
                 key={video.id}
                 onClick={() => setSelectedVideo(video)}
-                className="group relative aspect-video rounded-lg overflow-hidden cursor-pointer bg-[#1a1a22] border border-border/50 hover:border-primary/50 transition-all"
+                className="group relative aspect-video rounded-lg overflow-hidden cursor-pointer bg-card border border-border/50 hover:border-primary/50 transition-all"
               >
                 {/* Video thumbnail/preview - uses first frame */}
                 <video
@@ -472,7 +472,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
           onClick={() => setSelectedImage(null)}
         >
           <div
-            className="relative max-w-5xl w-full max-h-[90vh] flex flex-col bg-[#131318] rounded-xl overflow-hidden"
+            className="relative max-w-5xl w-full max-h-[90vh] flex flex-col bg-sidebar rounded-xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
@@ -576,7 +576,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
           onClick={() => setSelectedVideo(null)}
         >
           <div
-            className="relative max-w-4xl w-full max-h-[90vh] flex flex-col bg-[#131318] rounded-xl overflow-hidden"
+            className="relative max-w-4xl w-full max-h-[90vh] flex flex-col bg-sidebar rounded-xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}

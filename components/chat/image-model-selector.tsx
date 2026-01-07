@@ -44,7 +44,7 @@ export function ImageModelSelector({
         <label className="text-sm font-medium">Modelo de Imagen</label>
       </div>
       <select
-        className="w-full bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm"
+        className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
         value={selectedModelId?.toString() || ""}
         onChange={(e) => onChange(Number(e.target.value))}
         disabled={disabled}

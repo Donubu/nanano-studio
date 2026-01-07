@@ -1390,17 +1390,17 @@ export function ChatInterface() {
     // Prevent hydration mismatch by not rendering until mounted
     if (!mounted) {
         return (
-            <div className="flex h-screen bg-[#0f0f14] items-center justify-center">
+            <div className="flex h-screen bg-background items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-primary"/>
             </div>
         );
     }
 
     return (
-        <div className="flex h-screen bg-[#0f0f14]">
+        <div className="flex h-screen bg-background">
             {/* Left Sidebar - Conversations */}
             {leftSidebarOpen && (
-                <div className="w-64 border-r border-border/50 bg-[#131318] flex flex-col">
+                <div className="w-64 border-r border-border/50 bg-sidebar flex flex-col">
                     {/* Header */}
                     <div className="p-3 border-b border-border/50">
                         <div className="flex items-center gap-3 mb-3">
@@ -1428,7 +1428,7 @@ export function ChatInterface() {
                     <div className="p-3 border-b border-border/50">
                         <label className="text-xs text-muted-foreground mb-1 block">Proyecto</label>
                         <select
-                            className="w-full bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm"
+                            className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
                             value={selectedProjectId || ""}
                             onChange={(e) =>
                                 setSelectedProjectId(e.target.value ? Number(e.target.value) : null)
@@ -1442,7 +1442,7 @@ export function ChatInterface() {
                             ))}
                         </select>
                         {selectedProjectId && projectUsage && (
-                            <div className="mt-2 px-2 py-1.5 bg-[#1a1a22] rounded-lg border border-border/30">
+                            <div className="mt-2 px-2 py-1.5 bg-card rounded-lg border border-border/30">
                                 <div className="flex items-center justify-between text-xs">
                                     <span className="text-muted-foreground">Mensajes este mes</span>
                                     <span className={projectUsage.unlimited ? "text-green-400" : projectUsage.used >= projectUsage.limit ? "text-red-400" : "text-foreground"}>
@@ -1454,7 +1454,7 @@ export function ChatInterface() {
                                     </span>
                                 </div>
                                 {!projectUsage.unlimited && (
-                                    <div className="mt-1.5 h-1.5 bg-[#24242e] rounded-full overflow-hidden">
+                                    <div className="mt-1.5 h-1.5 bg-muted rounded-full overflow-hidden">
                                         <div
                                             className={`h-full rounded-full transition-all ${
                                                 projectUsage.used >= projectUsage.limit
@@ -1557,7 +1557,7 @@ export function ChatInterface() {
                         </button>
 
                         {showArchived && (
-                            <div className="p-2 space-y-1 bg-[#0d0d10]">
+                            <div className="p-2 space-y-1 bg-background/90">
                                 {loadingArchived ? (
                                     <div className="flex justify-center py-2">
                                         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground"/>
@@ -1616,7 +1616,7 @@ export function ChatInterface() {
                                     <ChevronDown className="h-4 w-4 text-muted-foreground"/>
                                 </button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="start" className="w-56 bg-[#1a1a22] border-border/50">
+                            <DropdownMenuContent align="start" className="w-56 bg-card border-border/50">
                                 <DropdownMenuItem asChild>
                                     <Link href="/dashboard" className="cursor-pointer">
                                         <LayoutDashboard className="mr-2 h-4 w-4"/>
@@ -1815,7 +1815,7 @@ export function ChatInterface() {
                                                 className={`max-w-[80%] rounded-2xl px-4 py-3 ${
                                                     msg.role === "user"
                                                         ? "bg-primary text-primary-foreground"
-                                                        : "bg-[#1a1a22] border border-border/50"
+                                                        : "bg-card border border-border/50"
                                                 }`}
                                             >
                                                 <MessageContent
@@ -1917,7 +1917,7 @@ export function ChatInterface() {
 
             {/* Right Sidebar - Settings (solo visible con conversación activa, no galería) */}
             {selectedProjectId && rightSidebarOpen && activeTabId !== null && !activeTab?.isGallery && (
-                <div className="w-72 border-l border-border/50 bg-[#131318] overflow-y-auto">
+                <div className="w-72 border-l border-border/50 bg-sidebar overflow-y-auto">
                     <div className="p-4 space-y-6">
                         {/* Archived indicator */}
                         {activeTab?.isArchived && (
@@ -1935,16 +1935,16 @@ export function ChatInterface() {
                                     <Loader2 className="h-5 w-5 animate-spin text-muted-foreground"/>
                                 </div>
                             ) : projectModels.length === 0 ? (
-                                <div className="text-sm text-muted-foreground bg-[#24242e] rounded-lg p-3 text-center">
+                                <div className="text-sm text-muted-foreground bg-muted rounded-lg p-3 text-center">
                                     No hay modelos asignados a este proyecto
                                 </div>
                             ) : activeTab?.isArchived ? (
-                                <div className="bg-[#1a1a22] border border-border/30 rounded-lg px-3 py-2 text-sm text-muted-foreground">
+                                <div className="bg-card border border-border/30 rounded-lg px-3 py-2 text-sm text-muted-foreground">
                                     {selectedProjectModel?.model_display_name || "Modelo no disponible"}
                                 </div>
                             ) : (
                                 <select
-                                    className="w-full bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm"
+                                    className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
                                     value={selectedModelId || ""}
                                     onChange={(e) => handleModelChange(Number(e.target.value))}
                                     disabled={isSending}
@@ -1973,7 +1973,7 @@ export function ChatInterface() {
                                                 type="checkbox"
                                                 checked={useProjectSystemInstruction}
                                                 onChange={(e) => setUseProjectSystemInstruction(e.target.checked)}
-                                                className="w-4 h-4 rounded border-border/50 bg-[#24242e] accent-primary"
+                                                className="w-4 h-4 rounded border-border/50 bg-muted accent-primary"
                                             />
                                             <span className="text-xs text-muted-foreground">Utilizar</span>
                                         </label>
@@ -1984,7 +1984,7 @@ export function ChatInterface() {
                                     )}
                                 </div>
                                 <div
-                                    className={`bg-[#1a1a22] border border-border/30 rounded-lg px-3 py-2 text-sm ${
+                                    className={`bg-card border border-border/30 rounded-lg px-3 py-2 text-sm ${
                                         !useProjectSystemInstruction ? "opacity-50" : ""
                                     }`}
                                 >
@@ -2012,18 +2012,18 @@ export function ChatInterface() {
                                         : "Eres un asistente útil..."}
                                     rows={4}
                                     disabled={isSending}
-                                    className="w-full bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm resize-none disabled:opacity-50"
+                                    className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm resize-none disabled:opacity-50"
                                 />
                             ) : (
                                 <>
                                     {systemInstruction ? (
-                                        <div className="bg-[#1a1a22] border border-border/30 rounded-lg px-3 py-2 text-sm">
+                                        <div className="bg-card border border-border/30 rounded-lg px-3 py-2 text-sm">
                                             <p className="text-muted-foreground whitespace-pre-wrap">
                                                 {systemInstruction}
                                             </p>
                                         </div>
                                     ) : (
-                                        <div className="bg-[#1a1a22] border border-border/30 rounded-lg px-3 py-2 text-sm">
+                                        <div className="bg-card border border-border/30 rounded-lg px-3 py-2 text-sm">
                                             <p className="text-muted-foreground/50 italic">Sin instrucción adicional</p>
                                         </div>
                                     )}
@@ -2038,7 +2038,7 @@ export function ChatInterface() {
 
                         {/* Model Info */}
                         {selectedProjectModel && (
-                            <div className="bg-[#24242e] rounded-lg p-3 text-xs text-muted-foreground">
+                            <div className="bg-muted rounded-lg p-3 text-xs text-muted-foreground">
                                 <div className="font-medium text-foreground mb-1">
                                     {selectedProjectModel.model_display_name}
                                 </div>
@@ -2048,7 +2048,7 @@ export function ChatInterface() {
 
                         {/* Image Generation Settings - Only show for models that support it and not archived */}
                         {selectedProjectModel?.supports_image_generation && !activeTab?.isArchived && (
-                            <div className="space-y-4 p-4 bg-[#1a1a22] rounded-lg border border-border/50">
+                            <div className="space-y-4 p-4 bg-card rounded-lg border border-border/50">
                                 <div className="flex items-center gap-2 text-sm font-medium">
                                     <ImageIcon className="h-4 w-4 text-primary"/>
                                     Generación de Imágenes
@@ -2060,7 +2060,7 @@ export function ChatInterface() {
                                         Relación de aspecto
                                     </label>
                                     <select
-                                        className="w-full bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm"
+                                        className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
                                         value={imageAspectRatio}
                                         onChange={(e) => handleSettingChange("image_aspect_ratio", e.target.value)}
                                         disabled={isSending}
@@ -2082,7 +2082,7 @@ export function ChatInterface() {
                                         Tamaño de imagen
                                     </label>
                                     <select
-                                        className="w-full bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm"
+                                        className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
                                         value={imageSize}
                                         onChange={(e) => handleSettingChange("image_size", e.target.value)}
                                         disabled={isSending}
@@ -2097,7 +2097,7 @@ export function ChatInterface() {
 
                         {/* Video Generation Settings - Only show for video models when in video mode */}
                         {selectedProjectModel?.supports_video_generation && !activeTab?.isArchived && generationMode === "video" && (
-                            <div className="space-y-4 p-4 bg-[#1a1a22] rounded-lg border border-border/50">
+                            <div className="space-y-4 p-4 bg-card rounded-lg border border-border/50">
                                 <VideoSettings
                                     duration={videoDuration}
                                     resolution={videoResolution}
@@ -2133,7 +2133,7 @@ export function ChatInterface() {
 
                         {/* Video Input Frames - Only show for video models when in video mode */}
                         {selectedProjectModel?.supports_video_generation && !activeTab?.isArchived && generationMode === "video" && (
-                            <div className="space-y-4 p-4 bg-[#1a1a22] rounded-lg border border-border/50">
+                            <div className="space-y-4 p-4 bg-card rounded-lg border border-border/50">
                                 <VideoInputFrames
                                     projectId={selectedProjectId!}
                                     firstFrame={videoFirstFrame}
@@ -2151,7 +2151,7 @@ export function ChatInterface() {
                         {selectedProjectModel?.supports_video_generation && !activeTab?.isArchived && generationMode === "image" && (
                             <>
                                 {/* Image Model Selector */}
-                                <div className="space-y-4 p-4 bg-[#1a1a22] rounded-lg border border-border/50">
+                                <div className="space-y-4 p-4 bg-card rounded-lg border border-border/50">
                                     <ImageModelSelector
                                         projectModels={projectModels}
                                         selectedModelId={imageModelIdForGeneration}
@@ -2161,7 +2161,7 @@ export function ChatInterface() {
                                 </div>
 
                                 {/* Image Generation Settings */}
-                                <div className="space-y-4 p-4 bg-[#1a1a22] rounded-lg border border-border/50">
+                                <div className="space-y-4 p-4 bg-card rounded-lg border border-border/50">
                                     <div className="flex items-center gap-2 text-sm font-medium">
                                         <ImageIcon className="h-4 w-4 text-primary"/>
                                         Configuración de Imagen
@@ -2173,7 +2173,7 @@ export function ChatInterface() {
                                             Relación de aspecto
                                         </label>
                                         <select
-                                            className="w-full bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm"
+                                            className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
                                             value={imageAspectRatio}
                                             onChange={(e) => setImageAspectRatio(e.target.value)}
                                             disabled={isSending}
@@ -2195,7 +2195,7 @@ export function ChatInterface() {
                                             Tamaño de imagen
                                         </label>
                                         <select
-                                            className="w-full bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm"
+                                            className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
                                             value={imageSize}
                                             onChange={(e) => setImageSize(e.target.value)}
                                             disabled={isSending}
@@ -2299,7 +2299,7 @@ export function ChatInterface() {
                                                 onChange={(e) => setMaxOutputTokens(parseInt(e.target.value) || 8192)}
                                                 onBlur={(e) => handleSettingChange("max_output_tokens", parseInt(e.target.value) || 8192)}
                                                 disabled={isSending}
-                                                className="bg-[#24242e] border-border/50"
+                                                className="bg-muted border-border/50"
                                             />
                                         </div>
                                     </div>

@@ -12,7 +12,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card className="bg-[#1a1a22] border-border/50">
+        <Card className="bg-card border-border/50">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Usuarios
@@ -27,7 +27,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="bg-[#1a1a22] border-border/50">
+        <Card className="bg-card border-border/50">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Conversaciones
@@ -42,7 +42,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="bg-[#1a1a22] border-border/50">
+        <Card className="bg-card border-border/50">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Tokens usados
@@ -57,7 +57,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="bg-[#1a1a22] border-border/50">
+        <Card className="bg-card border-border/50">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Requests

@@ -252,7 +252,7 @@ export default function UsersPage() {
         </Button>
       </div>
 
-      <div className="bg-[#1a1a22] rounded-xl border border-border/50 overflow-hidden">
+      <div className="bg-card rounded-xl border border-border/50 overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow className="border-border/50 hover:bg-transparent">
@@ -384,7 +384,7 @@ export default function UsersPage() {
 
       {/* Dialog para crear/editar */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="bg-[#1a1a22] border-border/50">
+        <DialogContent className="bg-card border-border/50">
           <DialogHeader>
             <DialogTitle>
               {editingUser ? "Editar Usuario" : "Agregar Usuario"}
@@ -412,7 +412,7 @@ export default function UsersPage() {
                     setFormData({ ...formData, email: e.target.value })
                   }
                   required
-                  className="bg-[#24242e] border-border/50"
+                  className="bg-muted border-border/50"
                 />
               </div>
               <div className="space-y-2">
@@ -424,13 +424,13 @@ export default function UsersPage() {
                   onChange={(e) =>
                     setFormData({ ...formData, name: e.target.value })
                   }
-                  className="bg-[#24242e] border-border/50"
+                  className="bg-muted border-border/50"
                 />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Rol</label>
                 <select
-                  className="w-full bg-[#24242e] border border-border/50 rounded-lg px-3 py-2 text-sm"
+                  className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
                   value={formData.role}
                   onChange={(e) =>
                     setFormData({ ...formData, role: e.target.value })
@@ -461,7 +461,7 @@ export default function UsersPage() {
 
       {/* Dialog para confirmar eliminación */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="bg-[#1a1a22] border-border/50">
+        <DialogContent className="bg-card border-border/50">
           <DialogHeader>
             <DialogTitle>Eliminar Usuario</DialogTitle>
             <DialogDescription>
@@ -493,7 +493,7 @@ export default function UsersPage() {
 
       {/* Dialog para ver detalles del usuario */}
       <Dialog open={isDetailDialogOpen} onOpenChange={setIsDetailDialogOpen}>
-        <DialogContent className="bg-[#1a1a22] border-border/50 max-w-lg">
+        <DialogContent className="bg-card border-border/50 max-w-lg">
           <DialogHeader>
             <DialogTitle>Detalle del Usuario</DialogTitle>
           </DialogHeader>
@@ -542,7 +542,7 @@ export default function UsersPage() {
                   Proyectos Asociados
                 </h4>
                 {selectedUser.projects.length === 0 ? (
-                  <div className="text-sm text-muted-foreground bg-[#24242e] rounded-lg p-4 text-center">
+                  <div className="text-sm text-muted-foreground bg-muted rounded-lg p-4 text-center">
                     No está asignado a ningún proyecto
                   </div>
                 ) : (
@@ -550,7 +550,7 @@ export default function UsersPage() {
                     {selectedUser.projects.map((project) => (
                       <div
                         key={project.id}
-                        className="flex items-center justify-between p-3 bg-[#24242e] rounded-lg"
+                        className="flex items-center justify-between p-3 bg-muted rounded-lg"
                       >
                         <div>
                           <div className="text-sm font-medium">{project.project_title}</div>
@@ -559,7 +559,7 @@ export default function UsersPage() {
                           )}
                         </div>
                         <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-1 px-2 py-1 bg-[#1a1a22] rounded">
+                          <div className="flex items-center gap-1 px-2 py-1 bg-card rounded">
                             <Zap className="h-3 w-3 text-yellow-400" />
                             <span className="text-xs">
                               {project.max_monthly_generations === 0 ? "∞" : project.max_monthly_generations}

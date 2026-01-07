@@ -55,7 +55,7 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="w-60 border-r border-border/50 bg-[#131318] min-h-[calc(100vh-3.5rem)]">
+    <aside className="w-60 border-r border-border/50 bg-sidebar min-h-[calc(100vh-3.5rem)]">
       <nav className="p-3 space-y-1">
         {menuItems.map((item) => {
           const isActive =

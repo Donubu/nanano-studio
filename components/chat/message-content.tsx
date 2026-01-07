@@ -281,7 +281,7 @@ export function MessageContent({
           </div>
           {/* Metadatos de la imagen - solo para imágenes del modelo */}
           {!isUser && imageMetadata && (
-            <div className="bg-[#1a1a22] border-t border-border/30 px-3 py-2 text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
+            <div className="bg-card border-t border-border/30 px-3 py-2 text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
               <span>{imageMetadata.width} × {imageMetadata.height}</span>
               <span>{imageMetadata.aspectRatio}</span>
               <span>{imageMetadata.format}</span>
@@ -335,7 +335,7 @@ export function MessageContent({
                         "px-1.5 py-0.5 rounded text-xs font-mono",
                         isUser
                           ? "bg-white/20"
-                          : "bg-[#2a2a36] text-yellow-300"
+                          : "bg-secondary text-yellow-300"
                       )}
                       {...props}
                     >
@@ -347,14 +347,14 @@ export function MessageContent({
                 return (
                   <div className="relative my-2">
                     {match && (
-                      <div className="absolute top-0 right-0 px-2 py-1 text-xs text-muted-foreground bg-[#1a1a22] rounded-bl">
+                      <div className="absolute top-0 right-0 px-2 py-1 text-xs text-muted-foreground bg-card rounded-bl">
                         {match[1]}
                       </div>
                     )}
                     <pre
                       className={cn(
                         "p-4 rounded-lg overflow-x-auto text-sm",
-                        isUser ? "bg-white/10" : "bg-[#1a1a22]"
+                        isUser ? "bg-white/10" : "bg-card"
                       )}
                     >
                       <code className={className} {...props}>
@@ -422,7 +422,7 @@ export function MessageContent({
               th({ children, ...props }) {
                 return (
                   <th
-                    className="border border-border/50 px-3 py-2 bg-[#1a1a22] text-left font-medium"
+                    className="border border-border/50 px-3 py-2 bg-card text-left font-medium"
                     {...props}
                   >
                     {children}

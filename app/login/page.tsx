@@ -22,7 +22,7 @@ function LoginContent() {
   const errorMessage = getErrorMessage(error);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0f0f14]">
+    <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="max-w-md w-full space-y-8 p-8">
         <div className="text-center space-y-4">
           <div className="flex justify-center">
@@ -46,14 +46,14 @@ function LoginContent() {
           </div>
         )}
 
-        <div className="bg-[#1a1a22] rounded-2xl p-6 border border-border/50">
+        <div className="bg-card rounded-2xl p-6 border border-border/50">
           <p className="text-sm text-muted-foreground text-center mb-6">
             Solo usuarios autorizados pueden acceder
           </p>
 
           <button
             onClick={() => signIn("google", { callbackUrl: "/" })}
-            className="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl bg-[#24242e] hover:bg-[#2a2a35] border border-border/50 transition-all cursor-pointer group"
+            className="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl bg-muted hover:bg-secondary border border-border/50 transition-all cursor-pointer group"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">
               <path
@@ -91,7 +91,7 @@ export default function LoginPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen flex items-center justify-center bg-[#0f0f14]">
+        <div className="min-h-screen flex items-center justify-center bg-background">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-yellow-400 to-yellow-500 animate-pulse" />
         </div>
       }
