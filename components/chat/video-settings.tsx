@@ -19,6 +19,7 @@ interface VideoSettingsProps {
   audioEnabled: boolean;
   negativePrompt: string;
   disabled?: boolean;
+  hasReferenceImages?: boolean;
   onChange: (settings: {
     duration?: VideoDuration;
     resolution?: VideoResolution;
@@ -35,6 +36,7 @@ export function VideoSettings({
   audioEnabled,
   negativePrompt,
   disabled = false,
+  hasReferenceImages = false,
   onChange,
 }: VideoSettingsProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -84,21 +86,32 @@ export function VideoSettings({
       <div className="space-y-2">
         <Label className="text-xs text-muted-foreground">Duración</Label>
         <div className="flex gap-2">
-          {durations.map((d) => (
-            <button
-              key={d.value}
-              disabled={disabled}
-              onClick={() => handleDurationChange(d.value)}
-              className={`flex-1 py-2 px-3 text-sm rounded-md border transition-colors ${
-                duration === d.value
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "bg-background border-border hover:bg-muted"
-              } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-            >
-              {d.label}
-            </button>
-          ))}
+          {durations.map((d) => {
+            // Reference images only support 8 seconds
+            const isDisabledByRefImages = hasReferenceImages && d.value !== 8;
+            const isButtonDisabled = disabled || isDisabledByRefImages;
+
+            return (
+              <button
+                key={d.value}
+                disabled={isButtonDisabled}
+                onClick={() => handleDurationChange(d.value)}
+                className={`flex-1 py-2 px-3 text-sm rounded-md border transition-colors ${
+                  duration === d.value
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-background border-border hover:bg-muted"
+                } ${isButtonDisabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+              >
+                {d.label}
+              </button>
+            );
+          })}
         </div>
+        {hasReferenceImages && (
+          <p className="text-xs text-amber-500">
+            Con imágenes de referencia solo se permite 8 segundos
+          </p>
+        )}
       </div>
 
       {/* Resolución */}

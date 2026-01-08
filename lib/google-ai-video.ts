@@ -139,8 +139,6 @@ function prepareImageInput(base64Data: string, mimeType: string = "image/jpeg") 
  * Descarga una imagen desde URL y la convierte a base64
  */
 async function fetchImageAsBase64(imageUrl: string): Promise<string> {
-  console.log("[Google AI Video] Fetching image from URL:", imageUrl.substring(0, 100));
-
   const response = await fetch(imageUrl);
   if (!response.ok) {
     throw new Error(`Failed to fetch image: ${response.statusText}`);
@@ -214,12 +212,10 @@ export async function generateVideo(
 
     if (input.firstFrameImage) {
       preparedFirstFrame = await prepareImage(input.firstFrameImage);
-      console.log("[Google AI Video] First frame prepared, length:", preparedFirstFrame.length);
     }
 
     if (input.lastFrameImage) {
       preparedLastFrame = await prepareImage(input.lastFrameImage);
-      console.log("[Google AI Video] Last frame prepared, length:", preparedLastFrame.length);
     }
 
     if (input.referenceImages && input.referenceImages.length > 0) {
@@ -229,7 +225,6 @@ export async function generateVideo(
           type: refImg.type,
         }))
       );
-      console.log("[Google AI Video] Reference images prepared:", preparedReferenceImages.length);
     }
 
     // Construir la configuración de generación
@@ -294,15 +289,6 @@ export async function generateVideo(
     // Build labels for Vertex AI tracking
     const builtLabels = buildLabels(labels);
 
-    console.log("[Google AI Video] Generating with config:", {
-      model: normalizedModelId,
-      aspectRatio: config.aspectRatio,
-      durationSeconds: config.durationSeconds,
-      generateAudio: config.generateAudio,
-      hasNegativePrompt: !!config.negativePrompt,
-      labels: builtLabels,
-    });
-
     // Iniciar la operación de generación de video
     const operation = await ai.models.generateVideos({
       model: normalizedModelId,
@@ -342,18 +328,9 @@ export async function generateVideo(
       },
     });
 
-    // Debug: ver qué devuelve la operación
-    console.log("[Google AI Video] Operation received:", {
-      type: typeof operation,
-      keys: operation ? Object.keys(operation) : [],
-      hasResponse: !!operation?.response,
-      hasDone: 'done' in operation,
-      done: 'done' in operation ? operation.done : undefined,
-    });
-
     // Si la operación ya tiene el resultado (el SDK esperó internamente)
-    if (operation?.response?.generatedVideos?.[0]?.video) {
-      console.log("[Google AI Video] Video already ready in response!");
+    const immediateVideo = extractVideoFromResponse(operation?.response);
+    if (immediateVideo) {
 
       onProgress?.({
         status: "completed",
@@ -361,7 +338,7 @@ export async function generateVideo(
         progress: 90,
       });
 
-      const videoData = await downloadVideo(operation.response.generatedVideos[0].video);
+      const videoData = await downloadVideo(immediateVideo);
 
       onProgress?.({
         status: "completed",
@@ -371,7 +348,7 @@ export async function generateVideo(
 
       return {
         data: videoData,
-        mimeType: "video/mp4",
+        mimeType: immediateVideo.mimeType || "video/mp4",
         duration: config.durationSeconds,
         hasAudio: config.generateAudio,
       };
@@ -423,8 +400,6 @@ async function pollVideoOperation(
     // Incrementar progreso gradualmente (simulado)
     progressPercent = Math.min(progressPercent + 2, 90);
 
-    console.log(`[Video Poll #${pollCount}] Elapsed: ${elapsedMinutes}min, done: ${operation.done}`);
-
     onProgress?.({
       status: "processing",
       message: `Generando video... (${elapsedMinutes} min)`,
@@ -434,30 +409,29 @@ async function pollVideoOperation(
     try {
       // Actualizar el estado de la operación usando el SDK
       operation = await ai.operations.getVideosOperation({ operation });
-
-      console.log(`[Video Poll #${pollCount}] Updated operation:`, {
-        done: operation.done,
-        hasResponse: !!operation.response,
-        hasVideos: !!operation.response?.generatedVideos?.length,
-      });
-
     } catch (pollError) {
-      console.warn(`[Video Poll #${pollCount}] Poll error:`, pollError);
-      // Continuar polling a menos que sea un error fatal
+      // Log poll errors but continue polling
+      console.error(`[Video] Poll error:`, pollError);
     }
   }
 
-  // Operación completada
-  console.log(`[Video] Operation completed after ${pollCount} polls`);
+  // Check for error in operation
+  if ((operation as { error?: { message?: string } }).error) {
+    const error = (operation as { error?: { message?: string; code?: number } }).error;
+    throw new Error(`Video generation failed: ${error?.message || "Unknown error"} (code: ${error?.code})`);
+  }
 
-  if (operation.response?.generatedVideos?.[0]?.video) {
+  // Try to extract video from response - handle both Gemini API and Vertex AI response formats
+  const videoInfo = extractVideoFromResponse(operation.response);
+
+  if (videoInfo) {
     onProgress?.({
       status: "completed",
       message: "Video generado, descargando...",
       progress: 95,
     });
 
-    const videoData = await downloadVideo(operation.response.generatedVideos[0].video);
+    const videoData = await downloadVideo(videoInfo);
 
     onProgress?.({
       status: "completed",
@@ -467,13 +441,44 @@ async function pollVideoOperation(
 
     return {
       data: videoData,
-      mimeType: "video/mp4",
+      mimeType: videoInfo.mimeType || "video/mp4",
       duration: config.durationSeconds,
       hasAudio: config.generateAudio,
     };
   }
 
-  throw new Error("Video generation completed but no video in response");
+  // No video found in any known format
+  const responseKeys = operation.response ? Object.keys(operation.response) : [];
+  console.error("[Video] No video found in response. Response keys:", responseKeys);
+  throw new Error(`Video generation completed but no video in response. Response keys: ${responseKeys.join(", ") || "none"}`);
+}
+
+/**
+ * Extrae información del video de diferentes formatos de respuesta (Gemini API, Vertex AI, etc.)
+ */
+function extractVideoFromResponse(response: unknown): { uri?: string; videoBytes?: string; mimeType?: string } | null {
+  const resp = response as {
+    generatedVideos?: Array<{ video?: { uri?: string; videoBytes?: string } }>;
+    videos?: Array<{ gcsUri?: string; mimeType?: string }>;
+    generated_videos?: Array<{ video?: { uri?: string } }>;
+  } | undefined;
+
+  // Format 1: Gemini API - generatedVideos[].video
+  if (resp?.generatedVideos?.[0]?.video) {
+    return resp.generatedVideos[0].video;
+  }
+
+  // Format 2: Vertex AI REST - videos[].gcsUri
+  if (resp?.videos?.[0]?.gcsUri) {
+    return { uri: resp.videos[0].gcsUri, mimeType: resp.videos[0].mimeType };
+  }
+
+  // Format 3: Python SDK style - generated_videos[].video.uri
+  if (resp?.generated_videos?.[0]?.video?.uri) {
+    return { uri: resp.generated_videos[0].video.uri };
+  }
+
+  return null;
 }
 
 /**

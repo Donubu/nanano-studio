@@ -13,6 +13,7 @@ interface ProjectModelRow extends RowDataPacket {
   system_instruction: string | null;
   supports_image_generation: number; // MySQL TINYINT
   supports_video_generation: number; // MySQL TINYINT
+  supports_reference_images: number; // MySQL TINYINT
   created_at: Date;
 }
 
@@ -45,7 +46,7 @@ export async function GET(
       SELECT
         pm.id, pm.project_id, pm.model_id, pm.is_default, pm.system_instruction, pm.created_at,
         m.model_id as model_model_id, m.display_name as model_display_name,
-        m.supports_image_generation, m.supports_video_generation
+        m.supports_image_generation, m.supports_video_generation, m.supports_reference_images
       FROM project_models pm
       JOIN models m ON pm.model_id = m.id
       WHERE pm.project_id = ? AND m.is_active = TRUE
@@ -57,6 +58,7 @@ export async function GET(
       ...row,
       supports_image_generation: Boolean(row.supports_image_generation),
       supports_video_generation: Boolean(row.supports_video_generation),
+      supports_reference_images: Boolean(row.supports_reference_images),
     }));
 
     return NextResponse.json(modelsWithBooleans);

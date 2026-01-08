@@ -44,6 +44,7 @@ import {
   BarChart3,
   Settings,
   Zap,
+  DollarSign,
 } from "lucide-react";
 import Image from "next/image";
 import { formatDateLocal } from "@/lib/utils";
@@ -105,6 +106,7 @@ interface ProjectStats {
   activeUsers: number;
   totalTokensInput: number;
   totalTokensOutput: number;
+  totalEstimatedCost: number;
 }
 
 interface Client {
@@ -143,6 +145,7 @@ export default function ProjectDetailPage() {
     activeUsers: 0,
     totalTokensInput: 0,
     totalTokensOutput: 0,
+    totalEstimatedCost: 0,
   });
 
   // Users state
@@ -314,7 +317,9 @@ export default function ProjectDetailPage() {
     fetchUsers();
     fetchModels();
     fetchClients();
-  }, [fetchProject, fetchStats, fetchUsers, fetchModels, fetchClients]);
+    fetchProjectModels();
+    fetchProjectTags();
+  }, [fetchProject, fetchStats, fetchUsers, fetchModels, fetchClients, fetchProjectModels, fetchProjectTags]);
 
   useEffect(() => {
     if (activeTab === "users") {
@@ -617,6 +622,14 @@ export default function ProjectDetailPage() {
     return num.toString();
   };
 
+  const formatCost = (cost: number) => {
+    const numCost = Number(cost) || 0;
+    if (numCost === 0) return "$0.00";
+    if (numCost < 0.01) return `$${numCost.toFixed(4)}`;
+    if (numCost < 1) return `$${numCost.toFixed(3)}`;
+    return `$${numCost.toFixed(2)}`;
+  };
+
   const availableUsers = users.filter((u) => !projectUsers.some((pu) => pu.user_id === u.id));
   const availableModels = models.filter((m) => !projectModels.some((pm) => pm.model_id === m.id));
 
@@ -698,7 +711,7 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
         <div className="bg-card rounded-xl border border-border/50 p-4">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-blue-500/10 rounded-lg">
@@ -773,6 +786,17 @@ export default function ProjectDetailPage() {
             <div>
               <p className="text-2xl font-bold">{formatTokens(Number(stats.totalTokensInput) + Number(stats.totalTokensOutput))}</p>
               <p className="text-sm text-muted-foreground">Total Tokens</p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-card rounded-xl border border-border/50 p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-green-500/10 rounded-lg">
+              <DollarSign className="h-5 w-5 text-green-400" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-green-400">{formatCost(stats.totalEstimatedCost)}</p>
+              <p className="text-sm text-muted-foreground">Costo Est.</p>
             </div>
           </div>
         </div>

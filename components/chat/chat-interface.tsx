@@ -28,6 +28,7 @@ import {
     PanelRight,
     Sparkles,
     FolderKanban,
+    Folder,
     LayoutDashboard,
     SlidersHorizontal,
     ImageIcon,
@@ -36,7 +37,9 @@ import {
     Moon,
     Monitor,
     Video,
+    HelpCircle,
 } from "lucide-react";
+import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
 import Link from "next/link";
 import {ConversationTabs, Tab} from "./conversation-tabs";
 import {MessageContent} from "./message-content";
@@ -56,6 +59,7 @@ interface ProjectModel {
     is_default: boolean;
     supports_image_generation: boolean;
     supports_video_generation: boolean;
+    supports_reference_images: boolean;
     system_instruction: string | null;
 }
 
@@ -63,6 +67,9 @@ interface Project {
     id: number;
     title: string;
     client_name: string | null;
+    client_logo: string | null;
+    generation_count: number;
+    last_message_at: string | null;
 }
 
 interface Message {
@@ -184,6 +191,12 @@ export function ChatInterface() {
     const [projectUsage, setProjectUsage] = useState<{
         images: { used: number; limit: number; unlimited: boolean };
         videos: { used: number; limit: number; unlimited: boolean };
+    } | null>(null);
+
+    // Project stats (for gallery count)
+    const [projectStats, setProjectStats] = useState<{
+        totalImages: number;
+        totalVideos: number;
     } | null>(null);
 
     // Get current tab's conversation and messages
@@ -344,6 +357,24 @@ export function ChatInterface() {
         }
     }, []);
 
+    const fetchProjectStats = useCallback(async (projectId: number) => {
+        try {
+            const res = await fetch(`/api/projects/${projectId}/stats`);
+            if (res.ok) {
+                const data = await res.json();
+                setProjectStats({
+                    totalImages: data.totalImages || 0,
+                    totalVideos: data.totalVideos || 0,
+                });
+            } else {
+                setProjectStats(null);
+            }
+        } catch (err) {
+            console.error("Error fetching project stats:", err);
+            setProjectStats(null);
+        }
+    }, []);
+
     const fetchConversations = useCallback(async () => {
         // Solo cargar conversaciones si hay un proyecto seleccionado
         if (!selectedProjectId) {
@@ -427,6 +458,7 @@ export function ChatInterface() {
         if (selectedProjectId) {
             fetchProjectModels(selectedProjectId);
             fetchProjectUsage(selectedProjectId);
+            fetchProjectStats(selectedProjectId);
             // Clear tabs when changing project
             setOpenTabs([]);
             setActiveTabId(null);
@@ -441,8 +473,9 @@ export function ChatInterface() {
             setArchivedConversations([]);
             setShowArchived(false);
             setProjectUsage(null);
+            setProjectStats(null);
         }
-    }, [selectedProjectId, fetchProjectModels, fetchProjectUsage]);
+    }, [selectedProjectId, fetchProjectModels, fetchProjectUsage, fetchProjectStats]);
 
     useEffect(() => {
         fetchConversations();
@@ -479,6 +512,13 @@ export function ChatInterface() {
             setSelectedConversationImages([]);
         }
     }, [activeTabId, tabConversations]);
+
+    // Auto-set duration to 8 seconds when reference images are added (API requirement)
+    useEffect(() => {
+        if (videoReferenceImages.length > 0 && videoDuration !== 8) {
+            setVideoDuration(8);
+        }
+    }, [videoReferenceImages.length, videoDuration]);
 
     // Actualizar settings de una conversación existente
     const updateConversationSettings = async (
@@ -1106,9 +1146,10 @@ export function ChatInterface() {
             }
 
             fetchConversations();
-            // Actualizar contador de uso
+            // Actualizar contador de uso y stats
             if (selectedProjectId) {
                 fetchProjectUsage(selectedProjectId);
+                fetchProjectStats(selectedProjectId);
             }
         } catch (err) {
             console.error("Error sending message:", err);
@@ -1358,6 +1399,7 @@ export function ChatInterface() {
             fetchConversations();
             if (selectedProjectId) {
                 fetchProjectUsage(selectedProjectId);
+                fetchProjectStats(selectedProjectId);
             }
         } catch (err) {
             console.error("Error generating video:", err);
@@ -1806,15 +1848,80 @@ export function ChatInterface() {
                         /* Messages Area */
                         <div className="flex-1 overflow-y-auto p-4">
                             {activeTabId === null ? (
-                                <div className="flex flex-col items-center justify-center h-full text-center">
-                                    <div className="flex items-center gap-3 mb-3">
-                                        <div className="w-16 h-16 rounded-lg bg-gradient-to-br from-yellow-400 to-yellow-500 flex items-center justify-center text-black font-bold text-2xl">
-                                            NS
-                                        </div>
+                                <div className="flex flex-col h-full p-6">
+                                    <h2 className="text-lg font-semibold text-foreground mb-4">
+                                        Conversaciones
+                                    </h2>
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                                        {/* Gallery Folder - First item */}
+                                        <button
+                                            onClick={handleOpenGallery}
+                                            className="group flex flex-col items-center p-4 rounded-xl bg-gradient-to-br from-purple-500/10 to-purple-600/5 border border-purple-500/30 hover:border-purple-400/50 hover:from-purple-500/20 hover:to-purple-600/10 transition-all"
+                                        >
+                                            <div className="w-16 h-14 rounded-lg bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform shadow-lg shadow-purple-500/20">
+                                                <ImageIcon className="h-7 w-7 text-white" />
+                                            </div>
+                                            <span className="text-sm font-medium text-purple-300 group-hover:text-purple-200 transition-colors">
+                                                Galería
+                                            </span>
+                                            {projectStats && (
+                                                <span className="text-xs text-purple-400/70 mt-1">
+                                                    {projectStats.totalImages + projectStats.totalVideos} generaciones
+                                                </span>
+                                            )}
+                                        </button>
+
+                                        {/* Conversation Cards */}
+                                        {conversations.map((conv) => {
+                                            const isOpenInTab = openTabs.some((t) => t.conversationId === conv.id);
+                                            return (
+                                                <button
+                                                    key={conv.id}
+                                                    onClick={() => openConversationInTab(conv)}
+                                                    className={`group flex flex-col items-center p-4 rounded-xl border transition-all text-left ${
+                                                        isOpenInTab
+                                                            ? "bg-primary/10 border-primary/30"
+                                                            : "bg-card/50 border-border/30 hover:border-border/60 hover:bg-card"
+                                                    }`}
+                                                >
+                                                    <div className={`w-16 h-14 rounded-lg flex items-center justify-center mb-3 group-hover:scale-105 transition-transform ${
+                                                        isOpenInTab
+                                                            ? "bg-primary/20"
+                                                            : "bg-muted"
+                                                    }`}>
+                                                        <MessageSquare className={`h-6 w-6 ${
+                                                            isOpenInTab ? "text-primary" : "text-muted-foreground"
+                                                        }`} />
+                                                    </div>
+                                                    <span className="text-sm font-medium text-foreground truncate w-full text-center" title={conv.title}>
+                                                        {conv.title.length > 20 ? conv.title.slice(0, 20) + "..." : conv.title}
+                                                    </span>
+                                                    <span className="text-xs text-muted-foreground mt-1">
+                                                        {conv.message_count} {conv.message_count === 1 ? "mensaje" : "mensajes"}
+                                                    </span>
+                                                </button>
+                                            );
+                                        })}
+
+                                        {/* New Conversation Button */}
+                                        <button
+                                            onClick={() => handleNewTab()}
+                                            className="group flex flex-col items-center p-4 rounded-xl border border-dashed border-border/50 hover:border-primary/50 hover:bg-primary/5 transition-all"
+                                        >
+                                            <div className="w-16 h-14 rounded-lg bg-muted/50 flex items-center justify-center mb-3 group-hover:bg-primary/10 transition-colors">
+                                                <Plus className="h-6 w-6 text-muted-foreground group-hover:text-primary transition-colors" />
+                                            </div>
+                                            <span className="text-sm font-medium text-muted-foreground group-hover:text-primary transition-colors">
+                                                Nueva
+                                            </span>
+                                        </button>
                                     </div>
-                                    <p className="text-muted-foreground max-w-md">
-                                        Selecciona una conversación del panel izquierdo o crea una nueva para comenzar.
-                                    </p>
+
+                                    {conversations.length === 0 && (
+                                        <p className="text-center text-muted-foreground mt-8">
+                                            Crea tu primera conversación para comenzar a generar contenido.
+                                        </p>
+                                    )}
                                 </div>
                             ) : messages.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center h-full text-center">
@@ -1940,13 +2047,71 @@ export function ChatInterface() {
                     )}
                 </div>
             ) : (
-                /* Welcome Screen - No project selected */
-                <div className="flex-1 flex flex-col items-center justify-center">
-                    <FolderKanban className="h-20 w-20 text-muted-foreground/30 mb-6"/>
-                    <h2 className="text-2xl font-bold mb-2">Selecciona un proyecto</h2>
-                    <p className="text-muted-foreground text-center max-w-md">
-                        Para comenzar a chatear, selecciona un proyecto desde el panel izquierdo.
-                    </p>
+                /* Welcome Screen - Project Grid */
+                <div className="flex-1 overflow-y-auto p-8">
+                    <div className="max-w-5xl mx-auto">
+                        <h2 className="text-2xl font-bold mb-2">Selecciona un proyecto</h2>
+                        <p className="text-muted-foreground mb-8">
+                            Elige un proyecto para comenzar a generar contenido
+                        </p>
+
+                        {projects.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-16">
+                                <FolderKanban className="h-16 w-16 text-muted-foreground/30 mb-4"/>
+                                <p className="text-muted-foreground">No tienes proyectos asignados</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                {projects.map((project) => (
+                                    <button
+                                        key={project.id}
+                                        onClick={() => setSelectedProjectId(project.id)}
+                                        className="group flex flex-col items-center p-4 rounded-xl border border-border/50 bg-card hover:bg-accent hover:border-primary/50 transition-all text-left"
+                                    >
+                                        {/* Client logo or name */}
+                                        <div className="w-full mb-3 flex items-center justify-center h-8">
+                                            {project.client_logo ? (
+                                                <img
+                                                    src={project.client_logo}
+                                                    alt={project.client_name || ""}
+                                                    className="h-6 max-w-[80%] object-contain opacity-60 group-hover:opacity-100 transition-opacity"
+                                                />
+                                            ) : project.client_name ? (
+                                                <span className="text-xs text-muted-foreground group-hover:text-foreground truncate max-w-full">
+                                                    {project.client_name}
+                                                </span>
+                                            ) : (
+                                                <span className="text-xs text-muted-foreground/50">Sin cliente</span>
+                                            )}
+                                        </div>
+
+                                        {/* Folder icon */}
+                                        <div className="relative mb-3">
+                                            <Folder className="h-16 w-16 text-primary/70 group-hover:text-primary transition-colors fill-primary/10 group-hover:fill-primary/20" />
+                                            {project.generation_count > 0 && (
+                                                <div className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[10px] font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1">
+                                                    {project.generation_count > 999 ? "999+" : project.generation_count}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Project name */}
+                                        <h3 className="font-medium text-sm text-center truncate w-full group-hover:text-primary transition-colors">
+                                            {project.title}
+                                        </h3>
+
+                                        {/* Generation count */}
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            {project.generation_count === 0
+                                                ? "Sin generaciones"
+                                                : `${project.generation_count} ${project.generation_count === 1 ? "generación" : "generaciones"}`
+                                            }
+                                        </p>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 </div>
             )}
 
@@ -2140,6 +2305,7 @@ export function ChatInterface() {
                                     audioEnabled={videoAudioEnabled}
                                     negativePrompt={videoNegativePrompt}
                                     disabled={isSending}
+                                    hasReferenceImages={videoReferenceImages.length > 0}
                                     onChange={(settings) => {
                                         if (settings.duration !== undefined) {
                                             setVideoDuration(settings.duration);
@@ -2178,6 +2344,7 @@ export function ChatInterface() {
                                     onLastFrameChange={setVideoLastFrame}
                                     onReferenceImagesChange={setVideoReferenceImages}
                                     disabled={isSending}
+                                    supportsReferenceImages={selectedProjectModel?.supports_reference_images ?? false}
                                 />
                             </div>
                         )}
@@ -2263,80 +2430,125 @@ export function ChatInterface() {
                                 {/* Advanced Settings */}
                                 {showAdvanced && (
                                     <div className="space-y-6 pt-2 border-t border-border/50">
-                                        {/* Temperature */}
-                                        <div>
-                                            <div className="flex justify-between mb-2">
-                                                <label className="text-sm font-medium">Temperature</label>
-                                                <span className="text-sm text-muted-foreground">{temperature}</span>
-                                            </div>
-                                            <input
-                                                type="range"
-                                                min="0"
-                                                max="2"
-                                                step="0.1"
-                                                value={temperature}
-                                                onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                                                onMouseUp={(e) => handleSettingChange("temperature", parseFloat((e.target as HTMLInputElement).value))}
-                                                onTouchEnd={(e) => handleSettingChange("temperature", parseFloat((e.target as HTMLInputElement).value))}
-                                                disabled={isSending}
-                                                className="w-full accent-primary"
-                                            />
-                                        </div>
+                                        {/* Only show sampling params for text/image models, not video-only */}
+                                        {!(selectedProjectModel?.supports_video_generation && generationMode === "video") && (
+                                            <>
+                                                {/* Temperature */}
+                                                <div>
+                                                    <div className="flex justify-between mb-2">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <label className="text-sm font-medium">Temperature</label>
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                                                                </TooltipTrigger>
+                                                                <TooltipContent side="top" className="max-w-[250px]">
+                                                                    Controla la aleatoriedad. Valores altos (1.5-2) generan respuestas más creativas y variadas. Valores bajos (0-0.5) producen respuestas más enfocadas y predecibles.
+                                                                </TooltipContent>
+                                                            </Tooltip>
+                                                        </div>
+                                                        <span className="text-sm text-muted-foreground">{temperature}</span>
+                                                    </div>
+                                                    <input
+                                                        type="range"
+                                                        min="0"
+                                                        max="2"
+                                                        step="0.1"
+                                                        value={temperature}
+                                                        onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                                                        onMouseUp={(e) => handleSettingChange("temperature", parseFloat((e.target as HTMLInputElement).value))}
+                                                        onTouchEnd={(e) => handleSettingChange("temperature", parseFloat((e.target as HTMLInputElement).value))}
+                                                        disabled={isSending}
+                                                        className="w-full accent-primary"
+                                                    />
+                                                </div>
 
-                                        {/* Top P */}
-                                        <div>
-                                            <div className="flex justify-between mb-2">
-                                                <label className="text-sm font-medium">Top P</label>
-                                                <span className="text-sm text-muted-foreground">{topP}</span>
-                                            </div>
-                                            <input
-                                                type="range"
-                                                min="0"
-                                                max="1"
-                                                step="0.05"
-                                                value={topP}
-                                                onChange={(e) => setTopP(parseFloat(e.target.value))}
-                                                onMouseUp={(e) => handleSettingChange("top_p", parseFloat((e.target as HTMLInputElement).value))}
-                                                onTouchEnd={(e) => handleSettingChange("top_p", parseFloat((e.target as HTMLInputElement).value))}
-                                                disabled={isSending}
-                                                className="w-full accent-primary"
-                                            />
-                                        </div>
+                                                {/* Top P */}
+                                                <div>
+                                                    <div className="flex justify-between mb-2">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <label className="text-sm font-medium">Top P</label>
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                                                                </TooltipTrigger>
+                                                                <TooltipContent side="top" className="max-w-[250px]">
+                                                                    Muestreo nucleus. Considera solo los tokens cuya probabilidad acumulada no supere este valor. Menor valor = respuestas más enfocadas y coherentes.
+                                                                </TooltipContent>
+                                                            </Tooltip>
+                                                        </div>
+                                                        <span className="text-sm text-muted-foreground">{topP}</span>
+                                                    </div>
+                                                    <input
+                                                        type="range"
+                                                        min="0"
+                                                        max="1"
+                                                        step="0.05"
+                                                        value={topP}
+                                                        onChange={(e) => setTopP(parseFloat(e.target.value))}
+                                                        onMouseUp={(e) => handleSettingChange("top_p", parseFloat((e.target as HTMLInputElement).value))}
+                                                        onTouchEnd={(e) => handleSettingChange("top_p", parseFloat((e.target as HTMLInputElement).value))}
+                                                        disabled={isSending}
+                                                        className="w-full accent-primary"
+                                                    />
+                                                </div>
 
-                                        {/* Top K */}
-                                        <div>
-                                            <div className="flex justify-between mb-2">
-                                                <label className="text-sm font-medium">Top K</label>
-                                                <span className="text-sm text-muted-foreground">{topK}</span>
-                                            </div>
-                                            <input
-                                                type="range"
-                                                min="1"
-                                                max="100"
-                                                step="1"
-                                                value={topK}
-                                                onChange={(e) => setTopK(parseInt(e.target.value))}
-                                                onMouseUp={(e) => handleSettingChange("top_k", parseInt((e.target as HTMLInputElement).value))}
-                                                onTouchEnd={(e) => handleSettingChange("top_k", parseInt((e.target as HTMLInputElement).value))}
-                                                disabled={isSending}
-                                                className="w-full accent-primary"
-                                            />
-                                        </div>
+                                                {/* Top K */}
+                                                <div>
+                                                    <div className="flex justify-between mb-2">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <label className="text-sm font-medium">Top K</label>
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                                                                </TooltipTrigger>
+                                                                <TooltipContent side="top" className="max-w-[250px]">
+                                                                    Limita la selección a los K tokens más probables. Menor valor = respuestas más predecibles. Mayor valor = más diversidad en las respuestas.
+                                                                </TooltipContent>
+                                                            </Tooltip>
+                                                        </div>
+                                                        <span className="text-sm text-muted-foreground">{topK}</span>
+                                                    </div>
+                                                    <input
+                                                        type="range"
+                                                        min="1"
+                                                        max="100"
+                                                        step="1"
+                                                        value={topK}
+                                                        onChange={(e) => setTopK(parseInt(e.target.value))}
+                                                        onMouseUp={(e) => handleSettingChange("top_k", parseInt((e.target as HTMLInputElement).value))}
+                                                        onTouchEnd={(e) => handleSettingChange("top_k", parseInt((e.target as HTMLInputElement).value))}
+                                                        disabled={isSending}
+                                                        className="w-full accent-primary"
+                                                    />
+                                                </div>
 
-                                        {/* Max Output Tokens */}
-                                        <div>
-                                            <label className="text-sm font-medium mb-2 block">Max Output Tokens</label>
-                                            <Input
-                                                type="number"
-                                                min="1"
-                                                max="32768"
-                                                value={maxOutputTokens}
-                                                onChange={(e) => setMaxOutputTokens(parseInt(e.target.value) || 8192)}
-                                                onBlur={(e) => handleSettingChange("max_output_tokens", parseInt(e.target.value) || 8192)}
-                                                disabled={isSending}
-                                                className="bg-muted border-border/50"
-                                            />
-                                        </div>
+                                                {/* Max Output Tokens */}
+                                                <div>
+                                                    <div className="flex items-center gap-1.5 mb-2">
+                                                        <label className="text-sm font-medium">Max Output Tokens</label>
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                                                            </TooltipTrigger>
+                                                            <TooltipContent side="top" className="max-w-[250px]">
+                                                                Límite máximo de tokens en la respuesta. Un token equivale aproximadamente a 4 caracteres. Aumentar permite respuestas más largas.
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    </div>
+                                                    <Input
+                                                        type="number"
+                                                        min="1"
+                                                        max="32768"
+                                                        value={maxOutputTokens}
+                                                        onChange={(e) => setMaxOutputTokens(parseInt(e.target.value) || 8192)}
+                                                        onBlur={(e) => handleSettingChange("max_output_tokens", parseInt(e.target.value) || 8192)}
+                                                        disabled={isSending}
+                                                        className="bg-muted border-border/50"
+                                                    />
+                                                </div>
+                                            </>
+                                        )}
                                     </div>
                                 )}
                             </>

@@ -5,6 +5,7 @@ import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { generateVideo, isVideoConfigured, VideoGenerationConfig, VideoInput, VideoGenerationProgress } from "@/lib/google-ai-video";
 import { uploadVideoToS3, generateVideoFileName, isS3Configured } from "@/lib/s3";
 import { generateConversationTitle, Labels } from "@/lib/google-ai";
+import { calculateEstimatedCost } from "@/lib/cost-calculator";
 
 interface ConversationRow extends RowDataPacket {
   id: number;
@@ -20,6 +21,8 @@ interface ConversationRow extends RowDataPacket {
   video_negative_prompt: string | null;
   supports_video_generation: boolean;
   project_name: string | null;
+  // Cost fields from model
+  cost_video_per_second: number;
 }
 
 interface VideoLimitRow extends RowDataPacket {
@@ -105,9 +108,10 @@ export async function POST(
       });
     }
 
-    // Obtener conversación con configuración de video
+    // Obtener conversación con configuración de video y costos del modelo
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, m.model_id as model_model_id, m.supports_video_generation, p.title as project_name
+      `SELECT c.*, m.model_id as model_model_id, m.supports_video_generation, p.title as project_name,
+              m.cost_video_per_second
        FROM conversations c
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
@@ -302,10 +306,29 @@ export async function POST(
             generatedVideo.mimeType
           );
 
+          // Calculate estimated cost for video generation
+          const estimatedCost = calculateEstimatedCost(
+            {
+              cost_input_per_million: 0,
+              cost_output_per_million: 0,
+              cost_image_1k: 0,
+              cost_image_2k: 0,
+              cost_image_4k: 0,
+              cost_video_per_second: Number(conversation.cost_video_per_second) || 0,
+            },
+            {
+              tokensInput: 0,
+              tokensOutput: 0,
+              imageGenerated: false,
+              imageSize: null,
+              videoSeconds: generatedVideo.duration,
+            }
+          );
+
           // Guardar respuesta del modelo en la base de datos
           const [modelResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, content, video_url, video_mime_type, video_file_size, video_duration, video_has_audio, video_aspect_ratio)
-             VALUES (?, 'model', 'video', '', ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO messages (conversation_id, role, content_type, content, video_url, video_mime_type, video_file_size, video_duration, video_has_audio, video_aspect_ratio, estimated_cost)
+             VALUES (?, 'model', 'video', '', ?, ?, ?, ?, ?, ?, ?)`,
             [
               id,
               uploadResult.url,
@@ -314,10 +337,19 @@ export async function POST(
               generatedVideo.duration,
               generatedVideo.hasAudio ? 1 : 0,
               videoConfig.aspectRatio,
+              estimatedCost,
             ]
           );
 
           const modelMessageId = modelResult.insertId;
+
+          // Actualizar costo total en la conversación
+          await pool.execute(
+            `UPDATE conversations
+             SET total_estimated_cost = total_estimated_cost + ?
+             WHERE id = ?`,
+            [estimatedCost, id]
+          );
 
           // Enviar evento de video generado
           sendEvent({
@@ -328,6 +360,7 @@ export async function POST(
             hasAudio: generatedVideo.hasAudio,
             aspectRatio: videoConfig.aspectRatio,
             fileSize: uploadResult.fileSize,
+            estimatedCost,
           });
 
           // Enviar evento de finalización
@@ -338,6 +371,7 @@ export async function POST(
             duration: generatedVideo.duration,
             hasAudio: generatedVideo.hasAudio,
             aspectRatio: videoConfig.aspectRatio,
+            estimatedCost,
           });
 
           controllerClosed = true;

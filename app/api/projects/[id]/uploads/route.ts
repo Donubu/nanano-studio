@@ -8,6 +8,65 @@ interface ProjectAccessRow extends RowDataPacket {
   id: number;
 }
 
+interface UploadRow extends RowDataPacket {
+  id: number;
+  image_url: string;
+  original_filename: string | null;
+  file_size: number;
+  mime_type: string;
+  created_at: string;
+}
+
+// GET - List all uploads for a project
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await auth();
+
+    if (!session?.user) {
+      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    }
+
+    const { id: projectId } = await params;
+
+    // Verificar que el usuario tiene acceso al proyecto
+    const isAdmin = session.user.role === "admin";
+
+    if (!isAdmin) {
+      const [projectAccess] = await pool.execute<ProjectAccessRow[]>(
+        `SELECT pu.id FROM project_users pu
+         WHERE pu.project_id = ? AND pu.user_id = ?`,
+        [projectId, session.user.id]
+      );
+
+      if (projectAccess.length === 0) {
+        return NextResponse.json(
+          { error: "Proyecto no encontrado o sin acceso" },
+          { status: 404 }
+        );
+      }
+    }
+
+    const [uploads] = await pool.execute<UploadRow[]>(
+      `SELECT id, image_url, original_filename, file_size, mime_type, created_at
+       FROM project_uploads
+       WHERE project_id = ?
+       ORDER BY created_at DESC`,
+      [projectId]
+    );
+
+    return NextResponse.json(uploads);
+  } catch (error) {
+    console.error("Error fetching uploads:", error);
+    return NextResponse.json(
+      { error: "Error interno del servidor" },
+      { status: 500 }
+    );
+  }
+}
+
 // POST - Upload a new image to S3 and register in project_uploads
 export async function POST(
   request: NextRequest,

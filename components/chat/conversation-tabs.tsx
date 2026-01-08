@@ -64,21 +64,19 @@ export function ConversationTabs({
               <MessageSquare className="h-3.5 w-3.5 shrink-0" />
             )}
             <span className="truncate">{tab.title}</span>
-            {tabs.length > 1 && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!disabled) onTabClose(tab.id);
-                }}
-                className={cn(
-                  "p-0.5 rounded hover:bg-red-500/20 opacity-0 group-hover:opacity-100 transition-opacity shrink-0",
-                  activeTabId === tab.id && "opacity-100"
-                )}
-                disabled={disabled}
-              >
-                <X className="h-3 w-3 text-muted-foreground hover:text-red-400" />
-              </button>
-            )}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!disabled) onTabClose(tab.id);
+              }}
+              className={cn(
+                "p-0.5 rounded hover:bg-red-500/20 opacity-0 group-hover:opacity-100 transition-opacity shrink-0",
+                activeTabId === tab.id && "opacity-100"
+              )}
+              disabled={disabled}
+            >
+              <X className="h-3 w-3 text-muted-foreground hover:text-red-400" />
+            </button>
           </div>
         ))}
       </div>

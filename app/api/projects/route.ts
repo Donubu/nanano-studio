@@ -12,6 +12,8 @@ interface ProjectRow extends RowDataPacket {
   client_logo: string | null;
   status: string;
   created_at: Date;
+  generation_count: number;
+  last_message_at: Date | null;
 }
 
 // GET - Listar proyectos
@@ -28,10 +30,24 @@ export async function GET() {
       const [rows] = await pool.execute<ProjectRow[]>(`
         SELECT
           p.id, p.title, p.description, p.client_id, p.status, p.created_at,
-          c.name as client_name, c.logo as client_logo
+          c.name as client_name, c.logo as client_logo,
+          COALESCE(gen.generation_count, 0) as generation_count,
+          gen.last_message_at
         FROM projects p
         LEFT JOIN clients c ON p.client_id = c.id
-        ORDER BY p.created_at DESC
+        LEFT JOIN (
+          SELECT
+            conv.project_id,
+            COUNT(msg.id) as generation_count,
+            MAX(msg.created_at) as last_message_at
+          FROM conversations conv
+          JOIN messages msg ON conv.id = msg.conversation_id
+          WHERE msg.role = 'model'
+            AND (msg.image_url IS NOT NULL OR msg.video_url IS NOT NULL)
+            AND msg.deleted_at IS NULL
+          GROUP BY conv.project_id
+        ) gen ON p.id = gen.project_id
+        ORDER BY gen.last_message_at DESC, p.created_at DESC
       `);
       return NextResponse.json(rows);
     }
@@ -40,12 +56,26 @@ export async function GET() {
     const [rows] = await pool.execute<ProjectRow[]>(`
       SELECT
         p.id, p.title, p.description, p.client_id, p.status, p.created_at,
-        c.name as client_name, c.logo as client_logo
+        c.name as client_name, c.logo as client_logo,
+        COALESCE(gen.generation_count, 0) as generation_count,
+        gen.last_message_at
       FROM projects p
       INNER JOIN project_users pu ON p.id = pu.project_id
       LEFT JOIN clients c ON p.client_id = c.id
+      LEFT JOIN (
+        SELECT
+          conv.project_id,
+          COUNT(msg.id) as generation_count,
+          MAX(msg.created_at) as last_message_at
+        FROM conversations conv
+        JOIN messages msg ON conv.id = msg.conversation_id
+        WHERE msg.role = 'model'
+          AND (msg.image_url IS NOT NULL OR msg.video_url IS NOT NULL)
+          AND msg.deleted_at IS NULL
+        GROUP BY conv.project_id
+      ) gen ON p.id = gen.project_id
       WHERE pu.user_id = ?
-      ORDER BY p.created_at DESC
+      ORDER BY gen.last_message_at DESC, p.created_at DESC
     `, [session.user.id]);
 
     return NextResponse.json(rows);

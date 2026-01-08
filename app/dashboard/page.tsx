@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, MessageSquare, FolderKanban, ImageIcon, Video, Loader2, Zap } from "lucide-react";
+import { Users, MessageSquare, FolderKanban, ImageIcon, Video, Loader2, Zap, DollarSign } from "lucide-react";
 
 interface DashboardStats {
   totalUsers: number;
@@ -12,6 +12,7 @@ interface DashboardStats {
   totalVideos: number;
   totalTokensInput: number;
   totalTokensOutput: number;
+  totalEstimatedCost: number;
 }
 
 export default function DashboardPage() {
@@ -44,6 +45,14 @@ export default function DashboardPage() {
       return (num / 1000).toFixed(1) + "K";
     }
     return num.toString();
+  };
+
+  const formatCost = (cost: number) => {
+    const numCost = Number(cost) || 0;
+    if (numCost === 0) return "$0.00";
+    if (numCost < 0.01) return `$${numCost.toFixed(4)}`;
+    if (numCost < 1) return `$${numCost.toFixed(3)}`;
+    return `$${numCost.toFixed(2)}`;
   };
 
   return (
@@ -157,6 +166,31 @@ export default function DashboardPage() {
             </div>
             <p className="text-xs text-muted-foreground">
               Generados
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Cost Section */}
+      <div>
+        <h2 className="text-lg font-semibold mb-3">Costos Estimados</h2>
+        <Card className="bg-card border-border/50 max-w-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Costo Total
+            </CardTitle>
+            <DollarSign className="h-4 w-4 text-green-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-400">
+              {loading ? (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              ) : (
+                formatCost(stats?.totalEstimatedCost || 0)
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              USD estimado
             </p>
           </CardContent>
         </Card>

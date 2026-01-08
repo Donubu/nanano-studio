@@ -8,9 +8,12 @@ type ReferenceType = "ASSET" | "STYLE";
 
 interface Generation {
   id: number;
-  image_url: string;
+  image_url: string | null;
   created_at: string;
-  source?: "generated" | "uploaded";
+  conversation_title?: string;
+  content?: string | null;
+  type?: "image" | "video";
+  source?: "generation" | "upload";
 }
 
 interface ImagePickerModalProps {
@@ -64,22 +67,52 @@ export function ImagePickerModal({
       return;
     }
 
-    const fetchGenerations = async () => {
+    const fetchImages = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/projects/${projectId}/generations`);
-        if (res.ok) {
-          const data = await res.json();
-          setGenerations(data);
+        // Fetch both AI-generated images and user uploads in parallel
+        const [generationsRes, uploadsRes] = await Promise.all([
+          fetch(`/api/projects/${projectId}/generations?type=images&limit=100`),
+          fetch(`/api/projects/${projectId}/uploads`),
+        ]);
+
+        let allImages: Generation[] = [];
+
+        // Add AI-generated images
+        if (generationsRes.ok) {
+          const generationsData = await generationsRes.json();
+          const generations = (generationsData.data || []).map((g: Generation) => ({
+            ...g,
+            source: "generation" as const,
+          }));
+          allImages = [...allImages, ...generations];
         }
+
+        // Add user uploads
+        if (uploadsRes.ok) {
+          const uploadsData = await uploadsRes.json();
+          const uploads = (uploadsData || []).map((u: { id: number; image_url: string; created_at: string; original_filename?: string }) => ({
+            id: u.id,
+            image_url: u.image_url,
+            created_at: u.created_at,
+            content: u.original_filename || "Imagen subida",
+            source: "upload" as const,
+          }));
+          allImages = [...allImages, ...uploads];
+        }
+
+        // Sort by date, newest first
+        allImages.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+        setGenerations(allImages);
       } catch (err) {
-        console.error("Error fetching generations:", err);
+        console.error("Error fetching images:", err);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchGenerations();
+    fetchImages();
   }, [projectId, isOpen]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -202,7 +235,7 @@ export function ImagePickerModal({
             <div className="flex items-center justify-center h-48">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
-          ) : generations.length === 0 ? (
+          ) : generations.filter(gen => gen.image_url).length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-center">
               <ImageIcon className="h-12 w-12 text-muted-foreground/30 mb-3" />
               <p className="text-muted-foreground text-sm">
@@ -214,10 +247,10 @@ export function ImagePickerModal({
             </div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-              {generations.map((gen) => (
+              {generations.filter(gen => gen.image_url).map((gen) => (
                 <button
-                  key={`${gen.source || 'gen'}-${gen.id}`}
-                  onClick={() => setSelectedImage(gen.image_url)}
+                  key={`${gen.source}-${gen.id}`}
+                  onClick={() => setSelectedImage(gen.image_url!)}
                   className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${
                     selectedImage === gen.image_url
                       ? "border-primary ring-2 ring-primary/30"
@@ -225,13 +258,14 @@ export function ImagePickerModal({
                   }`}
                 >
                   <img
-                    src={gen.image_url}
-                    alt=""
+                    src={gen.image_url!}
+                    alt={gen.content || ""}
                     className="w-full h-full object-cover"
                   />
-                  {/* Source badge */}
-                  {gen.source === "uploaded" && (
-                    <div className="absolute top-1 left-1 bg-blue-500/80 rounded px-1.5 py-0.5 text-[9px] font-medium text-white">
+                  {/* Badge to distinguish uploaded vs generated images */}
+                  {gen.source === "upload" && (
+                    <div className="absolute top-1 left-1 bg-blue-500/90 text-white text-[9px] font-medium px-1.5 py-0.5 rounded flex items-center gap-1">
+                      <Upload className="h-2.5 w-2.5" />
                       Subida
                     </div>
                   )}
@@ -287,16 +321,12 @@ export function ImagePickerModal({
                     </p>
                   </button>
                   <button
-                    onClick={() => setSelectedType("STYLE")}
-                    className={`p-3 rounded-lg border-2 transition-all text-left ${
-                      selectedType === "STYLE"
-                        ? "border-primary bg-primary/10"
-                        : "border-border hover:border-border/80"
-                    }`}
+                    disabled
+                    className="p-3 rounded-lg border-2 border-border/50 text-left opacity-50 cursor-not-allowed"
                   >
-                    <p className="font-medium text-sm">Style</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      El video debe tener este estilo visual
+                    <p className="font-medium text-sm text-muted-foreground">Style</p>
+                    <p className="text-xs text-muted-foreground/70 mt-0.5">
+                      Próximamente
                     </p>
                   </button>
                 </div>

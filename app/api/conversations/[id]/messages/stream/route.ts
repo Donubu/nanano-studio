@@ -4,6 +4,7 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { sendMessageStream, ChatMessage, isConfigured, Labels, GeneratedImage, generateConversationTitle, AttachedFile } from "@/lib/google-ai";
 import { uploadToS3, generateFileName, isS3Configured } from "@/lib/s3";
+import { calculateEstimatedCost } from "@/lib/cost-calculator";
 
 // Guardar imagen generada en S3 y retornar la URL de CloudFront y tamaño
 async function saveGeneratedImage(image: GeneratedImage, conversationId: string): Promise<{ url: string; fileSize: number }> {
@@ -61,6 +62,13 @@ interface ConversationRow extends RowDataPacket {
   image_size: string;
   supports_image_generation: boolean;
   project_name: string | null;
+  // Cost fields from model
+  cost_input_per_million: number;
+  cost_output_per_million: number;
+  cost_image_1k: number;
+  cost_image_2k: number;
+  cost_image_4k: number;
+  cost_video_per_second: number;
 }
 
 interface ProjectModelRow extends RowDataPacket {
@@ -122,9 +130,11 @@ export async function POST(
       console.log("[Stream] Files received:", files.map(f => ({ name: f.name, type: f.type, mimeType: f.mimeType })));
     }
 
-    // Obtener conversación con configuración y nombre del proyecto
+    // Obtener conversación con configuración, nombre del proyecto y costos del modelo
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, p.title as project_name
+      `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, p.title as project_name,
+              m.cost_input_per_million, m.cost_output_per_million,
+              m.cost_image_1k, m.cost_image_2k, m.cost_image_4k, m.cost_video_per_second
        FROM conversations c
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
@@ -466,25 +476,45 @@ export async function POST(
                 const imageAspectRatioToSave = imageUrl ? effectiveImageAspectRatio : null;
                 const imageSizeToSave = imageUrl ? effectiveImageSize : null;
 
+                // Calculate estimated cost
+                const estimatedCost = calculateEstimatedCost(
+                  {
+                    cost_input_per_million: Number(conversation.cost_input_per_million) || 0,
+                    cost_output_per_million: Number(conversation.cost_output_per_million) || 0,
+                    cost_image_1k: Number(conversation.cost_image_1k) || 0,
+                    cost_image_2k: Number(conversation.cost_image_2k) || 0,
+                    cost_image_4k: Number(conversation.cost_image_4k) || 0,
+                    cost_video_per_second: Number(conversation.cost_video_per_second) || 0,
+                  },
+                  {
+                    tokensInput: tokenCount.input,
+                    tokensOutput: tokenCount.output,
+                    imageGenerated: !!imageUrl,
+                    imageSize: imageSizeToSave,
+                    videoSeconds: null,
+                  }
+                );
+
                 const [modelResult] = await pool.execute<ResultSetHeader>(
-                  `INSERT INTO messages (conversation_id, role, content_type, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output)
-                   VALUES (?, 'model', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                  [id, contentType, text || "", imageUrl, imageMimeType, imageFileSize, imageAspectRatioToSave, imageSizeToSave, tokenCount.input, tokenCount.output]
+                  `INSERT INTO messages (conversation_id, role, content_type, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost)
+                   VALUES (?, 'model', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  [id, contentType, text || "", imageUrl, imageMimeType, imageFileSize, imageAspectRatioToSave, imageSizeToSave, tokenCount.input, tokenCount.output, estimatedCost]
                 );
                 modelMessageId = modelResult.insertId;
 
-                // Acumular tokens en la conversación
+                // Acumular tokens y costo en la conversación
                 await pool.execute(
                   `UPDATE conversations
                    SET total_tokens_input = total_tokens_input + ?,
-                       total_tokens_output = total_tokens_output + ?
+                       total_tokens_output = total_tokens_output + ?,
+                       total_estimated_cost = total_estimated_cost + ?
                    WHERE id = ?`,
-                  [tokenCount.input, tokenCount.output, id]
+                  [tokenCount.input, tokenCount.output, estimatedCost, id]
                 );
 
                 // Obtener totales actualizados
                 const [totalsResult] = await pool.execute<RowDataPacket[]>(
-                  `SELECT total_tokens_input, total_tokens_output FROM conversations WHERE id = ?`,
+                  `SELECT total_tokens_input, total_tokens_output, total_estimated_cost FROM conversations WHERE id = ?`,
                   [id]
                 );
 
@@ -493,7 +523,9 @@ export async function POST(
                   output: totalsResult[0]?.total_tokens_output || 0,
                 };
 
-                // Enviar evento de finalización con tokens del mensaje y totales de conversación
+                const totalCost = Number(totalsResult[0]?.total_estimated_cost) || 0;
+
+                // Enviar evento de finalización con tokens, costo del mensaje y totales de conversación
                 controller.enqueue(
                   encoder.encode(
                     `data: ${JSON.stringify({
@@ -501,6 +533,8 @@ export async function POST(
                       id: modelMessageId,
                       tokens: tokenCount,
                       totalTokens,
+                      estimatedCost,
+                      totalCost,
                       imageUrl: imageUrl,
                     })}\n\n`
                   )

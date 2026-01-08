@@ -12,7 +12,16 @@ interface ModelRow extends RowDataPacket {
   supports_images: boolean;
   supports_audio: boolean;
   supports_video: boolean;
+  supports_image_generation: boolean;
+  supports_video_generation: boolean;
+  supports_reference_images: boolean;
   max_tokens: number;
+  cost_input_per_million: number;
+  cost_output_per_million: number;
+  cost_image_1k: number;
+  cost_image_2k: number;
+  cost_image_4k: number;
+  cost_video_per_second: number;
 }
 
 // GET - Obtener modelo por ID
@@ -73,7 +82,16 @@ export async function PUT(
       supports_images,
       supports_audio,
       supports_video,
+      supports_image_generation,
+      supports_video_generation,
+      supports_reference_images,
       max_tokens,
+      cost_input_per_million,
+      cost_output_per_million,
+      cost_image_1k,
+      cost_image_2k,
+      cost_image_4k,
+      cost_video_per_second,
     } = body;
 
     // Verificar que existe
@@ -113,7 +131,16 @@ export async function PUT(
         supports_images = COALESCE(?, supports_images),
         supports_audio = COALESCE(?, supports_audio),
         supports_video = COALESCE(?, supports_video),
-        max_tokens = COALESCE(?, max_tokens)
+        supports_image_generation = COALESCE(?, supports_image_generation),
+        supports_video_generation = COALESCE(?, supports_video_generation),
+        supports_reference_images = COALESCE(?, supports_reference_images),
+        max_tokens = COALESCE(?, max_tokens),
+        cost_input_per_million = COALESCE(?, cost_input_per_million),
+        cost_output_per_million = COALESCE(?, cost_output_per_million),
+        cost_image_1k = COALESCE(?, cost_image_1k),
+        cost_image_2k = COALESCE(?, cost_image_2k),
+        cost_image_4k = COALESCE(?, cost_image_4k),
+        cost_video_per_second = COALESCE(?, cost_video_per_second)
        WHERE id = ?`,
       [
         model_id || null,
@@ -123,7 +150,16 @@ export async function PUT(
         supports_images ?? null,
         supports_audio ?? null,
         supports_video ?? null,
+        supports_image_generation ?? null,
+        supports_video_generation ?? null,
+        supports_reference_images ?? null,
         max_tokens ?? null,
+        cost_input_per_million ?? null,
+        cost_output_per_million ?? null,
+        cost_image_1k ?? null,
+        cost_image_2k ?? null,
+        cost_image_4k ?? null,
+        cost_video_per_second ?? null,
         id,
       ]
     );

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   X, Loader2, ExternalLink, Image as ImageIcon, Video, Calendar, FileType,
   Maximize2, RatioIcon, Ruler, Download, HardDrive, Volume2, VolumeX, Clock,
-  ChevronLeft, ChevronRight, LayoutGrid, Search, Tag, Plus, Trash2, RotateCcw
+  ChevronLeft, ChevronRight, LayoutGrid, Search, Tag, Plus, Trash2, Upload
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +40,7 @@ interface Generation {
   created_at: string;
   deleted_at: string | null;
   tags: TagInfo[];
+  source?: "generation" | "upload";
 }
 
 interface ImageDimensions {
@@ -60,6 +61,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [showDeleted, setShowDeleted] = useState(false);
+  const [showUploads, setShowUploads] = useState(false);
 
   // Data states
   const [generations, setGenerations] = useState<Generation[]>([]);
@@ -102,19 +104,61 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
       if (selectedTagIds.length > 0) params.set("tags", selectedTagIds.join(","));
       if (showDeleted) params.set("include_deleted", "true");
 
-      const res = await fetch(`/api/projects/${projectId}/generations?${params}`);
-      if (res.ok) {
-        const data = await res.json();
-        setGenerations(data.data);
-        setTotal(data.pagination.total);
+      // Fetch generations
+      const generationsRes = await fetch(`/api/projects/${projectId}/generations?${params}`);
+      let allItems: Generation[] = [];
+      let generationsTotal = 0;
+
+      if (generationsRes.ok) {
+        const data = await generationsRes.json();
+        allItems = (data.data || []).map((g: Generation) => ({ ...g, source: "generation" as const }));
+        generationsTotal = data.pagination.total;
         setHasMore(data.pagination.hasMore);
       }
+
+      // Fetch uploads if enabled and filter allows images
+      if (showUploads && filter !== "videos") {
+        const uploadsRes = await fetch(`/api/projects/${projectId}/uploads`);
+        if (uploadsRes.ok) {
+          const uploadsData = await uploadsRes.json();
+          const uploads: Generation[] = (uploadsData || []).map((u: { id: number; image_url: string; created_at: string; original_filename?: string; file_size?: number; mime_type?: string }) => ({
+            type: "image" as const,
+            id: u.id,
+            conversation_id: 0,
+            conversation_user_id: currentUserId,
+            conversation_title: u.original_filename || "Imagen subida",
+            content: u.original_filename || null,
+            image_url: u.image_url,
+            image_mime_type: u.mime_type || null,
+            image_file_size: u.file_size || null,
+            image_aspect_ratio: null,
+            image_size: null,
+            video_url: null,
+            video_mime_type: null,
+            video_file_size: null,
+            video_duration: null,
+            video_has_audio: null,
+            video_aspect_ratio: null,
+            created_at: u.created_at,
+            deleted_at: null,
+            tags: [],
+            source: "upload" as const,
+          }));
+          allItems = [...allItems, ...uploads];
+        }
+      }
+
+      // Sort by date, newest first
+      allItems.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      setGenerations(allItems);
+      setTotal(generationsTotal + (showUploads ? allItems.filter(i => i.source === "upload").length : 0));
     } catch (err) {
       console.error("Error fetching generations:", err);
     } finally {
       setLoading(false);
     }
-  }, [projectId, filter, debouncedSearch, selectedTagIds, showDeleted]);
+  }, [projectId, filter, debouncedSearch, selectedTagIds, showDeleted, showUploads, currentUserId]);
 
   // Initial load
   useEffect(() => {
@@ -253,39 +297,20 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
     }
   };
 
-  const handleDeleteMessage = async (messageId: number) => {
-    if (!confirm("¿Eliminar esta generación?")) return;
+  const handleDeleteUpload = async (uploadId: number) => {
+    if (!confirm("¿Eliminar esta imagen subida? Esta acción no se puede deshacer.")) return;
     try {
-      const res = await fetch(`/api/messages/${messageId}`, { method: "DELETE" });
+      const res = await fetch(`/api/projects/${projectId}/uploads/${uploadId}`, { method: "DELETE" });
       if (res.ok) {
-        if (showDeleted) {
-          setGenerations(prev => prev.map(gen =>
-            gen.id === messageId ? { ...gen, deleted_at: new Date().toISOString() } : gen
-          ));
-        } else {
-          setGenerations(prev => prev.filter(gen => gen.id !== messageId));
-          setSelectedIndex(null);
-        }
+        setGenerations(prev => prev.filter(gen => !(gen.source === "upload" && gen.id === uploadId)));
+        setSelectedIndex(null);
+      } else {
+        const error = await res.json();
+        alert(error.error || "Error al eliminar");
       }
     } catch (err) {
-      console.error("Error deleting message:", err);
-    }
-  };
-
-  const handleRestoreMessage = async (messageId: number) => {
-    try {
-      const res = await fetch(`/api/messages/${messageId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "restore" }),
-      });
-      if (res.ok) {
-        setGenerations(prev => prev.map(gen =>
-          gen.id === messageId ? { ...gen, deleted_at: null } : gen
-        ));
-      }
-    } catch (err) {
-      console.error("Error restoring message:", err);
+      console.error("Error deleting upload:", err);
+      alert("Error al eliminar la imagen");
     }
   };
 
@@ -417,6 +442,16 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
           <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
             <input
               type="checkbox"
+              checked={showUploads}
+              onChange={(e) => setShowUploads(e.target.checked)}
+              className="w-4 h-4 rounded accent-primary"
+            />
+            Mostrar subidas
+          </label>
+
+          <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+            <input
+              type="checkbox"
               checked={showDeleted}
               onChange={(e) => setShowDeleted(e.target.checked)}
               className="w-4 h-4 rounded accent-primary"
@@ -487,7 +522,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {generations.map((gen, index) => (
               <div
-                key={`${gen.type}-${gen.id}`}
+                key={`${gen.source || "generation"}-${gen.type}-${gen.id}`}
                 onClick={() => setSelectedIndex(index)}
                 className={`group relative aspect-square rounded-lg overflow-hidden cursor-pointer bg-card border transition-all ${
                   gen.deleted_at
@@ -517,6 +552,14 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                 {gen.deleted_at && (
                   <div className="absolute top-2 right-2 bg-red-500/80 rounded px-1.5 py-0.5 text-[10px] text-white">
                     Eliminado
+                  </div>
+                )}
+
+                {/* Upload indicator */}
+                {gen.source === "upload" && !gen.deleted_at && (
+                  <div className="absolute top-2 right-2 bg-blue-500/90 rounded px-1.5 py-0.5 text-[10px] text-white flex items-center gap-1">
+                    <Upload className="h-2.5 w-2.5" />
+                    Subida
                   </div>
                 )}
 
@@ -585,6 +628,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                 {selectedItem.type === "image" ? <ImageIcon className="h-5 w-5 text-muted-foreground" /> : <Video className="h-5 w-5 text-muted-foreground" />}
                 <h3 className="font-medium truncate">{selectedItem.conversation_title}</h3>
                 <span className="text-sm text-muted-foreground">{selectedIndex !== null && `${selectedIndex + 1} / ${generations.length}`}</span>
+                {selectedItem.source === "upload" && <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded flex items-center gap-1"><Upload className="h-3 w-3" />Subida</span>}
                 {selectedItem.deleted_at && <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded">Eliminado</span>}
               </div>
               <button onClick={() => { setSelectedIndex(null); setShowTagSelector(false); }} className="p-2 hover:bg-accent rounded-lg">
@@ -758,13 +802,9 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                   </Button>
                 )}
 
-                {/* Delete/Restore */}
-                {selectedItem.deleted_at ? (
-                  <Button onClick={() => handleRestoreMessage(selectedItem.id)} className="gap-2 text-green-400 border-green-500/30 hover:bg-green-500/10" variant="outline">
-                    <RotateCcw className="h-4 w-4" /> Restaurar
-                  </Button>
-                ) : (
-                  <Button onClick={() => handleDeleteMessage(selectedItem.id)} className="gap-2 text-red-400 border-red-500/30 hover:bg-red-500/10" variant="outline">
+                {/* Delete - Only for uploads */}
+                {selectedItem.source === "upload" && (
+                  <Button onClick={() => handleDeleteUpload(selectedItem.id)} className="gap-2 text-red-400 border-red-500/30 hover:bg-red-500/10" variant="outline">
                     <Trash2 className="h-4 w-4" /> Eliminar
                   </Button>
                 )}

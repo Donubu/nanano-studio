@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, Loader2, Image, AudioLines, Video } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Image, AudioLines, Video, DollarSign, Sparkles, Clapperboard } from "lucide-react";
 
 interface Model {
   id: number;
@@ -31,7 +31,16 @@ interface Model {
   supports_images: boolean;
   supports_audio: boolean;
   supports_video: boolean;
+  supports_image_generation: boolean;
+  supports_video_generation: boolean;
+  supports_reference_images: boolean;
   max_tokens: number;
+  cost_input_per_million: number;
+  cost_output_per_million: number;
+  cost_image_1k: number;
+  cost_image_2k: number;
+  cost_image_4k: number;
+  cost_video_per_second: number;
   created_at: string;
 }
 
@@ -50,7 +59,16 @@ export default function ModelsPage() {
     supports_images: false,
     supports_audio: false,
     supports_video: false,
+    supports_image_generation: false,
+    supports_video_generation: false,
+    supports_reference_images: false,
     max_tokens: 8192,
+    cost_input_per_million: 0,
+    cost_output_per_million: 0,
+    cost_image_1k: 0,
+    cost_image_2k: 0,
+    cost_image_4k: 0,
+    cost_video_per_second: 0,
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -83,7 +101,16 @@ export default function ModelsPage() {
       supports_images: false,
       supports_audio: false,
       supports_video: false,
+      supports_image_generation: false,
+      supports_video_generation: false,
+      supports_reference_images: false,
       max_tokens: 8192,
+      cost_input_per_million: 0,
+      cost_output_per_million: 0,
+      cost_image_1k: 0,
+      cost_image_2k: 0,
+      cost_image_4k: 0,
+      cost_video_per_second: 0,
     });
     setError("");
     setIsDialogOpen(true);
@@ -96,10 +123,19 @@ export default function ModelsPage() {
       display_name: model.display_name,
       description: model.description || "",
       is_active: model.is_active,
-      supports_images: model.supports_images,
-      supports_audio: model.supports_audio,
-      supports_video: model.supports_video,
+      supports_images: !!model.supports_images,
+      supports_audio: !!model.supports_audio,
+      supports_video: !!model.supports_video,
+      supports_image_generation: !!model.supports_image_generation,
+      supports_video_generation: !!model.supports_video_generation,
+      supports_reference_images: !!model.supports_reference_images,
       max_tokens: model.max_tokens,
+      cost_input_per_million: Number(model.cost_input_per_million) || 0,
+      cost_output_per_million: Number(model.cost_output_per_million) || 0,
+      cost_image_1k: Number(model.cost_image_1k) || 0,
+      cost_image_2k: Number(model.cost_image_2k) || 0,
+      cost_image_4k: Number(model.cost_image_4k) || 0,
+      cost_video_per_second: Number(model.cost_video_per_second) || 0,
     });
     setError("");
     setIsDialogOpen(true);
@@ -240,9 +276,9 @@ export default function ModelsPage() {
                     {model.model_id}
                   </TableCell>
                   <TableCell>
-                    <div className="flex gap-1">
+                    <div className="flex gap-1 flex-wrap">
                       {!!model.supports_images && (
-                        <span title="Imágenes" className="p-1 rounded bg-blue-500/20">
+                        <span title="Entrada de Imágenes" className="p-1 rounded bg-blue-500/20">
                           <Image className="h-3 w-3 text-blue-400" />
                         </span>
                       )}
@@ -252,11 +288,21 @@ export default function ModelsPage() {
                         </span>
                       )}
                       {!!model.supports_video && (
-                        <span title="Video" className="p-1 rounded bg-purple-500/20">
+                        <span title="Entrada de Video" className="p-1 rounded bg-purple-500/20">
                           <Video className="h-3 w-3 text-purple-400" />
                         </span>
                       )}
-                      {!model.supports_images && !model.supports_audio && !model.supports_video && (
+                      {!!model.supports_image_generation && (
+                        <span title="Genera Imágenes" className="p-1 rounded bg-amber-500/20">
+                          <Sparkles className="h-3 w-3 text-amber-400" />
+                        </span>
+                      )}
+                      {!!model.supports_video_generation && (
+                        <span title="Genera Video" className="p-1 rounded bg-pink-500/20">
+                          <Clapperboard className="h-3 w-3 text-pink-400" />
+                        </span>
+                      )}
+                      {!model.supports_images && !model.supports_audio && !model.supports_video && !model.supports_image_generation && !model.supports_video_generation && (
                         <span className="text-xs text-muted-foreground">Solo texto</span>
                       )}
                     </div>
@@ -371,7 +417,7 @@ export default function ModelsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium">Capacidades</label>
+                <label className="text-sm font-medium">Entrada (Input)</label>
                 <div className="flex gap-4">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -409,6 +455,135 @@ export default function ModelsPage() {
                     <Video className="h-4 w-4 text-purple-400" />
                     <span className="text-sm">Video</span>
                   </label>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Generación (Output)</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.supports_image_generation}
+                      onChange={(e) =>
+                        setFormData({ ...formData, supports_image_generation: e.target.checked })
+                      }
+                      className="w-4 h-4 rounded accent-primary"
+                    />
+                    <Sparkles className="h-4 w-4 text-amber-400" />
+                    <span className="text-sm">Genera Imágenes</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.supports_video_generation}
+                      onChange={(e) =>
+                        setFormData({ ...formData, supports_video_generation: e.target.checked })
+                      }
+                      className="w-4 h-4 rounded accent-primary"
+                    />
+                    <Clapperboard className="h-4 w-4 text-pink-400" />
+                    <span className="text-sm">Genera Video</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.supports_reference_images}
+                      onChange={(e) =>
+                        setFormData({ ...formData, supports_reference_images: e.target.checked })
+                      }
+                      className="w-4 h-4 rounded accent-primary"
+                    />
+                    <Image className="h-4 w-4 text-cyan-400" />
+                    <span className="text-sm">Ref Images (Video)</span>
+                  </label>
+                </div>
+              </div>
+              <div className="space-y-3 pt-2 border-t border-border/50">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <DollarSign className="h-4 w-4 text-green-400" />
+                  Costos (USD)
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs text-muted-foreground">Input por Millón Tokens</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={formData.cost_input_per_million}
+                      onChange={(e) =>
+                        setFormData({ ...formData, cost_input_per_million: parseFloat(e.target.value) || 0 })
+                      }
+                      className="bg-muted border-border/50"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs text-muted-foreground">Output por Millón Tokens</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={formData.cost_output_per_million}
+                      onChange={(e) =>
+                        setFormData({ ...formData, cost_output_per_million: parseFloat(e.target.value) || 0 })
+                      }
+                      className="bg-muted border-border/50"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs text-muted-foreground">Imagen 1K</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      value={formData.cost_image_1k}
+                      onChange={(e) =>
+                        setFormData({ ...formData, cost_image_1k: parseFloat(e.target.value) || 0 })
+                      }
+                      className="bg-muted border-border/50"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs text-muted-foreground">Imagen 2K</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      value={formData.cost_image_2k}
+                      onChange={(e) =>
+                        setFormData({ ...formData, cost_image_2k: parseFloat(e.target.value) || 0 })
+                      }
+                      className="bg-muted border-border/50"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs text-muted-foreground">Imagen 4K</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      value={formData.cost_image_4k}
+                      onChange={(e) =>
+                        setFormData({ ...formData, cost_image_4k: parseFloat(e.target.value) || 0 })
+                      }
+                      className="bg-muted border-border/50"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs text-muted-foreground">Video por Segundo</label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    value={formData.cost_video_per_second}
+                    onChange={(e) =>
+                      setFormData({ ...formData, cost_video_per_second: parseFloat(e.target.value) || 0 })
+                    }
+                    className="bg-muted border-border/50 max-w-[200px]"
+                  />
                 </div>
               </div>
               <div className="flex items-center gap-2">

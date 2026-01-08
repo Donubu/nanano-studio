@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
 // Configuración del cliente S3
 const s3Client = new S3Client({
@@ -133,4 +133,36 @@ export function isS3Configured(): boolean {
     process.env.AWS_SECRET_ACCESS_KEY &&
     process.env.AWS_S3_BUCKET
   );
+}
+
+/**
+ * Extrae la key de S3 desde una URL de CloudFront o S3
+ */
+export function extractS3KeyFromUrl(url: string): string | null {
+  try {
+    const urlObj = new URL(url);
+    // Remove leading slash
+    let path = urlObj.pathname.replace(/^\//, "");
+    return path || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Elimina un archivo de S3
+ */
+export async function deleteFromS3(key: string): Promise<boolean> {
+  try {
+    await s3Client.send(
+      new DeleteObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+      })
+    );
+    return true;
+  } catch (error) {
+    console.error("[S3] Error deleting file:", error);
+    return false;
+  }
 }

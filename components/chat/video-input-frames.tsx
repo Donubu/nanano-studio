@@ -28,6 +28,7 @@ interface VideoInputFramesProps {
   onLastFrameChange: (image: string | null) => void;
   onReferenceImagesChange: (images: ReferenceImage[]) => void;
   disabled?: boolean;
+  supportsReferenceImages?: boolean;
 }
 
 type ModalMode = "first" | "last" | "reference" | null;
@@ -41,6 +42,7 @@ export function VideoInputFrames({
   onLastFrameChange,
   onReferenceImagesChange,
   disabled = false,
+  supportsReferenceImages = false,
 }: VideoInputFramesProps) {
   const [modalMode, setModalMode] = useState<ModalMode>(null);
 
@@ -197,8 +199,7 @@ export function VideoInputFrames({
         </div>
 
         {/* Reference Images */}
-        {/* TODO: Cambiar a true cuando Google habilite el acceso */}
-        {false ? (
+        {supportsReferenceImages && (
           <div className="space-y-2">
             <Label className="text-xs text-muted-foreground flex items-center gap-1">
               Imágenes de Referencia
@@ -254,22 +255,6 @@ export function VideoInputFrames({
             <p className="text-xs text-muted-foreground">
               <span className="text-blue-400">ASSET</span> = contenido, <span className="text-purple-400">STYLE</span> = estilo visual
             </p>
-          </div>
-        ) : (
-          <div className="space-y-2 opacity-50">
-            <Label className="text-xs text-muted-foreground flex items-center gap-1">
-              Imágenes de Referencia
-              <span className="text-muted-foreground/60">
-                (no disponible)
-              </span>
-            </Label>
-            <div className="p-3 rounded-md border border-dashed border-border bg-muted/20">
-              <p className="text-xs text-muted-foreground text-center">
-                Esta función requiere acceso especial de Google Cloud.
-                <br />
-                <span className="text-muted-foreground/60">Solo first/last frame disponibles.</span>
-              </p>
-            </div>
           </div>
         )}
 
