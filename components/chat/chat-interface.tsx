@@ -39,22 +39,51 @@ import {
     Video,
     HelpCircle,
     Mic,
+    Star,
+    Dices,
+    X,
 } from "lucide-react";
 import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 import Link from "next/link";
 import {ConversationTabs, Tab} from "./conversation-tabs";
 import {MessageContent} from "./message-content";
 import {MessageInput, AttachedFile, PreselectedImage} from "./message-input";
 import {GenerationsGallery} from "./generations-gallery";
 import {VideoSettings} from "./video-settings";
+import {ImageSettings, ImagenAspectRatio, ImagenResolution} from "./image-settings";
 import {VideoInputFrames, ReferenceImage} from "./video-input-frames";
 import {VideoDuration, VideoResolution, VideoAspectRatio, VideoGenerationStatus} from "@/types/video";
 import {GenerationModeSelector, GenerationMode} from "./generation-mode-selector";
+import {GenerationTypeSelector, GenerationType, GenerationTypeBadge} from "./generation-type-selector";
+import {QualitySelector, QualityTier, QualitySelectorCompact} from "./quality-selector";
 import {ImageModelSelector} from "./image-model-selector";
 import {AudioSettings} from "./audio-settings";
 import {TTSComposer} from "./tts-composer";
 import {AudioGenerationHistory, AudioRestoreData} from "./audio-generation-history";
 import {AudioVoiceId, AudioOutputFormat, AudioSpeakerConfig, AudioGenerationStatus, AudioVoiceConfig} from "@/types/audio";
+
+// Helper function to get the icon for a conversation based on its generation type
+function getConversationIcon(generationType: string | undefined, className: string) {
+    switch (generationType) {
+        case "image":
+            return <ImageIcon className={className} />;
+        case "video":
+            return <Video className={className} />;
+        case "audio":
+            return <Mic className={className} />;
+        case "text":
+        default:
+            return <MessageSquare className={className} />;
+    }
+}
 
 interface ProjectModel {
     id: number;
@@ -82,8 +111,10 @@ interface Message {
     id: number;
     role: "user" | "model";
     content: string;
-    content_type?: "text" | "image" | "video" | "audio" | "mixed";
+    content_type?: "text" | "image" | "video" | "audio" | "mixed" | "error";
     image_url?: string | null;
+    is_favorite?: boolean;
+    generation_seed?: number | null;
     // Video fields
     video_url?: string | null;
     video_duration?: number | null;
@@ -107,6 +138,7 @@ interface Message {
     };
     created_at: string;
     isStreaming?: boolean;
+    isRetrying?: boolean;
 }
 
 interface Conversation {
@@ -117,6 +149,7 @@ interface Conversation {
     model_supports_image_generation?: boolean;
     model_supports_video_generation?: boolean;
     model_supports_audio_generation?: boolean;
+    generation_type?: GenerationType;
     project_id: number | null;
     project_title: string | null;
     last_message: string | null;
@@ -185,8 +218,9 @@ export function ChatInterface() {
     const [systemInstruction, setSystemInstruction] = useState("");
 
     // Image generation settings
-    const [imageAspectRatio, setImageAspectRatio] = useState("16:9");
-    const [imageSize, setImageSize] = useState("1K");
+    const [imageAspectRatio, setImageAspectRatio] = useState<string>("16:9");
+    const [imageSize, setImageSize] = useState<string>("1K");
+    const [imageNegativePrompt, setImageNegativePrompt] = useState("");
 
     // Video generation settings
     const [videoDuration, setVideoDuration] = useState<VideoDuration>(8);
@@ -218,10 +252,12 @@ export function ChatInterface() {
     // Project system instruction
     const [useProjectSystemInstruction, setUseProjectSystemInstruction] = useState(true);
 
-    // Usage tracking
+    // Usage tracking (new format with quality tiers)
     const [projectUsage, setProjectUsage] = useState<{
-        images: { used: number; limit: number; unlimited: boolean };
-        videos: { used: number; limit: number; unlimited: boolean };
+        text: { normal: { used: number; limit: number; unlimited: boolean }; hq: { used: number; limit: number; unlimited: boolean } };
+        image: { normal: { used: number; limit: number; unlimited: boolean }; hq: { used: number; limit: number; unlimited: boolean } };
+        video: { normal: { used: number; limit: number; unlimited: boolean }; hq: { used: number; limit: number; unlimited: boolean } };
+        audio: { normal: { used: number; limit: number; unlimited: boolean }; hq: { used: number; limit: number; unlimited: boolean } };
     } | null>(null);
 
     // Project stats (for gallery count)
@@ -230,11 +266,73 @@ export function ChatInterface() {
         totalVideos: number;
     } | null>(null);
 
+    // Selected seed for next generation (reuse from previous generation)
+    const [selectedSeed, setSelectedSeed] = useState<number | null>(null);
+
+    // Generation config per type (from project)
+    interface GenerationConfigItem {
+        generation_type: GenerationType;
+        is_enabled: boolean;
+        model_normal_id: number | null;
+        model_hq_id: number | null;
+        model_normal_name: string | null;
+        model_hq_name: string | null;
+        model_normal_model_id: string | null;
+        model_hq_model_id: string | null;
+    }
+    const [generationConfig, setGenerationConfig] = useState<GenerationConfigItem[]>([]);
+
+    // Quality tier selection
+    const [selectedQualityTier, setSelectedQualityTier] = useState<QualityTier>("normal");
+
+    // Generation type for new conversations
+    const [newConversationType, setNewConversationType] = useState<GenerationType>("text");
+    const [showNewConversationModal, setShowNewConversationModal] = useState(false);
+
     // Get current tab's conversation and messages
     const activeTab = openTabs.find((t) => t.id === activeTabId);
     const currentConversation = activeTab ? tabConversations[activeTab.id] : null;
     const messages = activeTab ? tabMessages[activeTab.id] || [] : [];
     const isSending = activeTab ? sendingTabs[activeTab.id] || false : false;
+
+    // Get configs for different types
+    const videoTypeConfig = generationConfig.find(c => c.generation_type === "video");
+    const imageTypeConfig = generationConfig.find(c => c.generation_type === "image");
+
+    // UI mode helpers based on conversation generation_type
+    const isTextConversation = currentConversation?.generation_type === "text";
+    const isImageConversation = currentConversation?.generation_type === "image";
+    const isVideoConversation = currentConversation?.generation_type === "video";
+    const isAudioConversation = currentConversation?.generation_type === "audio";
+
+    // Get current model based on conversation type, generation mode, and quality tier
+    // For video conversations in image mode, use the image model
+    const currentTypeConfig = (() => {
+        if (isVideoConversation && generationMode === "image") {
+            return imageTypeConfig;
+        }
+        return currentConversation?.generation_type
+            ? generationConfig.find(c => c.generation_type === currentConversation.generation_type)
+            : null;
+    })();
+
+    const currentModelInfo = currentTypeConfig
+        ? (selectedQualityTier === "hq"
+            ? { id: currentTypeConfig.model_hq_id, name: currentTypeConfig.model_hq_name }
+            : { id: currentTypeConfig.model_normal_id, name: currentTypeConfig.model_normal_name })
+        : null;
+
+    // Check if image models are available for video conversations
+    const hasImageModelsForVideo = imageTypeConfig && (imageTypeConfig.model_normal_id || imageTypeConfig.model_hq_id);
+
+    // Check if the current image model is Imagen 4 (based on quality tier)
+    const isImagen4Model = (() => {
+        if (!imageTypeConfig) return false;
+        const modelId = selectedQualityTier === "hq"
+            ? imageTypeConfig.model_hq_model_id
+            : imageTypeConfig.model_normal_model_id;
+        return modelId?.includes("imagen-4") ?? false;
+    })();
 
     // Mark component as mounted for hydration
     useEffect(() => {
@@ -411,6 +509,38 @@ export function ChatInterface() {
         }
     }, []);
 
+    const fetchGenerationConfig = useCallback(async (projectId: number) => {
+        try {
+            const res = await fetch(`/api/projects/${projectId}/generation-config`);
+            if (res.ok) {
+                const data = await res.json();
+                // Transform object response to array format
+                const types: GenerationType[] = ["text", "image", "video", "audio"];
+                const configArray: GenerationConfigItem[] = types.map((type) => ({
+                    generation_type: type,
+                    is_enabled: data[type]?.enabled ?? false,
+                    model_normal_id: data[type]?.model_normal?.id ?? null,
+                    model_hq_id: data[type]?.model_hq?.id ?? null,
+                    model_normal_name: data[type]?.model_normal?.display_name ?? null,
+                    model_hq_name: data[type]?.model_hq?.display_name ?? null,
+                    model_normal_model_id: data[type]?.model_normal?.model_id ?? null,
+                    model_hq_model_id: data[type]?.model_hq?.model_id ?? null,
+                }));
+                setGenerationConfig(configArray);
+                // Auto-select first enabled type
+                const firstEnabled = configArray.find((c) => c.is_enabled);
+                if (firstEnabled) {
+                    setNewConversationType(firstEnabled.generation_type);
+                }
+            } else {
+                setGenerationConfig([]);
+            }
+        } catch (err) {
+            console.error("Error fetching generation config:", err);
+            setGenerationConfig([]);
+        }
+    }, []);
+
     const fetchConversations = useCallback(async () => {
         // Solo cargar conversaciones si hay un proyecto seleccionado
         if (!selectedProjectId) {
@@ -452,6 +582,7 @@ export function ChatInterface() {
                         max_output_tokens: data.max_output_tokens,
                         system_instruction: data.system_instruction,
                         model_id: data.model_id,
+                        generation_type: data.generation_type,
                         image_aspect_ratio: data.image_aspect_ratio || "16:9",
                         image_size: data.image_size || "1K",
                         model_supports_image_generation: data.model_supports_image_generation,
@@ -495,6 +626,7 @@ export function ChatInterface() {
             fetchProjectModels(selectedProjectId);
             fetchProjectUsage(selectedProjectId);
             fetchProjectStats(selectedProjectId);
+            fetchGenerationConfig(selectedProjectId);
             // Clear tabs when changing project
             setOpenTabs([]);
             setActiveTabId(null);
@@ -503,6 +635,8 @@ export function ChatInterface() {
             // Clear archived conversations
             setArchivedConversations([]);
             setShowArchived(false);
+            // Reset quality tier
+            setSelectedQualityTier("normal");
         } else {
             setProjectModels([]);
             setSelectedModelId(null);
@@ -510,8 +644,9 @@ export function ChatInterface() {
             setShowArchived(false);
             setProjectUsage(null);
             setProjectStats(null);
+            setGenerationConfig([]);
         }
-    }, [selectedProjectId, fetchProjectModels, fetchProjectUsage, fetchProjectStats]);
+    }, [selectedProjectId, fetchProjectModels, fetchProjectUsage, fetchProjectStats, fetchGenerationConfig]);
 
     useEffect(() => {
         fetchConversations();
@@ -713,19 +848,25 @@ export function ChatInterface() {
         }
     };
 
-    const createNewConversation = async (overrideModelId?: number): Promise<Conversation | null> => {
+    const createNewConversation = async (overrideModelId?: number, generationType?: GenerationType): Promise<Conversation | null> => {
         const modelIdToUse = overrideModelId || selectedModelId;
-        if (!modelIdToUse || !selectedProjectId) return null;
+        if (!selectedProjectId) return null;
+        // For the new system, generation_type determines the model, so modelId might be optional
+        const typeToUse = generationType || newConversationType;
 
-        const modelForConversation = projectModels.find((m) => m.model_id === modelIdToUse);
+        const modelForConversation = modelIdToUse
+            ? projectModels.find((m) => m.model_id === modelIdToUse)
+            : null;
 
         try {
             const res = await fetch("/api/conversations", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({
-                    model_id: modelIdToUse,
+                    model_id: modelIdToUse, // Can be null, API will use generation_config
                     project_id: selectedProjectId,
+                    generation_type: typeToUse,
+                    quality_tier: selectedQualityTier,
                     temperature,
                     top_p: topP,
                     top_k: topK,
@@ -749,14 +890,18 @@ export function ChatInterface() {
             if (res.ok) {
                 const data = await res.json();
                 fetchConversations();
+                // Use model info from API response (which resolves from generation_config)
+                const resolvedModelId = data.model_id || modelIdToUse;
+                const resolvedModel = projectModels.find((m) => m.model_id === resolvedModelId);
                 const newConversation: Conversation = {
                     id: data.id,
                     title: data.title,
-                    model_id: modelIdToUse,
-                    model_display_name: modelForConversation?.model_display_name || "",
-                    model_supports_image_generation: modelForConversation?.supports_image_generation,
-                    model_supports_video_generation: modelForConversation?.supports_video_generation,
-                    model_supports_audio_generation: modelForConversation?.supports_audio_generation,
+                    model_id: resolvedModelId,
+                    model_display_name: data.model_display_name || resolvedModel?.model_display_name || "",
+                    model_supports_image_generation: resolvedModel?.supports_image_generation,
+                    model_supports_video_generation: resolvedModel?.supports_video_generation,
+                    model_supports_audio_generation: resolvedModel?.supports_audio_generation,
+                    generation_type: data.generation_type || typeToUse,
                     project_id: selectedProjectId,
                     project_title: null,
                     last_message: null,
@@ -819,11 +964,23 @@ export function ChatInterface() {
     };
 
     const handleNewTab = async (overrideModelId?: number) => {
-        // Crear tab draft sin crear conversación en BD
-        const modelIdToUse = overrideModelId || selectedModelId;
-        if (!modelIdToUse || !selectedProjectId) return;
+        if (!selectedProjectId) return;
 
-        const modelForTab = projectModels.find((m) => m.model_id === modelIdToUse);
+        // Get model from generation config for the selected type
+        const typeConfig = generationConfig.find(c => c.generation_type === newConversationType && c.is_enabled);
+        if (!typeConfig && !overrideModelId) {
+            console.error("No hay configuración habilitada para el tipo:", newConversationType);
+            return;
+        }
+
+        // Use override, or normal model, or HQ model as fallback
+        const modelIdToUse = overrideModelId || typeConfig?.model_normal_id || typeConfig?.model_hq_id;
+        if (!modelIdToUse) {
+            console.error("No hay modelo configurado para el tipo:", newConversationType);
+            return;
+        }
+
+        const modelName = typeConfig?.model_normal_name || typeConfig?.model_hq_name || "";
 
         const tabId = nextTabId.current++;
         const draftTab: Tab = {
@@ -839,9 +996,10 @@ export function ChatInterface() {
             id: 0, // ID temporal
             title: "Nueva conversación",
             model_id: modelIdToUse,
-            model_display_name: modelForTab?.model_display_name || "",
-            model_supports_image_generation: modelForTab?.supports_image_generation,
-            model_supports_video_generation: modelForTab?.supports_video_generation,
+            model_display_name: modelName,
+            model_supports_image_generation: newConversationType === "image",
+            model_supports_video_generation: newConversationType === "video",
+            generation_type: newConversationType,
             project_id: selectedProjectId,
             project_title: null,
             last_message: null,
@@ -1010,7 +1168,8 @@ export function ChatInterface() {
         content: string,
         files?: AttachedFile[],
         modelIdOverride?: number | null,
-        imageSettings?: { aspectRatio: string; size: string }
+        imageSettings?: { aspectRatio: string; size: string; negativePrompt?: string; isImagen4?: boolean; seed?: number },
+        generationTypeOverride?: "text" | "image" | "video" | "audio"
     ) => {
         if (!activeTabId || (!content.trim() && (!files || files.length === 0))) return;
 
@@ -1079,17 +1238,40 @@ export function ChatInterface() {
                 type: f.type,
             }));
 
-            // Use streaming endpoint
-            const response = await fetch(`/api/conversations/${conversationId}/messages/stream`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({
+            // Determine which endpoint to use based on model type
+            const useImagenEndpoint = imageSettings?.isImagen4 === true;
+            const endpoint = useImagenEndpoint
+                ? `/api/conversations/${conversationId}/messages/imagen`
+                : `/api/conversations/${conversationId}/messages/stream`;
+
+            // Build request body based on endpoint
+            const requestBody = useImagenEndpoint
+                ? {
+                    content,
+                    quality_tier: selectedQualityTier,
+                    imageSettings: {
+                        aspectRatio: imageSettings?.aspectRatio,
+                        resolution: imageSettings?.size,
+                        negativePrompt: imageSettings?.negativePrompt,
+                        seed: imageSettings?.seed,
+                    },
+                    ...(generationTypeOverride && { generation_type_override: generationTypeOverride }),
+                }
+                : {
                     content,
                     files: filesToSend,
                     useProjectSystemInstruction,
+                    quality_tier: selectedQualityTier,
                     ...(modelIdOverride && { modelIdOverride }),
-                    ...(imageSettings && { imageSettings }),
-                }),
+                    ...(imageSettings && { imageSettings: { aspectRatio: imageSettings.aspectRatio, size: imageSettings.size } }),
+                    ...(generationTypeOverride && { generation_type_override: generationTypeOverride }),
+                };
+
+            // Use streaming endpoint
+            const response = await fetch(endpoint, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(requestBody),
             });
 
             if (!response.ok) {
@@ -1125,14 +1307,25 @@ export function ChatInterface() {
                                             m.id === tempUserMessage.id ? {...m, id: realUserMessageId!} : m
                                         ),
                                     }));
-                                } else if (data.type === "chunk") {
-                                    fullContent += data.text;
-                                    // Update streaming message
+                                } else if (data.type === "retry") {
+                                    // Mostrar mensaje de reintento al usuario
+                                    const retryMessage = `⏳ Reintentando (${data.attempt}/${data.maxAttempts})... Esperando ${data.delaySeconds}s`;
                                     setTabMessages((prev) => ({
                                         ...prev,
                                         [tabId]: prev[tabId].map((m) =>
                                             m.id === streamingMessageId
-                                                ? {...m, content: fullContent}
+                                                ? {...m, content: retryMessage, isRetrying: true}
+                                                : m
+                                        ),
+                                    }));
+                                } else if (data.type === "chunk") {
+                                    fullContent += data.text;
+                                    // Update streaming message (limpiar estado de retry)
+                                    setTabMessages((prev) => ({
+                                        ...prev,
+                                        [tabId]: prev[tabId].map((m) =>
+                                            m.id === streamingMessageId
+                                                ? {...m, content: fullContent, isRetrying: false}
                                                 : m
                                         ),
                                     }));
@@ -1143,7 +1336,7 @@ export function ChatInterface() {
                                         ...prev,
                                         [tabId]: prev[tabId].map((m) =>
                                             m.id === streamingMessageId
-                                                ? {...m, image_url: imageUrl}
+                                                ? {...m, image_url: imageUrl, generation_seed: data.seed}
                                                 : m
                                         ),
                                     }));
@@ -1160,6 +1353,7 @@ export function ChatInterface() {
                                                     id: realModelMessageId!,
                                                     content: fullContent,
                                                     image_url: finalImageUrl,
+                                                    generation_seed: data.seed,
                                                     isStreaming: false
                                                 }
                                                 : m
@@ -1233,8 +1427,8 @@ export function ChatInterface() {
                 // Deselect
                 return prev.filter((url) => url !== imageUrl);
             } else {
-                // Select - and auto-switch to image mode if on video model
-                if (selectedProjectModel?.supports_video_generation && generationMode === "video") {
+                // Select - and auto-switch to image mode if on video conversation
+                if (isVideoConversation && generationMode === "video") {
                     setGenerationMode("image");
                 }
                 return [...prev, imageUrl];
@@ -1242,8 +1436,27 @@ export function ChatInterface() {
         });
     };
 
+    // Toggle favorite status for a message
+    const handleToggleFavorite = async (messageId: number) => {
+        if (!activeTabId) return;
+        try {
+            const res = await fetch(`/api/messages/${messageId}/favorite`, { method: "POST" });
+            if (res.ok) {
+                const data = await res.json();
+                setTabMessages((prev) => ({
+                    ...prev,
+                    [activeTabId]: prev[activeTabId].map((msg) =>
+                        msg.id === messageId ? { ...msg, is_favorite: data.is_favorite } : msg
+                    ),
+                }));
+            }
+        } catch (err) {
+            console.error("Error toggling favorite:", err);
+        }
+    };
+
     // Send video generation message
-    const sendVideoMessage = async (content: string) => {
+    const sendVideoMessage = async (content: string, seed?: number) => {
         if (!activeTabId || !content.trim()) return;
 
         let tabId = activeTabId;
@@ -1314,12 +1527,14 @@ export function ChatInterface() {
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({
                     content,
+                    quality_tier: selectedQualityTier,
                     videoSettings: {
                         duration: videoDuration,
                         resolution: videoResolution,
                         aspectRatio: videoAspectRatio,
                         audioEnabled: videoAudioEnabled,
                         negativePrompt: videoNegativePrompt || undefined,
+                        seed: seed,
                     },
                     videoInputs: {
                         firstFrame: videoFirstFrame,
@@ -1387,6 +1602,7 @@ export function ChatInterface() {
                                                     video_duration: data.duration,
                                                     video_has_audio: data.hasAudio,
                                                     video_aspect_ratio: data.aspectRatio,
+                                                    generation_seed: data.seed,
                                                     isVideoGenerating: false,
                                                     videoProgress: undefined,
                                                 }
@@ -1406,6 +1622,7 @@ export function ChatInterface() {
                                                     video_duration: data.duration,
                                                     video_has_audio: data.hasAudio,
                                                     video_aspect_ratio: data.aspectRatio,
+                                                    generation_seed: data.seed,
                                                     isVideoGenerating: false,
                                                     videoProgress: undefined,
                                                 }
@@ -1554,6 +1771,7 @@ export function ChatInterface() {
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({
                     content,
+                    quality_tier: selectedQualityTier,
                     audioSettings: {
                         voiceId: audioVoiceId,
                         stylePrompt: audioStylePrompt || undefined,
@@ -1747,10 +1965,10 @@ export function ChatInterface() {
                             </div>
                         </div>
                         <Button
-                            onClick={() => handleNewTab()}
+                            onClick={() => setShowNewConversationModal(true)}
                             className="w-full gap-2"
                             size="sm"
-                            disabled={!selectedProjectId || !selectedModelId}
+                            disabled={!selectedProjectId || !generationConfig.some(c => c.is_enabled)}
                         >
                             <Plus className="h-4 w-4"/>
                             Nueva conversación
@@ -1777,65 +1995,80 @@ export function ChatInterface() {
                         {selectedProjectId && projectUsage && (
                             <div className="mt-2 px-2 py-1.5 bg-card rounded-lg border border-border/30 space-y-2">
                                 {/* Image generations */}
-                                <div>
-                                    <div className="flex items-center justify-between text-xs">
-                                        <span className="text-muted-foreground flex items-center gap-1">
-                                            <ImageIcon className="h-3 w-3" />
-                                            Imágenes
-                                        </span>
-                                        <span className={projectUsage.images.unlimited ? "text-green-400" : projectUsage.images.used >= projectUsage.images.limit ? "text-red-400" : "text-foreground"}>
-                                            {projectUsage.images.unlimited ? (
-                                                <span className="text-green-400">∞</span>
-                                            ) : (
-                                                <>{projectUsage.images.used} / {projectUsage.images.limit}</>
+                                {/* Image generations (combined normal + hq) */}
+                                {(() => {
+                                    const imageUsed = (projectUsage.image?.normal?.used || 0) + (projectUsage.image?.hq?.used || 0);
+                                    const imageLimit = (projectUsage.image?.normal?.limit || 0) + (projectUsage.image?.hq?.limit || 0);
+                                    const imageUnlimited = (projectUsage.image?.normal?.unlimited && projectUsage.image?.hq?.unlimited) || imageLimit === 0;
+                                    return (
+                                        <div>
+                                            <div className="flex items-center justify-between text-xs">
+                                                <span className="text-muted-foreground flex items-center gap-1">
+                                                    <ImageIcon className="h-3 w-3" />
+                                                    Imágenes
+                                                </span>
+                                                <span className={imageUnlimited ? "text-green-400" : imageUsed >= imageLimit ? "text-red-400" : "text-foreground"}>
+                                                    {imageUnlimited ? (
+                                                        <span className="text-green-400">∞</span>
+                                                    ) : (
+                                                        <>{imageUsed} / {imageLimit}</>
+                                                    )}
+                                                </span>
+                                            </div>
+                                            {!imageUnlimited && imageLimit > 0 && (
+                                                <div className="mt-1 h-1 bg-muted rounded-full overflow-hidden">
+                                                    <div
+                                                        className={`h-full rounded-full transition-all ${
+                                                            imageUsed >= imageLimit
+                                                                ? "bg-red-500"
+                                                                : imageUsed >= imageLimit * 0.8
+                                                                    ? "bg-yellow-500"
+                                                                    : "bg-blue-500"
+                                                        }`}
+                                                        style={{ width: `${Math.min((imageUsed / imageLimit) * 100, 100)}%` }}
+                                                    />
+                                                </div>
                                             )}
-                                        </span>
-                                    </div>
-                                    {!projectUsage.images.unlimited && (
-                                        <div className="mt-1 h-1 bg-muted rounded-full overflow-hidden">
-                                            <div
-                                                className={`h-full rounded-full transition-all ${
-                                                    projectUsage.images.used >= projectUsage.images.limit
-                                                        ? "bg-red-500"
-                                                        : projectUsage.images.used >= projectUsage.images.limit * 0.8
-                                                            ? "bg-yellow-500"
-                                                            : "bg-blue-500"
-                                                }`}
-                                                style={{ width: `${Math.min((projectUsage.images.used / projectUsage.images.limit) * 100, 100)}%` }}
-                                            />
                                         </div>
-                                    )}
-                                </div>
-                                {/* Video generations */}
-                                <div>
-                                    <div className="flex items-center justify-between text-xs">
-                                        <span className="text-muted-foreground flex items-center gap-1">
-                                            <Video className="h-3 w-3" />
-                                            Videos
-                                        </span>
-                                        <span className={projectUsage.videos.unlimited ? "text-green-400" : projectUsage.videos.used >= projectUsage.videos.limit ? "text-red-400" : "text-foreground"}>
-                                            {projectUsage.videos.unlimited ? (
-                                                <span className="text-green-400">∞</span>
-                                            ) : (
-                                                <>{projectUsage.videos.used} / {projectUsage.videos.limit}</>
+                                    );
+                                })()}
+                                {/* Video generations (combined normal + hq) */}
+                                {(() => {
+                                    const videoUsed = (projectUsage.video?.normal?.used || 0) + (projectUsage.video?.hq?.used || 0);
+                                    const videoLimit = (projectUsage.video?.normal?.limit || 0) + (projectUsage.video?.hq?.limit || 0);
+                                    const videoUnlimited = (projectUsage.video?.normal?.unlimited && projectUsage.video?.hq?.unlimited) || videoLimit === 0;
+                                    return (
+                                        <div>
+                                            <div className="flex items-center justify-between text-xs">
+                                                <span className="text-muted-foreground flex items-center gap-1">
+                                                    <Video className="h-3 w-3" />
+                                                    Videos
+                                                </span>
+                                                <span className={videoUnlimited ? "text-green-400" : videoUsed >= videoLimit ? "text-red-400" : "text-foreground"}>
+                                                    {videoUnlimited ? (
+                                                        <span className="text-green-400">∞</span>
+                                                    ) : (
+                                                        <>{videoUsed} / {videoLimit}</>
+                                                    )}
+                                                </span>
+                                            </div>
+                                            {!videoUnlimited && videoLimit > 0 && (
+                                                <div className="mt-1 h-1 bg-muted rounded-full overflow-hidden">
+                                                    <div
+                                                        className={`h-full rounded-full transition-all ${
+                                                            videoUsed >= videoLimit
+                                                                ? "bg-red-500"
+                                                                : videoUsed >= videoLimit * 0.8
+                                                                    ? "bg-yellow-500"
+                                                                    : "bg-purple-500"
+                                                        }`}
+                                                        style={{ width: `${Math.min((videoUsed / videoLimit) * 100, 100)}%` }}
+                                                    />
+                                                </div>
                                             )}
-                                        </span>
-                                    </div>
-                                    {!projectUsage.videos.unlimited && (
-                                        <div className="mt-1 h-1 bg-muted rounded-full overflow-hidden">
-                                            <div
-                                                className={`h-full rounded-full transition-all ${
-                                                    projectUsage.videos.used >= projectUsage.videos.limit
-                                                        ? "bg-red-500"
-                                                        : projectUsage.videos.used >= projectUsage.videos.limit * 0.8
-                                                            ? "bg-yellow-500"
-                                                            : "bg-purple-500"
-                                                }`}
-                                                style={{ width: `${Math.min((projectUsage.videos.used / projectUsage.videos.limit) * 100, 100)}%` }}
-                                            />
                                         </div>
-                                    )}
-                                </div>
+                                    );
+                                })()}
                             </div>
                         )}
                         {selectedProjectId && (
@@ -1878,7 +2111,7 @@ export function ChatInterface() {
                                                 : "hover:bg-accent text-muted-foreground hover:text-foreground"
                                         }`}
                                     >
-                                        <MessageSquare className="h-4 w-4 shrink-0"/>
+                                        {getConversationIcon(conv.generation_type, "h-4 w-4 shrink-0")}
                                         <div className="flex-1 min-w-0">
                                             <div
                                                 className="text-sm truncate"
@@ -1886,14 +2119,6 @@ export function ChatInterface() {
                                             >
                                                 {conv.title}
                                             </div>
-                                            {conv.last_message && (
-                                                <div
-                                                    className="text-xs text-muted-foreground truncate"
-                                                    title={conv.last_message?.trim() ? conv.last_message : undefined}
-                                                >
-                                                    {conv.last_message.slice(0, 30)}...
-                                                </div>
-                                            )}
                                         </div>
                                         <button
                                             onClick={(e) => archiveConversation(conv.id, e)}
@@ -1921,7 +2146,7 @@ export function ChatInterface() {
                             className="flex items-center gap-2 w-full px-4 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
                         >
                             <Archive className="h-4 w-4"/>
-                            <span>Conversaciones archivadas</span>
+                            <span>Archivadas</span>
                             <ChevronRight className={`h-4 w-4 ml-auto transition-transform ${showArchived ? "rotate-90" : ""}`}/>
                         </button>
 
@@ -2079,7 +2304,7 @@ export function ChatInterface() {
                             activeTabId={activeTabId}
                             onTabClick={setActiveTabId}
                             onTabClose={handleTabClose}
-                            onNewTab={() => handleNewTab()}
+                            onNewTab={() => setShowNewConversationModal(true)}
                             disabled={isSending}
                         />
                     )}
@@ -2131,10 +2356,11 @@ export function ChatInterface() {
                                 onOpenConversation={handleOpenConversationFromGallery}
                             />
                         </div>
-                    ) : selectedProjectModel?.supports_audio_generation && activeTabId !== null ? (
-                        /* TTS Composer View */
-                        <div className="flex-1 flex flex-col overflow-hidden">
-                            <div className="flex-shrink-0 overflow-y-auto max-h-[60vh] border-b border-border/50">
+                    ) : isAudioConversation && activeTabId !== null ? (
+                        /* TTS Composer View - Split layout with history column */
+                        <div className="flex-1 flex overflow-hidden">
+                            {/* Left: TTSComposer */}
+                            <div className="flex-1 overflow-y-auto">
                                 <TTSComposer
                                     voiceId={audioVoiceId}
                                     multiSpeaker={audioMultiSpeaker}
@@ -2185,7 +2411,8 @@ export function ChatInterface() {
                                     onRestoreHandled={() => setAudioRestoreData(null)}
                                 />
                             </div>
-                            <div className="flex-1 overflow-y-auto p-4">
+                            {/* Right: Audio Generation History Column */}
+                            <div className="w-80 border-l border-border/50 bg-card/50 overflow-y-auto p-4">
                                 <AudioGenerationHistory
                                     messages={tabMessages[activeTabId] || []}
                                     onRestore={(data) => setAudioRestoreData(data)}
@@ -2237,12 +2464,10 @@ export function ChatInterface() {
                                                             ? "bg-primary/20"
                                                             : "bg-muted"
                                                     }`}>
-                                                        <MessageSquare className={`h-6 w-6 ${
-                                                            isOpenInTab ? "text-primary" : "text-muted-foreground"
-                                                        }`} />
+                                                        {getConversationIcon(conv.generation_type, `h-6 w-6 ${isOpenInTab ? "text-primary" : "text-muted-foreground"}`)}
                                                     </div>
-                                                    <span className="text-sm font-medium text-foreground truncate w-full text-center" title={conv.title}>
-                                                        {conv.title.length > 20 ? conv.title.slice(0, 20) + "..." : conv.title}
+                                                    <span className="text-sm font-medium text-foreground w-full text-center line-clamp-3 h-[3.75rem] leading-5" title={conv.title}>
+                                                        {conv.title}
                                                     </span>
                                                     <span className="text-xs text-muted-foreground mt-1">
                                                         {conv.message_count} {conv.message_count === 1 ? "mensaje" : "mensajes"}
@@ -2253,7 +2478,7 @@ export function ChatInterface() {
 
                                         {/* New Conversation Button */}
                                         <button
-                                            onClick={() => handleNewTab()}
+                                            onClick={() => setShowNewConversationModal(true)}
                                             className="group flex flex-col items-center p-4 rounded-xl border border-dashed border-border/50 hover:border-primary/50 hover:bg-primary/5 transition-all"
                                         >
                                             <div className="w-16 h-14 rounded-lg bg-muted/50 flex items-center justify-center mb-3 group-hover:bg-primary/10 transition-colors">
@@ -2288,7 +2513,7 @@ export function ChatInterface() {
                                     {messages.map((msg) => (
                                         <div
                                             key={msg.id}
-                                            className={`flex gap-3 ${msg.role === "user" ? "justify-end" : ""}`}
+                                            className={`group flex gap-3 ${msg.role === "user" ? "justify-end" : ""}`}
                                         >
                                             {msg.role === "model" && (
                                                 <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
@@ -2302,14 +2527,43 @@ export function ChatInterface() {
                                                 </div>
                                             )}
                                             <div
-                                                className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                                                className={`relative max-w-[80%] rounded-2xl px-4 py-3 ${
                                                     msg.role === "user"
                                                         ? "bg-primary text-primary-foreground"
                                                         : "bg-card border border-border/50"
                                                 }`}
                                             >
+                                                {/* Favorite star for model messages with assets */}
+                                                {msg.role === "model" && (msg.image_url || msg.video_url || msg.audio_url) && (
+                                                    <button
+                                                        onClick={() => handleToggleFavorite(msg.id)}
+                                                        className={`absolute -top-2 -right-2 p-1 rounded-full transition-all z-10 ${
+                                                            msg.is_favorite
+                                                                ? "bg-yellow-500/20 text-yellow-400"
+                                                                : "bg-card border border-border/50 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-yellow-400"
+                                                        }`}
+                                                        title={msg.is_favorite ? "Quitar de favoritos" : "Agregar a favoritos"}
+                                                    >
+                                                        <Star className={`h-4 w-4 ${msg.is_favorite ? "fill-yellow-400" : ""}`} />
+                                                    </button>
+                                                )}
+                                                {/* Seed button for model messages with generation_seed (image or video) */}
+                                                {msg.role === "model" && msg.generation_seed && (msg.image_url || msg.video_url) && (
+                                                    <button
+                                                        onClick={() => setSelectedSeed(selectedSeed === msg.generation_seed ? null : msg.generation_seed!)}
+                                                        className={`absolute top-5 -right-2 p-1 rounded-full transition-all z-10 ${
+                                                            selectedSeed === msg.generation_seed
+                                                                ? "bg-purple-500/20 text-purple-400"
+                                                                : "bg-card border border-border/50 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-purple-400"
+                                                        }`}
+                                                        title={selectedSeed === msg.generation_seed ? "Deseleccionar seed" : `Usar seed ${msg.generation_seed} en proxima generacion`}
+                                                    >
+                                                        <Dices className={`h-4 w-4 ${selectedSeed === msg.generation_seed ? "fill-purple-400" : ""}`} />
+                                                    </button>
+                                                )}
                                                 <MessageContent
                                                     content={msg.content}
+                                                    contentType={msg.content_type}
                                                     imageUrl={msg.image_url}
                                                     videoUrl={msg.video_url}
                                                     videoDuration={msg.video_duration}
@@ -2346,8 +2600,8 @@ export function ChatInterface() {
                         </div>
                     )}
 
-                    {/* Input Area - Hidden for gallery, archived, and audio models (TTSComposer handles audio) */}
-                    {activeTabId !== null && !activeTab?.isGallery && !selectedProjectModel?.supports_audio_generation && (
+                    {/* Input Area - Hidden for gallery, archived, and audio conversations (TTSComposer handles audio) */}
+                    {activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && (
                         activeTab?.isArchived ? (
                             <div className="p-4 border-t border-border/50 bg-orange-500/5">
                                 <div className="flex items-center justify-center gap-2 text-orange-400 text-sm">
@@ -2357,8 +2611,8 @@ export function ChatInterface() {
                             </div>
                         ) : (
                             <div className="flex flex-col">
-                                {/* Generation Mode Selector - Only for video models (not audio models) */}
-                                {selectedProjectModel?.supports_video_generation && !selectedProjectModel?.supports_audio_generation && (
+                                {/* Generation Mode Selector - Only for video conversations */}
+                                {isVideoConversation && (
                                     <div className="flex justify-center py-2 border-t border-border/50">
                                         <GenerationModeSelector
                                             mode={generationMode}
@@ -2370,32 +2624,77 @@ export function ChatInterface() {
                                                 }
                                             }}
                                             disabled={isSending}
-                                            imageDisabled={!projectModels.some(m => m.supports_image_generation)}
+                                            imageDisabled={!hasImageModelsForVideo}
                                         />
+                                    </div>
+                                )}
+                                {/* Quality Tier Selector */}
+                                {projectUsage && currentConversation?.generation_type && (
+                                    <div className="flex justify-center py-2 border-t border-border/50">
+                                        <QualitySelector
+                                            selectedQuality={selectedQualityTier}
+                                            onSelect={setSelectedQualityTier}
+                                            disabled={isSending}
+                                            normalUsage={
+                                                isVideoConversation && generationMode === "image"
+                                                    ? projectUsage.image?.normal
+                                                    : projectUsage[currentConversation.generation_type]?.normal
+                                            }
+                                            hqUsage={
+                                                isVideoConversation && generationMode === "image"
+                                                    ? projectUsage.image?.hq
+                                                    : projectUsage[currentConversation.generation_type]?.hq
+                                            }
+                                            showUsage={true}
+                                        />
+                                    </div>
+                                )}
+                                {/* Selected Seed Indicator */}
+                                {selectedSeed && (isImageConversation || isVideoConversation) && (
+                                    <div className="flex items-center justify-center gap-2 py-2 px-4 border-t border-border/50">
+                                        <div className="flex items-center gap-2 bg-purple-500/10 text-purple-400 px-3 py-1.5 rounded-full text-sm">
+                                            <Dices className="h-4 w-4" />
+                                            <span className="font-mono">Seed: {selectedSeed}</span>
+                                            <button
+                                                onClick={() => setSelectedSeed(null)}
+                                                className="hover:bg-purple-500/20 rounded-full p-0.5 transition-colors"
+                                                title="Limpiar seed"
+                                            >
+                                                <X className="h-3 w-3" />
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                                 <MessageInput
                                     onSend={(content, files) => {
-                                        // Route based on generation mode and model capabilities
-                                        if (selectedProjectModel?.supports_audio_generation) {
-                                            // Audio model - send to audio endpoint
-                                            sendAudioMessage(content);
-                                        } else if (selectedProjectModel?.supports_video_generation && generationMode === "video") {
-                                            sendVideoMessage(content);
-                                        } else {
-                                            // Use image model if in image mode, otherwise use current model
-                                            const modelOverride = generationMode === "image" ? imageModelIdForGeneration : undefined;
-                                            const imgSettings = generationMode === "image" ? {
+                                        // Route based on generation type
+                                        if (isVideoConversation && generationMode === "video") {
+                                            sendVideoMessage(content, selectedSeed || undefined);
+                                            // Clear selected seed after use
+                                            if (selectedSeed) setSelectedSeed(null);
+                                        } else if (isImageConversation || (isVideoConversation && generationMode === "image")) {
+                                            // Image generation
+                                            const imgSettings = {
                                                 aspectRatio: imageAspectRatio,
                                                 size: imageSize,
-                                            } : undefined;
-                                            sendMessage(content, files, modelOverride, imgSettings);
+                                                negativePrompt: imageNegativePrompt || undefined,
+                                                isImagen4: isImagen4Model,
+                                                seed: selectedSeed || undefined,
+                                            };
+                                            // Pass generation_type_override when in video conversation with image mode
+                                            const typeOverride = isVideoConversation && generationMode === "image" ? "image" as const : undefined;
+                                            sendMessage(content, files, undefined, imgSettings, typeOverride);
+                                            // Clear selected seed after use
+                                            if (selectedSeed) setSelectedSeed(null);
+                                        } else {
+                                            // Text generation
+                                            sendMessage(content, files);
                                         }
                                         // Clear selected images after sending
                                         setSelectedConversationImages([]);
                                     }}
-                                    disabled={isSending || !selectedModelId}
-                                    supportsFiles={!selectedProjectModel?.supports_audio_generation && (generationMode === "image" || !selectedProjectModel?.supports_video_generation)}
+                                    disabled={isSending || !currentModelInfo?.id}
+                                    supportsFiles={isTextConversation || isImageConversation || (isVideoConversation && generationMode === "image")}
                                     preselectedImages={selectedConversationImages.map(url => ({ url }))}
                                     onRemovePreselectedImage={(url) => setSelectedConversationImages(prev => prev.filter(u => u !== url))}
                                 />
@@ -2484,78 +2783,45 @@ export function ChatInterface() {
                             </div>
                         )}
 
-                        {/* Model Selector / Display */}
-                        <div>
-                            <label className="text-sm font-medium mb-2 block">Modelo</label>
-                            {loadingModels ? (
-                                <div className="flex items-center justify-center py-2">
-                                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground"/>
-                                </div>
-                            ) : projectModels.length === 0 ? (
-                                <div className="text-sm text-muted-foreground bg-muted rounded-lg p-3 text-center">
-                                    No hay modelos asignados a este proyecto
-                                </div>
-                            ) : activeTab?.isArchived ? (
-                                <div className="bg-card border border-border/30 rounded-lg px-3 py-2 text-sm text-muted-foreground">
-                                    {selectedProjectModel?.model_display_name || "Modelo no disponible"}
-                                </div>
-                            ) : (
-                                <select
-                                    className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
-                                    value={selectedModelId || ""}
-                                    onChange={(e) => handleModelChange(Number(e.target.value))}
-                                    disabled={isSending}
-                                >
-                                    {projectModels.map((m) => (
-                                        <option key={m.model_id} value={m.model_id}>
-                                            {m.model_display_name}
-                                        </option>
-                                    ))}
-                                </select>
-                            )}
-                        </div>
-
-                        {/* Project System Instruction (read-only) */}
-                        {selectedProjectModel?.system_instruction?.trim() && (
-                            <div className="space-y-2">
-                                <div className="flex items-center justify-between">
-                                    <label className="text-sm font-medium flex items-center gap-2">
-                                        Instrucción base del proyecto
-                                        {(messages.length > 0 || activeTab?.isArchived) &&
-                                            <Lock className="h-3 w-3 text-muted-foreground"/>}
-                                    </label>
-                                    {!activeTab?.isArchived && messages.length === 0 ? (
-                                        <label className="flex items-center gap-2 cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                checked={useProjectSystemInstruction}
-                                                onChange={(e) => setUseProjectSystemInstruction(e.target.checked)}
-                                                className="w-4 h-4 rounded border-border/50 bg-muted accent-primary"
-                                            />
-                                            <span className="text-xs text-muted-foreground">Utilizar</span>
-                                        </label>
-                                    ) : (
-                                        <span className="text-xs text-muted-foreground">
-                      {useProjectSystemInstruction ? "Activo" : "Inactivo"}
-                    </span>
-                                    )}
-                                </div>
-                                <div
-                                    className={`bg-card border border-border/30 rounded-lg px-3 py-2 text-sm ${
-                                        !useProjectSystemInstruction ? "opacity-50" : ""
-                                    }`}
-                                >
-                                    <p className="text-muted-foreground whitespace-pre-wrap">
-                                        {selectedProjectModel.system_instruction}
-                                    </p>
+                        {/* Model & Quality Selector */}
+                        <div className="space-y-3">
+                            <div>
+                                <label className="text-sm font-medium mb-2 block">Modelo</label>
+                                <div className="bg-card border border-border/30 rounded-lg px-3 py-2 text-sm">
+                                    {currentModelInfo?.name || "Sin modelo asignado"}
                                 </div>
                             </div>
-                        )}
+
+                            {/* Quality Selector - only show if not archived and has both models */}
+                            {!activeTab?.isArchived && currentTypeConfig && (currentTypeConfig.model_normal_id || currentTypeConfig.model_hq_id) && (
+                                <div>
+                                    <label className="text-sm font-medium mb-2 block">Calidad</label>
+                                    <QualitySelectorCompact
+                                        selectedQuality={selectedQualityTier}
+                                        onSelect={setSelectedQualityTier}
+                                        disabled={isSending || messages.length > 0}
+                                    />
+                                    {messages.length > 0 && (
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            La calidad no se puede cambiar después del primer mensaje
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Generation Type Badge */}
+                            {currentConversation?.generation_type && (
+                                <div>
+                                    <label className="text-sm font-medium mb-2 block">Tipo</label>
+                                    <GenerationTypeBadge type={currentConversation.generation_type} />
+                                </div>
+                            )}
+                        </div>
 
                         {/* System Instruction */}
                         <div>
                             <label className="text-sm font-medium mb-2 flex items-center gap-2">
-                                Instrucción del sistema {selectedProjectModel?.system_instruction ? "(adicional)" : ""}
+                                Instrucción del sistema
                                 {(messages.length > 0 || activeTab?.isArchived) &&
                                     <Lock className="h-3 w-3 text-muted-foreground"/>}
                             </label>
@@ -2564,9 +2830,7 @@ export function ChatInterface() {
                                     value={systemInstruction}
                                     onChange={(e) => setSystemInstruction(e.target.value)}
                                     onBlur={(e) => handleSettingChange("system_instruction", e.target.value)}
-                                    placeholder={selectedProjectModel?.system_instruction
-                                        ? "Instrucciones adicionales para esta conversación..."
-                                        : "Eres un asistente útil..."}
+                                    placeholder="Eres un asistente útil..."
                                     rows={4}
                                     disabled={isSending}
                                     className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm resize-none disabled:opacity-50"
@@ -2593,67 +2857,83 @@ export function ChatInterface() {
                             )}
                         </div>
 
-                        {/* Model Info */}
-                        {selectedProjectModel && (
-                            <div className="bg-muted rounded-lg p-3 text-xs text-muted-foreground">
-                                <div className="font-medium text-foreground mb-1">
-                                    {selectedProjectModel.model_display_name}
-                                </div>
-                                <div className="font-mono">{selectedProjectModel.model_model_id}</div>
-                            </div>
-                        )}
-
-                        {/* Image Generation Settings - Only show for models that support it and not archived */}
-                        {selectedProjectModel?.supports_image_generation && !activeTab?.isArchived && (
+                        {/* Image Generation Settings - Only show for image conversations */}
+                        {isImageConversation && !activeTab?.isArchived && (
                             <div className="space-y-4 p-4 bg-card rounded-lg border border-border/50">
-                                <div className="flex items-center gap-2 text-sm font-medium">
-                                    <ImageIcon className="h-4 w-4 text-primary"/>
-                                    Generación de Imágenes
-                                </div>
-
-                                {/* Aspect Ratio */}
-                                <div>
-                                    <label className="text-xs text-muted-foreground mb-2 block">
-                                        Relación de aspecto
-                                    </label>
-                                    <select
-                                        className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
-                                        value={imageAspectRatio}
-                                        onChange={(e) => handleSettingChange("image_aspect_ratio", e.target.value)}
+                                {isImagen4Model ? (
+                                    /* Imagen 4 specific settings with more options */
+                                    <ImageSettings
+                                        aspectRatio={imageAspectRatio as ImagenAspectRatio}
+                                        resolution={imageSize as ImagenResolution}
+                                        negativePrompt={imageNegativePrompt}
                                         disabled={isSending}
-                                    >
-                                        <option value="16:9">16:9 (Panorámico)</option>
-                                        <option value="1:1">1:1 (Cuadrado)</option>
-                                        <option value="9:16">9:16 (Móvil vertical)</option>
-                                        <option value="4:3">4:3 (Paisaje)</option>
-                                        <option value="3:4">3:4 (Retrato)</option>
-                                        <option value="3:2">3:2 (Paisaje)</option>
-                                        <option value="2:3">2:3 (Retrato)</option>
-                                        <option value="21:9">21:9 (Ultra panorámico)</option>
-                                    </select>
-                                </div>
+                                        onChange={(settings) => {
+                                            if (settings.aspectRatio !== undefined) {
+                                                setImageAspectRatio(settings.aspectRatio);
+                                                handleSettingChange("image_aspect_ratio", settings.aspectRatio);
+                                            }
+                                            if (settings.resolution !== undefined) {
+                                                setImageSize(settings.resolution);
+                                                handleSettingChange("image_size", settings.resolution);
+                                            }
+                                            if (settings.negativePrompt !== undefined) {
+                                                setImageNegativePrompt(settings.negativePrompt);
+                                            }
+                                        }}
+                                    />
+                                ) : (
+                                    /* Gemini native image settings */
+                                    <>
+                                        <div className="flex items-center gap-2 text-sm font-medium">
+                                            <ImageIcon className="h-4 w-4 text-primary"/>
+                                            Generacion de Imagenes
+                                        </div>
 
-                                {/* Image Size */}
-                                <div>
-                                    <label className="text-xs text-muted-foreground mb-2 block">
-                                        Tamaño de imagen
-                                    </label>
-                                    <select
-                                        className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
-                                        value={imageSize}
-                                        onChange={(e) => handleSettingChange("image_size", e.target.value)}
-                                        disabled={isSending}
-                                    >
-                                        <option value="1K">1K (Estándar)</option>
-                                        <option value="2K">2K (Alta definición)</option>
-                                        <option value="4K">4K (Ultra alta definición)</option>
-                                    </select>
-                                </div>
+                                        {/* Aspect Ratio */}
+                                        <div>
+                                            <label className="text-xs text-muted-foreground mb-2 block">
+                                                Relacion de aspecto
+                                            </label>
+                                            <select
+                                                className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
+                                                value={imageAspectRatio}
+                                                onChange={(e) => handleSettingChange("image_aspect_ratio", e.target.value)}
+                                                disabled={isSending}
+                                            >
+                                                <option value="16:9">16:9 (Panoramico)</option>
+                                                <option value="1:1">1:1 (Cuadrado)</option>
+                                                <option value="9:16">9:16 (Movil vertical)</option>
+                                                <option value="4:3">4:3 (Paisaje)</option>
+                                                <option value="3:4">3:4 (Retrato)</option>
+                                                <option value="3:2">3:2 (Paisaje)</option>
+                                                <option value="2:3">2:3 (Retrato)</option>
+                                                <option value="21:9">21:9 (Ultra panoramico)</option>
+                                            </select>
+                                        </div>
+
+                                        {/* Image Size */}
+                                        <div>
+                                            <label className="text-xs text-muted-foreground mb-2 block">
+                                                Tamano de imagen
+                                            </label>
+                                            <select
+                                                className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
+                                                value={imageSize}
+                                                onChange={(e) => handleSettingChange("image_size", e.target.value)}
+                                                disabled={isSending}
+                                            >
+                                                <option value="1K">1K (Estandar)</option>
+                                                <option value="2K">2K (Alta definicion)</option>
+                                                <option value="4K">4K (Ultra alta definicion)</option>
+                                            </select>
+                                        </div>
+                                    </>
+                                )}
                             </div>
                         )}
 
-                        {/* Video Generation Settings - Only show for video models when in video mode */}
-                        {selectedProjectModel?.supports_video_generation && !activeTab?.isArchived && generationMode === "video" && (
+                        {/* Video Generation Settings - Only show for video conversations in video mode */}
+                        {isVideoConversation && !activeTab?.isArchived && generationMode === "video" && (
                             <div className="space-y-4 p-4 bg-card rounded-lg border border-border/50">
                                 <VideoSettings
                                     duration={videoDuration}
@@ -2689,8 +2969,8 @@ export function ChatInterface() {
                             </div>
                         )}
 
-                        {/* Video Input Frames - Only show for video models when in video mode */}
-                        {selectedProjectModel?.supports_video_generation && !activeTab?.isArchived && generationMode === "video" && (
+                        {/* Video Input Frames - Only show for video conversations in video mode */}
+                        {isVideoConversation && !activeTab?.isArchived && generationMode === "video" && (
                             <div className="space-y-4 p-4 bg-card rounded-lg border border-border/50">
                                 <VideoInputFrames
                                     projectId={selectedProjectId!}
@@ -2701,73 +2981,84 @@ export function ChatInterface() {
                                     onLastFrameChange={setVideoLastFrame}
                                     onReferenceImagesChange={setVideoReferenceImages}
                                     disabled={isSending}
-                                    supportsReferenceImages={selectedProjectModel?.supports_reference_images ?? false}
+                                    supportsReferenceImages={true}
                                 />
                             </div>
                         )}
 
                         {/* Audio Settings removed from sidebar - now integrated in TTSComposer in center */}
 
-                        {/* Image Settings when video model is in image mode */}
-                        {selectedProjectModel?.supports_video_generation && !activeTab?.isArchived && generationMode === "image" && (
-                            <>
-                                {/* Image Model Selector */}
-                                <div className="space-y-4 p-4 bg-card rounded-lg border border-border/50">
-                                    <ImageModelSelector
-                                        projectModels={projectModels}
-                                        selectedModelId={imageModelIdForGeneration}
-                                        onChange={setImageModelIdForGeneration}
+                        {/* Image Settings when video conversation is in image mode */}
+                        {isVideoConversation && !activeTab?.isArchived && generationMode === "image" && (
+                            <div className="space-y-4 p-4 bg-card rounded-lg border border-border/50">
+                                {isImagen4Model ? (
+                                    /* Imagen 4 specific settings */
+                                    <ImageSettings
+                                        aspectRatio={imageAspectRatio as ImagenAspectRatio}
+                                        resolution={imageSize as ImagenResolution}
+                                        negativePrompt={imageNegativePrompt}
                                         disabled={isSending}
+                                        onChange={(settings) => {
+                                            if (settings.aspectRatio !== undefined) {
+                                                setImageAspectRatio(settings.aspectRatio);
+                                            }
+                                            if (settings.resolution !== undefined) {
+                                                setImageSize(settings.resolution);
+                                            }
+                                            if (settings.negativePrompt !== undefined) {
+                                                setImageNegativePrompt(settings.negativePrompt);
+                                            }
+                                        }}
                                     />
-                                </div>
+                                ) : (
+                                    /* Gemini native image settings */
+                                    <>
+                                        <div className="flex items-center gap-2 text-sm font-medium">
+                                            <ImageIcon className="h-4 w-4 text-primary"/>
+                                            Configuracion de Imagen
+                                        </div>
 
-                                {/* Image Generation Settings */}
-                                <div className="space-y-4 p-4 bg-card rounded-lg border border-border/50">
-                                    <div className="flex items-center gap-2 text-sm font-medium">
-                                        <ImageIcon className="h-4 w-4 text-primary"/>
-                                        Configuración de Imagen
-                                    </div>
+                                        {/* Aspect Ratio */}
+                                        <div>
+                                            <label className="text-xs text-muted-foreground mb-2 block">
+                                                Relacion de aspecto
+                                            </label>
+                                            <select
+                                                className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
+                                                value={imageAspectRatio}
+                                                onChange={(e) => setImageAspectRatio(e.target.value)}
+                                                disabled={isSending}
+                                            >
+                                                <option value="16:9">16:9 (Panoramico)</option>
+                                                <option value="1:1">1:1 (Cuadrado)</option>
+                                                <option value="9:16">9:16 (Movil vertical)</option>
+                                                <option value="4:3">4:3 (Paisaje)</option>
+                                                <option value="3:4">3:4 (Retrato)</option>
+                                                <option value="3:2">3:2 (Paisaje)</option>
+                                                <option value="2:3">2:3 (Retrato)</option>
+                                                <option value="21:9">21:9 (Ultra panoramico)</option>
+                                            </select>
+                                        </div>
 
-                                    {/* Aspect Ratio */}
-                                    <div>
-                                        <label className="text-xs text-muted-foreground mb-2 block">
-                                            Relación de aspecto
-                                        </label>
-                                        <select
-                                            className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
-                                            value={imageAspectRatio}
-                                            onChange={(e) => setImageAspectRatio(e.target.value)}
-                                            disabled={isSending}
-                                        >
-                                            <option value="16:9">16:9 (Panorámico)</option>
-                                            <option value="1:1">1:1 (Cuadrado)</option>
-                                            <option value="9:16">9:16 (Móvil vertical)</option>
-                                            <option value="4:3">4:3 (Paisaje)</option>
-                                            <option value="3:4">3:4 (Retrato)</option>
-                                            <option value="3:2">3:2 (Paisaje)</option>
-                                            <option value="2:3">2:3 (Retrato)</option>
-                                            <option value="21:9">21:9 (Ultra panorámico)</option>
-                                        </select>
-                                    </div>
-
-                                    {/* Image Size */}
-                                    <div>
-                                        <label className="text-xs text-muted-foreground mb-2 block">
-                                            Tamaño de imagen
-                                        </label>
-                                        <select
-                                            className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
-                                            value={imageSize}
-                                            onChange={(e) => setImageSize(e.target.value)}
-                                            disabled={isSending}
-                                        >
-                                            <option value="1K">1K (Estándar)</option>
-                                            <option value="2K">2K (Alta definición)</option>
-                                            <option value="4K">4K (Ultra alta definición)</option>
-                                        </select>
-                                    </div>
-                                </div>
-                            </>
+                                        {/* Image Size */}
+                                        <div>
+                                            <label className="text-xs text-muted-foreground mb-2 block">
+                                                Tamano de imagen
+                                            </label>
+                                            <select
+                                                className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
+                                                value={imageSize}
+                                                onChange={(e) => setImageSize(e.target.value)}
+                                                disabled={isSending}
+                                            >
+                                                <option value="1K">1K (Estandar)</option>
+                                                <option value="2K">2K (Alta definicion)</option>
+                                                <option value="4K">4K (Ultra alta definicion)</option>
+                                            </select>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
                         )}
 
                         {/* Advanced Settings Toggle - Only show if not archived */}
@@ -2789,8 +3080,8 @@ export function ChatInterface() {
                                 {/* Advanced Settings */}
                                 {showAdvanced && (
                                     <div className="space-y-6 pt-2 border-t border-border/50">
-                                        {/* Only show sampling params for text/image models, not video-only */}
-                                        {!(selectedProjectModel?.supports_video_generation && generationMode === "video") && (
+                                        {/* Only show sampling params for text/image, not video generation */}
+                                        {!(isVideoConversation && generationMode === "video") && (
                                             <>
                                                 {/* Temperature */}
                                                 <div>
@@ -2915,6 +3206,39 @@ export function ChatInterface() {
                     </div>
                 </div>
             )}
+
+            {/* New Conversation Modal */}
+            <Dialog open={showNewConversationModal} onOpenChange={setShowNewConversationModal}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Nueva conversación</DialogTitle>
+                        <DialogDescription>
+                            Selecciona el tipo de contenido que deseas generar
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                        <GenerationTypeSelector
+                            enabledTypes={generationConfig.map(c => ({ type: c.generation_type, isEnabled: c.is_enabled }))}
+                            selectedType={newConversationType}
+                            onSelect={setNewConversationType}
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setShowNewConversationModal(false)}>
+                            Cancelar
+                        </Button>
+                        <Button
+                            onClick={() => {
+                                handleNewTab();
+                                setShowNewConversationModal(false);
+                            }}
+                            disabled={!generationConfig.some(c => c.is_enabled && c.generation_type === newConversationType)}
+                        >
+                            Crear conversación
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

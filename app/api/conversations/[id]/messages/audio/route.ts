@@ -22,11 +22,14 @@ import {
   AudioSpeakerConfig,
 } from "@/types/audio";
 
+type QualityTier = "normal" | "hq";
+
 interface ConversationRow extends RowDataPacket {
   id: number;
   user_id: number;
   project_id: number | null;
   model_id: number;
+  generation_type: string;
   model_model_id: string;
   system_instruction: string | null;
   audio_voice_id: AudioVoiceId;
@@ -42,6 +45,8 @@ interface ConversationRow extends RowDataPacket {
 interface AudioLimitRow extends RowDataPacket {
   max_monthly_audio_generations: number;
   current_month_audio_count: number;
+  max_monthly_audio_normal: number;
+  max_monthly_audio_hq: number;
 }
 
 interface MessageRow extends RowDataPacket {
@@ -83,6 +88,7 @@ export async function POST(
     const {
       content,
       audioSettings,
+      quality_tier = "normal",
     } = body as {
       content: string;
       audioSettings?: {
@@ -92,7 +98,11 @@ export async function POST(
         speakerConfig?: AudioSpeakerConfig;
         outputFormat?: AudioOutputFormat;
       };
+      quality_tier?: QualityTier;
     };
+
+    // Validate quality_tier
+    const effectiveQualityTier: QualityTier = quality_tier === "hq" ? "hq" : "normal";
 
     console.log("[Audio API] Received audioSettings:", audioSettings);
 
@@ -134,6 +144,40 @@ export async function POST(
 
     const conversation = conversations[0];
 
+    // Get the correct model from project_generation_config based on quality_tier
+    let effectiveModelId = conversation.model_model_id;
+    let effectiveCostAudioPerMinute = Number(conversation.cost_audio_per_minute) || 0;
+    const generationType = conversation.generation_type || "audio";
+
+    if (conversation.project_id) {
+      const [configRows] = await pool.execute<RowDataPacket[]>(`
+        SELECT
+          pgc.model_normal_id,
+          pgc.model_hq_id,
+          mn.model_id as model_normal_model_id,
+          mn.cost_audio_per_minute as mn_cost_audio,
+          mh.model_id as model_hq_model_id,
+          mh.cost_audio_per_minute as mh_cost_audio
+        FROM project_generation_config pgc
+        LEFT JOIN models mn ON pgc.model_normal_id = mn.id
+        LEFT JOIN models mh ON pgc.model_hq_id = mh.id
+        WHERE pgc.project_id = ? AND pgc.generation_type = ? AND pgc.is_enabled = 1
+      `, [conversation.project_id, generationType]);
+
+      if (configRows.length > 0) {
+        const config = configRows[0];
+        if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
+          effectiveModelId = config.model_hq_model_id;
+          effectiveCostAudioPerMinute = Number(config.mh_cost_audio) || 0;
+          console.log(`[Audio] Using HQ model from config: ${effectiveModelId}`);
+        } else if (config.model_normal_model_id) {
+          effectiveModelId = config.model_normal_model_id;
+          effectiveCostAudioPerMinute = Number(config.mn_cost_audio) || 0;
+          console.log(`[Audio] Using Normal model from config: ${effectiveModelId}`);
+        }
+      }
+    }
+
     // Verificar que el modelo soporta audio generation
     if (!conversation.supports_audio_generation) {
       return new Response(JSON.stringify({ error: "El modelo seleccionado no soporta generación de audio" }), {
@@ -142,14 +186,53 @@ export async function POST(
       });
     }
 
-    // TODO: Verificar límite de generaciones de audio mensuales cuando se agregue a project_users
-    // Por ahora no hay límite definido para audio
+    // Verificar límite de generaciones de audio mensuales (por calidad)
+    if (conversation.project_id && session.user.role !== "admin") {
+      const limitColumn = effectiveQualityTier === "hq"
+        ? "max_monthly_audio_hq"
+        : "max_monthly_audio_normal";
 
-    // Guardar mensaje del usuario
+      const [limitRows] = await pool.execute<RowDataPacket[]>(`
+        SELECT
+          COALESCE(pu.${limitColumn}, 0) as max_limit,
+          (
+            SELECT COUNT(*)
+            FROM messages m
+            JOIN conversations c ON m.conversation_id = c.id
+            WHERE c.project_id = ?
+              AND c.user_id = ?
+              AND m.role = 'model'
+              AND m.audio_url IS NOT NULL
+              AND m.quality_tier = ?
+              AND m.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01')
+          ) as current_count
+        FROM project_users pu
+        WHERE pu.project_id = ? AND pu.user_id = ?
+      `, [conversation.project_id, session.user.id, effectiveQualityTier, conversation.project_id, session.user.id]);
+
+      if (limitRows.length > 0) {
+        const maxLimit = limitRows[0].max_limit;
+        const currentCount = limitRows[0].current_count;
+        if (maxLimit > 0 && currentCount >= maxLimit) {
+          return new Response(JSON.stringify({
+            error: `Has alcanzado el límite de generaciones de audio ${effectiveQualityTier === 'hq' ? 'HQ' : 'normales'} mensuales para este proyecto`,
+            type: "audio_limit",
+            limit: maxLimit,
+            used: currentCount,
+            quality_tier: effectiveQualityTier
+          }), {
+            status: 429,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      }
+    }
+
+    // Guardar mensaje del usuario (con quality_tier)
     const [userMessageResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, content)
-       VALUES (?, 'user', 'text', ?)`,
-      [id, content]
+      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)
+       VALUES (?, 'user', 'text', ?, ?)`,
+      [id, effectiveQualityTier, content]
     );
     const userMessageId = userMessageResult.insertId;
 
@@ -228,7 +311,8 @@ export async function POST(
           }
 
           console.log("\n========== [AUDIO GENERATION REQUEST] ==========");
-          console.log("Model:", conversation.model_model_id);
+          console.log("Model:", effectiveModelId);
+          console.log("Quality tier:", effectiveQualityTier);
           console.log("Voice ID:", voiceId);
           console.log("Style Prompt:", stylePrompt || "(none)");
           console.log("Multi-speaker:", multiSpeaker);
@@ -260,7 +344,7 @@ export async function POST(
             }
 
             generatedAudio = await generateMultiSpeakerAudio(
-              conversation.model_model_id,
+              effectiveModelId,
               content,
               {
                 speakers: speakerConfig.speakers,
@@ -272,7 +356,7 @@ export async function POST(
             voiceConfig = speakerConfig;
           } else {
             generatedAudio = await generateSingleSpeakerAudio(
-              conversation.model_model_id,
+              effectiveModelId,
               content,
               {
                 voiceId,
@@ -319,7 +403,7 @@ export async function POST(
             mimeType
           );
 
-          // Calculate estimated cost for audio generation
+          // Calculate estimated cost for audio generation using effective model cost
           const durationMinutes = generatedAudio.duration / 60;
           const estimatedCost = calculateEstimatedCost(
             {
@@ -329,7 +413,7 @@ export async function POST(
               cost_image_2k: 0,
               cost_image_4k: 0,
               cost_video_per_second: 0,
-              cost_audio_per_minute: Number(conversation.cost_audio_per_minute) || 0,
+              cost_audio_per_minute: effectiveCostAudioPerMinute,
             },
             {
               tokensInput: 0,
@@ -340,13 +424,14 @@ export async function POST(
             }
           );
 
-          // Guardar respuesta del modelo en la base de datos
+          // Guardar respuesta del modelo en la base de datos (con quality_tier)
           // Guardamos el content original para permitir restauración de la configuración
           const [modelResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, content, audio_url, audio_mime_type, audio_file_size, audio_duration, audio_voice_config, estimated_cost)
-             VALUES (?, 'model', 'audio', ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, audio_url, audio_mime_type, audio_file_size, audio_duration, audio_voice_config, estimated_cost)
+             VALUES (?, 'model', 'audio', ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               id,
+              effectiveQualityTier,
               content, // Guardar el texto original para poder restaurarlo luego
               uploadResult.url,
               mimeType,
@@ -393,10 +478,10 @@ export async function POST(
           console.error("[Audio] Error generating audio:", error);
           const errorMessage = error instanceof Error ? error.message : "Error desconocido";
 
-          // Guardar mensaje de error
+          // Guardar mensaje de error (con content_type 'error' para excluirlo del historial)
           const [modelResult] = await pool.execute<ResultSetHeader>(
             `INSERT INTO messages (conversation_id, role, content_type, content)
-             VALUES (?, 'model', 'text', ?)`,
+             VALUES (?, 'model', 'error', ?)`,
             [id, `Error generando audio: ${errorMessage}`]
           );
 

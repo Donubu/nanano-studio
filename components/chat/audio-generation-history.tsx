@@ -64,10 +64,11 @@ function formatTime(dateString: string): string {
 }
 
 export function AudioGenerationHistory({ messages, onRestore }: AudioGenerationHistoryProps) {
-  // Filter messages that have audio or are generating audio
-  const audioMessages = messages.filter(
-    (msg) => msg.role === "model" && (msg.audio_url || msg.isAudioGenerating)
-  );
+  // Filter messages that have audio or are generating audio, most recent first
+  const audioMessages = messages
+    .filter((msg) => msg.role === "model" && (msg.audio_url || msg.isAudioGenerating))
+    .slice()
+    .reverse();
 
   if (audioMessages.length === 0) {
     return (

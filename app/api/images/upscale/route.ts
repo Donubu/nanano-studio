@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { uploadToS3 } from "@/lib/s3";
+import pool from "@/lib/db";
+import { ResultSetHeader } from "mysql2";
 
 const TOPAZ_API_KEY = process.env.TOPAZ_API_KEY || "";
 
@@ -8,6 +10,7 @@ interface UpscaleRequest {
   imageUrl: string;
   width: number;
   height: number;
+  messageId?: number;
 }
 
 // Generar la URL de la versión 2x
@@ -55,7 +58,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body: UpscaleRequest = await request.json();
-    const { imageUrl, width, height } = body;
+    const { imageUrl, width, height, messageId } = body;
 
     if (!imageUrl || !width || !height) {
       return NextResponse.json({ error: "Parámetros requeridos: imageUrl, width, height" }, { status: 400 });
@@ -71,7 +74,18 @@ export async function POST(request: NextRequest) {
     // Verificar si ya existe la versión 2x
     const exists = await check2xExists(url2x);
     if (exists) {
-      return NextResponse.json({ url: url2x, cached: true });
+      // Also update database if messageId provided (might have been generated before tracking)
+      if (messageId) {
+        try {
+          await pool.execute<ResultSetHeader>(
+            "UPDATE messages SET has_2x = 1 WHERE id = ?",
+            [messageId]
+          );
+        } catch {
+          // Ignore errors on cached check
+        }
+      }
+      return NextResponse.json({ url: url2x, cached: true, has_2x: true });
     }
 
     // Descargar imagen original
@@ -140,10 +154,25 @@ export async function POST(request: NextRequest) {
 
     console.log("[Upscale] Completado:", result.url);
 
+    // Update database to mark has_2x = true if messageId provided
+    if (messageId) {
+      try {
+        await pool.execute<ResultSetHeader>(
+          "UPDATE messages SET has_2x = 1 WHERE id = ?",
+          [messageId]
+        );
+        console.log("[Upscale] Marcado has_2x=true para mensaje:", messageId);
+      } catch (dbError) {
+        console.error("[Upscale] Error actualizando has_2x:", dbError);
+        // Don't fail the request, the upscale was successful
+      }
+    }
+
     return NextResponse.json({
       url: result.url,
       cached: false,
-      fileSize: result.fileSize
+      fileSize: result.fileSize,
+      has_2x: true
     });
 
   } catch (error) {

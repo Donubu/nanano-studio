@@ -3,16 +3,52 @@
 import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Download, ZoomIn, Loader2, Check, Mic } from "lucide-react";
+import { Download, ZoomIn, Loader2, Check, Mic, AlertCircle, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VideoPlayer } from "./video-player";
 import { VideoProgress } from "./video-progress";
 import { VideoGenerationStatus } from "@/types/video";
 import { AudioPlayer } from "./audio-player";
 import { AudioGenerationStatus, AudioVoiceConfig, AudioSpeakerConfig } from "@/types/audio";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+
+// Parse error message to extract code and details
+function parseErrorMessage(content: string): { code?: string | number; message: string; details?: string } {
+  // Try to extract JSON error from the content
+  const jsonMatch = content.match(/\{[\s\S]*"error"[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const error = parsed.error || parsed;
+      return {
+        code: error.code || error.status,
+        message: error.message?.split("\\n")[0]?.replace(/^"|"$/g, '') || content.split(":")[0],
+        details: jsonMatch[0],
+      };
+    } catch {
+      // If JSON parsing fails, return raw content
+    }
+  }
+
+  // Fallback: extract simple error format
+  const colonIndex = content.indexOf(":");
+  if (content.startsWith("Error") && colonIndex > 0) {
+    return {
+      message: content.substring(0, colonIndex),
+      details: content.substring(colonIndex + 1).trim(),
+    };
+  }
+
+  return { message: content };
+}
 
 interface MessageContentProps {
   content: string;
+  contentType?: string;
   imageUrl?: string | null;
   // Video fields
   videoUrl?: string | null;
@@ -126,6 +162,7 @@ const getImageFormat = (url: string): string => {
 
 export function MessageContent({
   content,
+  contentType,
   imageUrl,
   videoUrl,
   videoDuration,
@@ -145,6 +182,8 @@ export function MessageContent({
   onImageSelect,
   allowImageSelection = false,
 }: MessageContentProps) {
+  const [errorExpanded, setErrorExpanded] = useState(false);
+  const isError = contentType === "error" || content.startsWith("Error");
   const [imageMetadata, setImageMetadata] = useState<ImageMetadata | null>(null);
   const [upscaling, setUpscaling] = useState(false);
 
@@ -356,8 +395,56 @@ export function MessageContent({
         />
       )}
 
+      {/* Error Message - Collapsible */}
+      {content && isError && !isUser && (
+        <Collapsible open={errorExpanded} onOpenChange={setErrorExpanded}>
+          <div className="bg-red-500/10 border border-red-500/30 rounded-lg overflow-hidden">
+            <CollapsibleTrigger className="w-full px-4 py-3 flex items-center gap-3 hover:bg-red-500/5 transition-colors">
+              <AlertCircle className="h-5 w-5 text-red-500 shrink-0" />
+              <div className="flex-1 text-left">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-red-400">Error</span>
+                  {(() => {
+                    const parsed = parseErrorMessage(content);
+                    return parsed.code ? (
+                      <span className="px-2 py-0.5 bg-red-500/20 text-red-300 text-xs rounded-full font-mono">
+                        {parsed.code}
+                      </span>
+                    ) : null;
+                  })()}
+                </div>
+                <p className="text-xs text-red-300/70 mt-0.5 line-clamp-1">
+                  {parseErrorMessage(content).message.substring(0, 100)}
+                </p>
+              </div>
+              <ChevronDown className={cn(
+                "h-4 w-4 text-red-400 transition-transform shrink-0",
+                errorExpanded && "rotate-180"
+              )} />
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="px-4 pb-4 pt-2 border-t border-red-500/20">
+                <pre className="text-xs text-red-200/80 whitespace-pre-wrap break-all bg-red-950/30 p-3 rounded-md overflow-x-auto max-h-64 overflow-y-auto">
+                  {(() => {
+                    const parsed = parseErrorMessage(content);
+                    if (parsed.details) {
+                      try {
+                        return JSON.stringify(JSON.parse(parsed.details), null, 2);
+                      } catch {
+                        return parsed.details;
+                      }
+                    }
+                    return content;
+                  })()}
+                </pre>
+              </div>
+            </CollapsibleContent>
+          </div>
+        </Collapsible>
+      )}
+
       {/* Contenido de texto con Markdown */}
-      {content && (
+      {content && !isError && (
         <div
           className={cn(
             "prose prose-sm max-w-none",

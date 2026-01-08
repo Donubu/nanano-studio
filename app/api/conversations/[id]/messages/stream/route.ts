@@ -47,11 +47,15 @@ interface MessageRow extends RowDataPacket {
   created_at: Date;
 }
 
+type GenerationType = "text" | "image" | "video" | "audio";
+type QualityTier = "normal" | "hq";
+
 interface ConversationRow extends RowDataPacket {
   id: number;
   user_id: number;
   project_id: number | null;
   model_id: number;
+  generation_type: GenerationType;
   model_model_id: string;
   system_instruction: string | null;
   temperature: number;
@@ -71,6 +75,11 @@ interface ConversationRow extends RowDataPacket {
   cost_video_per_second: number;
 }
 
+interface GenerationConfigRow extends RowDataPacket {
+  model_normal_id: number | null;
+  model_hq_id: number | null;
+}
+
 interface ProjectModelRow extends RowDataPacket {
   system_instruction: string | null;
 }
@@ -78,6 +87,11 @@ interface ProjectModelRow extends RowDataPacket {
 interface ImageLimitRow extends RowDataPacket {
   max_monthly_image_generations: number;
   current_month_image_count: number;
+  // New quality-based limits
+  max_monthly_image_normal: number;
+  max_monthly_image_hq: number;
+  max_monthly_text_normal: number;
+  max_monthly_text_hq: number;
 }
 
 interface ModelRow extends RowDataPacket {
@@ -110,13 +124,18 @@ export async function POST(
 
     const { id } = await params;
     const body = await request.json();
-    const { content, files, useProjectSystemInstruction = true, modelIdOverride, imageSettings } = body as {
+    const { content, files, useProjectSystemInstruction = true, modelIdOverride, imageSettings, quality_tier = "normal", generation_type_override } = body as {
       content: string;
       files?: AttachedFile[];
       useProjectSystemInstruction?: boolean;
       modelIdOverride?: number;
       imageSettings?: { aspectRatio: string; size: string };
+      quality_tier?: QualityTier;
+      generation_type_override?: GenerationType;
     };
+
+    // Validate quality_tier
+    const effectiveQualityTier: QualityTier = quality_tier === "hq" ? "hq" : "normal";
 
     if (!content || content.trim() === "") {
       return new Response(JSON.stringify({ error: "El contenido del mensaje es requerido" }), {
@@ -132,7 +151,7 @@ export async function POST(
 
     // Obtener conversación con configuración, nombre del proyecto y costos del modelo
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, p.title as project_name,
+      `SELECT c.*, c.generation_type, m.model_id as model_model_id, m.supports_image_generation, p.title as project_name,
               m.cost_input_per_million, m.cost_output_per_million,
               m.cost_image_1k, m.cost_image_2k, m.cost_image_4k, m.cost_video_per_second
        FROM conversations c
@@ -156,6 +175,82 @@ export async function POST(
     let effectiveSupportsImageGeneration = conversation.supports_image_generation;
     let effectiveImageAspectRatio = conversation.image_aspect_ratio;
     let effectiveImageSize = conversation.image_size;
+    let effectiveModelDbId = conversation.model_id; // Track the DB id for cost lookup
+
+    // Get the correct model from project_generation_config based on quality_tier
+    // Use generation_type_override if provided (e.g., when video conversation is in image mode)
+    const generationType = generation_type_override || conversation.generation_type || "text";
+    if (generation_type_override) {
+      console.log(`[Stream] Using generation_type_override: ${generation_type_override} (conversation type: ${conversation.generation_type})`);
+    }
+    // Track effective costs (will be updated if we get model from config)
+    let effectiveCosts = {
+      cost_input_per_million: Number(conversation.cost_input_per_million) || 0,
+      cost_output_per_million: Number(conversation.cost_output_per_million) || 0,
+      cost_image_1k: Number(conversation.cost_image_1k) || 0,
+      cost_image_2k: Number(conversation.cost_image_2k) || 0,
+      cost_image_4k: Number(conversation.cost_image_4k) || 0,
+      cost_video_per_second: Number(conversation.cost_video_per_second) || 0,
+    };
+
+    if (conversation.project_id && !modelIdOverride) {
+      const [configRows] = await pool.execute<RowDataPacket[]>(`
+        SELECT
+          pgc.model_normal_id,
+          pgc.model_hq_id,
+          mn.model_id as model_normal_model_id,
+          mn.supports_image_generation as model_normal_supports_image,
+          mn.cost_input_per_million as mn_cost_input,
+          mn.cost_output_per_million as mn_cost_output,
+          mn.cost_image_1k as mn_cost_image_1k,
+          mn.cost_image_2k as mn_cost_image_2k,
+          mn.cost_image_4k as mn_cost_image_4k,
+          mn.cost_video_per_second as mn_cost_video,
+          mh.model_id as model_hq_model_id,
+          mh.supports_image_generation as model_hq_supports_image,
+          mh.cost_input_per_million as mh_cost_input,
+          mh.cost_output_per_million as mh_cost_output,
+          mh.cost_image_1k as mh_cost_image_1k,
+          mh.cost_image_2k as mh_cost_image_2k,
+          mh.cost_image_4k as mh_cost_image_4k,
+          mh.cost_video_per_second as mh_cost_video
+        FROM project_generation_config pgc
+        LEFT JOIN models mn ON pgc.model_normal_id = mn.id
+        LEFT JOIN models mh ON pgc.model_hq_id = mh.id
+        WHERE pgc.project_id = ? AND pgc.generation_type = ? AND pgc.is_enabled = 1
+      `, [conversation.project_id, generationType]);
+
+      if (configRows.length > 0) {
+        const config = configRows[0];
+        if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
+          effectiveModelId = config.model_hq_model_id;
+          effectiveSupportsImageGeneration = config.model_hq_supports_image;
+          effectiveModelDbId = config.model_hq_id;
+          effectiveCosts = {
+            cost_input_per_million: Number(config.mh_cost_input) || 0,
+            cost_output_per_million: Number(config.mh_cost_output) || 0,
+            cost_image_1k: Number(config.mh_cost_image_1k) || 0,
+            cost_image_2k: Number(config.mh_cost_image_2k) || 0,
+            cost_image_4k: Number(config.mh_cost_image_4k) || 0,
+            cost_video_per_second: Number(config.mh_cost_video) || 0,
+          };
+          console.log(`[Stream] Using HQ model from config: ${effectiveModelId}`);
+        } else if (config.model_normal_model_id) {
+          effectiveModelId = config.model_normal_model_id;
+          effectiveSupportsImageGeneration = config.model_normal_supports_image;
+          effectiveModelDbId = config.model_normal_id;
+          effectiveCosts = {
+            cost_input_per_million: Number(config.mn_cost_input) || 0,
+            cost_output_per_million: Number(config.mn_cost_output) || 0,
+            cost_image_1k: Number(config.mn_cost_image_1k) || 0,
+            cost_image_2k: Number(config.mn_cost_image_2k) || 0,
+            cost_image_4k: Number(config.mn_cost_image_4k) || 0,
+            cost_video_per_second: Number(config.mn_cost_video) || 0,
+          };
+          console.log(`[Stream] Using Normal model from config: ${effectiveModelId}`);
+        }
+      }
+    }
 
     if (modelIdOverride && conversation.project_id) {
       // Verify the override model belongs to the same project
@@ -183,11 +278,22 @@ export async function POST(
       console.log(`[Stream] Using image settings override: ${effectiveImageAspectRatio}, ${effectiveImageSize}`);
     }
 
-    // Verificar límite de generaciones de imágenes si el modelo soporta imagen
-    if (conversation.project_id && session.user.role !== "admin" && effectiveSupportsImageGeneration) {
-      const [limitRows] = await pool.execute<ImageLimitRow[]>(`
+    // Verificar límite de generaciones según tipo de conversación y calidad
+    if (conversation.project_id && session.user.role !== "admin") {
+      // Determinar qué límite verificar según el tipo de generación
+      const limitColumn = effectiveQualityTier === "hq"
+        ? `max_monthly_${generationType}_hq`
+        : `max_monthly_${generationType}_normal`;
+
+      // Determinar qué URL verificar para contar generaciones
+      const urlColumn = generationType === "image" ? "image_url"
+        : generationType === "video" ? "video_url"
+        : generationType === "audio" ? "audio_url"
+        : null; // texto no tiene URL específica
+
+      const [limitRows] = await pool.execute<RowDataPacket[]>(`
         SELECT
-          COALESCE(pu.max_monthly_image_generations, 0) as max_monthly_image_generations,
+          COALESCE(pu.${limitColumn}, 0) as max_limit,
           (
             SELECT COUNT(*)
             FROM messages m
@@ -195,22 +301,25 @@ export async function POST(
             WHERE c.project_id = ?
               AND c.user_id = ?
               AND m.role = 'model'
-              AND m.image_url IS NOT NULL
+              AND m.quality_tier = ?
+              ${urlColumn ? `AND m.${urlColumn} IS NOT NULL` : "AND m.content IS NOT NULL AND m.image_url IS NULL AND m.video_url IS NULL AND m.audio_url IS NULL"}
               AND m.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01')
-          ) as current_month_image_count
+          ) as current_count
         FROM project_users pu
         WHERE pu.project_id = ? AND pu.user_id = ?
-      `, [conversation.project_id, session.user.id, conversation.project_id, session.user.id]);
+      `, [conversation.project_id, session.user.id, effectiveQualityTier, conversation.project_id, session.user.id]);
 
       if (limitRows.length > 0) {
-        const { max_monthly_image_generations, current_month_image_count } = limitRows[0];
+        const maxLimit = limitRows[0].max_limit;
+        const currentCount = limitRows[0].current_count;
         // 0 = sin límite, mayor a 0 = límite activo
-        if (max_monthly_image_generations > 0 && current_month_image_count >= max_monthly_image_generations) {
+        if (maxLimit > 0 && currentCount >= maxLimit) {
           return new Response(JSON.stringify({
-            error: "Has alcanzado el límite de generaciones de imágenes mensuales para este proyecto",
-            type: "image_limit",
-            limit: max_monthly_image_generations,
-            used: current_month_image_count
+            error: `Has alcanzado el límite de generaciones de ${generationType} ${effectiveQualityTier === 'hq' ? 'HQ' : 'normales'} mensuales para este proyecto`,
+            type: `${generationType}_limit`,
+            limit: maxLimit,
+            used: currentCount,
+            quality_tier: effectiveQualityTier
           }), {
             status: 429,
             headers: { "Content-Type": "application/json" },
@@ -260,18 +369,18 @@ export async function POST(
 
     // Guardar mensaje del usuario (con URL de imagen guardada, no base64)
     const [userMessageResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, content, image_url, image_mime_type)
-       VALUES (?, 'user', ?, ?, ?, ?)`,
-      [id, contentType, content, savedImageUrl, firstImage?.mimeType || null]
+      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, image_url, image_mime_type)
+       VALUES (?, 'user', ?, ?, ?, ?, ?)`,
+      [id, contentType, effectiveQualityTier, content, savedImageUrl, firstImage?.mimeType || null]
     );
 
     const userMessageId = userMessageResult.insertId;
 
-    // Obtener historial de mensajes para contexto
+    // Obtener historial de mensajes para contexto (excluir errores)
     const [historyRows] = await pool.execute<MessageRow[]>(
       `SELECT role, content, image_url, image_mime_type
        FROM messages
-       WHERE conversation_id = ?
+       WHERE conversation_id = ? AND content_type != 'error'
        ORDER BY created_at ASC`,
       [id]
     );
@@ -417,6 +526,19 @@ export async function POST(
                   encoder.encode(`data: ${JSON.stringify({ type: "chunk", text })}\n\n`)
                 );
               },
+              onRetry: (info) => {
+                if (!controllerClosed) {
+                  controller.enqueue(
+                    encoder.encode(`data: ${JSON.stringify({
+                      type: "retry",
+                      attempt: info.attempt,
+                      maxAttempts: info.maxAttempts,
+                      delaySeconds: Math.round(info.delayMs / 1000),
+                      error: info.error.substring(0, 200), // Truncar mensaje largo
+                    })}\n\n`)
+                  );
+                }
+              },
               onImage: async (image: GeneratedImage) => {
                 // Guardar imagen en S3 solo una vez (flag síncrono para evitar race condition)
                 if (imageUploadStarted) return;
@@ -476,16 +598,9 @@ export async function POST(
                 const imageAspectRatioToSave = imageUrl ? effectiveImageAspectRatio : null;
                 const imageSizeToSave = imageUrl ? effectiveImageSize : null;
 
-                // Calculate estimated cost
+                // Calculate estimated cost using effective model costs
                 const estimatedCost = calculateEstimatedCost(
-                  {
-                    cost_input_per_million: Number(conversation.cost_input_per_million) || 0,
-                    cost_output_per_million: Number(conversation.cost_output_per_million) || 0,
-                    cost_image_1k: Number(conversation.cost_image_1k) || 0,
-                    cost_image_2k: Number(conversation.cost_image_2k) || 0,
-                    cost_image_4k: Number(conversation.cost_image_4k) || 0,
-                    cost_video_per_second: Number(conversation.cost_video_per_second) || 0,
-                  },
+                  effectiveCosts,
                   {
                     tokensInput: tokenCount.input,
                     tokensOutput: tokenCount.output,
@@ -496,9 +611,9 @@ export async function POST(
                 );
 
                 const [modelResult] = await pool.execute<ResultSetHeader>(
-                  `INSERT INTO messages (conversation_id, role, content_type, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost)
-                   VALUES (?, 'model', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                  [id, contentType, text || "", imageUrl, imageMimeType, imageFileSize, imageAspectRatioToSave, imageSizeToSave, tokenCount.input, tokenCount.output, estimatedCost]
+                  `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost)
+                   VALUES (?, 'model', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  [id, contentType, effectiveQualityTier, text || "", imageUrl, imageMimeType, imageFileSize, imageAspectRatioToSave, imageSizeToSave, tokenCount.input, tokenCount.output, estimatedCost]
                 );
                 modelMessageId = modelResult.insertId;
 
@@ -545,11 +660,11 @@ export async function POST(
               onError: async (error) => {
                 console.error("Error en streaming:", error);
 
-                // Guardar mensaje de error como respuesta del modelo
+                // Guardar mensaje de error (con content_type 'error' para excluirlo del historial)
                 const errorMessage = `Error al generar respuesta: ${error.message}`;
                 const [modelResult] = await pool.execute<ResultSetHeader>(
                   `INSERT INTO messages (conversation_id, role, content_type, content)
-                   VALUES (?, 'model', 'text', ?)`,
+                   VALUES (?, 'model', 'error', ?)`,
                   [id, errorMessage]
                 );
 

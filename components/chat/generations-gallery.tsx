@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import {
   X, Loader2, ExternalLink, Image as ImageIcon, Video, Calendar, FileType,
   Maximize2, RatioIcon, Ruler, Download, HardDrive, Volume2, VolumeX, Clock,
-  ChevronLeft, ChevronRight, LayoutGrid, Search, Tag, Plus, Trash2, Upload, Music, User, Users
+  ChevronLeft, ChevronRight, LayoutGrid, Search, Tag, Plus, Trash2, Upload, Music, User, Users,
+  Sparkles, Copy, Check, Star
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,8 @@ import { formatDateTimeLocal } from "@/lib/utils";
 import { AudioVoiceConfig, AudioSpeakerConfig, getVoiceById } from "@/types/audio";
 
 type FilterType = "all" | "images" | "videos" | "audios";
+type QualityFilterType = "all" | "normal" | "hq";
+type FavoriteFilterType = "all" | "favorites";
 
 interface TagInfo {
   id: number;
@@ -28,11 +31,15 @@ interface Generation {
   conversation_user_id: number;
   conversation_title: string;
   content: string | null;
+  quality_tier: "normal" | "hq" | null;
+  generation_seed: number | null;
+  is_favorite: boolean;
   image_url: string | null;
   image_mime_type: string | null;
   image_file_size: number | null;
   image_aspect_ratio: string | null;
   image_size: string | null;
+  has_2x: boolean;
   video_url: string | null;
   video_mime_type: string | null;
   video_file_size: number | null;
@@ -84,11 +91,16 @@ interface GenerationsGalleryProps {
 export function GenerationsGallery({ projectId, currentUserId, onOpenConversation }: GenerationsGalleryProps) {
   // Filter states
   const [filter, setFilter] = useState<FilterType>("all");
+  const [qualityFilter, setQualityFilter] = useState<QualityFilterType>("all");
+  const [favoriteFilter, setFavoriteFilter] = useState<FavoriteFilterType>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [showDeleted, setShowDeleted] = useState(false);
   const [showUploads, setShowUploads] = useState(false);
+
+  // Copy seed state
+  const [copiedSeed, setCopiedSeed] = useState(false);
 
   // Data states
   const [generations, setGenerations] = useState<Generation[]>([]);
@@ -155,11 +167,15 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
             conversation_user_id: currentUserId,
             conversation_title: u.original_filename || "Imagen subida",
             content: u.original_filename || null,
+            quality_tier: null,
+            generation_seed: null,
+            is_favorite: false,
             image_url: u.image_url,
             image_mime_type: u.mime_type || null,
             image_file_size: u.file_size || null,
             image_aspect_ratio: null,
             image_size: null,
+            has_2x: false,
             video_url: null,
             video_mime_type: null,
             video_file_size: null,
@@ -209,11 +225,20 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const selectedItem = selectedIndex !== null ? generations[selectedIndex] : null;
+  // Apply quality and favorite filters early for navigation
+  const filteredGenerations = generations.filter(g => {
+    // Uploads don't have quality_tier, so exclude them from quality filtering
+    if (qualityFilter !== "all" && g.source !== "upload" && g.quality_tier !== qualityFilter) return false;
+    // Uploads can't be favorited, so exclude them from favorite filtering
+    if (favoriteFilter === "favorites" && g.source !== "upload" && !g.is_favorite) return false;
+    return true;
+  });
+
+  const selectedItem = selectedIndex !== null ? filteredGenerations[selectedIndex] : null;
 
   // Navigation
   const canGoPrev = selectedIndex !== null && selectedIndex > 0;
-  const canGoNext = selectedIndex !== null && selectedIndex < generations.length - 1;
+  const canGoNext = selectedIndex !== null && selectedIndex < filteredGenerations.length - 1;
 
   const goToPrev = useCallback(() => {
     if (canGoPrev && selectedIndex !== null) {
@@ -346,6 +371,26 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
     }
   };
 
+  const handleToggleFavorite = async (messageId: number, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    try {
+      const res = await fetch(`/api/messages/${messageId}/favorite`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        setGenerations(prev => prev.map(gen => {
+          if (gen.id === messageId) {
+            return { ...gen, is_favorite: data.is_favorite };
+          }
+          return gen;
+        }));
+      }
+    } catch (err) {
+      console.error("Error toggling favorite:", err);
+    }
+  };
+
   // Helper functions
   const getFileExtension = (mimeType: string | null) => {
     if (!mimeType) return "PNG";
@@ -412,10 +457,19 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
           imageUrl: gen.image_url,
           width: imageDimensions.width,
           height: imageDimensions.height,
+          messageId: gen.source !== "upload" ? gen.id : undefined,
         }),
       });
       if (!response.ok) throw new Error("Error al procesar imagen");
       const result = await response.json();
+
+      // Update local state to reflect has_2x
+      if (result.has_2x && gen.source !== "upload") {
+        setGenerations(prev => prev.map(g =>
+          g.id === gen.id && g.source === gen.source ? { ...g, has_2x: true } : g
+        ));
+      }
+
       const imageResponse = await fetch(result.url);
       const blob = await imageResponse.blob();
       const url = window.URL.createObjectURL(blob);
@@ -435,11 +489,22 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
   };
 
   const canUpscale = imageDimensions && imageDimensions.width <= 1920;
-  const imageCount = generations.filter(g => g.type === "image").length;
-  const videoCount = generations.filter(g => g.type === "video").length;
-  const audioCount = generations.filter(g => g.type === "audio").length;
+
+  // Counts (filteredGenerations is already defined above)
+  const imageCount = filteredGenerations.filter(g => g.type === "image").length;
+  const videoCount = filteredGenerations.filter(g => g.type === "video").length;
+  const audioCount = filteredGenerations.filter(g => g.type === "audio").length;
+  const hqCount = generations.filter(g => g.quality_tier === "hq").length;
+  const favoriteCount = generations.filter(g => g.is_favorite).length;
 
   const tagColors = ["#6366f1", "#ec4899", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ef4444", "#06b6d4"];
+
+  // Copy seed to clipboard
+  const handleCopySeed = (seed: number) => {
+    navigator.clipboard.writeText(seed.toString());
+    setCopiedSeed(true);
+    setTimeout(() => setCopiedSeed(false), 2000);
+  };
 
   if (loading && generations.length === 0) {
     return (
@@ -485,6 +550,45 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
             ))}
           </div>
 
+          {/* Quality Filter */}
+          <div className="flex items-center gap-1 p-1 bg-muted rounded-lg">
+            {(["all", "normal", "hq"] as QualityFilterType[]).map((q) => (
+              <button
+                key={q}
+                onClick={() => setQualityFilter(q)}
+                className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors ${
+                  qualityFilter === q
+                    ? q === "hq"
+                      ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white"
+                      : "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {q === "hq" && <Sparkles className="h-3 w-3" />}
+                {q === "all" ? "Todas" : q === "normal" ? "Normal" : "HQ"}
+                {q === "hq" && hqCount > 0 && (
+                  <span className="ml-0.5 opacity-60">({hqCount})</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Favorites Filter */}
+          <button
+            onClick={() => setFavoriteFilter(favoriteFilter === "all" ? "favorites" : "all")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              favoriteFilter === "favorites"
+                ? "bg-yellow-500/20 text-yellow-500"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted"
+            }`}
+          >
+            <Star className={`h-4 w-4 ${favoriteFilter === "favorites" ? "fill-yellow-500" : ""}`} />
+            Favoritos
+            {favoriteCount > 0 && (
+              <span className="opacity-60">({favoriteCount})</span>
+            )}
+          </button>
+
           <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
             <input
               type="checkbox"
@@ -492,7 +596,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
               onChange={(e) => setShowUploads(e.target.checked)}
               className="w-4 h-4 rounded accent-primary"
             />
-            Mostrar subidas
+            Subidas
           </label>
 
           <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
@@ -502,7 +606,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
               onChange={(e) => setShowDeleted(e.target.checked)}
               className="w-4 h-4 rounded accent-primary"
             />
-            Mostrar eliminados
+            Eliminados
           </label>
         </div>
 
@@ -560,19 +664,19 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
 
       {/* Grid */}
       <div className="flex-1 overflow-y-auto p-4">
-        {generations.length === 0 ? (
+        {filteredGenerations.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
             <LayoutGrid className="h-16 w-16 text-muted-foreground/30 mb-4" />
             <h3 className="text-lg font-medium mb-2">Sin generaciones</h3>
             <p className="text-muted-foreground text-sm max-w-md">
-              {searchQuery || selectedTagIds.length > 0
+              {searchQuery || selectedTagIds.length > 0 || qualityFilter !== "all"
                 ? "No hay resultados para los filtros seleccionados."
                 : "Aún no hay generaciones en este proyecto."}
             </p>
           </div>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {generations.map((gen, index) => (
+            {filteredGenerations.map((gen, index) => (
               <div
                 key={`${gen.source || "generation"}-${gen.type}-${gen.id}`}
                 onClick={() => setSelectedIndex(index)}
@@ -624,39 +728,59 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                   </div>
                 ) : null}
 
-                {/* Deleted indicator */}
-                {gen.deleted_at && (
-                  <div className="absolute top-2 right-2 bg-red-500/80 rounded px-1.5 py-0.5 text-[10px] text-white">
-                    Eliminado
-                  </div>
-                )}
+                {/* Top-right badges */}
+                <div className="absolute top-2 right-2 flex items-center gap-1">
+                  {/* HQ badge */}
+                  {gen.quality_tier === "hq" && !gen.deleted_at && (
+                    <div className="bg-gradient-to-r from-amber-500 to-orange-500 rounded px-1.5 py-0.5 text-[10px] text-white font-medium flex items-center gap-0.5">
+                      <Sparkles className="h-2.5 w-2.5" />
+                      HQ
+                    </div>
+                  )}
+                  {/* Deleted indicator */}
+                  {gen.deleted_at && (
+                    <div className="bg-red-500/80 rounded px-1.5 py-0.5 text-[10px] text-white">
+                      Eliminado
+                    </div>
+                  )}
+                  {/* Upload indicator */}
+                  {gen.source === "upload" && !gen.deleted_at && (
+                    <div className="bg-blue-500/90 rounded px-1.5 py-0.5 text-[10px] text-white flex items-center gap-1">
+                      <Upload className="h-2.5 w-2.5" />
+                      Subida
+                    </div>
+                  )}
+                </div>
 
-                {/* Upload indicator */}
-                {gen.source === "upload" && !gen.deleted_at && (
-                  <div className="absolute top-2 right-2 bg-blue-500/90 rounded px-1.5 py-0.5 text-[10px] text-white flex items-center gap-1">
-                    <Upload className="h-2.5 w-2.5" />
-                    Subida
-                  </div>
-                )}
-
-                {/* Tags */}
+                {/* Favorite star - always visible when favorited */}
+                {/* Tags - top left corner */}
                 {gen.tags.length > 0 && (
-                  <div className="absolute top-2 left-2 flex gap-1 flex-wrap max-w-[80%]">
-                    {gen.tags.slice(0, 3).map((tag) => (
+                  <div className="absolute top-2 left-2 flex gap-1 flex-wrap max-w-[80%] z-10">
+                    {gen.tags.slice(0, 2).map((tag) => (
                       <span
                         key={tag.id}
-                        className="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                        className="px-1.5 py-0.5 rounded text-[10px] font-medium shadow-sm"
                         style={{ backgroundColor: `${tag.color}cc`, color: "white" }}
                       >
                         {tag.name}
                       </span>
                     ))}
-                    {gen.tags.length > 3 && (
+                    {gen.tags.length > 2 && (
                       <span className="px-1.5 py-0.5 rounded text-[10px] bg-black/60 text-white">
-                        +{gen.tags.length - 3}
+                        +{gen.tags.length - 2}
                       </span>
                     )}
                   </div>
+                )}
+
+                {/* Favorite star - bottom right corner (hidden on hover since overlay has its own) */}
+                {gen.is_favorite && gen.source !== "upload" && (
+                  <button
+                    onClick={(e) => handleToggleFavorite(gen.id, e)}
+                    className="absolute bottom-2 right-2 z-10 group-hover:opacity-0 transition-opacity"
+                  >
+                    <Star className="h-5 w-5 fill-yellow-400 text-yellow-400 drop-shadow-md" />
+                  </button>
                 )}
 
                 {/* Hover overlay */}
@@ -675,6 +799,15 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                       <Maximize2 className="h-3.5 w-3.5 text-white/80" />
                     </div>
                   </div>
+                  {/* Favorite toggle - bottom right */}
+                  {gen.source !== "upload" && (
+                    <button
+                      onClick={(e) => handleToggleFavorite(gen.id, e)}
+                      className="absolute bottom-2 right-2 p-1.5 rounded-md bg-black/50 hover:bg-black/70 transition-colors"
+                    >
+                      <Star className={`h-4 w-4 ${gen.is_favorite ? "fill-yellow-400 text-yellow-400" : "text-white/80"}`} />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -703,13 +836,29 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
               <div className="flex items-center gap-3">
                 {selectedItem.type === "image" ? <ImageIcon className="h-5 w-5 text-muted-foreground" /> : selectedItem.type === "video" ? <Video className="h-5 w-5 text-muted-foreground" /> : <Music className="h-5 w-5 text-muted-foreground" />}
                 <h3 className="font-medium truncate">{selectedItem.conversation_title}</h3>
-                <span className="text-sm text-muted-foreground">{selectedIndex !== null && `${selectedIndex + 1} / ${generations.length}`}</span>
+                <span className="text-sm text-muted-foreground">{selectedIndex !== null && `${selectedIndex + 1} / ${filteredGenerations.length}`}</span>
                 {selectedItem.source === "upload" && <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded flex items-center gap-1"><Upload className="h-3 w-3" />Subida</span>}
                 {selectedItem.deleted_at && <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded">Eliminado</span>}
               </div>
-              <button onClick={() => { setSelectedIndex(null); setShowTagSelector(false); }} className="p-2 hover:bg-accent rounded-lg">
-                <X className="h-5 w-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Favorite toggle button */}
+                {selectedItem.source !== "upload" && (
+                  <button
+                    onClick={() => handleToggleFavorite(selectedItem.id)}
+                    className={`p-2 rounded-lg transition-colors ${
+                      selectedItem.is_favorite
+                        ? "bg-yellow-500/20 text-yellow-500 hover:bg-yellow-500/30"
+                        : "hover:bg-accent text-muted-foreground hover:text-foreground"
+                    }`}
+                    title={selectedItem.is_favorite ? "Quitar de favoritos" : "Agregar a favoritos"}
+                  >
+                    <Star className={`h-5 w-5 ${selectedItem.is_favorite ? "fill-yellow-400" : ""}`} />
+                  </button>
+                )}
+                <button onClick={() => { setSelectedIndex(null); setShowTagSelector(false); }} className="p-2 hover:bg-accent rounded-lg">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
 
             {/* Content */}
@@ -803,7 +952,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                             <Input
                               placeholder="Nueva etiqueta"
                               value={newTagName}
-                              onChange={(e) => setNewTagName(e.target.value)}
+                              onChange={(e) => setNewTagName(e.target.value.toUpperCase())}
                               className="h-8 text-sm"
                               onKeyDown={(e) => e.key === "Enter" && handleCreateTag()}
                             />
@@ -910,6 +1059,28 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                   <Calendar className="h-4 w-4" />
                   <span>{formatDateTimeLocal(selectedItem.created_at)}</span>
                 </div>
+                {/* Quality badge */}
+                {selectedItem.quality_tier === "hq" && (
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-500">
+                    <Sparkles className="h-4 w-4" />
+                    <span className="font-medium">Alta Calidad</span>
+                  </div>
+                )}
+                {/* Seed */}
+                {selectedItem.generation_seed && (
+                  <button
+                    onClick={() => handleCopySeed(selectedItem.generation_seed!)}
+                    className="flex items-center gap-1.5 hover:text-foreground transition-colors"
+                    title="Copiar seed"
+                  >
+                    {copiedSeed ? (
+                      <Check className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                    <span>Seed: {selectedItem.generation_seed}</span>
+                  </button>
+                )}
               </div>
 
               {/* Actions */}
@@ -920,9 +1091,9 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                       <Download className="h-4 w-4" /> Descargar
                     </Button>
                     {canUpscale && (
-                      <Button onClick={() => handle2xDownload(selectedItem)} disabled={upscaling} className="flex-1 gap-2 text-green-400 border-green-500/30 hover:bg-green-500/10" variant="outline">
+                      <Button onClick={() => handle2xDownload(selectedItem)} disabled={upscaling} className={`flex-1 gap-2 ${selectedItem.has_2x ? "text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" : "text-green-400 border-green-500/30 hover:bg-green-500/10"}`} variant="outline">
                         {upscaling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                        {upscaling ? "Procesando..." : "Descargar @2x"}
+                        {upscaling ? "Procesando..." : selectedItem.has_2x ? "Descargar @2x (listo)" : "Generar @2x"}
                       </Button>
                     )}
                   </>

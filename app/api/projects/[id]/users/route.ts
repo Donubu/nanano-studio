@@ -10,8 +10,18 @@ interface ProjectUserRow extends RowDataPacket {
   user_name: string | null;
   user_image: string | null;
   role: string;
+  // Límites legacy (mantener por retrocompatibilidad)
   max_monthly_image_generations: number;
   max_monthly_video_generations: number;
+  // Nuevos límites por calidad
+  max_monthly_image_normal: number;
+  max_monthly_image_hq: number;
+  max_monthly_video_normal: number;
+  max_monthly_video_hq: number;
+  max_monthly_audio_normal: number;
+  max_monthly_audio_hq: number;
+  max_monthly_text_normal: number;
+  max_monthly_text_hq: number;
   created_at: Date;
 }
 
@@ -34,6 +44,14 @@ export async function GET(
         pu.id, pu.user_id, pu.role,
         COALESCE(pu.max_monthly_image_generations, 0) as max_monthly_image_generations,
         COALESCE(pu.max_monthly_video_generations, 0) as max_monthly_video_generations,
+        COALESCE(pu.max_monthly_image_normal, 0) as max_monthly_image_normal,
+        COALESCE(pu.max_monthly_image_hq, 0) as max_monthly_image_hq,
+        COALESCE(pu.max_monthly_video_normal, 0) as max_monthly_video_normal,
+        COALESCE(pu.max_monthly_video_hq, 0) as max_monthly_video_hq,
+        COALESCE(pu.max_monthly_audio_normal, 0) as max_monthly_audio_normal,
+        COALESCE(pu.max_monthly_audio_hq, 0) as max_monthly_audio_hq,
+        COALESCE(pu.max_monthly_text_normal, 0) as max_monthly_text_normal,
+        COALESCE(pu.max_monthly_text_hq, 0) as max_monthly_text_hq,
         pu.created_at,
         u.email as user_email, u.name as user_name, u.image as user_image
       FROM project_users pu
@@ -69,8 +87,18 @@ export async function POST(
     const {
       user_id,
       role = "member",
+      // Legacy fields
       max_monthly_image_generations = 0,
       max_monthly_video_generations = 0,
+      // New quality-based limits
+      max_monthly_image_normal = 0,
+      max_monthly_image_hq = 0,
+      max_monthly_video_normal = 0,
+      max_monthly_video_hq = 0,
+      max_monthly_audio_normal = 0,
+      max_monthly_audio_hq = 0,
+      max_monthly_text_normal = 0,
+      max_monthly_text_hq = 0,
     } = body;
 
     if (!user_id) {
@@ -94,9 +122,22 @@ export async function POST(
     }
 
     const [result] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO project_users (project_id, user_id, role, max_monthly_image_generations, max_monthly_video_generations)
-       VALUES (?, ?, ?, ?, ?)`,
-      [id, user_id, role, max_monthly_image_generations, max_monthly_video_generations]
+      `INSERT INTO project_users (
+        project_id, user_id, role,
+        max_monthly_image_generations, max_monthly_video_generations,
+        max_monthly_image_normal, max_monthly_image_hq,
+        max_monthly_video_normal, max_monthly_video_hq,
+        max_monthly_audio_normal, max_monthly_audio_hq,
+        max_monthly_text_normal, max_monthly_text_hq
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id, user_id, role,
+        max_monthly_image_generations, max_monthly_video_generations,
+        max_monthly_image_normal, max_monthly_image_hq,
+        max_monthly_video_normal, max_monthly_video_hq,
+        max_monthly_audio_normal, max_monthly_audio_hq,
+        max_monthly_text_normal, max_monthly_text_hq,
+      ]
     );
 
     return NextResponse.json(
@@ -107,6 +148,14 @@ export async function POST(
         role,
         max_monthly_image_generations,
         max_monthly_video_generations,
+        max_monthly_image_normal,
+        max_monthly_image_hq,
+        max_monthly_video_normal,
+        max_monthly_video_hq,
+        max_monthly_audio_normal,
+        max_monthly_audio_hq,
+        max_monthly_text_normal,
+        max_monthly_text_hq,
       },
       { status: 201 }
     );
@@ -135,8 +184,18 @@ export async function PUT(
     const body = await request.json();
     const {
       user_id,
+      // Legacy fields
       max_monthly_image_generations,
       max_monthly_video_generations,
+      // New quality-based limits
+      max_monthly_image_normal,
+      max_monthly_image_hq,
+      max_monthly_video_normal,
+      max_monthly_video_hq,
+      max_monthly_audio_normal,
+      max_monthly_audio_hq,
+      max_monthly_text_normal,
+      max_monthly_text_hq,
       role,
     } = body;
 
@@ -164,14 +223,48 @@ export async function PUT(
     const updates: string[] = [];
     const values: (string | number)[] = [];
 
+    // Legacy fields
     if (max_monthly_image_generations !== undefined) {
       updates.push("max_monthly_image_generations = ?");
       values.push(max_monthly_image_generations);
     }
-
     if (max_monthly_video_generations !== undefined) {
       updates.push("max_monthly_video_generations = ?");
       values.push(max_monthly_video_generations);
+    }
+
+    // New quality-based limits
+    if (max_monthly_image_normal !== undefined) {
+      updates.push("max_monthly_image_normal = ?");
+      values.push(max_monthly_image_normal);
+    }
+    if (max_monthly_image_hq !== undefined) {
+      updates.push("max_monthly_image_hq = ?");
+      values.push(max_monthly_image_hq);
+    }
+    if (max_monthly_video_normal !== undefined) {
+      updates.push("max_monthly_video_normal = ?");
+      values.push(max_monthly_video_normal);
+    }
+    if (max_monthly_video_hq !== undefined) {
+      updates.push("max_monthly_video_hq = ?");
+      values.push(max_monthly_video_hq);
+    }
+    if (max_monthly_audio_normal !== undefined) {
+      updates.push("max_monthly_audio_normal = ?");
+      values.push(max_monthly_audio_normal);
+    }
+    if (max_monthly_audio_hq !== undefined) {
+      updates.push("max_monthly_audio_hq = ?");
+      values.push(max_monthly_audio_hq);
+    }
+    if (max_monthly_text_normal !== undefined) {
+      updates.push("max_monthly_text_normal = ?");
+      values.push(max_monthly_text_normal);
+    }
+    if (max_monthly_text_hq !== undefined) {
+      updates.push("max_monthly_text_hq = ?");
+      values.push(max_monthly_text_hq);
     }
 
     if (role !== undefined) {

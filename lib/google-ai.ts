@@ -6,9 +6,9 @@ const isVertexAI = process.env.GOOGLE_GENAI_USE_VERTEXAI === "true";
 // Configuración de retry
 const RETRY_CONFIG = {
   maxRetries: 3,
-  initialDelayMs: 2000, // 2 segundos inicial
-  maxDelayMs: 30000,    // máximo 30 segundos
-  backoffMultiplier: 2, // duplicar cada vez
+  initialDelayMs: 5000,  // 5 segundos inicial
+  maxDelayMs: 60000,     // máximo 60 segundos
+  backoffMultiplier: 2,  // duplicar cada vez
 };
 
 // Helper para esperar
@@ -38,10 +38,19 @@ function isRetriableError(error: unknown): boolean {
   return false;
 }
 
+// Información de retry para callbacks
+export interface RetryInfo {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  error: string;
+}
+
 // Ejecutar función con retry y backoff exponencial
 async function withRetry<T>(
   operation: () => Promise<T>,
-  operationName: string
+  operationName: string,
+  onRetry?: (info: RetryInfo) => void
 ): Promise<T> {
   let lastError: Error | undefined;
   let delay = RETRY_CONFIG.initialDelayMs;
@@ -62,6 +71,16 @@ async function withRetry<T>(
         `[Google AI] ${operationName} falló (intento ${attempt + 1}/${RETRY_CONFIG.maxRetries + 1}). ` +
         `Reintentando en ${delay / 1000}s... Error: ${lastError.message}`
       );
+
+      // Notificar al callback si existe
+      if (onRetry) {
+        onRetry({
+          attempt: attempt + 1,
+          maxAttempts: RETRY_CONFIG.maxRetries + 1,
+          delayMs: delay,
+          error: lastError.message,
+        });
+      }
 
       // Esperar antes de reintentar
       await sleep(delay);
@@ -135,6 +154,7 @@ export interface GeneratedImage {
 export interface StreamCallbacks {
   onChunk: (text: string) => void;
   onImage?: (image: GeneratedImage) => void;
+  onRetry?: (info: RetryInfo) => void;
   onComplete: (
     fullText: string,
     tokenCount: { input: number; output: number },
@@ -347,7 +367,8 @@ export async function sendMessageStream(
         contents,
         config,
       }),
-      "generateContentStream"
+      "generateContentStream",
+      callbacks.onRetry
     );
 
     let fullText = "";
@@ -400,11 +421,11 @@ export async function generateConversationTitle(
   labels?: Labels
 ): Promise<string> {
   const TITLE_MODEL = "gemini-2.0-flash-lite";
-  const SYSTEM_INSTRUCTION = `Eres un asistente que genera títulos cortos y descriptivos para conversaciones.
+  const SYSTEM_INSTRUCTION = `Eres un asistente que genera títulos descriptivos para conversaciones.
 Tu tarea es crear un título que resuma el tema principal del mensaje del usuario.
 
 Reglas:
-- El título debe tener máximo 40 caracteres
+- El título debe ser conciso pero completo (máximo 80 caracteres)
 - Debe ser coherente y relevante al contenido
 - Debe estar en el mismo idioma que el mensaje
 - Solo responde con el título, sin comillas ni explicaciones
@@ -415,7 +436,7 @@ Reglas:
       temperature: 0.7,
       topP: 0.9,
       topK: 40,
-      maxOutputTokens: 60,
+      maxOutputTokens: 100,
       systemInstruction: SYSTEM_INSTRUCTION,
       labels: buildLabels(labels),
     };
@@ -440,9 +461,9 @@ Reglas:
     // Limpiar el título de comillas si las tiene
     title = title.replace(/^["']|["']$/g, "").trim();
 
-    // Asegurar que no exceda 40 caracteres
-    if (title.length > 40) {
-      title = title.substring(0, 37) + "...";
+    // Asegurar que no exceda 80 caracteres
+    if (title.length > 80) {
+      title = title.substring(0, 77) + "...";
     }
 
     return title || "Nueva conversación";

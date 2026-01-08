@@ -82,6 +82,9 @@ export async function POST(
       );
     }
 
+    // Standardize tag name to uppercase
+    const normalizedName = name.trim().toUpperCase();
+
     // Validate color format
     if (!/^#[0-9A-Fa-f]{6}$/.test(color)) {
       return NextResponse.json(
@@ -104,7 +107,7 @@ export async function POST(
     // Check if tag already exists
     const [existing] = await pool.execute<RowDataPacket[]>(
       "SELECT id FROM tags WHERE project_id = ? AND name = ?",
-      [id, name.trim()]
+      [id, normalizedName]
     );
 
     if (existing.length > 0) {
@@ -116,14 +119,14 @@ export async function POST(
 
     const [result] = await pool.execute<ResultSetHeader>(
       "INSERT INTO tags (project_id, name, color) VALUES (?, ?, ?)",
-      [id, name.trim(), color]
+      [id, normalizedName, color]
     );
 
     return NextResponse.json(
       {
         id: result.insertId,
         project_id: Number(id),
-        name: name.trim(),
+        name: normalizedName,
         color,
         usage_count: 0,
       },
@@ -193,10 +196,12 @@ export async function PUT(
           { status: 400 }
         );
       }
+      // Standardize tag name to uppercase
+      const normalizedName = name.trim().toUpperCase();
       // Check if name already exists for another tag
       const [nameCheck] = await pool.execute<RowDataPacket[]>(
         "SELECT id FROM tags WHERE project_id = ? AND name = ? AND id != ?",
-        [id, name.trim(), tag_id]
+        [id, normalizedName, tag_id]
       );
       if (nameCheck.length > 0) {
         return NextResponse.json(
@@ -205,7 +210,7 @@ export async function PUT(
         );
       }
       updates.push("name = ?");
-      values.push(name.trim());
+      values.push(normalizedName);
     }
 
     if (color !== undefined) {

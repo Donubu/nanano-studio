@@ -2,9 +2,9 @@ import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
-import { generateVideo, isVideoConfigured, VideoGenerationConfig, VideoInput, VideoGenerationProgress } from "@/lib/google-ai-video";
-import { uploadVideoToS3, generateVideoFileName, isS3Configured } from "@/lib/s3";
-import { generateConversationTitle, Labels } from "@/lib/google-ai";
+import { generateImagen, isImagenConfigured, ImagenAspectRatio, ImagenResolution, Labels } from "@/lib/google-ai-imagen";
+import { uploadToS3, generateFileName, isS3Configured } from "@/lib/s3";
+import { generateConversationTitle } from "@/lib/google-ai";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
 
 type QualityTier = "normal" | "hq";
@@ -17,29 +17,20 @@ interface ConversationRow extends RowDataPacket {
   generation_type: string;
   model_model_id: string;
   system_instruction: string | null;
-  video_duration: number;
-  video_resolution: string;
-  video_aspect_ratio: string;
-  video_audio_enabled: boolean;
-  video_negative_prompt: string | null;
-  supports_video_generation: boolean;
+  image_aspect_ratio: string;
+  image_size: string;
+  supports_image_generation: boolean;
   project_name: string | null;
   // Cost fields from model
-  cost_video_per_second: number;
-}
-
-interface VideoLimitRow extends RowDataPacket {
-  max_monthly_video_generations: number;
-  current_month_video_count: number;
-  max_monthly_video_normal: number;
-  max_monthly_video_hq: number;
+  cost_image_1k: number;
+  cost_image_2k: number;
 }
 
 interface MessageRow extends RowDataPacket {
   id: number;
 }
 
-// POST - Generar video con VEO
+// POST - Generar imagen con Imagen 4
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -54,15 +45,15 @@ export async function POST(
       });
     }
 
-    if (!isVideoConfigured()) {
-      return new Response(JSON.stringify({ error: "API de Google AI Video no configurada" }), {
+    if (!isImagenConfigured()) {
+      return new Response(JSON.stringify({ error: "API de Imagen no configurada" }), {
         status: 500,
         headers: { "Content-Type": "application/json" },
       });
     }
 
     if (!isS3Configured()) {
-      return new Response(JSON.stringify({ error: "S3 no configurado para almacenar videos" }), {
+      return new Response(JSON.stringify({ error: "S3 no configurado para almacenar imagenes" }), {
         status: 500,
         headers: { "Content-Type": "application/json" },
       });
@@ -70,59 +61,38 @@ export async function POST(
 
     const { id } = await params;
     const body = await request.json();
-    // Type for reference images with ASSET or STYLE type
-    type ReferenceImageWithType = {
-      image: string;
-      type: "ASSET" | "STYLE";
-    };
 
     const {
       content,
-      firstFrameImage,
-      lastFrameImage,
-      referenceImages,
-      videoSettings,
-      videoInputs,
+      imageSettings,
       quality_tier = "normal",
+      generation_type_override,
     } = body as {
       content: string;
-      firstFrameImage?: string;
-      lastFrameImage?: string;
-      referenceImages?: ReferenceImageWithType[];
-      videoSettings?: {
-        duration?: number;
-        resolution?: string;
-        aspectRatio?: string;
-        audioEnabled?: boolean;
+      imageSettings?: {
+        aspectRatio?: ImagenAspectRatio;
+        resolution?: ImagenResolution;
         negativePrompt?: string;
         seed?: number;
       };
-      videoInputs?: {
-        firstFrame?: string;
-        lastFrame?: string;
-        referenceImages?: ReferenceImageWithType[];
-      };
       quality_tier?: QualityTier;
+      generation_type_override?: "text" | "image" | "video" | "audio";
     };
 
     // Validate quality_tier
     const effectiveQualityTier: QualityTier = quality_tier === "hq" ? "hq" : "normal";
 
-    // Debug: log received settings
-    console.log("[Video API] Received videoSettings:", videoSettings);
-    console.log("[Video API] audioEnabled from request:", videoSettings?.audioEnabled);
-
     if (!content || content.trim() === "") {
-      return new Response(JSON.stringify({ error: "El prompt del video es requerido" }), {
+      return new Response(JSON.stringify({ error: "El prompt de la imagen es requerido" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    // Obtener conversación con configuración de video y costos del modelo
+    // Obtener conversacion con configuracion de imagen y costos del modelo
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, m.model_id as model_model_id, m.supports_video_generation, p.title as project_name,
-              m.cost_video_per_second
+      `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, p.title as project_name,
+              m.cost_image_1k, m.cost_image_2k
        FROM conversations c
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
@@ -131,7 +101,7 @@ export async function POST(
     );
 
     if (conversations.length === 0) {
-      return new Response(JSON.stringify({ error: "Conversación no encontrada" }), {
+      return new Response(JSON.stringify({ error: "Conversacion no encontrada" }), {
         status: 404,
         headers: { "Content-Type": "application/json" },
       });
@@ -140,9 +110,14 @@ export async function POST(
     const conversation = conversations[0];
 
     // Get the correct model from project_generation_config based on quality_tier
+    // Use generation_type_override if provided (e.g., when video conversation is in image mode)
     let effectiveModelId = conversation.model_model_id;
-    let effectiveCostVideoPerSecond = Number(conversation.cost_video_per_second) || 0;
-    const generationType = conversation.generation_type || "video";
+    let effectiveCostImage1k = Number(conversation.cost_image_1k) || 0;
+    let effectiveCostImage2k = Number(conversation.cost_image_2k) || 0;
+    const generationType = generation_type_override || conversation.generation_type || "image";
+    if (generation_type_override) {
+      console.log(`[Imagen] Using generation_type_override: ${generation_type_override} (conversation type: ${conversation.generation_type})`);
+    }
 
     if (conversation.project_id) {
       const [configRows] = await pool.execute<RowDataPacket[]>(`
@@ -150,9 +125,11 @@ export async function POST(
           pgc.model_normal_id,
           pgc.model_hq_id,
           mn.model_id as model_normal_model_id,
-          mn.cost_video_per_second as mn_cost_video,
+          mn.cost_image_1k as mn_cost_1k,
+          mn.cost_image_2k as mn_cost_2k,
           mh.model_id as model_hq_model_id,
-          mh.cost_video_per_second as mh_cost_video
+          mh.cost_image_1k as mh_cost_1k,
+          mh.cost_image_2k as mh_cost_2k
         FROM project_generation_config pgc
         LEFT JOIN models mn ON pgc.model_normal_id = mn.id
         LEFT JOIN models mh ON pgc.model_hq_id = mh.id
@@ -163,29 +140,31 @@ export async function POST(
         const config = configRows[0];
         if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
           effectiveModelId = config.model_hq_model_id;
-          effectiveCostVideoPerSecond = Number(config.mh_cost_video) || 0;
-          console.log(`[Video] Using HQ model from config: ${effectiveModelId}`);
+          effectiveCostImage1k = Number(config.mh_cost_1k) || 0;
+          effectiveCostImage2k = Number(config.mh_cost_2k) || 0;
+          console.log(`[Imagen] Using HQ model from config: ${effectiveModelId}`);
         } else if (config.model_normal_model_id) {
           effectiveModelId = config.model_normal_model_id;
-          effectiveCostVideoPerSecond = Number(config.mn_cost_video) || 0;
-          console.log(`[Video] Using Normal model from config: ${effectiveModelId}`);
+          effectiveCostImage1k = Number(config.mn_cost_1k) || 0;
+          effectiveCostImage2k = Number(config.mn_cost_2k) || 0;
+          console.log(`[Imagen] Using Normal model from config: ${effectiveModelId}`);
         }
       }
     }
 
-    // Verificar que el modelo soporta video
-    if (!conversation.supports_video_generation) {
-      return new Response(JSON.stringify({ error: "El modelo seleccionado no soporta generación de video" }), {
+    // Verificar que el modelo es Imagen 4
+    if (!effectiveModelId.includes("imagen-4")) {
+      return new Response(JSON.stringify({ error: "El modelo seleccionado no es Imagen 4" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    // Verificar límite de generaciones de video mensuales (por calidad)
+    // Verificar limite de generaciones de imagen mensuales (por calidad)
     if (conversation.project_id && session.user.role !== "admin") {
       const limitColumn = effectiveQualityTier === "hq"
-        ? "max_monthly_video_hq"
-        : "max_monthly_video_normal";
+        ? "max_monthly_image_hq"
+        : "max_monthly_image_normal";
 
       const [limitRows] = await pool.execute<RowDataPacket[]>(`
         SELECT
@@ -197,7 +176,7 @@ export async function POST(
             WHERE c.project_id = ?
               AND c.user_id = ?
               AND m.role = 'model'
-              AND m.video_url IS NOT NULL
+              AND m.image_url IS NOT NULL
               AND m.quality_tier = ?
               AND m.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01')
           ) as current_count
@@ -210,8 +189,8 @@ export async function POST(
         const currentCount = limitRows[0].current_count;
         if (maxLimit > 0 && currentCount >= maxLimit) {
           return new Response(JSON.stringify({
-            error: `Has alcanzado el límite de generaciones de video ${effectiveQualityTier === 'hq' ? 'HQ' : 'normales'} mensuales para este proyecto`,
-            type: "video_limit",
+            error: `Has alcanzado el limite de generaciones de imagen ${effectiveQualityTier === 'hq' ? 'HQ' : 'normales'} mensuales para este proyecto`,
+            type: "image_limit",
             limit: maxLimit,
             used: currentCount,
             quality_tier: effectiveQualityTier
@@ -238,7 +217,7 @@ export async function POST(
     );
     const isFirstMessage = messageCount.length === 1;
 
-    // Actualizar timestamp de la conversación
+    // Actualizar timestamp de la conversacion
     await pool.execute(
       "UPDATE conversations SET updated_at = NOW() WHERE id = ?",
       [id]
@@ -270,7 +249,7 @@ export async function POST(
           // Enviar el ID del mensaje del usuario
           sendEvent({ type: "user_message", id: userMessageId });
 
-          // Generar título si es el primer mensaje (async)
+          // Generar titulo si es el primer mensaje (async)
           if (isFirstMessage) {
             generateConversationTitle(content, labels)
               .then(async (title) => {
@@ -281,129 +260,112 @@ export async function POST(
                 sendEvent({ type: "title", title });
               })
               .catch((err) => {
-                console.error("[Video] Error generating title:", err);
+                console.error("[Imagen] Error generating title:", err);
               });
           }
 
-          // Configuración de generación de video (usa request settings, fallback a conversation settings)
-          const audioEnabled = videoSettings?.audioEnabled !== undefined
-            ? videoSettings.audioEnabled
-            : (conversation.video_audio_enabled ?? true);
+          // Configuracion de generacion de imagen (usa request settings, fallback a conversation settings)
+          const aspectRatio: ImagenAspectRatio = (imageSettings?.aspectRatio ||
+            conversation.image_aspect_ratio || "16:9") as ImagenAspectRatio;
+          const resolution: ImagenResolution = (imageSettings?.resolution ||
+            conversation.image_size || "1K") as ImagenResolution;
 
-          // Use user-provided seed or generate random seed (uint32 range: 0-4294967295)
-          const generatedSeed = videoSettings?.seed ?? Math.floor(Math.random() * 4294967295);
-
-          const videoConfig: VideoGenerationConfig = {
-            durationSeconds: ((videoSettings?.duration || conversation.video_duration) as 4 | 6 | 8) || 8,
-            resolution: ((videoSettings?.resolution || conversation.video_resolution) as "720p" | "1080p") || "720p",
-            aspectRatio: ((videoSettings?.aspectRatio || conversation.video_aspect_ratio) as "16:9" | "9:16") || "16:9",
-            generateAudio: audioEnabled,
-            negativePrompt: videoSettings?.negativePrompt || conversation.video_negative_prompt || undefined,
-            seed: generatedSeed,
-          };
-
-          // Debug: log final config
-          console.log("[Video API] Final generateAudio value:", videoConfig.generateAudio);
-
-          // Input del video (usa videoInputs si está disponible, fallback a campos directos)
-          // Get reference images - could be from referenceImages or videoInputs.referenceImages
-          const refImages = referenceImages || videoInputs?.referenceImages;
-
-          const videoInput: VideoInput = {
-            prompt: content,
-            firstFrameImage: videoInputs?.firstFrame || firstFrameImage || undefined,
-            lastFrameImage: videoInputs?.lastFrame || lastFrameImage || undefined,
-            referenceImages: refImages,
-          };
-
-          console.log("\n========== [VIDEO GENERATION REQUEST] ==========");
+          console.log("\n========== [IMAGEN 4 GENERATION REQUEST] ==========");
           console.log("Model:", effectiveModelId);
           console.log("Quality tier:", effectiveQualityTier);
-          console.log("Seed:", generatedSeed, videoSettings?.seed ? "(user-provided)" : "(auto-generated)");
-          console.log("Config:", JSON.stringify(videoConfig, null, 2));
-          console.log("Input prompt:", content);
-          console.log("Has first frame:", !!videoInput.firstFrameImage);
-          console.log("Has last frame:", !!videoInput.lastFrameImage);
-          console.log("Reference images count:", refImages?.length || 0);
-          if (refImages && refImages.length > 0) {
-            console.log("Reference images types:", refImages.map(r => r.type).join(", "));
+          console.log("Aspect Ratio:", aspectRatio);
+          console.log("Resolution:", resolution);
+          console.log("Prompt:", content);
+          if (imageSettings?.negativePrompt) {
+            console.log("Negative Prompt:", imageSettings.negativePrompt);
           }
-          console.log("================================================\n");
+          if (imageSettings?.seed) {
+            console.log("User-provided Seed:", imageSettings.seed);
+          }
+          console.log("====================================================\n");
 
           // Callback de progreso
-          const onProgress = (progress: VideoGenerationProgress) => {
+          const onProgress = (progress: { status: string; message: string }) => {
             sendEvent({
               type: "progress",
               status: progress.status,
               message: progress.message,
-              progress: progress.progress,
             });
           };
 
-          // Generar video using effective model
-          const generatedVideo = await generateVideo(
+          // Generar imagen (use user-provided seed if available)
+          const generatedImages = await generateImagen(
             effectiveModelId,
-            videoInput,
-            videoConfig,
+            content,
+            {
+              aspectRatio,
+              resolution,
+              negativePrompt: imageSettings?.negativePrompt,
+              numberOfImages: 1,
+              seed: imageSettings?.seed,
+            },
             onProgress,
             labels
           );
 
-          // Guardar video en S3
+          if (generatedImages.length === 0) {
+            throw new Error("No se genero ninguna imagen");
+          }
+
+          const generatedImage = generatedImages[0];
+
+          // Guardar imagen en S3
           sendEvent({
             type: "progress",
             status: "processing",
-            message: "Guardando video...",
-            progress: 95,
+            message: "Guardando imagen...",
           });
 
-          const videoFileName = generateVideoFileName(id, "mp4");
-          const uploadResult = await uploadVideoToS3(
-            generatedVideo.data,
-            videoFileName,
-            generatedVideo.mimeType
+          const extension = generatedImage.mimeType.split("/")[1] || "png";
+          const fileName = generateFileName(id, extension);
+          const uploadResult = await uploadToS3(
+            generatedImage.data,
+            fileName,
+            generatedImage.mimeType,
+            "generated"
           );
 
-          // Calculate estimated cost for video generation using effective model cost
+          // Calculate estimated cost for image generation using effective model cost
           const estimatedCost = calculateEstimatedCost(
             {
               cost_input_per_million: 0,
               cost_output_per_million: 0,
-              cost_image_1k: 0,
-              cost_image_2k: 0,
+              cost_image_1k: effectiveCostImage1k,
+              cost_image_2k: effectiveCostImage2k,
               cost_image_4k: 0,
-              cost_video_per_second: effectiveCostVideoPerSecond,
+              cost_video_per_second: 0,
             },
             {
               tokensInput: 0,
               tokensOutput: 0,
-              imageGenerated: false,
-              imageSize: null,
-              videoSeconds: generatedVideo.duration,
+              imageGenerated: true,
+              imageSize: resolution,
+              videoSeconds: 0,
             }
           );
 
           // Guardar respuesta del modelo en la base de datos (con quality_tier y seed)
           const [modelResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, quality_tier, generation_seed, content, video_url, video_mime_type, video_file_size, video_duration, video_has_audio, video_aspect_ratio, estimated_cost)
-             VALUES (?, 'model', 'video', ?, ?, '', ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO messages (conversation_id, role, content_type, quality_tier, generation_seed, content, image_url, image_mime_type, estimated_cost)
+             VALUES (?, 'model', 'image', ?, ?, '', ?, ?, ?)`,
             [
               id,
               effectiveQualityTier,
-              generatedVideo.seed,
+              generatedImage.seed,
               uploadResult.url,
-              generatedVideo.mimeType,
-              uploadResult.fileSize,
-              generatedVideo.duration,
-              generatedVideo.hasAudio ? 1 : 0,
-              videoConfig.aspectRatio,
+              generatedImage.mimeType,
               estimatedCost,
             ]
           );
 
           const modelMessageId = modelResult.insertId;
 
-          // Actualizar costo total en la conversación
+          // Actualizar costo total en la conversacion
           await pool.execute(
             `UPDATE conversations
              SET total_estimated_cost = total_estimated_cost + ?
@@ -411,43 +373,36 @@ export async function POST(
             [estimatedCost, id]
           );
 
-          // Enviar evento de video generado
+          // Enviar evento de imagen generada
           sendEvent({
-            type: "video",
-            videoUrl: uploadResult.url,
-            mimeType: generatedVideo.mimeType,
-            duration: generatedVideo.duration,
-            hasAudio: generatedVideo.hasAudio,
-            aspectRatio: videoConfig.aspectRatio,
-            fileSize: uploadResult.fileSize,
+            type: "image",
+            imageUrl: uploadResult.url,
+            mimeType: generatedImage.mimeType,
+            seed: generatedImage.seed,
             estimatedCost,
-            seed: generatedSeed,
           });
 
-          // Enviar evento de finalización
+          // Enviar evento de finalizacion
           sendEvent({
             type: "complete",
             id: modelMessageId,
-            videoUrl: uploadResult.url,
-            duration: generatedVideo.duration,
-            hasAudio: generatedVideo.hasAudio,
-            aspectRatio: videoConfig.aspectRatio,
+            imageUrl: uploadResult.url,
+            seed: generatedImage.seed,
             estimatedCost,
-            seed: generatedSeed,
           });
 
           controllerClosed = true;
           controller.close();
 
         } catch (error) {
-          console.error("[Video] Error generating video:", error);
+          console.error("[Imagen] Error generating image:", error);
           const errorMessage = error instanceof Error ? error.message : "Error desconocido";
 
           // Guardar mensaje de error (con content_type 'error' para excluirlo del historial)
           const [modelResult] = await pool.execute<ResultSetHeader>(
             `INSERT INTO messages (conversation_id, role, content_type, content)
              VALUES (?, 'model', 'error', ?)`,
-            [id, `Error generando video: ${errorMessage}`]
+            [id, `Error generando imagen: ${errorMessage}`]
           );
 
           sendEvent({
@@ -471,7 +426,7 @@ export async function POST(
     });
 
   } catch (error) {
-    console.error("[Video] Error en endpoint de video:", error);
+    console.error("[Imagen] Error en endpoint de imagen:", error);
     return new Response(
       JSON.stringify({ error: "Error interno del servidor" }),
       {

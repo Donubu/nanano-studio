@@ -9,11 +9,15 @@ interface GenerationRow extends RowDataPacket {
   conversation_user_id: number;
   conversation_title: string;
   content: string | null;
+  quality_tier: "normal" | "hq" | null;
+  generation_seed: number | null;
+  is_favorite: number;
   image_url: string | null;
   image_mime_type: string | null;
   image_file_size: number | null;
   image_aspect_ratio: string | null;
   image_size: string | null;
+  has_2x: number;
   video_url: string | null;
   video_mime_type: string | null;
   video_file_size: number | null;
@@ -158,11 +162,15 @@ export async function GET(
         c.user_id as conversation_user_id,
         c.title as conversation_title,
         m.content,
+        m.quality_tier,
+        m.generation_seed,
+        m.is_favorite,
         m.image_url,
         m.image_mime_type,
         m.image_file_size,
         COALESCE(m.image_aspect_ratio, c.image_aspect_ratio) as image_aspect_ratio,
         COALESCE(m.image_size, c.image_size) as image_size,
+        m.has_2x,
         m.video_url,
         m.video_mime_type,
         m.video_file_size,
@@ -207,6 +215,8 @@ export async function GET(
 
       return {
         ...gen,
+        is_favorite: Boolean(gen.is_favorite),
+        has_2x: Boolean(gen.has_2x),
         tags: gen.tags ? JSON.parse(gen.tags) as TagInfo[] : [],
         audio_voice_config: gen.audio_voice_config ? JSON.parse(gen.audio_voice_config) : null,
         type,

@@ -84,10 +84,11 @@ export async function GET(
       [id]
     );
 
-    // Convert MySQL TINYINT to boolean for video_has_audio in messages
+    // Convert MySQL TINYINT to boolean for video_has_audio and is_favorite in messages
     const messagesWithBooleans = messages.map(msg => ({
       ...msg,
       video_has_audio: Boolean(msg.video_has_audio),
+      is_favorite: Boolean(msg.is_favorite),
     }));
 
     const conv = conversations[0];

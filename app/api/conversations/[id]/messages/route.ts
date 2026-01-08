@@ -157,6 +157,7 @@ export async function POST(
     let modelResponse: string;
     let tokensInput = 0;
     let tokensOutput = 0;
+    let isError = false;
 
     // Preparar labels para tracking en Vertex AI
     // Usar solo la parte inicial del email para no exponer datos sensibles
@@ -194,16 +195,19 @@ export async function POST(
       } catch (aiError) {
         console.error("Error llamando a Google AI:", aiError);
         modelResponse = `Error al generar respuesta: ${aiError instanceof Error ? aiError.message : "Error desconocido"}`;
+        isError = true;
       }
     } else {
       modelResponse = `API de Google AI no configurada. Por favor, configure GOOGLE_API_KEY en las variables de entorno.`;
+      isError = true;
     }
 
-    // Guardar respuesta del modelo
+    // Guardar respuesta del modelo (usar content_type 'error' si hubo error para excluirlo del historial)
+    const contentTypeResponse = isError ? "error" : "text";
     const [modelMessageResult] = await pool.execute<ResultSetHeader>(
       `INSERT INTO messages (conversation_id, role, content_type, content, tokens_input, tokens_output)
-       VALUES (?, 'model', 'text', ?, ?, ?)`,
-      [id, modelResponse, tokensInput, tokensOutput]
+       VALUES (?, 'model', ?, ?, ?, ?)`,
+      [id, contentTypeResponse, modelResponse, tokensInput, tokensOutput]
     );
 
     return NextResponse.json({

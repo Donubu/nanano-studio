@@ -3,11 +3,15 @@ import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 
+type GenerationType = "text" | "image" | "video" | "audio";
+type QualityTier = "normal" | "hq";
+
 interface ConversationRow extends RowDataPacket {
   id: number;
   user_id: number;
   project_id: number | null;
   model_id: number;
+  generation_type: GenerationType;
   model_display_name: string;
   project_title: string | null;
   title: string;
@@ -20,6 +24,12 @@ interface ConversationRow extends RowDataPacket {
   updated_at: Date;
   last_message: string | null;
   message_count: number;
+}
+
+interface GenerationConfigRow extends RowDataPacket {
+  model_normal_id: number | null;
+  model_hq_id: number | null;
+  is_enabled: number;
 }
 
 // GET - Listar conversaciones del usuario
@@ -81,7 +91,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const {
       project_id,
-      model_id,
+      model_id: providedModelId,
+      generation_type = "text" as GenerationType,
+      quality_tier = "normal" as QualityTier,
       title = "Nueva conversación",
       system_instruction,
       temperature = 1.0,
@@ -104,9 +116,59 @@ export async function POST(request: NextRequest) {
       audio_output_format = "mp3",
     } = body;
 
-    if (!model_id) {
+    // Validar generation_type
+    if (!["text", "image", "video", "audio"].includes(generation_type)) {
       return NextResponse.json(
-        { error: "model_id es requerido" },
+        { error: "generation_type invalido. Debe ser: text, image, video o audio" },
+        { status: 400 }
+      );
+    }
+
+    // Validar quality_tier
+    if (!["normal", "hq"].includes(quality_tier)) {
+      return NextResponse.json(
+        { error: "quality_tier invalido. Debe ser: normal o hq" },
+        { status: 400 }
+      );
+    }
+
+    let model_id = providedModelId;
+
+    // Si hay proyecto, obtener modelo desde la configuracion del proyecto
+    if (project_id) {
+      // Verificar que el tipo esta habilitado para el proyecto
+      const [genConfig] = await pool.execute<GenerationConfigRow[]>(
+        `SELECT model_normal_id, model_hq_id, is_enabled
+         FROM project_generation_config
+         WHERE project_id = ? AND generation_type = ?`,
+        [project_id, generation_type]
+      );
+
+      if (genConfig.length === 0 || !genConfig[0].is_enabled) {
+        return NextResponse.json(
+          { error: `El tipo de generacion '${generation_type}' no esta habilitado para este proyecto` },
+          { status: 400 }
+        );
+      }
+
+      // Obtener el modelo segun la calidad
+      const configRow = genConfig[0];
+      const selectedModelId = quality_tier === "hq"
+        ? configRow.model_hq_id
+        : configRow.model_normal_id;
+
+      if (!selectedModelId) {
+        return NextResponse.json(
+          { error: `No hay modelo ${quality_tier === 'hq' ? 'HQ' : 'normal'} configurado para '${generation_type}' en este proyecto` },
+          { status: 400 }
+        );
+      }
+
+      model_id = selectedModelId;
+    } else if (!model_id) {
+      // Si no hay proyecto ni model_id, es error
+      return NextResponse.json(
+        { error: "Se requiere project_id o model_id" },
         { status: 400 }
       );
     }
@@ -125,12 +187,13 @@ export async function POST(request: NextRequest) {
     }
 
     const [result] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO conversations (user_id, project_id, model_id, title, system_instruction, temperature, top_p, top_k, max_output_tokens, image_aspect_ratio, image_size, video_duration, video_resolution, video_aspect_ratio, video_audio_enabled, video_negative_prompt, audio_voice_id, audio_style_prompt, audio_multi_speaker, audio_speaker_config, audio_output_format)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO conversations (user_id, project_id, model_id, generation_type, title, system_instruction, temperature, top_p, top_k, max_output_tokens, image_aspect_ratio, image_size, video_duration, video_resolution, video_aspect_ratio, video_audio_enabled, video_negative_prompt, audio_voice_id, audio_style_prompt, audio_multi_speaker, audio_speaker_config, audio_output_format)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         session.user.id,
         project_id || null,
         model_id,
+        generation_type,
         title,
         system_instruction || null,
         temperature,
@@ -153,7 +216,7 @@ export async function POST(request: NextRequest) {
     );
 
     return NextResponse.json(
-      { id: result.insertId, title, model_id },
+      { id: result.insertId, title, model_id, generation_type },
       { status: 201 }
     );
   } catch (error) {

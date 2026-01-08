@@ -45,6 +45,10 @@ import {
   Settings,
   Zap,
   DollarSign,
+  Mic,
+  Sparkles,
+  ToggleLeft,
+  ToggleRight,
 } from "lucide-react";
 import Image from "next/image";
 import { formatDateLocal } from "@/lib/utils";
@@ -67,8 +71,18 @@ interface ProjectUser {
   user_name: string | null;
   user_image: string | null;
   role: string;
+  // Legacy fields
   max_monthly_image_generations: number;
   max_monthly_video_generations: number;
+  // New quality-based limits
+  max_monthly_image_normal: number;
+  max_monthly_image_hq: number;
+  max_monthly_video_normal: number;
+  max_monthly_video_hq: number;
+  max_monthly_audio_normal: number;
+  max_monthly_audio_hq: number;
+  max_monthly_text_normal: number;
+  max_monthly_text_hq: number;
 }
 
 interface User {
@@ -81,15 +95,6 @@ interface Model {
   id: number;
   model_id: string;
   display_name: string;
-}
-
-interface ProjectModel {
-  id: number;
-  model_id: number;
-  model_model_id: string;
-  model_display_name: string;
-  is_default: boolean;
-  system_instruction: string | null;
 }
 
 interface ProjectTag {
@@ -128,7 +133,28 @@ const statusColors: Record<string, string> = {
   cancelled: "bg-red-500/20 text-red-400",
 };
 
-type TabType = "overview" | "users" | "models" | "tags";
+type TabType = "overview" | "users" | "tags" | "config";
+
+type GenerationType = "text" | "image" | "video" | "audio";
+
+interface ModelInfo {
+  id: number;
+  model_id: string;
+  display_name: string;
+}
+
+interface TypeConfig {
+  enabled: boolean;
+  model_normal: ModelInfo | null;
+  model_hq: ModelInfo | null;
+}
+
+interface GenerationConfigResponse {
+  text: TypeConfig;
+  image: TypeConfig;
+  video: TypeConfig;
+  audio: TypeConfig;
+}
 
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -163,13 +189,8 @@ export default function ProjectDetailPage() {
   const [editUnlimitedImage, setEditUnlimitedImage] = useState(false);
   const [editUnlimitedVideo, setEditUnlimitedVideo] = useState(false);
 
-  // Models state
-  const [projectModels, setProjectModels] = useState<ProjectModel[]>([]);
+  // Models state (for config tab selectors)
   const [models, setModels] = useState<Model[]>([]);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [selectedModelId, setSelectedModelId] = useState("");
-  const [editingSystemInstruction, setEditingSystemInstruction] = useState<number | null>(null);
-  const [systemInstructionText, setSystemInstructionText] = useState("");
 
   // Tags state
   const [projectTags, setProjectTags] = useState<ProjectTag[]>([]);
@@ -179,6 +200,16 @@ export default function ProjectDetailPage() {
   const [editingTag, setEditingTag] = useState<number | null>(null);
   const [editTagName, setEditTagName] = useState("");
   const [editTagColor, setEditTagColor] = useState("");
+
+  // Generation config state
+  const [generationConfig, setGenerationConfig] = useState<GenerationConfigResponse>({
+    text: { enabled: false, model_normal: null, model_hq: null },
+    image: { enabled: false, model_normal: null, model_hq: null },
+    video: { enabled: false, model_normal: null, model_hq: null },
+    audio: { enabled: false, model_normal: null, model_hq: null },
+  });
+  const [loadingConfig, setLoadingConfig] = useState(false);
+  const [savingConfigType, setSavingConfigType] = useState<GenerationType | null>(null);
 
   // Edit project state
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -257,21 +288,6 @@ export default function ProjectDetailPage() {
     }
   }, []);
 
-  const fetchProjectModels = useCallback(async () => {
-    setLoadingModels(true);
-    try {
-      const res = await fetch(`/api/projects/${projectId}/models`);
-      if (res.ok) {
-        const data = await res.json();
-        setProjectModels(data);
-      }
-    } catch (err) {
-      console.error("Error fetching project models:", err);
-    } finally {
-      setLoadingModels(false);
-    }
-  }, [projectId]);
-
   const fetchModels = useCallback(async () => {
     try {
       const res = await fetch("/api/models");
@@ -299,6 +315,21 @@ export default function ProjectDetailPage() {
     }
   }, [projectId]);
 
+  const fetchGenerationConfig = useCallback(async () => {
+    setLoadingConfig(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/generation-config`);
+      if (res.ok) {
+        const data = await res.json();
+        setGenerationConfig(data);
+      }
+    } catch (err) {
+      console.error("Error fetching generation config:", err);
+    } finally {
+      setLoadingConfig(false);
+    }
+  }, [projectId]);
+
   const fetchClients = useCallback(async () => {
     try {
       const res = await fetch("/api/clients");
@@ -317,19 +348,19 @@ export default function ProjectDetailPage() {
     fetchUsers();
     fetchModels();
     fetchClients();
-    fetchProjectModels();
     fetchProjectTags();
-  }, [fetchProject, fetchStats, fetchUsers, fetchModels, fetchClients, fetchProjectModels, fetchProjectTags]);
+    fetchGenerationConfig();
+  }, [fetchProject, fetchStats, fetchUsers, fetchModels, fetchClients, fetchProjectTags, fetchGenerationConfig]);
 
   useEffect(() => {
     if (activeTab === "users") {
       fetchProjectUsers();
-    } else if (activeTab === "models") {
-      fetchProjectModels();
     } else if (activeTab === "tags") {
       fetchProjectTags();
+    } else if (activeTab === "config") {
+      fetchGenerationConfig();
     }
-  }, [activeTab, fetchProjectUsers, fetchProjectModels, fetchProjectTags]);
+  }, [activeTab, fetchProjectUsers, fetchProjectTags, fetchGenerationConfig]);
 
   // User handlers
   const handleAddUser = async () => {
@@ -413,82 +444,6 @@ export default function ProjectDetailPage() {
     }
   };
 
-  // Model handlers
-  const handleAddModel = async () => {
-    if (!selectedModelId) return;
-    setSaving(true);
-
-    try {
-      const res = await fetch(`/api/projects/${projectId}/models`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model_id: Number(selectedModelId) }),
-      });
-
-      if (res.ok) {
-        setSelectedModelId("");
-        fetchProjectModels();
-      } else {
-        const data = await res.json();
-        alert(data.error || "Error al agregar modelo");
-      }
-    } catch (err) {
-      console.error("Error:", err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleRemoveModel = async (modelId: number) => {
-    if (!confirm("¿Eliminar este modelo del proyecto?")) return;
-
-    try {
-      const res = await fetch(`/api/projects/${projectId}/models?model_id=${modelId}`, {
-        method: "DELETE",
-      });
-
-      if (res.ok) {
-        fetchProjectModels();
-      }
-    } catch (err) {
-      console.error("Error:", err);
-    }
-  };
-
-  const handleSetDefaultModel = async (modelId: number) => {
-    try {
-      await fetch(`/api/projects/${projectId}/models`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model_id: modelId, is_default: true }),
-      });
-      fetchProjectModels();
-    } catch (err) {
-      console.error("Error:", err);
-    }
-  };
-
-  const handleSaveSystemInstruction = async (modelId: number) => {
-    setSaving(true);
-
-    try {
-      await fetch(`/api/projects/${projectId}/models`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model_id: modelId,
-          system_instruction: systemInstructionText || null,
-        }),
-      });
-      setEditingSystemInstruction(null);
-      fetchProjectModels();
-    } catch (err) {
-      console.error("Error:", err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   // Tag handlers
   const handleCreateTag = async () => {
     if (!newTagName.trim()) return;
@@ -553,6 +508,36 @@ export default function ProjectDetailPage() {
       }
     } catch (err) {
       console.error("Error:", err);
+    }
+  };
+
+  // Generation config handlers
+  const handleUpdateGenerationConfig = async (
+    type: GenerationType,
+    updates: { is_enabled?: boolean; model_normal_id?: number | null; model_hq_id?: number | null }
+  ) => {
+    setSavingConfigType(type);
+
+    try {
+      const res = await fetch(`/api/projects/${projectId}/generation-config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          generation_type: type,
+          ...updates,
+        }),
+      });
+
+      if (res.ok) {
+        fetchGenerationConfig();
+      } else {
+        const data = await res.json();
+        alert(data.error || "Error al actualizar configuración");
+      }
+    } catch (err) {
+      console.error("Error:", err);
+    } finally {
+      setSavingConfigType(null);
     }
   };
 
@@ -631,7 +616,6 @@ export default function ProjectDetailPage() {
   };
 
   const availableUsers = users.filter((u) => !projectUsers.some((pu) => pu.user_id === u.id));
-  const availableModels = models.filter((m) => !projectModels.some((pm) => pm.model_id === m.id));
 
   if (loading) {
     return (
@@ -808,8 +792,8 @@ export default function ProjectDetailPage() {
           {[
             { id: "overview" as TabType, label: "Resumen", icon: BarChart3 },
             { id: "users" as TabType, label: "Usuarios", icon: Users },
-            { id: "models" as TabType, label: "Modelos", icon: Cpu },
             { id: "tags" as TabType, label: "Etiquetas", icon: Tag },
+            { id: "config" as TabType, label: "Configuración", icon: Settings },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -835,23 +819,58 @@ export default function ProjectDetailPage() {
             <div className="grid grid-cols-2 gap-6">
               <div>
                 <h3 className="font-medium mb-3 flex items-center gap-2">
-                  <Cpu className="h-4 w-4 text-muted-foreground" />
-                  Modelos Asignados
+                  <Settings className="h-4 w-4 text-muted-foreground" />
+                  Tipos de Generación
                 </h3>
-                {projectModels.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Sin modelos asignados</p>
-                ) : (
-                  <div className="space-y-2">
-                    {projectModels.map((pm) => (
-                      <div key={pm.id} className="flex items-center gap-2 text-sm">
-                        <span className="font-medium">{pm.model_display_name}</span>
-                        {Boolean(pm.is_default) && (
-                          <Badge className="bg-yellow-500/20 text-yellow-400 text-xs">Default</Badge>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {(() => {
+                  const typeLabels: Record<GenerationType, { label: string; icon: typeof MessageSquare }> = {
+                    text: { label: "Texto", icon: MessageSquare },
+                    image: { label: "Imagen", icon: ImageIcon },
+                    video: { label: "Video", icon: Video },
+                    audio: { label: "Audio", icon: Mic },
+                  };
+                  const enabledTypes = (["text", "image", "video", "audio"] as GenerationType[]).filter(
+                    (type) => generationConfig[type]?.enabled
+                  );
+
+                  if (enabledTypes.length === 0) {
+                    return <p className="text-sm text-muted-foreground">Sin tipos habilitados</p>;
+                  }
+
+                  return (
+                    <div className="space-y-3">
+                      {enabledTypes.map((type) => {
+                        const config = generationConfig[type];
+                        const { label, icon: Icon } = typeLabels[type];
+                        return (
+                          <div key={type} className="flex items-start gap-2 text-sm">
+                            <Icon className="h-4 w-4 text-primary mt-0.5" />
+                            <div>
+                              <span className="font-medium">{label}</span>
+                              <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
+                                {config.model_normal && (
+                                  <div className="flex items-center gap-1">
+                                    <Zap className="h-3 w-3" />
+                                    <span>Normal: {config.model_normal.display_name}</span>
+                                  </div>
+                                )}
+                                {config.model_hq && (
+                                  <div className="flex items-center gap-1 text-amber-400">
+                                    <Sparkles className="h-3 w-3" />
+                                    <span>HQ: {config.model_hq.display_name}</span>
+                                  </div>
+                                )}
+                                {!config.model_normal && !config.model_hq && (
+                                  <span className="text-yellow-500">Sin modelos asignados</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
               <div>
                 <h3 className="font-medium mb-3 flex items-center gap-2">
@@ -1106,129 +1125,6 @@ export default function ProjectDetailPage() {
           </div>
         )}
 
-        {/* Models Tab */}
-        {activeTab === "models" && (
-          <div className="p-6 space-y-4">
-            {/* Add model form */}
-            <div className="flex gap-3">
-              <select
-                className="flex-1 bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
-                value={selectedModelId}
-                onChange={(e) => setSelectedModelId(e.target.value)}
-              >
-                <option value="">Seleccionar modelo...</option>
-                {availableModels.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.display_name}
-                  </option>
-                ))}
-              </select>
-              <Button onClick={handleAddModel} disabled={!selectedModelId || saving}>
-                <Plus className="h-4 w-4 mr-1.5" />
-                Agregar Modelo
-              </Button>
-            </div>
-
-            {/* Models list */}
-            {loadingModels ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-primary" />
-              </div>
-            ) : projectModels.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                No hay modelos asignados a este proyecto
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {projectModels.map((pm) => (
-                  <div key={pm.id} className="p-4 bg-muted rounded-lg space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <Cpu className="h-5 w-5 text-primary" />
-                        <div>
-                          <div className="font-medium flex items-center gap-2">
-                            {pm.model_display_name}
-                            {Boolean(pm.is_default) && (
-                              <Badge className="bg-yellow-500/20 text-yellow-400 text-xs">Default</Badge>
-                            )}
-                          </div>
-                          <div className="text-xs text-muted-foreground font-mono">{pm.model_model_id}</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        {!Boolean(pm.is_default) && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 hover:bg-yellow-500/10"
-                            onClick={() => handleSetDefaultModel(pm.model_id)}
-                            title="Establecer como default"
-                          >
-                            <Star className="h-4 w-4 text-yellow-400" />
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 hover:bg-red-500/10"
-                          onClick={() => handleRemoveModel(pm.model_id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-red-400" />
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* System Instruction */}
-                    <div className="border-t border-border/30 pt-3">
-                      <div className="flex items-center gap-2 mb-2">
-                        <FileText className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-xs font-medium text-muted-foreground">
-                          Instrucción del Sistema Base
-                        </span>
-                      </div>
-                      {editingSystemInstruction === pm.model_id ? (
-                        <div className="space-y-2">
-                          <textarea
-                            value={systemInstructionText}
-                            onChange={(e) => setSystemInstructionText(e.target.value)}
-                            placeholder="Ej: Eres un asistente experto en desarrollo de software..."
-                            rows={4}
-                            className="w-full bg-card border border-border/50 rounded-lg px-3 py-2 text-sm resize-none"
-                            autoFocus
-                          />
-                          <div className="flex justify-end gap-2">
-                            <Button variant="ghost" size="sm" onClick={() => setEditingSystemInstruction(null)}>
-                              Cancelar
-                            </Button>
-                            <Button size="sm" onClick={() => handleSaveSystemInstruction(pm.model_id)} disabled={saving}>
-                              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                              <span className="ml-1">Guardar</span>
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => {
-                            setEditingSystemInstruction(pm.model_id);
-                            setSystemInstructionText(pm.system_instruction || "");
-                          }}
-                          className="w-full text-left p-3 rounded border border-dashed border-border/50 hover:border-primary/50 hover:bg-card transition-colors"
-                        >
-                          {pm.system_instruction ? (
-                            <p className="text-sm text-foreground whitespace-pre-wrap">{pm.system_instruction}</p>
-                          ) : (
-                            <p className="text-sm text-muted-foreground italic">Click para agregar instrucción base...</p>
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
         {/* Tags Tab */}
         {activeTab === "tags" && (
           <div className="p-6 space-y-4">
@@ -1239,7 +1135,7 @@ export default function ProjectDetailPage() {
                 <Input
                   placeholder="Nombre de la etiqueta"
                   value={newTagName}
-                  onChange={(e) => setNewTagName(e.target.value)}
+                  onChange={(e) => setNewTagName(e.target.value.toUpperCase())}
                   className="bg-muted border-border/50"
                 />
               </div>
@@ -1288,7 +1184,7 @@ export default function ProjectDetailPage() {
                           <div className="flex items-center gap-2">
                             <Input
                               value={editTagName}
-                              onChange={(e) => setEditTagName(e.target.value)}
+                              onChange={(e) => setEditTagName(e.target.value.toUpperCase())}
                               className="w-40 h-8 bg-muted border-border/50"
                             />
                             <div className="flex gap-1">
@@ -1364,6 +1260,142 @@ export default function ProjectDetailPage() {
                   ))}
                 </TableBody>
               </Table>
+            )}
+          </div>
+        )}
+
+        {/* Config Tab */}
+        {activeTab === "config" && (
+          <div className="p-6 space-y-6">
+            <div className="space-y-2">
+              <h3 className="font-medium">Configuración de Tipos de Generación</h3>
+              <p className="text-sm text-muted-foreground">
+                Habilita o deshabilita tipos de generación y asigna los modelos Normal y HQ para cada uno.
+              </p>
+            </div>
+
+            {loadingConfig ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {(["text", "image", "video", "audio"] as GenerationType[]).map((type) => {
+                  const config = generationConfig[type];
+                  const typeLabels: Record<GenerationType, { label: string; icon: typeof MessageSquare }> = {
+                    text: { label: "Texto", icon: MessageSquare },
+                    image: { label: "Imagen", icon: ImageIcon },
+                    video: { label: "Video", icon: Video },
+                    audio: { label: "Audio", icon: Mic },
+                  };
+                  const { label, icon: Icon } = typeLabels[type];
+                  const isSaving = savingConfigType === type;
+
+                  return (
+                    <div
+                      key={type}
+                      className={`p-4 rounded-lg border transition-colors ${
+                        config.enabled
+                          ? "bg-card border-border/50"
+                          : "bg-muted/50 border-border/30 opacity-75"
+                      }`}
+                    >
+                      {/* Header with toggle */}
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className={`p-2 rounded-lg ${config.enabled ? "bg-primary/10" : "bg-muted"}`}>
+                            <Icon className={`h-5 w-5 ${config.enabled ? "text-primary" : "text-muted-foreground"}`} />
+                          </div>
+                          <div>
+                            <div className="font-medium">{label}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {config.enabled ? "Habilitado" : "Deshabilitado"}
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleUpdateGenerationConfig(type, { is_enabled: !config.enabled })}
+                          disabled={isSaving}
+                          className="transition-colors"
+                        >
+                          {isSaving ? (
+                            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                          ) : config.enabled ? (
+                            <ToggleRight className="h-8 w-8 text-primary" />
+                          ) : (
+                            <ToggleLeft className="h-8 w-8 text-muted-foreground" />
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Model selectors */}
+                      {config.enabled && (
+                        <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border/30">
+                          {/* Normal model */}
+                          <div>
+                            <label className="text-xs font-medium mb-1.5 flex items-center gap-1.5 text-muted-foreground">
+                              <Zap className="h-3.5 w-3.5" />
+                              Modelo Normal
+                            </label>
+                            <select
+                              className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
+                              value={config.model_normal?.id || ""}
+                              onChange={(e) =>
+                                handleUpdateGenerationConfig(type, {
+                                  model_normal_id: e.target.value ? Number(e.target.value) : null,
+                                })
+                              }
+                              disabled={isSaving}
+                            >
+                              <option value="">Sin modelo asignado</option>
+                              {models.map((model) => (
+                                <option key={model.id} value={model.id}>
+                                  {model.display_name}
+                                </option>
+                              ))}
+                            </select>
+                            {config.model_normal && (
+                              <div className="text-xs text-muted-foreground mt-1 font-mono">
+                                {config.model_normal.model_id}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* HQ model */}
+                          <div>
+                            <label className="text-xs font-medium mb-1.5 flex items-center gap-1.5 text-amber-400">
+                              <Sparkles className="h-3.5 w-3.5" />
+                              Modelo HQ
+                            </label>
+                            <select
+                              className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
+                              value={config.model_hq?.id || ""}
+                              onChange={(e) =>
+                                handleUpdateGenerationConfig(type, {
+                                  model_hq_id: e.target.value ? Number(e.target.value) : null,
+                                })
+                              }
+                              disabled={isSaving}
+                            >
+                              <option value="">Sin modelo asignado</option>
+                              {models.map((model) => (
+                                <option key={model.id} value={model.id}>
+                                  {model.display_name}
+                                </option>
+                              ))}
+                            </select>
+                            {config.model_hq && (
+                              <div className="text-xs text-muted-foreground mt-1 font-mono">
+                                {config.model_hq.model_id}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         )}

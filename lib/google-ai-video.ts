@@ -98,6 +98,7 @@ export interface GeneratedVideo {
   mimeType: string;
   duration: number;
   hasAudio: boolean;
+  seed: number;
 }
 
 export interface VideoGenerationProgress {
@@ -306,6 +307,7 @@ export async function generateVideo(
         generateAudio: config.generateAudio,
         ...(config.negativePrompt && { negativePrompt: config.negativePrompt }),
         ...(config.personGeneration && { personGeneration: config.personGeneration }),
+        ...(config.seed !== undefined && { seed: config.seed }),
         ...(preparedLastFrame && {
           lastFrame: {
             imageBytes: prepareImageInput(preparedLastFrame, detectMimeType(preparedLastFrame)).bytesBase64Encoded,
@@ -351,6 +353,7 @@ export async function generateVideo(
         mimeType: immediateVideo.mimeType || "video/mp4",
         duration: config.durationSeconds,
         hasAudio: config.generateAudio,
+        seed: config.seed!,
       };
     }
 
@@ -363,7 +366,10 @@ export async function generateVideo(
     // Polling para esperar a que complete (si el SDK no esperó)
     const video = await pollVideoOperation(operation, config, onProgress);
 
-    return video;
+    return {
+      ...video,
+      seed: config.seed!,
+    };
   } catch (error) {
     console.error("[Google AI Video] Error generating video:", error);
     throw error;
@@ -444,6 +450,7 @@ async function pollVideoOperation(
       mimeType: videoInfo.mimeType || "video/mp4",
       duration: config.durationSeconds,
       hasAudio: config.generateAudio,
+      seed: config.seed!,
     };
   }
 
