@@ -20,6 +20,11 @@ interface GenerationRow extends RowDataPacket {
   video_duration: number | null;
   video_has_audio: boolean | null;
   video_aspect_ratio: string | null;
+  audio_url: string | null;
+  audio_mime_type: string | null;
+  audio_file_size: number | null;
+  audio_duration: number | null;
+  audio_voice_config: string | null;
   created_at: string;
   deleted_at: string | null;
   tags: string | null; // JSON string of tags
@@ -31,7 +36,7 @@ interface TagInfo {
   color: string;
 }
 
-// GET - Obtener todas las generaciones (imágenes y videos) del proyecto con filtros
+// GET - Obtener todas las generaciones (imágenes, videos y audios) del proyecto con filtros
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -47,7 +52,7 @@ export async function GET(
     const { searchParams } = new URL(request.url);
 
     // Filter parameters
-    const type = searchParams.get("type"); // "images", "videos", or null for all
+    const type = searchParams.get("type"); // "images", "videos", "audios", or null for all
     const tagIds = searchParams.get("tags")?.split(",").filter(Boolean).map(Number) || [];
     const search = searchParams.get("search")?.trim() || "";
     const dateFrom = searchParams.get("from");
@@ -86,9 +91,11 @@ export async function GET(
       conditions.push("m.image_url IS NOT NULL AND m.image_url != ''");
     } else if (type === "videos") {
       conditions.push("m.video_url IS NOT NULL AND m.video_url != ''");
+    } else if (type === "audios") {
+      conditions.push("m.audio_url IS NOT NULL AND m.audio_url != ''");
     } else {
-      // All generations (images OR videos)
-      conditions.push("((m.image_url IS NOT NULL AND m.image_url != '') OR (m.video_url IS NOT NULL AND m.video_url != ''))");
+      // All generations (images OR videos OR audios)
+      conditions.push("((m.image_url IS NOT NULL AND m.image_url != '') OR (m.video_url IS NOT NULL AND m.video_url != '') OR (m.audio_url IS NOT NULL AND m.audio_url != ''))");
     }
 
     // Soft delete filter
@@ -114,6 +121,7 @@ export async function GET(
 
     // Tag filter - if tags specified, only include messages that have ALL specified tags
     let tagJoin = "";
+    const tagParams: (string | number)[] = [];
     if (tagIds.length > 0) {
       tagJoin = `
         INNER JOIN (
@@ -124,8 +132,11 @@ export async function GET(
           HAVING COUNT(DISTINCT tag_id) = ?
         ) tag_filter ON m.id = tag_filter.message_id
       `;
-      queryParams.push(...tagIds, tagIds.length);
+      tagParams.push(...tagIds, tagIds.length);
     }
+
+    // Build final params array: tag params first (for JOIN), then condition params (for WHERE)
+    const finalQueryParams = [...tagParams, ...queryParams];
 
     // Get total count first
     const countQuery = `
@@ -136,7 +147,7 @@ export async function GET(
       WHERE ${conditions.join(" AND ")}
     `;
 
-    const [countResult] = await pool.execute<RowDataPacket[]>(countQuery, queryParams);
+    const [countResult] = await pool.execute<RowDataPacket[]>(countQuery, finalQueryParams);
     const total = countResult[0]?.total || 0;
 
     // Main query with tags aggregation
@@ -158,6 +169,11 @@ export async function GET(
         m.video_duration,
         m.video_has_audio,
         COALESCE(m.video_aspect_ratio, c.video_aspect_ratio, '16:9') as video_aspect_ratio,
+        m.audio_url,
+        m.audio_mime_type,
+        m.audio_file_size,
+        m.audio_duration,
+        m.audio_voice_config,
         m.created_at,
         m.deleted_at,
         (
@@ -174,17 +190,28 @@ export async function GET(
       LIMIT ? OFFSET ?
     `;
 
-    // Add limit and offset to params
-    const mainQueryParams = [...queryParams, limit, offset];
+    // Add limit and offset to params (use finalQueryParams for correct order)
+    const mainQueryParams = [...finalQueryParams, limit, offset];
 
     const [generations] = await pool.execute<GenerationRow[]>(mainQuery, mainQueryParams);
 
     // Parse tags JSON and transform response
-    const result = generations.map(gen => ({
-      ...gen,
-      tags: gen.tags ? JSON.parse(gen.tags) as TagInfo[] : [],
-      type: gen.video_url ? "video" : "image",
-    }));
+    const result = generations.map(gen => {
+      // Determine type: video > audio > image (priority order)
+      let type: "video" | "audio" | "image" = "image";
+      if (gen.video_url) {
+        type = "video";
+      } else if (gen.audio_url) {
+        type = "audio";
+      }
+
+      return {
+        ...gen,
+        tags: gen.tags ? JSON.parse(gen.tags) as TagInfo[] : [],
+        audio_voice_config: gen.audio_voice_config ? JSON.parse(gen.audio_voice_config) : null,
+        type,
+      };
+    });
 
     return NextResponse.json({
       data: result,

@@ -38,6 +38,7 @@ import {
     Monitor,
     Video,
     HelpCircle,
+    Mic,
 } from "lucide-react";
 import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
 import Link from "next/link";
@@ -50,6 +51,10 @@ import {VideoInputFrames, ReferenceImage} from "./video-input-frames";
 import {VideoDuration, VideoResolution, VideoAspectRatio, VideoGenerationStatus} from "@/types/video";
 import {GenerationModeSelector, GenerationMode} from "./generation-mode-selector";
 import {ImageModelSelector} from "./image-model-selector";
+import {AudioSettings} from "./audio-settings";
+import {TTSComposer} from "./tts-composer";
+import {AudioGenerationHistory, AudioRestoreData} from "./audio-generation-history";
+import {AudioVoiceId, AudioOutputFormat, AudioSpeakerConfig, AudioGenerationStatus, AudioVoiceConfig} from "@/types/audio";
 
 interface ProjectModel {
     id: number;
@@ -59,6 +64,7 @@ interface ProjectModel {
     is_default: boolean;
     supports_image_generation: boolean;
     supports_video_generation: boolean;
+    supports_audio_generation: boolean;
     supports_reference_images: boolean;
     system_instruction: string | null;
 }
@@ -76,7 +82,7 @@ interface Message {
     id: number;
     role: "user" | "model";
     content: string;
-    content_type?: "text" | "image" | "video" | "mixed";
+    content_type?: "text" | "image" | "video" | "audio" | "mixed";
     image_url?: string | null;
     // Video fields
     video_url?: string | null;
@@ -89,6 +95,16 @@ interface Message {
         message: string;
         progress?: number;
     };
+    // Audio fields
+    audio_url?: string | null;
+    audio_duration?: number | null;
+    audio_mime_type?: string | null;
+    audio_voice_config?: AudioVoiceConfig | AudioSpeakerConfig | null;
+    isAudioGenerating?: boolean;
+    audioProgress?: {
+        status: AudioGenerationStatus;
+        message: string;
+    };
     created_at: string;
     isStreaming?: boolean;
 }
@@ -100,6 +116,7 @@ interface Conversation {
     model_display_name: string;
     model_supports_image_generation?: boolean;
     model_supports_video_generation?: boolean;
+    model_supports_audio_generation?: boolean;
     project_id: number | null;
     project_title: string | null;
     last_message: string | null;
@@ -118,6 +135,12 @@ interface Conversation {
     video_aspect_ratio: string;
     video_audio_enabled: boolean;
     video_negative_prompt: string | null;
+    // Audio settings
+    audio_voice_id?: AudioVoiceId;
+    audio_style_prompt?: string | null;
+    audio_multi_speaker?: boolean;
+    audio_speaker_config?: AudioSpeakerConfig | null;
+    audio_output_format?: AudioOutputFormat;
     isArchived?: boolean;
 }
 
@@ -176,6 +199,14 @@ export function ChatInterface() {
     const [videoFirstFrame, setVideoFirstFrame] = useState<string | null>(null);
     const [videoLastFrame, setVideoLastFrame] = useState<string | null>(null);
     const [videoReferenceImages, setVideoReferenceImages] = useState<ReferenceImage[]>([]);
+
+    // Audio generation settings
+    const [audioVoiceId, setAudioVoiceId] = useState<AudioVoiceId>("Kore");
+    const [audioStylePrompt, setAudioStylePrompt] = useState("");
+    const [audioMultiSpeaker, setAudioMultiSpeaker] = useState(false);
+    const [audioSpeakerConfig, setAudioSpeakerConfig] = useState<AudioSpeakerConfig | null>(null);
+    const [audioOutputFormat, setAudioOutputFormat] = useState<AudioOutputFormat>("mp3");
+    const [audioRestoreData, setAudioRestoreData] = useState<AudioRestoreData | null>(null);
 
     // Generation mode (for video models that can also generate images)
     const [generationMode, setGenerationMode] = useState<GenerationMode>("video");
@@ -236,6 +267,11 @@ export function ChatInterface() {
             }
         }
     }, [generationMode, projectModels, imageModelIdForGeneration]);
+
+    // Reset audio settings when switching to a TTS model
+    useEffect(() => {
+        setAudioMultiSpeaker(false);
+    }, [selectedModelId]);
 
     // Restore tabs from localStorage after conversations are loaded
     useEffect(() => {
@@ -613,8 +649,8 @@ export function ChatInterface() {
 
     // Manejar cambios de settings (excepto modelo)
     const handleSettingChange = async (
-        setting: "system_instruction" | "temperature" | "top_p" | "top_k" | "max_output_tokens" | "image_aspect_ratio" | "image_size" | "video_duration" | "video_resolution" | "video_aspect_ratio" | "video_audio_enabled" | "video_negative_prompt",
-        value: string | number | boolean
+        setting: "system_instruction" | "temperature" | "top_p" | "top_k" | "max_output_tokens" | "image_aspect_ratio" | "image_size" | "video_duration" | "video_resolution" | "video_aspect_ratio" | "video_audio_enabled" | "video_negative_prompt" | "audio_voice_id" | "audio_style_prompt" | "audio_multi_speaker" | "audio_speaker_config" | "audio_output_format",
+        value: string | number | boolean | AudioSpeakerConfig | null
     ) => {
         // Actualizar estado local inmediatamente
         switch (setting) {
@@ -654,6 +690,21 @@ export function ChatInterface() {
             case "video_negative_prompt":
                 setVideoNegativePrompt(value as string);
                 break;
+            case "audio_voice_id":
+                setAudioVoiceId(value as AudioVoiceId);
+                break;
+            case "audio_style_prompt":
+                setAudioStylePrompt(value as string);
+                break;
+            case "audio_multi_speaker":
+                setAudioMultiSpeaker(value as boolean);
+                break;
+            case "audio_speaker_config":
+                setAudioSpeakerConfig(value as AudioSpeakerConfig | null);
+                break;
+            case "audio_output_format":
+                setAudioOutputFormat(value as AudioOutputFormat);
+                break;
         }
 
         // Si hay conversación activa, guardar en DB
@@ -687,6 +738,11 @@ export function ChatInterface() {
                     video_aspect_ratio: videoAspectRatio,
                     video_audio_enabled: videoAudioEnabled,
                     video_negative_prompt: videoNegativePrompt || null,
+                    audio_voice_id: audioVoiceId,
+                    audio_style_prompt: audioStylePrompt || null,
+                    audio_multi_speaker: audioMultiSpeaker,
+                    audio_speaker_config: audioSpeakerConfig,
+                    audio_output_format: audioOutputFormat,
                 }),
             });
 
@@ -700,6 +756,7 @@ export function ChatInterface() {
                     model_display_name: modelForConversation?.model_display_name || "",
                     model_supports_image_generation: modelForConversation?.supports_image_generation,
                     model_supports_video_generation: modelForConversation?.supports_video_generation,
+                    model_supports_audio_generation: modelForConversation?.supports_audio_generation,
                     project_id: selectedProjectId,
                     project_title: null,
                     last_message: null,
@@ -717,6 +774,11 @@ export function ChatInterface() {
                     video_aspect_ratio: videoAspectRatio,
                     video_audio_enabled: videoAudioEnabled,
                     video_negative_prompt: videoNegativePrompt,
+                    audio_voice_id: audioVoiceId,
+                    audio_style_prompt: audioStylePrompt,
+                    audio_multi_speaker: audioMultiSpeaker,
+                    audio_speaker_config: audioSpeakerConfig,
+                    audio_output_format: audioOutputFormat,
                 };
                 return newConversation;
             }
@@ -1421,6 +1483,231 @@ export function ChatInterface() {
         }
     };
 
+    // Send audio generation message
+    const sendAudioMessage = async (content: string) => {
+        if (!activeTabId || !content.trim()) return;
+
+        let tabId = activeTabId;
+        const currentTab = openTabs.find(t => t.id === tabId);
+        let conversationId = tabConversations[tabId]?.id;
+
+        // Si es un tab draft, crear la conversación real en BD
+        if (currentTab?.isDraft || !conversationId) {
+            const draftConv = tabConversations[tabId];
+            const newConv = await createNewConversation(draftConv?.model_id);
+            if (!newConv) return;
+            conversationId = newConv.id;
+            setTabConversations((prev) => ({...prev, [tabId]: newConv}));
+            setOpenTabs((prev) =>
+                prev.map((t) =>
+                    t.id === tabId ? {...t, conversationId: newConv.id, title: newConv.title, isDraft: false} : t
+                )
+            );
+        }
+
+        setSendingTabs((prev) => ({...prev, [tabId]: true}));
+
+        console.log("[Audio Debug] Sending with settings:", {
+            voiceId: audioVoiceId,
+            stylePrompt: audioStylePrompt,
+            multiSpeaker: audioMultiSpeaker,
+            outputFormat: audioOutputFormat,
+        });
+
+        // Add optimistic user message
+        const tempUserMessage: Message = {
+            id: Date.now(),
+            role: "user",
+            content,
+            content_type: "text",
+            created_at: new Date().toISOString(),
+        };
+
+        setTabMessages((prev) => ({
+            ...prev,
+            [tabId]: [...(prev[tabId] || []), tempUserMessage],
+        }));
+
+        // Add audio generating placeholder for model response
+        const audioMessageId = Date.now() + 1;
+        const audioMessage: Message = {
+            id: audioMessageId,
+            role: "model",
+            content: "",
+            content_type: "audio",
+            created_at: new Date().toISOString(),
+            isAudioGenerating: true,
+            audioProgress: {
+                status: "pending",
+                message: "Iniciando generación de audio...",
+            },
+        };
+
+        setTabMessages((prev) => ({
+            ...prev,
+            [tabId]: [...(prev[tabId] || []), audioMessage],
+        }));
+
+        try {
+            const response = await fetch(`/api/conversations/${conversationId}/messages/audio`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    content,
+                    audioSettings: {
+                        voiceId: audioVoiceId,
+                        stylePrompt: audioStylePrompt || undefined,
+                        multiSpeaker: audioMultiSpeaker,
+                        speakerConfig: audioMultiSpeaker ? audioSpeakerConfig : undefined,
+                        outputFormat: audioOutputFormat,
+                    },
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error("Error generating audio");
+            }
+
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+            let realUserMessageId: number | null = null;
+            let realModelMessageId: number | null = null;
+
+            if (reader) {
+                while (true) {
+                    const {done, value} = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split("\n");
+
+                    for (const line of lines) {
+                        if (line.startsWith("data: ")) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+
+                                if (data.type === "user_message") {
+                                    realUserMessageId = data.id;
+                                    setTabMessages((prev) => ({
+                                        ...prev,
+                                        [tabId]: prev[tabId].map((m) =>
+                                            m.id === tempUserMessage.id ? {...m, id: realUserMessageId!} : m
+                                        ),
+                                    }));
+                                } else if (data.type === "progress") {
+                                    setTabMessages((prev) => ({
+                                        ...prev,
+                                        [tabId]: prev[tabId].map((m) =>
+                                            m.id === audioMessageId
+                                                ? {
+                                                    ...m,
+                                                    audioProgress: {
+                                                        status: data.status,
+                                                        message: data.message,
+                                                    },
+                                                }
+                                                : m
+                                        ),
+                                    }));
+                                } else if (data.type === "audio") {
+                                    setTabMessages((prev) => ({
+                                        ...prev,
+                                        [tabId]: prev[tabId].map((m) =>
+                                            m.id === audioMessageId
+                                                ? {
+                                                    ...m,
+                                                    content: data.content || m.content, // Guardar texto original para restauración
+                                                    audio_url: data.audioUrl,
+                                                    audio_duration: data.duration,
+                                                    audio_mime_type: data.mimeType,
+                                                    audio_voice_config: data.voiceConfig,
+                                                    isAudioGenerating: false,
+                                                    audioProgress: undefined,
+                                                }
+                                                : m
+                                        ),
+                                    }));
+                                } else if (data.type === "complete") {
+                                    realModelMessageId = data.messageId;
+                                    setTabMessages((prev) => ({
+                                        ...prev,
+                                        [tabId]: prev[tabId].map((m) =>
+                                            m.id === audioMessageId
+                                                ? {
+                                                    ...m,
+                                                    id: realModelMessageId!,
+                                                    isAudioGenerating: false,
+                                                    audioProgress: undefined,
+                                                }
+                                                : m
+                                        ),
+                                    }));
+                                } else if (data.type === "title") {
+                                    const newTitle = data.title;
+                                    setOpenTabs((prev) =>
+                                        prev.map((t) =>
+                                            t.id === tabId ? {...t, title: newTitle} : t
+                                        )
+                                    );
+                                    setTabConversations((prev) => ({
+                                        ...prev,
+                                        [tabId]: {...prev[tabId], title: newTitle},
+                                    }));
+                                    setConversations((prev) =>
+                                        prev.map((c) =>
+                                            c.id === conversationId ? {...c, title: newTitle} : c
+                                        )
+                                    );
+                                } else if (data.type === "error") {
+                                    realModelMessageId = data.id;
+                                    setTabMessages((prev) => ({
+                                        ...prev,
+                                        [tabId]: prev[tabId].map((m) =>
+                                            m.id === audioMessageId
+                                                ? {
+                                                    ...m,
+                                                    id: realModelMessageId!,
+                                                    content: `Error: ${data.message}`,
+                                                    isAudioGenerating: false,
+                                                    audioProgress: undefined,
+                                                }
+                                                : m
+                                        ),
+                                    }));
+                                }
+                            } catch (e) {
+                                // Ignore parse errors for incomplete chunks
+                            }
+                        }
+                    }
+                }
+            }
+
+            fetchConversations();
+            if (selectedProjectId) {
+                fetchProjectUsage(selectedProjectId);
+                fetchProjectStats(selectedProjectId);
+            }
+        } catch (err) {
+            console.error("Error generating audio:", err);
+            setTabMessages((prev) => ({
+                ...prev,
+                [tabId]: prev[tabId].map((m) =>
+                    m.id === audioMessageId
+                        ? {
+                            ...m,
+                            content: "Error al generar el audio. Por favor intenta de nuevo.",
+                            isAudioGenerating: false,
+                            audioProgress: undefined,
+                        }
+                        : m
+                ),
+            }));
+        } finally {
+            setSendingTabs((prev) => ({...prev, [tabId]: false}));
+        }
+    };
+
     const getInitials = (name: string | null | undefined) => {
         if (!name) return "U";
         return name
@@ -1844,6 +2131,67 @@ export function ChatInterface() {
                                 onOpenConversation={handleOpenConversationFromGallery}
                             />
                         </div>
+                    ) : selectedProjectModel?.supports_audio_generation && activeTabId !== null ? (
+                        /* TTS Composer View */
+                        <div className="flex-1 flex flex-col overflow-hidden">
+                            <div className="flex-shrink-0 overflow-y-auto max-h-[60vh] border-b border-border/50">
+                                <TTSComposer
+                                    voiceId={audioVoiceId}
+                                    multiSpeaker={audioMultiSpeaker}
+                                    speakerConfig={audioSpeakerConfig}
+                                    stylePrompt={audioStylePrompt}
+                                    outputFormat={audioOutputFormat}
+                                    disabled={isSending}
+                                    isGenerating={(() => {
+                                        const msgs = tabMessages[activeTabId] || [];
+                                        return msgs.some(m => m.isAudioGenerating);
+                                    })()}
+                                    generationProgress={(() => {
+                                        const msgs = tabMessages[activeTabId] || [];
+                                        const generatingMsg = msgs.find(m => m.isAudioGenerating);
+                                        return generatingMsg?.audioProgress;
+                                    })()}
+                                    restoreData={audioRestoreData}
+                                    onGenerate={(text, speakers) => {
+                                        if (speakers) {
+                                            // Multi-speaker mode
+                                            setAudioSpeakerConfig(speakers);
+                                            setAudioMultiSpeaker(true);
+                                        }
+                                        sendAudioMessage(text);
+                                    }}
+                                    onSettingsChange={(settings) => {
+                                        if (settings.voiceId !== undefined) {
+                                            setAudioVoiceId(settings.voiceId);
+                                            handleSettingChange("audio_voice_id", settings.voiceId);
+                                        }
+                                        if (settings.stylePrompt !== undefined) {
+                                            setAudioStylePrompt(settings.stylePrompt);
+                                            handleSettingChange("audio_style_prompt", settings.stylePrompt);
+                                        }
+                                        if (settings.multiSpeaker !== undefined) {
+                                            setAudioMultiSpeaker(settings.multiSpeaker);
+                                            handleSettingChange("audio_multi_speaker", settings.multiSpeaker);
+                                        }
+                                        if (settings.speakerConfig !== undefined) {
+                                            setAudioSpeakerConfig(settings.speakerConfig);
+                                            handleSettingChange("audio_speaker_config", settings.speakerConfig);
+                                        }
+                                        if (settings.outputFormat !== undefined) {
+                                            setAudioOutputFormat(settings.outputFormat);
+                                            handleSettingChange("audio_output_format", settings.outputFormat);
+                                        }
+                                    }}
+                                    onRestoreHandled={() => setAudioRestoreData(null)}
+                                />
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-4">
+                                <AudioGenerationHistory
+                                    messages={tabMessages[activeTabId] || []}
+                                    onRestore={(data) => setAudioRestoreData(data)}
+                                />
+                            </div>
+                        </div>
                     ) : (
                         /* Messages Area */
                         <div className="flex-1 overflow-y-auto p-4">
@@ -1969,6 +2317,12 @@ export function ChatInterface() {
                                                     videoAspectRatio={msg.video_aspect_ratio || videoAspectRatio}
                                                     isVideoGenerating={msg.isVideoGenerating}
                                                     videoProgress={msg.videoProgress}
+                                                    audioUrl={msg.audio_url}
+                                                    audioDuration={msg.audio_duration}
+                                                    audioMimeType={msg.audio_mime_type}
+                                                    audioVoiceConfig={msg.audio_voice_config}
+                                                    isAudioGenerating={msg.isAudioGenerating}
+                                                    audioProgress={msg.audioProgress}
                                                     isUser={msg.role === "user"}
                                                     isStreaming={msg.isStreaming}
                                                     allowImageSelection={!activeTab?.isArchived && !!msg.image_url}
@@ -1992,8 +2346,8 @@ export function ChatInterface() {
                         </div>
                     )}
 
-                    {/* Input Area - Hidden for gallery and archived */}
-                    {activeTabId !== null && !activeTab?.isGallery && (
+                    {/* Input Area - Hidden for gallery, archived, and audio models (TTSComposer handles audio) */}
+                    {activeTabId !== null && !activeTab?.isGallery && !selectedProjectModel?.supports_audio_generation && (
                         activeTab?.isArchived ? (
                             <div className="p-4 border-t border-border/50 bg-orange-500/5">
                                 <div className="flex items-center justify-center gap-2 text-orange-400 text-sm">
@@ -2003,8 +2357,8 @@ export function ChatInterface() {
                             </div>
                         ) : (
                             <div className="flex flex-col">
-                                {/* Generation Mode Selector - Only for video models */}
-                                {selectedProjectModel?.supports_video_generation && (
+                                {/* Generation Mode Selector - Only for video models (not audio models) */}
+                                {selectedProjectModel?.supports_video_generation && !selectedProjectModel?.supports_audio_generation && (
                                     <div className="flex justify-center py-2 border-t border-border/50">
                                         <GenerationModeSelector
                                             mode={generationMode}
@@ -2023,7 +2377,10 @@ export function ChatInterface() {
                                 <MessageInput
                                     onSend={(content, files) => {
                                         // Route based on generation mode and model capabilities
-                                        if (selectedProjectModel?.supports_video_generation && generationMode === "video") {
+                                        if (selectedProjectModel?.supports_audio_generation) {
+                                            // Audio model - send to audio endpoint
+                                            sendAudioMessage(content);
+                                        } else if (selectedProjectModel?.supports_video_generation && generationMode === "video") {
                                             sendVideoMessage(content);
                                         } else {
                                             // Use image model if in image mode, otherwise use current model
@@ -2038,7 +2395,7 @@ export function ChatInterface() {
                                         setSelectedConversationImages([]);
                                     }}
                                     disabled={isSending || !selectedModelId}
-                                    supportsFiles={generationMode === "image" || !selectedProjectModel?.supports_video_generation}
+                                    supportsFiles={!selectedProjectModel?.supports_audio_generation && (generationMode === "image" || !selectedProjectModel?.supports_video_generation)}
                                     preselectedImages={selectedConversationImages.map(url => ({ url }))}
                                     onRemovePreselectedImage={(url) => setSelectedConversationImages(prev => prev.filter(u => u !== url))}
                                 />
@@ -2348,6 +2705,8 @@ export function ChatInterface() {
                                 />
                             </div>
                         )}
+
+                        {/* Audio Settings removed from sidebar - now integrated in TTSComposer in center */}
 
                         {/* Image Settings when video model is in image mode */}
                         {selectedProjectModel?.supports_video_generation && !activeTab?.isArchived && generationMode === "image" && (

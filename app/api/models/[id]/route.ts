@@ -14,6 +14,7 @@ interface ModelRow extends RowDataPacket {
   supports_video: boolean;
   supports_image_generation: boolean;
   supports_video_generation: boolean;
+  supports_audio_generation: boolean;
   supports_reference_images: boolean;
   max_tokens: number;
   cost_input_per_million: number;
@@ -22,6 +23,7 @@ interface ModelRow extends RowDataPacket {
   cost_image_2k: number;
   cost_image_4k: number;
   cost_video_per_second: number;
+  cost_audio_per_minute: number;
 }
 
 // GET - Obtener modelo por ID
@@ -84,6 +86,7 @@ export async function PUT(
       supports_video,
       supports_image_generation,
       supports_video_generation,
+      supports_audio_generation,
       supports_reference_images,
       max_tokens,
       cost_input_per_million,
@@ -92,6 +95,7 @@ export async function PUT(
       cost_image_2k,
       cost_image_4k,
       cost_video_per_second,
+      cost_audio_per_minute,
     } = body;
 
     // Verificar que existe
@@ -133,6 +137,7 @@ export async function PUT(
         supports_video = COALESCE(?, supports_video),
         supports_image_generation = COALESCE(?, supports_image_generation),
         supports_video_generation = COALESCE(?, supports_video_generation),
+        supports_audio_generation = COALESCE(?, supports_audio_generation),
         supports_reference_images = COALESCE(?, supports_reference_images),
         max_tokens = COALESCE(?, max_tokens),
         cost_input_per_million = COALESCE(?, cost_input_per_million),
@@ -140,7 +145,8 @@ export async function PUT(
         cost_image_1k = COALESCE(?, cost_image_1k),
         cost_image_2k = COALESCE(?, cost_image_2k),
         cost_image_4k = COALESCE(?, cost_image_4k),
-        cost_video_per_second = COALESCE(?, cost_video_per_second)
+        cost_video_per_second = COALESCE(?, cost_video_per_second),
+        cost_audio_per_minute = COALESCE(?, cost_audio_per_minute)
        WHERE id = ?`,
       [
         model_id || null,
@@ -152,6 +158,7 @@ export async function PUT(
         supports_video ?? null,
         supports_image_generation ?? null,
         supports_video_generation ?? null,
+        supports_audio_generation ?? null,
         supports_reference_images ?? null,
         max_tokens ?? null,
         cost_input_per_million ?? null,
@@ -160,6 +167,7 @@ export async function PUT(
         cost_image_2k ?? null,
         cost_image_4k ?? null,
         cost_video_per_second ?? null,
+        cost_audio_per_minute ?? null,
         id,
       ]
     );

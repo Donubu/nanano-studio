@@ -12,6 +12,7 @@ interface ConversationRow extends RowDataPacket {
   model_display_name: string;
   model_supports_image_generation: boolean;
   model_supports_video_generation: boolean;
+  model_supports_audio_generation: boolean;
   project_title: string | null;
   title: string;
   system_instruction: string | null;
@@ -27,6 +28,12 @@ interface ConversationRow extends RowDataPacket {
   video_aspect_ratio: string;
   video_audio_enabled: boolean;
   video_negative_prompt: string | null;
+  // Audio settings
+  audio_voice_id: string;
+  audio_style_prompt: string | null;
+  audio_multi_speaker: boolean;
+  audio_speaker_config: string | null;
+  audio_output_format: string;
   created_at: Date;
   updated_at: Date;
 }
@@ -55,6 +62,7 @@ export async function GET(
         m.display_name as model_display_name,
         m.supports_image_generation as model_supports_image_generation,
         m.supports_video_generation as model_supports_video_generation,
+        m.supports_audio_generation as model_supports_audio_generation,
         p.title as project_title
       FROM conversations c
       JOIN models m ON c.model_id = m.id
@@ -89,6 +97,9 @@ export async function GET(
       video_audio_enabled: Boolean(conv.video_audio_enabled),
       model_supports_image_generation: Boolean(conv.model_supports_image_generation),
       model_supports_video_generation: Boolean(conv.model_supports_video_generation),
+      model_supports_audio_generation: Boolean(conv.model_supports_audio_generation),
+      audio_multi_speaker: Boolean(conv.audio_multi_speaker),
+      audio_speaker_config: conv.audio_speaker_config ? JSON.parse(conv.audio_speaker_config) : null,
       messages: messagesWithBooleans,
     });
   } catch (error) {
@@ -130,6 +141,12 @@ export async function PUT(
       video_aspect_ratio,
       video_audio_enabled,
       video_negative_prompt,
+      // Audio settings
+      audio_voice_id,
+      audio_style_prompt,
+      audio_multi_speaker,
+      audio_speaker_config,
+      audio_output_format,
     } = body;
 
     // Debug: log received body
@@ -164,7 +181,12 @@ export async function PUT(
         video_resolution = COALESCE(?, video_resolution),
         video_aspect_ratio = COALESCE(?, video_aspect_ratio),
         video_audio_enabled = COALESCE(?, video_audio_enabled),
-        video_negative_prompt = COALESCE(?, video_negative_prompt)
+        video_negative_prompt = COALESCE(?, video_negative_prompt),
+        audio_voice_id = COALESCE(?, audio_voice_id),
+        audio_style_prompt = COALESCE(?, audio_style_prompt),
+        audio_multi_speaker = COALESCE(?, audio_multi_speaker),
+        audio_speaker_config = COALESCE(?, audio_speaker_config),
+        audio_output_format = COALESCE(?, audio_output_format)
        WHERE id = ?`,
       [
         title ?? null,
@@ -181,6 +203,11 @@ export async function PUT(
         video_aspect_ratio ?? null,
         video_audio_enabled !== undefined ? (video_audio_enabled ? 1 : 0) : null,
         video_negative_prompt ?? null,
+        audio_voice_id ?? null,
+        audio_style_prompt ?? null,
+        audio_multi_speaker !== undefined ? (audio_multi_speaker ? 1 : 0) : null,
+        audio_speaker_config !== undefined ? (audio_speaker_config ? JSON.stringify(audio_speaker_config) : null) : null,
+        audio_output_format ?? null,
         id,
       ]
     );

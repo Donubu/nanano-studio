@@ -4,14 +4,16 @@ import { useState, useEffect, useCallback } from "react";
 import {
   X, Loader2, ExternalLink, Image as ImageIcon, Video, Calendar, FileType,
   Maximize2, RatioIcon, Ruler, Download, HardDrive, Volume2, VolumeX, Clock,
-  ChevronLeft, ChevronRight, LayoutGrid, Search, Tag, Plus, Trash2, Upload
+  ChevronLeft, ChevronRight, LayoutGrid, Search, Tag, Plus, Trash2, Upload, Music, User, Users
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { VideoPlayer } from "./video-player";
+import { AudioPlayer } from "./audio-player";
 import { formatDateTimeLocal } from "@/lib/utils";
+import { AudioVoiceConfig, AudioSpeakerConfig, getVoiceById } from "@/types/audio";
 
-type FilterType = "all" | "images" | "videos";
+type FilterType = "all" | "images" | "videos" | "audios";
 
 interface TagInfo {
   id: number;
@@ -20,7 +22,7 @@ interface TagInfo {
 }
 
 interface Generation {
-  type: "image" | "video";
+  type: "image" | "video" | "audio";
   id: number;
   conversation_id: number;
   conversation_user_id: number;
@@ -37,6 +39,11 @@ interface Generation {
   video_duration: number | null;
   video_has_audio: boolean | null;
   video_aspect_ratio: string | null;
+  audio_url: string | null;
+  audio_mime_type: string | null;
+  audio_file_size: number | null;
+  audio_duration: number | null;
+  audio_voice_config: AudioVoiceConfig | AudioSpeakerConfig | null;
   created_at: string;
   deleted_at: string | null;
   tags: TagInfo[];
@@ -46,6 +53,26 @@ interface Generation {
 interface ImageDimensions {
   width: number;
   height: number;
+}
+
+// Helper to safely check if config is multi-speaker
+function isMultiSpeakerConfig(config: AudioVoiceConfig | AudioSpeakerConfig | string | null | undefined): boolean {
+  if (!config) return false;
+  const parsed = typeof config === "string" ? JSON.parse(config) : config;
+  return parsed && typeof parsed === "object" && "speakers" in parsed;
+}
+
+// Helper to safely get parsed voice config
+function getParsedVoiceConfig(config: AudioVoiceConfig | AudioSpeakerConfig | string | null | undefined): AudioVoiceConfig | AudioSpeakerConfig | null {
+  if (!config) return null;
+  if (typeof config === "string") {
+    try {
+      return JSON.parse(config);
+    } catch {
+      return null;
+    }
+  }
+  return config;
 }
 
 interface GenerationsGalleryProps {
@@ -117,7 +144,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
       }
 
       // Fetch uploads if enabled and filter allows images
-      if (showUploads && filter !== "videos") {
+      if (showUploads && filter !== "videos" && filter !== "audios") {
         const uploadsRes = await fetch(`/api/projects/${projectId}/uploads`);
         if (uploadsRes.ok) {
           const uploadsData = await uploadsRes.json();
@@ -139,6 +166,11 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
             video_duration: null,
             video_has_audio: null,
             video_aspect_ratio: null,
+            audio_url: null,
+            audio_mime_type: null,
+            audio_file_size: null,
+            audio_duration: null,
+            audio_voice_config: null,
             created_at: u.created_at,
             deleted_at: null,
             tags: [],
@@ -339,14 +371,26 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
 
   const handleDownload = async (gen: Generation) => {
     try {
-      const url = gen.type === "image" ? gen.image_url : gen.video_url;
+      let url: string | null = null;
+      let ext: string = "png";
+
+      if (gen.type === "image") {
+        url = gen.image_url;
+        ext = gen.image_mime_type?.split("/")[1] || "png";
+      } else if (gen.type === "video") {
+        url = gen.video_url;
+        ext = "mp4";
+      } else if (gen.type === "audio") {
+        url = gen.audio_url;
+        ext = gen.audio_mime_type?.split("/")[1] || "mp3";
+      }
+
       if (!url) return;
       const response = await fetch(url);
       const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = blobUrl;
-      const ext = gen.type === "image" ? (gen.image_mime_type?.split("/")[1] || "png") : "mp4";
       a.download = `${gen.type}-${gen.id}.${ext}`;
       document.body.appendChild(a);
       a.click();
@@ -393,6 +437,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
   const canUpscale = imageDimensions && imageDimensions.width <= 1920;
   const imageCount = generations.filter(g => g.type === "image").length;
   const videoCount = generations.filter(g => g.type === "video").length;
+  const audioCount = generations.filter(g => g.type === "audio").length;
 
   const tagColors = ["#6366f1", "#ec4899", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ef4444", "#06b6d4"];
 
@@ -421,7 +466,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
           </div>
 
           <div className="flex items-center gap-1">
-            {(["all", "images", "videos"] as FilterType[]).map((f) => (
+            {(["all", "images", "videos", "audios"] as FilterType[]).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -434,7 +479,8 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                 {f === "all" && <LayoutGrid className="h-4 w-4" />}
                 {f === "images" && <ImageIcon className="h-4 w-4" />}
                 {f === "videos" && <Video className="h-4 w-4" />}
-                {f === "all" ? "Todos" : f === "images" ? "Imágenes" : "Videos"}
+                {f === "audios" && <Music className="h-4 w-4" />}
+                {f === "all" ? "Todos" : f === "images" ? "Imágenes" : f === "videos" ? "Videos" : "Audios"}
               </button>
             ))}
           </div>
@@ -502,7 +548,13 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
 
         <p className="text-sm text-muted-foreground">
           {total} {total === 1 ? "generación" : "generaciones"}
-          {imageCount > 0 && videoCount > 0 && ` (${imageCount} imágenes, ${videoCount} videos)`}
+          {(imageCount > 0 || videoCount > 0 || audioCount > 0) && ` (`}
+          {imageCount > 0 && `${imageCount} ${imageCount === 1 ? "imagen" : "imágenes"}`}
+          {imageCount > 0 && (videoCount > 0 || audioCount > 0) && ", "}
+          {videoCount > 0 && `${videoCount} ${videoCount === 1 ? "video" : "videos"}`}
+          {videoCount > 0 && audioCount > 0 && ", "}
+          {audioCount > 0 && `${audioCount} ${audioCount === 1 ? "audio" : "audios"}`}
+          {(imageCount > 0 || videoCount > 0 || audioCount > 0) && `)`}
         </p>
       </div>
 
@@ -532,7 +584,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
               >
                 {gen.type === "image" && gen.image_url ? (
                   <img src={gen.image_url} alt="" className="w-full h-full object-cover" />
-                ) : gen.video_url ? (
+                ) : gen.type === "video" && gen.video_url ? (
                   <>
                     <video src={gen.video_url} className="w-full h-full object-cover" preload="metadata" muted playsInline />
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -546,6 +598,30 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                       </div>
                     )}
                   </>
+                ) : gen.type === "audio" && gen.audio_url ? (
+                  <div className="w-full h-full bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex flex-col items-center justify-center p-4">
+                    <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mb-3">
+                      <Music className="w-8 h-8 text-primary" />
+                    </div>
+                    {gen.audio_duration && (
+                      <span className="text-sm font-medium text-foreground">
+                        {Math.floor(gen.audio_duration / 60)}:{(gen.audio_duration % 60).toString().padStart(2, "0")}
+                      </span>
+                    )}
+                    {gen.audio_voice_config && (() => {
+                      const parsedConfig = getParsedVoiceConfig(gen.audio_voice_config);
+                      if (!parsedConfig) return null;
+                      return (
+                        <span className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                          {isMultiSpeakerConfig(parsedConfig) ? (
+                            <><Users className="h-3 w-3" /> {(parsedConfig as AudioSpeakerConfig).speakers.length} voces</>
+                          ) : (
+                            <><User className="h-3 w-3" /> {getVoiceById((parsedConfig as AudioVoiceConfig).voiceId)?.name || (parsedConfig as AudioVoiceConfig).voiceId}</>
+                          )}
+                        </span>
+                      );
+                    })()}
+                  </div>
                 ) : null}
 
                 {/* Deleted indicator */}
@@ -625,7 +701,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-border/50">
               <div className="flex items-center gap-3">
-                {selectedItem.type === "image" ? <ImageIcon className="h-5 w-5 text-muted-foreground" /> : <Video className="h-5 w-5 text-muted-foreground" />}
+                {selectedItem.type === "image" ? <ImageIcon className="h-5 w-5 text-muted-foreground" /> : selectedItem.type === "video" ? <Video className="h-5 w-5 text-muted-foreground" /> : <Music className="h-5 w-5 text-muted-foreground" />}
                 <h3 className="font-medium truncate">{selectedItem.conversation_title}</h3>
                 <span className="text-sm text-muted-foreground">{selectedIndex !== null && `${selectedIndex + 1} / ${generations.length}`}</span>
                 {selectedItem.source === "upload" && <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded flex items-center gap-1"><Upload className="h-3 w-3" />Subida</span>}
@@ -640,13 +716,45 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
             <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-black/50">
               {selectedItem.type === "image" && selectedItem.image_url ? (
                 <img src={selectedItem.image_url} alt="" className="max-w-full max-h-[60vh] object-contain rounded-lg" />
-              ) : selectedItem.video_url ? (
+              ) : selectedItem.type === "video" && selectedItem.video_url ? (
                 <VideoPlayer
                   videoUrl={selectedItem.video_url}
                   duration={selectedItem.video_duration || undefined}
                   hasAudio={selectedItem.video_has_audio || false}
                   aspectRatio={selectedItem.video_aspect_ratio || "16:9"}
                 />
+              ) : selectedItem.type === "audio" && selectedItem.audio_url ? (
+                <div className="w-full max-w-md p-6 bg-card rounded-xl border border-border/50">
+                  <div className="flex flex-col items-center mb-6">
+                    <div className="w-20 h-20 rounded-full bg-primary/20 flex items-center justify-center mb-4">
+                      <Music className="w-10 h-10 text-primary" />
+                    </div>
+                    {selectedItem.audio_voice_config && (() => {
+                      const parsedConfig = getParsedVoiceConfig(selectedItem.audio_voice_config);
+                      if (!parsedConfig) return null;
+                      return (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          {isMultiSpeakerConfig(parsedConfig) ? (
+                            <><Users className="h-4 w-4" /> {(parsedConfig as AudioSpeakerConfig).speakers.length} voces: {(parsedConfig as AudioSpeakerConfig).speakers.map(s => s.name).join(", ")}</>
+                          ) : (
+                            <><User className="h-4 w-4" /> {getVoiceById((parsedConfig as AudioVoiceConfig).voiceId)?.name || (parsedConfig as AudioVoiceConfig).voiceId}</>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  <AudioPlayer
+                    audioUrl={selectedItem.audio_url}
+                    duration={selectedItem.audio_duration ?? undefined}
+                    mimeType={selectedItem.audio_mime_type ?? undefined}
+                    voiceConfig={getParsedVoiceConfig(selectedItem.audio_voice_config)}
+                  />
+                  {selectedItem.content && (
+                    <div className="mt-4 pt-4 border-t border-border/50">
+                      <p className="text-sm text-muted-foreground line-clamp-4">{selectedItem.content}</p>
+                    </div>
+                  )}
+                </div>
               ) : null}
             </div>
 
@@ -727,7 +835,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
               <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
                 <div className="flex items-center gap-1.5">
                   <FileType className="h-4 w-4" />
-                  <span>{selectedItem.type === "image" ? getFileExtension(selectedItem.image_mime_type) : "MP4"}</span>
+                  <span>{selectedItem.type === "image" ? getFileExtension(selectedItem.image_mime_type) : selectedItem.type === "video" ? "MP4" : getFileExtension(selectedItem.audio_mime_type)}</span>
                 </div>
                 {selectedItem.type === "image" ? (
                   <>
@@ -746,7 +854,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                       </div>
                     )}
                   </>
-                ) : (
+                ) : selectedItem.type === "video" ? (
                   <>
                     {selectedItem.video_duration && (
                       <div className="flex items-center gap-1.5">
@@ -766,6 +874,34 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                       <div className="flex items-center gap-1.5">
                         <HardDrive className="h-4 w-4" />
                         <span>{formatFileSize(selectedItem.video_file_size)}</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {selectedItem.audio_duration && (
+                      <div className="flex items-center gap-1.5">
+                        <Clock className="h-4 w-4" />
+                        <span>{Math.floor(selectedItem.audio_duration / 60)}:{(selectedItem.audio_duration % 60).toString().padStart(2, "0")}</span>
+                      </div>
+                    )}
+                    {selectedItem.audio_voice_config && (() => {
+                      const parsedConfig = getParsedVoiceConfig(selectedItem.audio_voice_config);
+                      if (!parsedConfig) return null;
+                      return (
+                        <div className="flex items-center gap-1.5">
+                          {isMultiSpeakerConfig(parsedConfig) ? (
+                            <><Users className="h-4 w-4" /><span>{(parsedConfig as AudioSpeakerConfig).speakers.length} voces</span></>
+                          ) : (
+                            <><User className="h-4 w-4" /><span>{getVoiceById((parsedConfig as AudioVoiceConfig).voiceId)?.name}</span></>
+                          )}
+                        </div>
+                      );
+                    })()}
+                    {formatFileSize(selectedItem.audio_file_size) && (
+                      <div className="flex items-center gap-1.5">
+                        <HardDrive className="h-4 w-4" />
+                        <span>{formatFileSize(selectedItem.audio_file_size)}</span>
                       </div>
                     )}
                   </>
@@ -790,9 +926,13 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                       </Button>
                     )}
                   </>
-                ) : (
+                ) : selectedItem.type === "video" ? (
                   <Button onClick={() => handleDownload(selectedItem)} className="flex-1 gap-2" variant="outline">
                     <Download className="h-4 w-4" /> Descargar video
+                  </Button>
+                ) : (
+                  <Button onClick={() => handleDownload(selectedItem)} className="flex-1 gap-2" variant="outline">
+                    <Download className="h-4 w-4" /> Descargar audio
                   </Button>
                 )}
 

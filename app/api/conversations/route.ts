@@ -96,6 +96,12 @@ export async function POST(request: NextRequest) {
       video_aspect_ratio = "16:9",
       video_audio_enabled = true,
       video_negative_prompt = null,
+      // Audio settings
+      audio_voice_id = "Kore",
+      audio_style_prompt = null,
+      audio_multi_speaker = false,
+      audio_speaker_config = null,
+      audio_output_format = "mp3",
     } = body;
 
     if (!model_id) {
@@ -119,8 +125,8 @@ export async function POST(request: NextRequest) {
     }
 
     const [result] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO conversations (user_id, project_id, model_id, title, system_instruction, temperature, top_p, top_k, max_output_tokens, image_aspect_ratio, image_size, video_duration, video_resolution, video_aspect_ratio, video_audio_enabled, video_negative_prompt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO conversations (user_id, project_id, model_id, title, system_instruction, temperature, top_p, top_k, max_output_tokens, image_aspect_ratio, image_size, video_duration, video_resolution, video_aspect_ratio, video_audio_enabled, video_negative_prompt, audio_voice_id, audio_style_prompt, audio_multi_speaker, audio_speaker_config, audio_output_format)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         session.user.id,
         project_id || null,
@@ -138,6 +144,11 @@ export async function POST(request: NextRequest) {
         video_aspect_ratio,
         video_audio_enabled ? 1 : 0,
         video_negative_prompt,
+        audio_voice_id,
+        audio_style_prompt,
+        audio_multi_speaker ? 1 : 0,
+        audio_speaker_config ? JSON.stringify(audio_speaker_config) : null,
+        audio_output_format,
       ]
     );
 

@@ -3,11 +3,13 @@
 import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Download, ZoomIn, Loader2, Check } from "lucide-react";
+import { Download, ZoomIn, Loader2, Check, Mic } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VideoPlayer } from "./video-player";
 import { VideoProgress } from "./video-progress";
 import { VideoGenerationStatus } from "@/types/video";
+import { AudioPlayer } from "./audio-player";
+import { AudioGenerationStatus, AudioVoiceConfig, AudioSpeakerConfig } from "@/types/audio";
 
 interface MessageContentProps {
   content: string;
@@ -22,6 +24,16 @@ interface MessageContentProps {
     status: VideoGenerationStatus;
     message: string;
     progress?: number;
+  };
+  // Audio fields
+  audioUrl?: string | null;
+  audioDuration?: number | null;
+  audioMimeType?: string | null;
+  audioVoiceConfig?: AudioVoiceConfig | AudioSpeakerConfig | null;
+  isAudioGenerating?: boolean;
+  audioProgress?: {
+    status: AudioGenerationStatus;
+    message: string;
   };
   isUser?: boolean;
   isStreaming?: boolean;
@@ -121,6 +133,12 @@ export function MessageContent({
   videoAspectRatio = "16:9",
   isVideoGenerating = false,
   videoProgress,
+  audioUrl,
+  audioDuration,
+  audioMimeType,
+  audioVoiceConfig,
+  isAudioGenerating = false,
+  audioProgress,
   isUser = false,
   isStreaming = false,
   isImageSelected = false,
@@ -307,6 +325,34 @@ export function MessageContent({
           duration={videoDuration || undefined}
           hasAudio={videoHasAudio}
           aspectRatio={videoAspectRatio}
+        />
+      )}
+
+      {/* Audio en progreso de generación */}
+      {isAudioGenerating && audioProgress && (
+        <div className="flex items-center gap-3 p-4 bg-violet-500/10 border border-violet-200/50 dark:border-violet-800/50 rounded-lg">
+          <div className="w-10 h-10 rounded-full bg-violet-500/20 flex items-center justify-center shrink-0">
+            <Mic className="w-5 h-5 text-violet-600 animate-pulse" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-violet-700 dark:text-violet-300">
+              Generando audio...
+            </p>
+            <p className="text-xs text-violet-600/70 dark:text-violet-400/70 truncate">
+              {audioProgress.message}
+            </p>
+          </div>
+          <div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin shrink-0" />
+        </div>
+      )}
+
+      {/* Audio generado */}
+      {audioUrl && !isAudioGenerating && (
+        <AudioPlayer
+          audioUrl={audioUrl}
+          duration={audioDuration || undefined}
+          mimeType={audioMimeType || undefined}
+          voiceConfig={audioVoiceConfig}
         />
       )}
 

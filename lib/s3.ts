@@ -113,6 +113,28 @@ export async function uploadImageToS3(
 }
 
 /**
+ * Sube un audio a S3 y retorna la URL de CloudFront
+ * Usa el subfolder "audio" para organizar los archivos
+ */
+export async function uploadAudioToS3(
+  buffer: Buffer,
+  fileName: string,
+  mimeType: string = "audio/mpeg"
+): Promise<UploadResult> {
+  return uploadToS3(buffer, fileName, mimeType, "audio");
+}
+
+/**
+ * Genera un nombre único para un archivo de audio
+ */
+export function generateAudioFileName(
+  conversationId: string,
+  extension: string = "mp3"
+): string {
+  return generateFileName(conversationId, extension);
+}
+
+/**
  * Genera un nombre único para una imagen subida por usuario
  */
 export function generateUploadFileName(

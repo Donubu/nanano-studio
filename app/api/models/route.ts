@@ -14,6 +14,7 @@ interface ModelRow extends RowDataPacket {
   supports_video: boolean;
   supports_image_generation: boolean;
   supports_video_generation: boolean;
+  supports_audio_generation: boolean;
   supports_reference_images: boolean;
   max_tokens: number;
   cost_input_per_million: number;
@@ -22,6 +23,7 @@ interface ModelRow extends RowDataPacket {
   cost_image_2k: number;
   cost_image_4k: number;
   cost_video_per_second: number;
+  cost_audio_per_minute: number;
   created_at: Date;
 }
 
@@ -75,6 +77,7 @@ export async function POST(request: NextRequest) {
       supports_video = false,
       supports_image_generation = false,
       supports_video_generation = false,
+      supports_audio_generation = false,
       supports_reference_images = false,
       max_tokens = 8192,
       cost_input_per_million = 0,
@@ -83,6 +86,7 @@ export async function POST(request: NextRequest) {
       cost_image_2k = 0,
       cost_image_4k = 0,
       cost_video_per_second = 0,
+      cost_audio_per_minute = 0,
     } = body;
 
     if (!model_id || !display_name) {
@@ -109,16 +113,18 @@ export async function POST(request: NextRequest) {
       `INSERT INTO models (
         model_id, display_name, description, is_active,
         supports_images, supports_audio, supports_video,
-        supports_image_generation, supports_video_generation, supports_reference_images, max_tokens,
+        supports_image_generation, supports_video_generation, supports_audio_generation,
+        supports_reference_images, max_tokens,
         cost_input_per_million, cost_output_per_million,
-        cost_image_1k, cost_image_2k, cost_image_4k, cost_video_per_second
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        cost_image_1k, cost_image_2k, cost_image_4k, cost_video_per_second, cost_audio_per_minute
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         model_id, display_name, description || null, is_active,
         supports_images, supports_audio, supports_video,
-        supports_image_generation, supports_video_generation, supports_reference_images, max_tokens,
+        supports_image_generation, supports_video_generation, supports_audio_generation,
+        supports_reference_images, max_tokens,
         cost_input_per_million, cost_output_per_million,
-        cost_image_1k, cost_image_2k, cost_image_4k, cost_video_per_second
+        cost_image_1k, cost_image_2k, cost_image_4k, cost_video_per_second, cost_audio_per_minute
       ]
     );
 

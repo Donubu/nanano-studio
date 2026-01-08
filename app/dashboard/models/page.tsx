@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, Loader2, Image, AudioLines, Video, DollarSign, Sparkles, Clapperboard } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Image, AudioLines, Video, DollarSign, Sparkles, Clapperboard, Mic } from "lucide-react";
 
 interface Model {
   id: number;
@@ -33,6 +33,7 @@ interface Model {
   supports_video: boolean;
   supports_image_generation: boolean;
   supports_video_generation: boolean;
+  supports_audio_generation: boolean;
   supports_reference_images: boolean;
   max_tokens: number;
   cost_input_per_million: number;
@@ -41,6 +42,7 @@ interface Model {
   cost_image_2k: number;
   cost_image_4k: number;
   cost_video_per_second: number;
+  cost_audio_per_minute: number;
   created_at: string;
 }
 
@@ -61,6 +63,7 @@ export default function ModelsPage() {
     supports_video: false,
     supports_image_generation: false,
     supports_video_generation: false,
+    supports_audio_generation: false,
     supports_reference_images: false,
     max_tokens: 8192,
     cost_input_per_million: 0,
@@ -69,6 +72,7 @@ export default function ModelsPage() {
     cost_image_2k: 0,
     cost_image_4k: 0,
     cost_video_per_second: 0,
+    cost_audio_per_minute: 0,
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -103,6 +107,7 @@ export default function ModelsPage() {
       supports_video: false,
       supports_image_generation: false,
       supports_video_generation: false,
+      supports_audio_generation: false,
       supports_reference_images: false,
       max_tokens: 8192,
       cost_input_per_million: 0,
@@ -111,6 +116,7 @@ export default function ModelsPage() {
       cost_image_2k: 0,
       cost_image_4k: 0,
       cost_video_per_second: 0,
+      cost_audio_per_minute: 0,
     });
     setError("");
     setIsDialogOpen(true);
@@ -128,6 +134,7 @@ export default function ModelsPage() {
       supports_video: !!model.supports_video,
       supports_image_generation: !!model.supports_image_generation,
       supports_video_generation: !!model.supports_video_generation,
+      supports_audio_generation: !!model.supports_audio_generation,
       supports_reference_images: !!model.supports_reference_images,
       max_tokens: model.max_tokens,
       cost_input_per_million: Number(model.cost_input_per_million) || 0,
@@ -136,6 +143,7 @@ export default function ModelsPage() {
       cost_image_2k: Number(model.cost_image_2k) || 0,
       cost_image_4k: Number(model.cost_image_4k) || 0,
       cost_video_per_second: Number(model.cost_video_per_second) || 0,
+      cost_audio_per_minute: Number(model.cost_audio_per_minute) || 0,
     });
     setError("");
     setIsDialogOpen(true);
@@ -302,7 +310,12 @@ export default function ModelsPage() {
                           <Clapperboard className="h-3 w-3 text-pink-400" />
                         </span>
                       )}
-                      {!model.supports_images && !model.supports_audio && !model.supports_video && !model.supports_image_generation && !model.supports_video_generation && (
+                      {!!model.supports_audio_generation && (
+                        <span title="Genera Audio (TTS)" className="p-1 rounded bg-violet-500/20">
+                          <Mic className="h-3 w-3 text-violet-400" />
+                        </span>
+                      )}
+                      {!model.supports_images && !model.supports_audio && !model.supports_video && !model.supports_image_generation && !model.supports_video_generation && !model.supports_audio_generation && (
                         <span className="text-xs text-muted-foreground">Solo texto</span>
                       )}
                     </div>
@@ -487,6 +500,18 @@ export default function ModelsPage() {
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
+                      checked={formData.supports_audio_generation}
+                      onChange={(e) =>
+                        setFormData({ ...formData, supports_audio_generation: e.target.checked })
+                      }
+                      className="w-4 h-4 rounded accent-primary"
+                    />
+                    <Mic className="h-4 w-4 text-violet-400" />
+                    <span className="text-sm">Genera Audio (TTS)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
                       checked={formData.supports_reference_images}
                       onChange={(e) =>
                         setFormData({ ...formData, supports_reference_images: e.target.checked })
@@ -572,18 +597,33 @@ export default function ModelsPage() {
                     />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-xs text-muted-foreground">Video por Segundo</label>
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.001"
-                    value={formData.cost_video_per_second}
-                    onChange={(e) =>
-                      setFormData({ ...formData, cost_video_per_second: parseFloat(e.target.value) || 0 })
-                    }
-                    className="bg-muted border-border/50 max-w-[200px]"
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs text-muted-foreground">Video por Segundo</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      value={formData.cost_video_per_second}
+                      onChange={(e) =>
+                        setFormData({ ...formData, cost_video_per_second: parseFloat(e.target.value) || 0 })
+                      }
+                      className="bg-muted border-border/50"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs text-muted-foreground">Audio por Minuto</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      value={formData.cost_audio_per_minute}
+                      onChange={(e) =>
+                        setFormData({ ...formData, cost_audio_per_minute: parseFloat(e.target.value) || 0 })
+                      }
+                      className="bg-muted border-border/50"
+                    />
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
