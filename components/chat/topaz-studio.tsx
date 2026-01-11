@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useNavigation } from "@/contexts/navigation-context";
 import {
   X, Loader2, Download, Sparkles, Settings2, User,
   ChevronDown, ChevronUp, History, Zap, AlertCircle, Wand2, Image as ImageIcon
@@ -272,6 +273,13 @@ export function TopazStudio({ imageUrl, messageId, imageDimensions, onClose }: T
     fetchHistory();
   }, [fetchHistory]);
 
+  // Register with navigation system (handles Escape and browser back)
+  const navigation = useNavigation();
+  useEffect(() => {
+    // Register layer so Escape closes Topaz Studio
+    navigation.registerLayer(onClose);
+  }, [navigation, onClose]);
+
   // Process image
   const handleProcess = async () => {
     if (!estimate || processing) return;
@@ -360,7 +368,7 @@ export function TopazStudio({ imageUrl, messageId, imageDimensions, onClose }: T
   const generativeModels = Object.entries(TOPAZ_MODELS).filter(([, config]) => config.type === "generative");
 
   return (
-    <div className="fixed inset-0 bg-black/95 z-50 flex" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/95 z-[60] flex" onClick={onClose}>
       <div
         className="flex flex-1 max-h-screen overflow-hidden"
         onClick={(e) => e.stopPropagation()}

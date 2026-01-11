@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, MessageSquare, FolderKanban, ImageIcon, Video, Loader2, Zap, DollarSign } from "lucide-react";
+import { Users, MessageSquare, FolderKanban, ImageIcon, Video, Loader2, Zap, DollarSign, Sparkles } from "lucide-react";
 
 interface DashboardStats {
   totalUsers: number;
@@ -13,6 +13,8 @@ interface DashboardStats {
   totalTokensInput: number;
   totalTokensOutput: number;
   totalEstimatedCost: number;
+  topazImageCredits: number;
+  topazVideoCredits: number;
 }
 
 export default function DashboardPage() {
@@ -171,10 +173,9 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* Cost Section */}
-      <div>
-        <h2 className="text-lg font-semibold mb-3">Costos Estimados</h2>
-        <Card className="bg-card border-border/50 max-w-sm">
+      {/* Cost & Topaz Section */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 max-w-4xl">
+        <Card className="bg-card border-border/50">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Costo Total
@@ -191,6 +192,69 @@ export default function DashboardPage() {
             </div>
             <p className="text-xs text-muted-foreground">
               USD estimado
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border/50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Topaz Imagen
+            </CardTitle>
+            <Sparkles className="h-4 w-4 text-purple-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-purple-400">
+              {loading ? (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              ) : (
+                formatNumber(Number(stats?.topazImageCredits || 0))
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Créditos usados
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border/50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Topaz Video
+            </CardTitle>
+            <Sparkles className="h-4 w-4 text-orange-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-400">
+              {loading ? (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              ) : (
+                formatNumber(Number(stats?.topazVideoCredits || 0))
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Créditos usados
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border/50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Topaz Total
+            </CardTitle>
+            <Sparkles className="h-4 w-4 text-cyan-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-cyan-400">
+              {loading ? (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              ) : (
+                formatNumber(Number(stats?.topazImageCredits || 0) + Number(stats?.topazVideoCredits || 0))
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Créditos totales
             </p>
           </CardContent>
         </Card>

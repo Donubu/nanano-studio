@@ -58,6 +58,11 @@ interface PeriodSummaryRow extends RowDataPacket {
   conversation_count: number;
 }
 
+interface TopazCreditsRow extends RowDataPacket {
+  topaz_image_credits: number;
+  topaz_video_credits: number;
+}
+
 // GET - Get analytics data (admin only)
 export async function GET(request: NextRequest) {
   try {
@@ -238,6 +243,35 @@ export async function GET(request: NextRequest) {
       GROUP BY type
     `);
 
+    // 8. Topaz credits (separate query for each period)
+    const getTopazCredits = async (days: number | null): Promise<{ imageCredits: number; videoCredits: number }> => {
+      const imageFilter = days ? `WHERE created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)` : "";
+      const videoFilter = days ? `AND created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)` : "";
+
+      const [imageRows] = await pool.execute<TopazCreditsRow[]>(`
+        SELECT COALESCE(SUM(credits_consumed), 0) as topaz_image_credits
+        FROM topaz_edits
+        ${imageFilter}
+      `);
+
+      const [videoRows] = await pool.execute<TopazCreditsRow[]>(`
+        SELECT COALESCE(SUM(credits_consumed), 0) as topaz_video_credits
+        FROM topaz_video_edits
+        WHERE status = 'completed' ${videoFilter}
+      `);
+
+      return {
+        imageCredits: Number(imageRows[0]?.topaz_image_credits || 0),
+        videoCredits: Number(videoRows[0]?.topaz_video_credits || 0),
+      };
+    };
+
+    const [topaz7d, topaz30d, topazAll] = await Promise.all([
+      getTopazCredits(7),
+      getTopazCredits(30),
+      getTopazCredits(null),
+    ]);
+
     // Cost corrections from environment
     const costMultiplier = getCostMultiplier();
     const monthlyBaseCost = getMonthlyBaseCost();
@@ -293,6 +327,8 @@ export async function GET(request: NextRequest) {
           videoCount: Number(summary7d.video_count),
           messageCount: Number(summary7d.message_count),
           conversationCount: Number(summary7d.conversation_count),
+          topazImageCredits: topaz7d.imageCredits,
+          topazVideoCredits: topaz7d.videoCredits,
         },
         "30d": {
           tokensInput: Number(summary30d.tokens_input),
@@ -303,6 +339,8 @@ export async function GET(request: NextRequest) {
           videoCount: Number(summary30d.video_count),
           messageCount: Number(summary30d.message_count),
           conversationCount: Number(summary30d.conversation_count),
+          topazImageCredits: topaz30d.imageCredits,
+          topazVideoCredits: topaz30d.videoCredits,
         },
         "all": {
           tokensInput: Number(summaryAll.tokens_input),
@@ -313,6 +351,8 @@ export async function GET(request: NextRequest) {
           videoCount: Number(summaryAll.video_count),
           messageCount: Number(summaryAll.message_count),
           conversationCount: Number(summaryAll.conversation_count),
+          topazImageCredits: topazAll.imageCredits,
+          topazVideoCredits: topazAll.videoCredits,
         },
       },
       hourlyDistribution: hourlyDistribution.map(row => ({

@@ -425,3 +425,20 @@ export function applyCostCorrections(rawCost: number, includeMonthlyBase: boolea
 
   return correctedCost;
 }
+
+// ===========================================
+// TOPAZ VIDEO STUDIO - Re-exports from topaz-video.ts
+// ===========================================
+
+export {
+  TOPAZ_VIDEO_MODELS,
+  TOPAZ_VIDEO_MODEL_GROUPS,
+  calculateTopazVideoCredits,
+  getTopazVideoModelName,
+  modelSupportsUpscale,
+  modelSupportsSlowmo,
+  type TopazVideoModel,
+  type TopazVideoModelConfig,
+  type TopazVideoParameters,
+  type TopazVideoEditStatus,
+} from "./topaz-video";

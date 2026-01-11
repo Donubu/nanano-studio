@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigation } from "@/contexts/navigation-context";
 import {
   X, Loader2, ExternalLink, Image as ImageIcon, Video, Calendar, FileType,
   Maximize2, RatioIcon, Ruler, Download, HardDrive, Volume2, VolumeX, Clock,
@@ -8,6 +9,7 @@ import {
   Sparkles, Copy, Check, Star, CalendarDays, Wand2
 } from "lucide-react";
 import { TopazStudio } from "./topaz-studio";
+import { TopazStudioVideo } from "./topaz-studio-video";
 import { ProjectCalendar } from "@/components/dashboard/project-calendar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -92,6 +94,8 @@ interface GenerationsGalleryProps {
 }
 
 export function GenerationsGallery({ projectId, currentUserId, onOpenConversation }: GenerationsGalleryProps) {
+  const navigation = useNavigation();
+
   // Filter states
   const [filter, setFilter] = useState<FilterType>("all");
   const [qualityFilter, setQualityFilter] = useState<QualityFilterType>("all");
@@ -122,6 +126,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
 
   // Topaz Studio state
   const [showTopazStudio, setShowTopazStudio] = useState(false);
+  const [showTopazVideoStudio, setShowTopazVideoStudio] = useState(false);
 
   // Pagination
   const [total, setTotal] = useState(0);
@@ -247,38 +252,131 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
   const canGoPrev = selectedIndex !== null && selectedIndex > 0;
   const canGoNext = selectedIndex !== null && selectedIndex < filteredGenerations.length - 1;
 
+  // Close the generation modal
+  const closeGenerationModal = useCallback(() => {
+    setSelectedIndex(null);
+    setShowTagSelector(false);
+    setShowTopazStudio(false);
+    setShowTopazVideoStudio(false);
+  }, []);
+
+  // Handle deep linking - open specific generation if URL indicates it
+  const deepLinkHandledRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandledRef.current) return;
+    if (!navigation.initialState || filteredGenerations.length === 0) return;
+
+    const { type, id } = navigation.initialState;
+    if ((type === 'generation' || type === 'topaz') && id) {
+      // Find the generation by ID in filtered generations (since selectedIndex indexes into filteredGenerations)
+      const index = filteredGenerations.findIndex(g => g.id === id);
+      if (index !== -1) {
+        deepLinkHandledRef.current = true;
+        setSelectedIndex(index);
+        // Register layer so back/escape will close the modal
+        navigation.registerLayer(closeGenerationModal);
+
+        // If topaz, also open Topaz Studio
+        if (type === 'topaz') {
+          setShowTopazStudio(true);
+        }
+      }
+    }
+  }, [navigation.initialState, filteredGenerations, navigation, closeGenerationModal]);
+
+  // Open a generation with navigation
+  const openGeneration = useCallback((index: number, gen: Generation) => {
+    setSelectedIndex(index);
+    navigation.openGeneration(gen.id, closeGenerationModal);
+  }, [navigation, closeGenerationModal]);
+
+  // Close via navigation (triggers back)
+  const handleCloseModal = useCallback(() => {
+    navigation.back();
+  }, [navigation]);
+
+  // Open Topaz Studio with URL navigation
+  const openTopazStudio = useCallback(() => {
+    if (!selectedItem) return;
+    setShowTopazStudio(true);
+    // Update URL to include /topaz
+    if (navigation.projectSlug) {
+      navigation.replace(`/${navigation.projectSlug}/gallery/${selectedItem.id}/topaz`);
+    }
+  }, [selectedItem, navigation]);
+
+  // Close Topaz Studio and update URL back to generation
+  const closeTopazStudio = useCallback(() => {
+    setShowTopazStudio(false);
+    // Update URL back to generation
+    if (selectedItem && navigation.projectSlug) {
+      navigation.replace(`/${navigation.projectSlug}/gallery/${selectedItem.id}`);
+    }
+  }, [selectedItem, navigation]);
+
+  // Open Topaz Video Studio
+  const openTopazVideoStudio = useCallback(() => {
+    if (!selectedItem) return;
+    setShowTopazVideoStudio(true);
+    // Update URL to include /topaz-video
+    if (navigation.projectSlug) {
+      navigation.replace(`/${navigation.projectSlug}/gallery/${selectedItem.id}/topaz-video`);
+    }
+  }, [selectedItem, navigation]);
+
+  // Close Topaz Video Studio and update URL back to generation
+  const closeTopazVideoStudio = useCallback(() => {
+    setShowTopazVideoStudio(false);
+    // Update URL back to generation
+    if (selectedItem && navigation.projectSlug) {
+      navigation.replace(`/${navigation.projectSlug}/gallery/${selectedItem.id}`);
+    }
+  }, [selectedItem, navigation]);
+
   const goToPrev = useCallback(() => {
     if (canGoPrev && selectedIndex !== null) {
-      setSelectedIndex(selectedIndex - 1);
+      const newIndex = selectedIndex - 1;
+      const newGen = filteredGenerations[newIndex];
+      setSelectedIndex(newIndex);
+      // Update URL without pushing new history entry
+      if (newGen && navigation.projectSlug) {
+        navigation.replace(`/${navigation.projectSlug}/gallery/${newGen.id}`);
+      }
     }
-  }, [canGoPrev, selectedIndex]);
+  }, [canGoPrev, selectedIndex, filteredGenerations, navigation]);
 
   const goToNext = useCallback(() => {
     if (canGoNext && selectedIndex !== null) {
-      setSelectedIndex(selectedIndex + 1);
+      const newIndex = selectedIndex + 1;
+      const newGen = filteredGenerations[newIndex];
+      setSelectedIndex(newIndex);
+      // Update URL without pushing new history entry
+      if (newGen && navigation.projectSlug) {
+        navigation.replace(`/${navigation.projectSlug}/gallery/${newGen.id}`);
+      }
     }
-  }, [canGoNext, selectedIndex]);
+  }, [canGoNext, selectedIndex, filteredGenerations, navigation]);
 
-  // Keyboard navigation
+  // Keyboard navigation (Escape handled globally by NavigationProvider)
   useEffect(() => {
     if (selectedIndex === null) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't handle keyboard when Topaz Studio is open
+      if (showTopazStudio || showTopazVideoStudio) return;
+
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         goToPrev();
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
         goToNext();
-      } else if (e.key === "Escape") {
-        setSelectedIndex(null);
-        setShowTagSelector(false);
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [selectedIndex, goToPrev, goToNext]);
+  }, [selectedIndex, goToPrev, goToNext, showTopazStudio, showTopazVideoStudio]);
 
   // Load image dimensions
   useEffect(() => {
@@ -367,7 +465,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
       const res = await fetch(`/api/projects/${projectId}/uploads/${uploadId}`, { method: "DELETE" });
       if (res.ok) {
         setGenerations(prev => prev.filter(gen => !(gen.source === "upload" && gen.id === uploadId)));
-        setSelectedIndex(null);
+        handleCloseModal();
       } else {
         const error = await res.json();
         alert(error.error || "Error al eliminar");
@@ -722,7 +820,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
             {filteredGenerations.map((gen, index) => (
               <div
                 key={`${gen.source || "generation"}-${gen.type}-${gen.id}`}
-                onClick={() => setSelectedIndex(index)}
+                onClick={() => openGeneration(index, gen)}
                 className={`group relative aspect-square rounded-lg overflow-hidden cursor-pointer bg-card border transition-all ${
                   gen.deleted_at
                     ? "border-red-500/30 opacity-60"
@@ -860,7 +958,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
 
       {/* Modal */}
       {selectedItem && (
-        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center" onClick={() => { setSelectedIndex(null); setShowTagSelector(false); setShowTopazStudio(false); }}>
+        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center" onClick={handleCloseModal}>
           {/* Navigation */}
           {canGoPrev && (
             <button onClick={(e) => { e.stopPropagation(); goToPrev(); }} className="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/50 hover:bg-black/70 z-10">
@@ -898,7 +996,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                     <Star className={`h-5 w-5 ${selectedItem.is_favorite ? "fill-yellow-400" : ""}`} />
                   </button>
                 )}
-                <button onClick={() => { setSelectedIndex(null); setShowTagSelector(false); setShowTopazStudio(false); }} className="p-2 hover:bg-accent rounded-lg">
+                <button onClick={handleCloseModal} className="p-2 hover:bg-accent rounded-lg">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -1141,7 +1239,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                     )}
                     {imageDimensions && (
                       <Button
-                        onClick={() => setShowTopazStudio(true)}
+                        onClick={openTopazStudio}
                         className="flex-1 gap-2 text-purple-400 border-purple-500/30 hover:bg-purple-500/10"
                         variant="outline"
                       >
@@ -1150,9 +1248,18 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                     )}
                   </>
                 ) : selectedItem.type === "video" ? (
-                  <Button onClick={() => handleDownload(selectedItem)} className="flex-1 gap-2" variant="outline">
-                    <Download className="h-4 w-4" /> Descargar video
-                  </Button>
+                  <>
+                    <Button onClick={() => handleDownload(selectedItem)} className="flex-1 gap-2" variant="outline">
+                      <Download className="h-4 w-4" /> Descargar video
+                    </Button>
+                    <Button
+                      onClick={openTopazVideoStudio}
+                      className="flex-1 gap-2 text-purple-400 border-purple-500/30 hover:bg-purple-500/10"
+                      variant="outline"
+                    >
+                      <Wand2 className="h-4 w-4" /> Topaz Video
+                    </Button>
+                  </>
                 ) : (
                   <Button onClick={() => handleDownload(selectedItem)} className="flex-1 gap-2" variant="outline">
                     <Download className="h-4 w-4" /> Descargar audio
@@ -1160,7 +1267,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                 )}
 
                 {selectedItem.conversation_user_id === currentUserId && (
-                  <Button onClick={() => { setSelectedIndex(null); onOpenConversation(selectedItem.conversation_id); }} className="flex-1 gap-2" variant="outline">
+                  <Button onClick={() => { handleCloseModal(); onOpenConversation(selectedItem.conversation_id); }} className="flex-1 gap-2" variant="outline">
                     <ExternalLink className="h-4 w-4" /> Ir a la conversación
                   </Button>
                 )}
@@ -1183,7 +1290,21 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
           imageUrl={selectedItem.image_url}
           messageId={selectedItem.source !== "upload" ? selectedItem.id : 0}
           imageDimensions={imageDimensions}
-          onClose={() => setShowTopazStudio(false)}
+          onClose={closeTopazStudio}
+        />
+      )}
+
+      {/* Topaz Video Studio Modal */}
+      {showTopazVideoStudio && selectedItem && selectedItem.type === "video" && selectedItem.video_url && (
+        <TopazStudioVideo
+          videoUrl={selectedItem.video_url}
+          messageId={selectedItem.source !== "upload" ? selectedItem.id : 0}
+          videoMetadata={{
+            duration: selectedItem.video_duration || 0,
+            hasAudio: selectedItem.video_has_audio || false,
+            aspectRatio: selectedItem.video_aspect_ratio || "16:9",
+          }}
+          onClose={closeTopazVideoStudio}
         />
       )}
     </div>

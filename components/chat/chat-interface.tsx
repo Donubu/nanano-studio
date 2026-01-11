@@ -69,8 +69,10 @@ import {ImageModelSelector} from "./image-model-selector";
 import {AudioSettings} from "./audio-settings";
 import {TTSComposer} from "./tts-composer";
 import {TopazStudio} from "./topaz-studio";
+import {TopazStudioVideo} from "./topaz-studio-video";
 import {AudioGenerationHistory, AudioRestoreData} from "./audio-generation-history";
 import {AudioVoiceId, AudioOutputFormat, AudioSpeakerConfig, AudioGenerationStatus, AudioVoiceConfig} from "@/types/audio";
+import {useNavigation, generateSlug} from "@/contexts/navigation-context";
 
 // Helper function to get the icon for a conversation based on its generation type
 function getConversationIcon(generationType: string | undefined, className: string) {
@@ -187,6 +189,7 @@ const STORAGE_KEY_PROJECT = "nanano_selected_project";
 export function ChatInterface() {
     const {data: session} = useSession();
     const {theme, setTheme} = useTheme();
+    const navigation = useNavigation();
     const [mounted, setMounted] = useState(false);
     const [projectModels, setProjectModels] = useState<ProjectModel[]>([]);
     const [projects, setProjects] = useState<Project[]>([]);
@@ -297,6 +300,10 @@ export function ChatInterface() {
     const [viewingImageDimensions, setViewingImageDimensions] = useState<{ width: number; height: number } | null>(null);
     const [showTopazStudio, setShowTopazStudio] = useState(false);
 
+    // Video viewer modal
+    const [viewingVideoMessage, setViewingVideoMessage] = useState<Message | null>(null);
+    const [showTopazVideoStudio, setShowTopazVideoStudio] = useState(false);
+
     // Get current tab's conversation and messages
     const activeTab = openTabs.find((t) => t.id === activeTabId);
     const currentConversation = activeTab ? tabConversations[activeTab.id] : null;
@@ -347,13 +354,32 @@ export function ChatInterface() {
         setMounted(true);
     }, []);
 
-    // Load from localStorage on mount
+    // Load from localStorage on mount (only if no URL slug to follow)
     useEffect(() => {
+        // If URL has a project slug, that will be handled by the next effect
+        if (navigation.initialState?.projectSlug) return;
+
         const savedProject = localStorage.getItem(STORAGE_KEY_PROJECT);
         if (savedProject) {
             setSelectedProjectId(Number(savedProject));
         }
-    }, []);
+    }, [navigation.initialState]);
+
+    // Select project from URL slug for deep linking
+    const projectFromUrlHandled = useRef(false);
+    useEffect(() => {
+        if (projectFromUrlHandled.current) return;
+        if (!navigation.initialState?.projectSlug || projects.length === 0) return;
+
+        // Find project with matching slug
+        const urlSlug = navigation.initialState.projectSlug;
+        const matchingProject = projects.find(p => generateSlug(p.title) === urlSlug);
+
+        if (matchingProject) {
+            projectFromUrlHandled.current = true;
+            setSelectedProjectId(matchingProject.id);
+        }
+    }, [navigation.initialState, projects]);
 
     // Save project to localStorage
     useEffect(() => {
@@ -363,6 +389,72 @@ export function ChatInterface() {
             localStorage.removeItem(STORAGE_KEY_PROJECT);
         }
     }, [selectedProjectId]);
+
+    // Update navigation slug when project changes
+    useEffect(() => {
+        if (selectedProjectId && projects.length > 0) {
+            const project = projects.find(p => p.id === selectedProjectId);
+            if (project) {
+                const newSlug = generateSlug(project.title);
+                // Only update if slug is different to avoid infinite loop
+                if (navigation.projectSlug !== newSlug) {
+                    navigation.setProjectSlug(newSlug);
+                }
+            }
+        }
+    }, [selectedProjectId, projects, navigation.projectSlug, navigation.setProjectSlug]);
+
+    // Handle deep linking - open gallery or conversation based on URL
+    const deepLinkHandled = useRef(false);
+    useEffect(() => {
+        // Only handle once per page load
+        if (deepLinkHandled.current) return;
+        if (!navigation.initialState || !selectedProjectId) return;
+
+        const { type, id } = navigation.initialState;
+        if (type === 'gallery' || type === 'generation' || type === 'topaz') {
+            // Open gallery tab without pushing navigation (we're already at the URL)
+            // Generation/topaz modals will be handled by generations-gallery
+            deepLinkHandled.current = true;
+            handleOpenGallery(true);
+        } else if (type === 'conversation' && id && conversations.length > 0) {
+            // Find and open conversation
+            const conv = conversations.find(c => c.id === id);
+            if (conv) {
+                deepLinkHandled.current = true;
+                openConversationInTab(conv, true);
+            }
+        }
+    }, [navigation.initialState, selectedProjectId, conversations]);
+
+    // Register navigation layer for image viewer modal
+    const imageViewerLayerRegistered = useRef(false);
+    useEffect(() => {
+        if (viewingImageMessage && !imageViewerLayerRegistered.current) {
+            // Register layer so Escape closes the image viewer, not the conversation
+            navigation.registerLayer(() => {
+                setViewingImageMessage(null);
+                setViewingImageDimensions(null);
+            });
+            imageViewerLayerRegistered.current = true;
+        } else if (!viewingImageMessage && imageViewerLayerRegistered.current) {
+            imageViewerLayerRegistered.current = false;
+        }
+    }, [viewingImageMessage, navigation]);
+
+    // Register navigation layer for video viewer modal
+    const videoViewerLayerRegistered = useRef(false);
+    useEffect(() => {
+        if (viewingVideoMessage && !videoViewerLayerRegistered.current) {
+            navigation.registerLayer(() => {
+                setViewingVideoMessage(null);
+                setShowTopazVideoStudio(false);
+            });
+            videoViewerLayerRegistered.current = true;
+        } else if (!viewingVideoMessage && videoViewerLayerRegistered.current) {
+            videoViewerLayerRegistered.current = false;
+        }
+    }, [viewingVideoMessage, navigation]);
 
     // Auto-select first image model when switching to image mode
     useEffect(() => {
@@ -628,6 +720,19 @@ export function ChatInterface() {
     useEffect(() => {
         fetchProjects();
     }, [fetchProjects]);
+
+    // Select project from URL slug (takes precedence over localStorage for deep linking)
+    useEffect(() => {
+        if (projects.length > 0 && navigation.projectSlug) {
+            // Find project that matches the URL slug
+            const matchingProject = projects.find(p =>
+                generateSlug(p.title) === navigation.projectSlug
+            );
+            if (matchingProject && matchingProject.id !== selectedProjectId) {
+                setSelectedProjectId(matchingProject.id);
+            }
+        }
+    }, [projects, navigation.projectSlug]);
 
     useEffect(() => {
         if (selectedProjectId) {
@@ -941,11 +1046,16 @@ export function ChatInterface() {
         return null;
     };
 
-    const openConversationInTab = (conversation: Conversation) => {
+    const openConversationInTab = (conversation: Conversation, skipNavigation = false) => {
         // Check if already open
         const existingTab = openTabs.find((t) => t.conversationId === conversation.id);
         if (existingTab) {
             setActiveTabId(existingTab.id);
+            if (skipNavigation) {
+                navigation.registerLayer(() => handleTabClose(existingTab.id, true));
+            } else {
+                navigation.openConversation(conversation.id, () => handleTabClose(existingTab.id, true));
+            }
             return;
         }
 
@@ -962,6 +1072,13 @@ export function ChatInterface() {
         setOpenTabs((prev) => [...prev, newTab]);
         setTabConversations((prev) => ({...prev, [tabId]: conversation}));
         setActiveTabId(tabId);
+
+        // Push navigation
+        if (skipNavigation) {
+            navigation.registerLayer(() => handleTabClose(tabId, true));
+        } else {
+            navigation.openConversation(conversation.id, () => handleTabClose(tabId, true));
+        }
 
         // Fetch messages
         fetchMessagesForTab(tabId, conversation.id, conversation.isArchived).then(() => {
@@ -1038,11 +1155,18 @@ export function ChatInterface() {
         }
     };
 
-    const handleOpenGallery = () => {
+    const handleOpenGallery = (skipNavigation = false) => {
         // Check if gallery tab already exists
         const existingGalleryTab = openTabs.find((t) => t.isGallery);
         if (existingGalleryTab) {
             setActiveTabId(existingGalleryTab.id);
+            if (skipNavigation) {
+                // Deep linking: register layer without pushing (URL already correct)
+                navigation.registerLayer(() => handleTabClose(existingGalleryTab.id, true));
+            } else {
+                // Normal open: push navigation state
+                navigation.openGallery(() => handleTabClose(existingGalleryTab.id, true));
+            }
             return;
         }
 
@@ -1058,6 +1182,14 @@ export function ChatInterface() {
 
         setOpenTabs((prev) => [...prev, newTab]);
         setActiveTabId(tabId);
+
+        if (skipNavigation) {
+            // Deep linking: register layer without pushing (URL already correct)
+            navigation.registerLayer(() => handleTabClose(tabId, true));
+        } else {
+            // Normal open: push navigation state
+            navigation.openGallery(() => handleTabClose(tabId, true));
+        }
     };
 
     const handleOpenConversationFromGallery = (conversationId: number) => {
@@ -1102,8 +1234,9 @@ export function ChatInterface() {
         }
     };
 
-    const handleTabClose = (tabId: number) => {
+    const handleTabClose = (tabId: number, fromNavigation = false) => {
         const tabIndex = openTabs.findIndex((t) => t.id === tabId);
+        const closingTab = openTabs.find((t) => t.id === tabId);
         setOpenTabs((prev) => prev.filter((t) => t.id !== tabId));
 
         // Clean up state
@@ -1128,9 +1261,25 @@ export function ChatInterface() {
             const remainingTabs = openTabs.filter((t) => t.id !== tabId);
             if (remainingTabs.length > 0) {
                 const newActiveIndex = Math.min(tabIndex, remainingTabs.length - 1);
-                setActiveTabId(remainingTabs[newActiveIndex].id);
+                const newActiveTab = remainingTabs[newActiveIndex];
+                setActiveTabId(newActiveTab.id);
+
+                // Update URL to reflect new active tab (only if not from navigation back)
+                if (!fromNavigation && navigation.projectSlug) {
+                    if (newActiveTab.isGallery) {
+                        navigation.replace(`/${navigation.projectSlug}/gallery`);
+                    } else if (newActiveTab.conversationId) {
+                        navigation.replace(`/${navigation.projectSlug}/conversation/${newActiveTab.conversationId}`);
+                    } else {
+                        navigation.replace(`/${navigation.projectSlug}/`);
+                    }
+                }
             } else {
                 setActiveTabId(null);
+                // No tabs left, go back to project base URL
+                if (!fromNavigation && navigation.projectSlug) {
+                    navigation.replace(`/${navigation.projectSlug}/`);
+                }
             }
         }
     };
@@ -2081,7 +2230,7 @@ export function ChatInterface() {
                         )}
                         {selectedProjectId && (
                             <Button
-                                onClick={handleOpenGallery}
+                                onClick={() => handleOpenGallery()}
                                 variant="outline"
                                 size="sm"
                                 className="w-full mt-2 gap-2 text-purple-400 border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-300"
@@ -2438,7 +2587,7 @@ export function ChatInterface() {
                                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                                         {/* Gallery Folder - First item */}
                                         <button
-                                            onClick={handleOpenGallery}
+                                            onClick={() => handleOpenGallery()}
                                             className="group flex flex-col items-center p-4 rounded-xl bg-gradient-to-br from-purple-500/10 to-purple-600/5 border border-purple-500/30 hover:border-purple-400/50 hover:from-purple-500/20 hover:to-purple-600/10 transition-all"
                                         >
                                             <div className="w-16 h-14 rounded-lg bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform shadow-lg shadow-purple-500/20">
@@ -2612,6 +2761,7 @@ export function ChatInterface() {
                                                     isImageSelected={msg.image_url ? selectedConversationImages.includes(msg.image_url) : false}
                                                     onImageSelect={handleConversationImageSelect}
                                                     onViewImage={msg.role === "model" && msg.image_url ? () => setViewingImageMessage(msg) : undefined}
+                                                    onViewVideo={msg.role === "model" && msg.video_url ? () => setViewingVideoMessage(msg) : undefined}
                                                 />
                                             </div>
                                             {msg.role === "user" && (
@@ -3377,6 +3527,93 @@ export function ChatInterface() {
                     messageId={viewingImageMessage.id}
                     imageDimensions={viewingImageDimensions}
                     onClose={() => setShowTopazStudio(false)}
+                />
+            )}
+
+            {/* Video Viewer Modal */}
+            {viewingVideoMessage && viewingVideoMessage.video_url && !showTopazVideoStudio && (
+                <div
+                    className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center"
+                    onClick={() => setViewingVideoMessage(null)}
+                >
+                    {/* Top bar with actions */}
+                    <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-10">
+                        <div className="flex items-center gap-2">
+                            {viewingVideoMessage.video_duration && (
+                                <span className="text-sm text-white/70 bg-black/50 px-3 py-1.5 rounded-lg">
+                                    {Math.floor(viewingVideoMessage.video_duration / 60)}:{String(Math.floor(viewingVideoMessage.video_duration % 60)).padStart(2, '0')}
+                                </span>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            {/* Download button */}
+                            <button
+                                onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                        const response = await fetch(viewingVideoMessage.video_url!);
+                                        const blob = await response.blob();
+                                        const url = window.URL.createObjectURL(blob);
+                                        const link = document.createElement("a");
+                                        link.href = url;
+                                        link.download = viewingVideoMessage.video_url!.split("/").pop() || "video.mp4";
+                                        document.body.appendChild(link);
+                                        link.click();
+                                        document.body.removeChild(link);
+                                        window.URL.revokeObjectURL(url);
+                                    } catch (err) {
+                                        console.error("Error downloading:", err);
+                                    }
+                                }}
+                                className="p-2.5 bg-black/50 hover:bg-black/70 rounded-lg transition-colors"
+                                title="Descargar video"
+                            >
+                                <Download className="h-5 w-5 text-white" />
+                            </button>
+                            {/* Topaz Video Studio button */}
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowTopazVideoStudio(true);
+                                }}
+                                className="flex items-center gap-2 px-3 py-2 bg-purple-600/80 hover:bg-purple-600 rounded-lg transition-colors"
+                                title="Abrir Topaz Video Studio"
+                            >
+                                <Sparkles className="h-5 w-5 text-white" />
+                                <span className="text-sm font-medium text-white">Topaz Video</span>
+                            </button>
+                            {/* Close button */}
+                            <button
+                                onClick={() => setViewingVideoMessage(null)}
+                                className="p-2.5 bg-black/50 hover:bg-black/70 rounded-lg transition-colors"
+                            >
+                                <X className="h-5 w-5 text-white" />
+                            </button>
+                        </div>
+                    </div>
+                    <div
+                        className="relative max-w-[90vw] max-h-[85vh] flex items-center justify-center mt-16"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <video
+                            src={viewingVideoMessage.video_url}
+                            className="max-w-full max-h-[85vh] object-contain rounded-lg"
+                            controls
+                            playsInline
+                        />
+                    </div>
+                </div>
+            )}
+
+            {/* Topaz Video Studio */}
+            {showTopazVideoStudio && viewingVideoMessage && viewingVideoMessage.video_url && (
+                <TopazStudioVideo
+                    videoUrl={viewingVideoMessage.video_url}
+                    messageId={viewingVideoMessage.id}
+                    videoMetadata={{
+                        duration: viewingVideoMessage.video_duration || 0,
+                    }}
+                    onClose={() => setShowTopazVideoStudio(false)}
                 />
             )}
         </div>

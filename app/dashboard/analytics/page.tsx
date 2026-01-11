@@ -15,6 +15,7 @@ import {
   Users,
   FolderKanban,
   BarChart3,
+  Sparkles,
 } from "lucide-react";
 import {
   LineChart,
@@ -87,6 +88,8 @@ interface Summary {
   videoCount: number;
   messageCount: number;
   conversationCount: number;
+  topazImageCredits: number;
+  topazVideoCredits: number;
 }
 
 interface GenerationType {
@@ -162,7 +165,7 @@ export default function AnalyticsPage() {
   };
 
   const getCurrentSummary = (): Summary => {
-    if (!data) return { tokensInput: 0, tokensOutput: 0, totalTokens: 0, estimatedCost: 0, imageCount: 0, videoCount: 0, messageCount: 0, conversationCount: 0 };
+    if (!data) return { tokensInput: 0, tokensOutput: 0, totalTokens: 0, estimatedCost: 0, imageCount: 0, videoCount: 0, messageCount: 0, conversationCount: 0, topazImageCredits: 0, topazVideoCredits: 0 };
     if (period === "7") return data.summaries["7d"];
     if (period === "30") return data.summaries["30d"];
     return data.summaries["all"];
@@ -228,7 +231,7 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
         <Card className="bg-card border-border/50">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -310,6 +313,23 @@ export default function AnalyticsPage() {
           <CardContent>
             <div className="text-2xl font-bold">{currentSummary.conversationCount}</div>
             <p className="text-xs text-muted-foreground">Chats activos</p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border/50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Topaz
+            </CardTitle>
+            <Sparkles className="h-4 w-4 text-purple-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-purple-400">
+              {formatNumber(currentSummary.topazImageCredits + currentSummary.topazVideoCredits)}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Img: {formatNumber(currentSummary.topazImageCredits)} / Vid: {formatNumber(currentSummary.topazVideoCredits)}
+            </p>
           </CardContent>
         </Card>
       </div>

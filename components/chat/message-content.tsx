@@ -79,6 +79,8 @@ interface MessageContentProps {
   allowImageSelection?: boolean;
   // View image in modal
   onViewImage?: () => void;
+  // View video in modal
+  onViewVideo?: () => void;
 }
 
 interface ImageMetadata {
@@ -184,6 +186,7 @@ export function MessageContent({
   onImageSelect,
   allowImageSelection = false,
   onViewImage,
+  onViewVideo,
 }: MessageContentProps) {
   const [errorExpanded, setErrorExpanded] = useState(false);
   const isError = contentType === "error" || content.startsWith("Error");
@@ -394,12 +397,26 @@ export function MessageContent({
 
       {/* Video generado */}
       {videoUrl && !isVideoGenerating && (
-        <VideoPlayer
-          videoUrl={videoUrl}
-          duration={videoDuration || undefined}
-          hasAudio={videoHasAudio}
-          aspectRatio={videoAspectRatio}
-        />
+        <div className="relative group">
+          <VideoPlayer
+            videoUrl={videoUrl}
+            duration={videoDuration || undefined}
+            hasAudio={videoHasAudio}
+            aspectRatio={videoAspectRatio}
+          />
+          {/* Botón de zoom para video */}
+          {!isUser && onViewVideo && (
+            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                onClick={onViewVideo}
+                className="p-2 bg-black/60 hover:bg-black/80 rounded-lg"
+                title="Ver video"
+              >
+                <ZoomIn className="h-4 w-4 text-white" />
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Audio en progreso de generación */}
@@ -503,7 +520,7 @@ export function MessageContent({
                         "px-1.5 py-0.5 rounded text-xs font-mono",
                         isUser
                           ? "bg-white/20"
-                          : "bg-secondary text-yellow-300"
+                          : "bg-secondary text-amber-700 dark:text-yellow-300"
                       )}
                       {...props}
                     >

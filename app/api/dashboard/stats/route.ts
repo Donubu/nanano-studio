@@ -13,6 +13,8 @@ interface StatsRow extends RowDataPacket {
   totalTokensInput: number;
   totalTokensOutput: number;
   totalEstimatedCost: number;
+  topazImageCredits: number;
+  topazVideoCredits: number;
 }
 
 // GET - Get global dashboard statistics (admin only)
@@ -38,7 +40,9 @@ export async function GET() {
         (SELECT COUNT(*) FROM messages WHERE role = 'model' AND video_url IS NOT NULL AND video_url != '') as totalVideos,
         (SELECT COALESCE(SUM(tokens_input), 0) FROM messages) as totalTokensInput,
         (SELECT COALESCE(SUM(tokens_output), 0) FROM messages) as totalTokensOutput,
-        (SELECT COALESCE(SUM(total_estimated_cost), 0) FROM conversations) as totalEstimatedCost
+        (SELECT COALESCE(SUM(total_estimated_cost), 0) FROM conversations) as totalEstimatedCost,
+        (SELECT COALESCE(SUM(credits_consumed), 0) FROM topaz_edits) as topazImageCredits,
+        (SELECT COALESCE(SUM(credits_consumed), 0) FROM topaz_video_edits WHERE status = 'completed') as topazVideoCredits
     `);
 
     const result = stats[0] || {
@@ -50,6 +54,8 @@ export async function GET() {
       totalTokensInput: 0,
       totalTokensOutput: 0,
       totalEstimatedCost: 0,
+      topazImageCredits: 0,
+      topazVideoCredits: 0,
     };
 
     // Apply cost corrections (multiplier + monthly base cost for current month)
