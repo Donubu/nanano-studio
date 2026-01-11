@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
+import { getCostMultiplier, getMonthlyBaseCost } from "@/lib/cost-calculator";
 
 interface DailyStatsRow extends RowDataPacket {
   date: string;
@@ -237,8 +238,9 @@ export async function GET(request: NextRequest) {
       GROUP BY type
     `);
 
-    // Cost correction multiplier from environment
-    const costMultiplier = parseFloat(process.env.COST_CORRECTION_MULTIPLIER || "1");
+    // Cost corrections from environment
+    const costMultiplier = getCostMultiplier();
+    const monthlyBaseCost = getMonthlyBaseCost();
 
     return NextResponse.json({
       dailyStats: dailyStats.map(row => ({
@@ -286,7 +288,7 @@ export async function GET(request: NextRequest) {
           tokensInput: Number(summary7d.tokens_input),
           tokensOutput: Number(summary7d.tokens_output),
           totalTokens: Number(summary7d.tokens_input) + Number(summary7d.tokens_output),
-          estimatedCost: Number(summary7d.estimated_cost) * costMultiplier,
+          estimatedCost: (Number(summary7d.estimated_cost) * costMultiplier) + monthlyBaseCost,
           imageCount: Number(summary7d.image_count),
           videoCount: Number(summary7d.video_count),
           messageCount: Number(summary7d.message_count),
@@ -296,7 +298,7 @@ export async function GET(request: NextRequest) {
           tokensInput: Number(summary30d.tokens_input),
           tokensOutput: Number(summary30d.tokens_output),
           totalTokens: Number(summary30d.tokens_input) + Number(summary30d.tokens_output),
-          estimatedCost: Number(summary30d.estimated_cost) * costMultiplier,
+          estimatedCost: (Number(summary30d.estimated_cost) * costMultiplier) + monthlyBaseCost,
           imageCount: Number(summary30d.image_count),
           videoCount: Number(summary30d.video_count),
           messageCount: Number(summary30d.message_count),
@@ -306,7 +308,7 @@ export async function GET(request: NextRequest) {
           tokensInput: Number(summaryAll.tokens_input),
           tokensOutput: Number(summaryAll.tokens_output),
           totalTokens: Number(summaryAll.tokens_input) + Number(summaryAll.tokens_output),
-          estimatedCost: Number(summaryAll.estimated_cost) * costMultiplier,
+          estimatedCost: (Number(summaryAll.estimated_cost) * costMultiplier) + monthlyBaseCost,
           imageCount: Number(summaryAll.image_count),
           videoCount: Number(summaryAll.video_count),
           messageCount: Number(summaryAll.message_count),

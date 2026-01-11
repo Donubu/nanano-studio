@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
+import { applyCostCorrections } from "@/lib/cost-calculator";
 
 interface StatsRow extends RowDataPacket {
   totalUsers: number;
@@ -27,9 +28,6 @@ export async function GET() {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 });
     }
 
-    // Cost correction multiplier from environment
-    const costMultiplier = parseFloat(process.env.COST_CORRECTION_MULTIPLIER || "1");
-
     // Get all stats in one query
     const [stats] = await pool.execute<StatsRow[]>(`
       SELECT
@@ -54,8 +52,8 @@ export async function GET() {
       totalEstimatedCost: 0,
     };
 
-    // Apply cost correction multiplier
-    result.totalEstimatedCost = Number(result.totalEstimatedCost) * costMultiplier;
+    // Apply cost corrections (multiplier + monthly base cost for current month)
+    result.totalEstimatedCost = applyCostCorrections(Number(result.totalEstimatedCost), true);
 
     return NextResponse.json(result);
   } catch (error) {

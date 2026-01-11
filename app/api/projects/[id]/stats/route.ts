@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
+import { getCostMultiplier } from "@/lib/cost-calculator";
 
 interface StatsRow extends RowDataPacket {
   totalConversations: number;
@@ -39,7 +40,7 @@ export async function GET(
     }
 
     // Cost correction multiplier from environment
-    const costMultiplier = parseFloat(process.env.COST_CORRECTION_MULTIPLIER || "1");
+    const costMultiplier = getCostMultiplier();
 
     // Get all stats in one query
     const [stats] = await pool.execute<StatsRow[]>(`

@@ -13,6 +13,8 @@ import {
     Cpu,
     BarChart3,
     DollarSign,
+    FileStack,
+    Cloud,
 } from "lucide-react";
 
 const menuItems = [
@@ -25,6 +27,11 @@ const menuItems = [
         title: "Estadísticas",
         href: "/dashboard/analytics",
         icon: BarChart3,
+    },
+    {
+        title: "Generaciones",
+        href: "/dashboard/generations",
+        icon: FileStack,
     },
     {
         title: "Proyectos",
@@ -52,7 +59,12 @@ const menuItems = [
         icon: MessageSquare,
     },
     {
-        title: 'Facturación',
+        title: "Costos GCP",
+        href: "/dashboard/billing",
+        icon: Cloud,
+    },
+    {
+        title: 'Facturación GCP',
         href: "https://console.cloud.google.com/billing/011AA4-02B727-A9BC2E/reports;credits=NONE?invt=AcGE5w&organizationId=282755889495&project=puerto-ia",
         icon: DollarSign,
         target: "_blank"

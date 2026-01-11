@@ -58,7 +58,7 @@ const ai = createClient();
 // ============================================
 
 export type ImagenAspectRatio = "1:1" | "3:4" | "4:3" | "9:16" | "16:9";
-export type ImagenResolution = "1K" | "2K";
+export type ImagenResolution = "1K" | "2K" | "4K";
 
 export interface ImagenGenerationConfig {
   aspectRatio: ImagenAspectRatio;
@@ -257,5 +257,6 @@ export function getSupportedResolutions(): { value: ImagenResolution; label: str
   return [
     { value: "1K", label: "1K (1024px)" },
     { value: "2K", label: "2K (2048px)" },
+    { value: "4K", label: "4K (4096px)" },
   ];
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Send, Paperclip, X, Loader2, FileText, Music, Image as ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -25,6 +25,8 @@ interface MessageInputProps {
   supportsFiles?: boolean;
   preselectedImages?: PreselectedImage[];
   onRemovePreselectedImage?: (url: string) => void;
+  initialValue?: string;
+  onInitialValueUsed?: () => void;
 }
 
 const MAX_FILES = 5;
@@ -65,8 +67,18 @@ export function MessageInput({
   supportsFiles = true,
   preselectedImages = [],
   onRemovePreselectedImage,
+  initialValue,
+  onInitialValueUsed,
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
+
+  // Set initial value when provided (e.g., when reusing a seed)
+  useEffect(() => {
+    if (initialValue) {
+      setMessage(initialValue);
+      onInitialValueUsed?.();
+    }
+  }, [initialValue, onInitialValueUsed]);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);

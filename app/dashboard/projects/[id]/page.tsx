@@ -49,7 +49,9 @@ import {
   Sparkles,
   ToggleLeft,
   ToggleRight,
+  CalendarDays,
 } from "lucide-react";
+import { ProjectCalendar } from "@/components/dashboard/project-calendar";
 import Image from "next/image";
 import { formatDateLocal } from "@/lib/utils";
 
@@ -133,7 +135,7 @@ const statusColors: Record<string, string> = {
   cancelled: "bg-red-500/20 text-red-400",
 };
 
-type TabType = "overview" | "users" | "tags" | "config";
+type TabType = "overview" | "users" | "calendar" | "tags" | "config";
 
 type GenerationType = "text" | "image" | "video" | "audio";
 
@@ -792,6 +794,7 @@ export default function ProjectDetailPage() {
           {[
             { id: "overview" as TabType, label: "Resumen", icon: BarChart3 },
             { id: "users" as TabType, label: "Usuarios", icon: Users },
+            { id: "calendar" as TabType, label: "Calendario", icon: CalendarDays },
             { id: "tags" as TabType, label: "Etiquetas", icon: Tag },
             { id: "config" as TabType, label: "Configuración", icon: Settings },
           ].map((tab) => (
@@ -1122,6 +1125,13 @@ export default function ProjectDetailPage() {
                 </TableBody>
               </Table>
             )}
+          </div>
+        )}
+
+        {/* Calendar Tab */}
+        {activeTab === "calendar" && (
+          <div className="p-6">
+            <ProjectCalendar projectId={Number(projectId)} />
           </div>
         )}
 

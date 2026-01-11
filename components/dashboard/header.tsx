@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { signOut, useSession } from "next-auth/react";
 import { useTheme } from "next-themes";
 import {
@@ -17,6 +18,11 @@ import { cn } from "@/lib/utils";
 export function Header() {
   const { data: session } = useSession();
   const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const getInitials = (name: string | null | undefined) => {
     if (!name) return "U";
@@ -41,83 +47,90 @@ export function Header() {
         </div>
       </div>
 
-      <DropdownMenu>
-        <DropdownMenuTrigger className="flex items-center gap-2 outline-none hover:bg-accent/50 rounded-lg px-2 py-1.5 transition-colors">
-          <Avatar className="h-7 w-7">
-            <AvatarImage src={session?.user?.image || undefined} />
-            <AvatarFallback className="bg-primary/20 text-primary text-xs">
-              {getInitials(session?.user?.name)}
-            </AvatarFallback>
-          </Avatar>
-          <span className="text-sm text-muted-foreground hidden sm:block">
-            {session?.user?.name}
-          </span>
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuLabel>
-            <div className="flex flex-col">
-              <span>{session?.user?.name}</span>
-              <span className="text-xs text-muted-foreground font-normal">
-                {session?.user?.email}
-              </span>
+      {mounted ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger className="flex items-center gap-2 outline-none hover:bg-accent/50 rounded-lg px-2 py-1.5 transition-colors">
+            <Avatar className="h-7 w-7">
+              <AvatarImage src={session?.user?.image || undefined} />
+              <AvatarFallback className="bg-primary/20 text-primary text-xs">
+                {getInitials(session?.user?.name)}
+              </AvatarFallback>
+            </Avatar>
+            <span className="text-sm text-muted-foreground hidden sm:block">
+              {session?.user?.name}
+            </span>
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>
+              <div className="flex flex-col">
+                <span>{session?.user?.name}</span>
+                <span className="text-xs text-muted-foreground font-normal">
+                  {session?.user?.email}
+                </span>
+              </div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+
+            <div className="px-2 py-1.5">
+              <span className="text-xs text-muted-foreground mb-2 block">Tema</span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setTheme("light")}
+                  className={cn(
+                    "p-2 rounded-md transition-colors",
+                    theme === "light"
+                      ? "bg-primary/20 text-primary"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                  )}
+                  title="Tema claro"
+                >
+                  <Sun className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setTheme("dark")}
+                  className={cn(
+                    "p-2 rounded-md transition-colors",
+                    theme === "dark"
+                      ? "bg-primary/20 text-primary"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                  )}
+                  title="Tema oscuro"
+                >
+                  <Moon className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setTheme("system")}
+                  className={cn(
+                    "p-2 rounded-md transition-colors",
+                    theme === "system"
+                      ? "bg-primary/20 text-primary"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                  )}
+                  title="Tema del sistema"
+                >
+                  <Monitor className="h-4 w-4" />
+                </button>
+              </div>
             </div>
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
 
-          <div className="px-2 py-1.5">
-            <span className="text-xs text-muted-foreground mb-2 block">Tema</span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setTheme("light")}
-                className={cn(
-                  "p-2 rounded-md transition-colors",
-                  theme === "light"
-                    ? "bg-primary/20 text-primary"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                )}
-                title="Tema claro"
-              >
-                <Sun className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => setTheme("dark")}
-                className={cn(
-                  "p-2 rounded-md transition-colors",
-                  theme === "dark"
-                    ? "bg-primary/20 text-primary"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                )}
-                title="Tema oscuro"
-              >
-                <Moon className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => setTheme("system")}
-                className={cn(
-                  "p-2 rounded-md transition-colors",
-                  theme === "system"
-                    ? "bg-primary/20 text-primary"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                )}
-                title="Tema del sistema"
-              >
-                <Monitor className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
+            <DropdownMenuSeparator />
 
-          <DropdownMenuSeparator />
-
-          <DropdownMenuItem
-            className="text-red-400 cursor-pointer focus:text-red-400"
-            onClick={() => signOut({ callbackUrl: "/login" })}
-          >
-            <LogOut className="mr-2 h-4 w-4" />
-            Cerrar sesión
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            <DropdownMenuItem
+              className="text-red-400 cursor-pointer focus:text-red-400"
+              onClick={() => signOut({ callbackUrl: "/login" })}
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              Cerrar sesión
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        <div className="flex items-center gap-2 px-2 py-1.5">
+          <div className="h-7 w-7 rounded-full bg-primary/20 animate-pulse" />
+          <div className="h-4 w-20 bg-muted rounded animate-pulse hidden sm:block" />
+        </div>
+      )}
     </header>
   );
 }

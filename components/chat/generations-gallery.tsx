@@ -5,8 +5,10 @@ import {
   X, Loader2, ExternalLink, Image as ImageIcon, Video, Calendar, FileType,
   Maximize2, RatioIcon, Ruler, Download, HardDrive, Volume2, VolumeX, Clock,
   ChevronLeft, ChevronRight, LayoutGrid, Search, Tag, Plus, Trash2, Upload, Music, User, Users,
-  Sparkles, Copy, Check, Star
+  Sparkles, Copy, Check, Star, CalendarDays, Wand2
 } from "lucide-react";
+import { TopazStudio } from "./topaz-studio";
+import { ProjectCalendar } from "@/components/dashboard/project-calendar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { VideoPlayer } from "./video-player";
@@ -17,6 +19,7 @@ import { AudioVoiceConfig, AudioSpeakerConfig, getVoiceById } from "@/types/audi
 type FilterType = "all" | "images" | "videos" | "audios";
 type QualityFilterType = "all" | "normal" | "hq";
 type FavoriteFilterType = "all" | "favorites";
+type ViewMode = "grid" | "calendar";
 
 interface TagInfo {
   id: number;
@@ -98,6 +101,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [showDeleted, setShowDeleted] = useState(false);
   const [showUploads, setShowUploads] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
 
   // Copy seed state
   const [copiedSeed, setCopiedSeed] = useState(false);
@@ -115,6 +119,9 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState("#6366f1");
   const [creatingTag, setCreatingTag] = useState(false);
+
+  // Topaz Studio state
+  const [showTopazStudio, setShowTopazStudio] = useState(false);
 
   // Pagination
   const [total, setTotal] = useState(0);
@@ -608,6 +615,32 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
             />
             Eliminados
           </label>
+
+          {/* View Mode Toggle */}
+          <div className="flex items-center gap-1 p-1 bg-muted rounded-lg ml-auto">
+            <button
+              onClick={() => setViewMode("grid")}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors ${
+                viewMode === "grid"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              Grilla
+            </button>
+            <button
+              onClick={() => setViewMode("calendar")}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors ${
+                viewMode === "calendar"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <CalendarDays className="h-3.5 w-3.5" />
+              Calendario
+            </button>
+          </div>
         </div>
 
         {/* Tag Filters */}
@@ -662,9 +695,19 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
         </p>
       </div>
 
-      {/* Grid */}
+      {/* Content Area */}
       <div className="flex-1 overflow-y-auto p-4">
-        {filteredGenerations.length === 0 ? (
+        {viewMode === "calendar" ? (
+          /* Calendar View */
+          <div className="max-w-4xl mx-auto">
+            <ProjectCalendar
+              projectId={projectId}
+              currentUserId={currentUserId}
+              onOpenConversation={onOpenConversation}
+              compact={false}
+            />
+          </div>
+        ) : filteredGenerations.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
             <LayoutGrid className="h-16 w-16 text-muted-foreground/30 mb-4" />
             <h3 className="text-lg font-medium mb-2">Sin generaciones</h3>
@@ -817,7 +860,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
 
       {/* Modal */}
       {selectedItem && (
-        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center" onClick={() => { setSelectedIndex(null); setShowTagSelector(false); }}>
+        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center" onClick={() => { setSelectedIndex(null); setShowTagSelector(false); setShowTopazStudio(false); }}>
           {/* Navigation */}
           {canGoPrev && (
             <button onClick={(e) => { e.stopPropagation(); goToPrev(); }} className="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/50 hover:bg-black/70 z-10">
@@ -855,7 +898,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                     <Star className={`h-5 w-5 ${selectedItem.is_favorite ? "fill-yellow-400" : ""}`} />
                   </button>
                 )}
-                <button onClick={() => { setSelectedIndex(null); setShowTagSelector(false); }} className="p-2 hover:bg-accent rounded-lg">
+                <button onClick={() => { setSelectedIndex(null); setShowTagSelector(false); setShowTopazStudio(false); }} className="p-2 hover:bg-accent rounded-lg">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -1096,6 +1139,15 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                         {upscaling ? "Procesando..." : selectedItem.has_2x ? "Descargar @2x (listo)" : "Generar @2x"}
                       </Button>
                     )}
+                    {imageDimensions && (
+                      <Button
+                        onClick={() => setShowTopazStudio(true)}
+                        className="flex-1 gap-2 text-purple-400 border-purple-500/30 hover:bg-purple-500/10"
+                        variant="outline"
+                      >
+                        <Wand2 className="h-4 w-4" /> Topaz Studio
+                      </Button>
+                    )}
                   </>
                 ) : selectedItem.type === "video" ? (
                   <Button onClick={() => handleDownload(selectedItem)} className="flex-1 gap-2" variant="outline">
@@ -1123,6 +1175,16 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
             </div>
           </div>
         </div>
+      )}
+
+      {/* Topaz Studio Modal */}
+      {showTopazStudio && selectedItem && selectedItem.type === "image" && selectedItem.image_url && imageDimensions && (
+        <TopazStudio
+          imageUrl={selectedItem.image_url}
+          messageId={selectedItem.source !== "upload" ? selectedItem.id : 0}
+          imageDimensions={imageDimensions}
+          onClose={() => setShowTopazStudio(false)}
+        />
       )}
     </div>
   );

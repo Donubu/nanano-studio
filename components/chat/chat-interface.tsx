@@ -42,6 +42,7 @@ import {
     Star,
     Dices,
     X,
+    Download,
 } from "lucide-react";
 import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
 import {
@@ -67,6 +68,7 @@ import {QualitySelector, QualityTier, QualitySelectorCompact} from "./quality-se
 import {ImageModelSelector} from "./image-model-selector";
 import {AudioSettings} from "./audio-settings";
 import {TTSComposer} from "./tts-composer";
+import {TopazStudio} from "./topaz-studio";
 import {AudioGenerationHistory, AudioRestoreData} from "./audio-generation-history";
 import {AudioVoiceId, AudioOutputFormat, AudioSpeakerConfig, AudioGenerationStatus, AudioVoiceConfig} from "@/types/audio";
 
@@ -268,6 +270,7 @@ export function ChatInterface() {
 
     // Selected seed for next generation (reuse from previous generation)
     const [selectedSeed, setSelectedSeed] = useState<number | null>(null);
+    const [seedPrompt, setSeedPrompt] = useState<string | null>(null);
 
     // Generation config per type (from project)
     interface GenerationConfigItem {
@@ -288,6 +291,11 @@ export function ChatInterface() {
     // Generation type for new conversations
     const [newConversationType, setNewConversationType] = useState<GenerationType>("text");
     const [showNewConversationModal, setShowNewConversationModal] = useState(false);
+
+    // Image viewer modal
+    const [viewingImageMessage, setViewingImageMessage] = useState<Message | null>(null);
+    const [viewingImageDimensions, setViewingImageDimensions] = useState<{ width: number; height: number } | null>(null);
+    const [showTopazStudio, setShowTopazStudio] = useState(false);
 
     // Get current tab's conversation and messages
     const activeTab = openTabs.find((t) => t.id === activeTabId);
@@ -2550,7 +2558,28 @@ export function ChatInterface() {
                                                 {/* Seed button for model messages with generation_seed (image or video) */}
                                                 {msg.role === "model" && msg.generation_seed && (msg.image_url || msg.video_url) && (
                                                     <button
-                                                        onClick={() => setSelectedSeed(selectedSeed === msg.generation_seed ? null : msg.generation_seed!)}
+                                                        onClick={() => {
+                                                            if (selectedSeed === msg.generation_seed) {
+                                                                // Deselect
+                                                                setSelectedSeed(null);
+                                                                setSeedPrompt(null);
+                                                            } else {
+                                                                // Select seed and find the original prompt
+                                                                setSelectedSeed(msg.generation_seed!);
+                                                                // Find the user message that preceded this model message
+                                                                const currentMessages = tabMessages[activeTabId!] || [];
+                                                                const msgIndex = currentMessages.findIndex(m => m.id === msg.id);
+                                                                if (msgIndex > 0) {
+                                                                    // Look backwards for the user message
+                                                                    for (let i = msgIndex - 1; i >= 0; i--) {
+                                                                        if (currentMessages[i].role === "user" && currentMessages[i].content) {
+                                                                            setSeedPrompt(currentMessages[i].content);
+                                                                            break;
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }}
                                                         className={`absolute top-5 -right-2 p-1 rounded-full transition-all z-10 ${
                                                             selectedSeed === msg.generation_seed
                                                                 ? "bg-purple-500/20 text-purple-400"
@@ -2582,6 +2611,7 @@ export function ChatInterface() {
                                                     allowImageSelection={!activeTab?.isArchived && !!msg.image_url}
                                                     isImageSelected={msg.image_url ? selectedConversationImages.includes(msg.image_url) : false}
                                                     onImageSelect={handleConversationImageSelect}
+                                                    onViewImage={msg.role === "model" && msg.image_url ? () => setViewingImageMessage(msg) : undefined}
                                                 />
                                             </div>
                                             {msg.role === "user" && (
@@ -2656,7 +2686,10 @@ export function ChatInterface() {
                                             <Dices className="h-4 w-4" />
                                             <span className="font-mono">Seed: {selectedSeed}</span>
                                             <button
-                                                onClick={() => setSelectedSeed(null)}
+                                                onClick={() => {
+                                                    setSelectedSeed(null);
+                                                    setSeedPrompt(null);
+                                                }}
                                                 className="hover:bg-purple-500/20 rounded-full p-0.5 transition-colors"
                                                 title="Limpiar seed"
                                             >
@@ -2670,8 +2703,11 @@ export function ChatInterface() {
                                         // Route based on generation type
                                         if (isVideoConversation && generationMode === "video") {
                                             sendVideoMessage(content, selectedSeed || undefined);
-                                            // Clear selected seed after use
-                                            if (selectedSeed) setSelectedSeed(null);
+                                            // Clear selected seed and prompt after use
+                                            if (selectedSeed) {
+                                                setSelectedSeed(null);
+                                                setSeedPrompt(null);
+                                            }
                                         } else if (isImageConversation || (isVideoConversation && generationMode === "image")) {
                                             // Image generation
                                             const imgSettings = {
@@ -2684,8 +2720,11 @@ export function ChatInterface() {
                                             // Pass generation_type_override when in video conversation with image mode
                                             const typeOverride = isVideoConversation && generationMode === "image" ? "image" as const : undefined;
                                             sendMessage(content, files, undefined, imgSettings, typeOverride);
-                                            // Clear selected seed after use
-                                            if (selectedSeed) setSelectedSeed(null);
+                                            // Clear selected seed and prompt after use
+                                            if (selectedSeed) {
+                                                setSelectedSeed(null);
+                                                setSeedPrompt(null);
+                                            }
                                         } else {
                                             // Text generation
                                             sendMessage(content, files);
@@ -2697,6 +2736,8 @@ export function ChatInterface() {
                                     supportsFiles={isTextConversation || isImageConversation || (isVideoConversation && generationMode === "image")}
                                     preselectedImages={selectedConversationImages.map(url => ({ url }))}
                                     onRemovePreselectedImage={(url) => setSelectedConversationImages(prev => prev.filter(u => u !== url))}
+                                    initialValue={seedPrompt || undefined}
+                                    onInitialValueUsed={() => setSeedPrompt(null)}
                                 />
                             </div>
                         )
@@ -3239,6 +3280,105 @@ export function ChatInterface() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Image Viewer Modal */}
+            {viewingImageMessage && viewingImageMessage.image_url && !showTopazStudio && (
+                <div
+                    className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center"
+                    onClick={() => {
+                        setViewingImageMessage(null);
+                        setViewingImageDimensions(null);
+                    }}
+                >
+                    {/* Top bar with actions */}
+                    <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-10">
+                        <div className="flex items-center gap-2">
+                            {viewingImageDimensions && (
+                                <span className="text-sm text-white/70 bg-black/50 px-3 py-1.5 rounded-lg">
+                                    {viewingImageDimensions.width} × {viewingImageDimensions.height}
+                                </span>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            {/* Download button */}
+                            <button
+                                onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                        const response = await fetch(viewingImageMessage.image_url!);
+                                        const blob = await response.blob();
+                                        const url = window.URL.createObjectURL(blob);
+                                        const link = document.createElement("a");
+                                        link.href = url;
+                                        link.download = viewingImageMessage.image_url!.split("/").pop() || "image.png";
+                                        document.body.appendChild(link);
+                                        link.click();
+                                        document.body.removeChild(link);
+                                        window.URL.revokeObjectURL(url);
+                                    } catch (err) {
+                                        console.error("Error downloading:", err);
+                                    }
+                                }}
+                                className="p-2.5 bg-black/50 hover:bg-black/70 rounded-lg transition-colors"
+                                title="Descargar imagen"
+                            >
+                                <Download className="h-5 w-5 text-white" />
+                            </button>
+                            {/* Topaz Studio button */}
+                            {viewingImageDimensions && (
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setShowTopazStudio(true);
+                                    }}
+                                    className="flex items-center gap-2 px-3 py-2 bg-purple-600/80 hover:bg-purple-600 rounded-lg transition-colors"
+                                    title="Abrir Topaz Studio"
+                                >
+                                    <Sparkles className="h-5 w-5 text-white" />
+                                    <span className="text-sm font-medium text-white">Topaz Studio</span>
+                                </button>
+                            )}
+                            {/* Close button */}
+                            <button
+                                onClick={() => {
+                                    setViewingImageMessage(null);
+                                    setViewingImageDimensions(null);
+                                }}
+                                className="p-2.5 bg-black/50 hover:bg-black/70 rounded-lg transition-colors"
+                            >
+                                <X className="h-5 w-5 text-white" />
+                            </button>
+                        </div>
+                    </div>
+                    <div
+                        className="relative max-w-[90vw] max-h-[85vh] flex items-center justify-center mt-16"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <img
+                            src={viewingImageMessage.image_url}
+                            alt=""
+                            className="max-w-full max-h-[85vh] object-contain rounded-lg"
+                            onLoad={(e) => {
+                                const img = e.target as HTMLImageElement;
+                                setViewingImageDimensions({
+                                    width: img.naturalWidth,
+                                    height: img.naturalHeight,
+                                });
+                            }}
+                        />
+                    </div>
+                </div>
+            )}
+
+            {/* Topaz Studio */}
+            {showTopazStudio && viewingImageMessage && viewingImageMessage.image_url && viewingImageDimensions && (
+                <TopazStudio
+                    imageUrl={viewingImageMessage.image_url}
+                    messageId={viewingImageMessage.id}
+                    imageDimensions={viewingImageDimensions}
+                    onClose={() => setShowTopazStudio(false)}
+                />
+            )}
         </div>
     );
 }

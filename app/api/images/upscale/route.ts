@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { uploadToS3 } from "@/lib/s3";
 import pool from "@/lib/db";
 import { ResultSetHeader } from "mysql2";
+import { calculateTopazCredits } from "@/lib/cost-calculator";
 
 const TOPAZ_API_KEY = process.env.TOPAZ_API_KEY || "";
 
@@ -154,14 +155,15 @@ export async function POST(request: NextRequest) {
 
     console.log("[Upscale] Completado:", result.url);
 
-    // Update database to mark has_2x = true if messageId provided
+    // Update database to mark has_2x = true and track Topaz credits
     if (messageId) {
       try {
+        const topazCredits = calculateTopazCredits(output_width, output_height);
         await pool.execute<ResultSetHeader>(
-          "UPDATE messages SET has_2x = 1 WHERE id = ?",
-          [messageId]
+          "UPDATE messages SET has_2x = 1, topaz_credits = ? WHERE id = ?",
+          [topazCredits, messageId]
         );
-        console.log("[Upscale] Marcado has_2x=true para mensaje:", messageId);
+        console.log("[Upscale] Marcado has_2x=true, topaz_credits=%d para mensaje:", topazCredits, messageId);
       } catch (dbError) {
         console.error("[Upscale] Error actualizando has_2x:", dbError);
         // Don't fail the request, the upscale was successful

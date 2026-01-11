@@ -24,6 +24,7 @@ interface ConversationRow extends RowDataPacket {
   // Cost fields from model
   cost_image_1k: number;
   cost_image_2k: number;
+  cost_image_4k: number;
 }
 
 interface MessageRow extends RowDataPacket {
@@ -92,7 +93,7 @@ export async function POST(
     // Obtener conversacion con configuracion de imagen y costos del modelo
     const [conversations] = await pool.execute<ConversationRow[]>(
       `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, p.title as project_name,
-              m.cost_image_1k, m.cost_image_2k
+              m.cost_image_1k, m.cost_image_2k, m.cost_image_4k
        FROM conversations c
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
@@ -114,6 +115,7 @@ export async function POST(
     let effectiveModelId = conversation.model_model_id;
     let effectiveCostImage1k = Number(conversation.cost_image_1k) || 0;
     let effectiveCostImage2k = Number(conversation.cost_image_2k) || 0;
+    let effectiveCostImage4k = Number(conversation.cost_image_4k) || 0;
     const generationType = generation_type_override || conversation.generation_type || "image";
     if (generation_type_override) {
       console.log(`[Imagen] Using generation_type_override: ${generation_type_override} (conversation type: ${conversation.generation_type})`);
@@ -127,9 +129,11 @@ export async function POST(
           mn.model_id as model_normal_model_id,
           mn.cost_image_1k as mn_cost_1k,
           mn.cost_image_2k as mn_cost_2k,
+          mn.cost_image_4k as mn_cost_4k,
           mh.model_id as model_hq_model_id,
           mh.cost_image_1k as mh_cost_1k,
-          mh.cost_image_2k as mh_cost_2k
+          mh.cost_image_2k as mh_cost_2k,
+          mh.cost_image_4k as mh_cost_4k
         FROM project_generation_config pgc
         LEFT JOIN models mn ON pgc.model_normal_id = mn.id
         LEFT JOIN models mh ON pgc.model_hq_id = mh.id
@@ -142,11 +146,13 @@ export async function POST(
           effectiveModelId = config.model_hq_model_id;
           effectiveCostImage1k = Number(config.mh_cost_1k) || 0;
           effectiveCostImage2k = Number(config.mh_cost_2k) || 0;
+          effectiveCostImage4k = Number(config.mh_cost_4k) || 0;
           console.log(`[Imagen] Using HQ model from config: ${effectiveModelId}`);
         } else if (config.model_normal_model_id) {
           effectiveModelId = config.model_normal_model_id;
           effectiveCostImage1k = Number(config.mn_cost_1k) || 0;
           effectiveCostImage2k = Number(config.mn_cost_2k) || 0;
+          effectiveCostImage4k = Number(config.mn_cost_4k) || 0;
           console.log(`[Imagen] Using Normal model from config: ${effectiveModelId}`);
         }
       }
@@ -337,7 +343,7 @@ export async function POST(
               cost_output_per_million: 0,
               cost_image_1k: effectiveCostImage1k,
               cost_image_2k: effectiveCostImage2k,
-              cost_image_4k: 0,
+              cost_image_4k: effectiveCostImage4k,
               cost_video_per_second: 0,
             },
             {

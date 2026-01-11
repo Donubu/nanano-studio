@@ -11,7 +11,7 @@ import {
 import { useState } from "react";
 
 export type ImagenAspectRatio = "1:1" | "3:4" | "4:3" | "9:16" | "16:9";
-export type ImagenResolution = "1K" | "2K";
+export type ImagenResolution = "1K" | "2K" | "4K";
 
 interface ImageSettingsProps {
   aspectRatio: ImagenAspectRatio;
@@ -45,6 +45,7 @@ export function ImageSettings({
   const resolutions: { value: ImagenResolution; label: string; description: string }[] = [
     { value: "1K", label: "1K", description: "1024px" },
     { value: "2K", label: "2K", description: "2048px" },
+    { value: "4K", label: "4K", description: "4096px" },
   ];
 
   const getIconDimensions = (icon: "square" | "portrait" | "landscape") => {

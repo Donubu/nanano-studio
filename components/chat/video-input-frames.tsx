@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { X, Image as ImageIcon, Info, ImagePlus } from "lucide-react";
+import { X, Image as ImageIcon, Info, ImagePlus, Upload } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,6 +33,7 @@ interface VideoInputFramesProps {
 }
 
 type ModalMode = "first" | "last" | "reference" | null;
+type DragTarget = "first" | "last" | "reference" | null;
 
 export function VideoInputFrames({
   projectId,
@@ -45,6 +47,122 @@ export function VideoInputFrames({
   supportsReferenceImages = false,
 }: VideoInputFramesProps) {
   const [modalMode, setModalMode] = useState<ModalMode>(null);
+  const [dragOverTarget, setDragOverTarget] = useState<DragTarget>(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  // Convertir URL a base64
+  const urlToBase64 = async (url: string): Promise<string> => {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  // Convertir archivo local a base64
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Aplicar imagen al target correspondiente
+  const applyToTarget = (target: DragTarget, base64: string) => {
+    if (target === "first") {
+      onFirstFrameChange(base64);
+    } else if (target === "last") {
+      onLastFrameChange(base64);
+    } else if (target === "reference") {
+      if (referenceImages.length < 3) {
+        onReferenceImagesChange([
+          ...referenceImages,
+          { image: base64, type: "ASSET" },
+        ]);
+      }
+    }
+  };
+
+  // Handler de drag over
+  const handleDragOver = (e: React.DragEvent, target: DragTarget) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!disabled) {
+      setDragOverTarget(target);
+    }
+  };
+
+  // Handler de drag leave
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverTarget(null);
+  };
+
+  // Handler de drop
+  const handleDrop = async (e: React.DragEvent, target: DragTarget) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverTarget(null);
+
+    if (disabled || !target) return;
+
+    setIsUploading(true);
+
+    try {
+      // Caso 1: Imagen del chat (datos de nanano)
+      const nanonoData = e.dataTransfer.getData("application/x-nanano-image");
+      if (nanonoData) {
+        const { url } = JSON.parse(nanonoData);
+        const base64 = await urlToBase64(url);
+        applyToTarget(target, base64);
+        return;
+      }
+
+      // Caso 2: URL directa
+      const uriList = e.dataTransfer.getData("text/uri-list");
+      if (uriList && uriList.startsWith("http")) {
+        const base64 = await urlToBase64(uriList);
+        applyToTarget(target, base64);
+        return;
+      }
+
+      // Caso 3: Archivo local del escritorio
+      const files = e.dataTransfer.files;
+      if (files.length > 0) {
+        const file = files[0];
+        if (file.type.startsWith("image/")) {
+          const base64 = await fileToBase64(file);
+
+          // Subir a S3 para guardar en el proyecto
+          try {
+            await fetch(`/api/projects/${projectId}/uploads`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                imageData: base64,
+                fileName: file.name,
+              }),
+            });
+          } catch (uploadError) {
+            console.error("Error subiendo imagen:", uploadError);
+            // Continuar de todas formas con la imagen local
+          }
+
+          applyToTarget(target, base64);
+        }
+      }
+    } catch (error) {
+      console.error("Error procesando drop:", error);
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleImageSelect = (imageUrl: string, referenceType?: ReferenceType) => {
     if (modalMode === "first") {
@@ -112,7 +230,17 @@ export function VideoInputFrames({
             <span className="text-muted-foreground/60">(opcional)</span>
           </Label>
           {firstFrame ? (
-            <div className="relative w-full aspect-video rounded-md overflow-hidden border border-border">
+            <div
+              className={cn(
+                "relative w-full aspect-video rounded-md overflow-hidden border-2 transition-colors",
+                dragOverTarget === "first"
+                  ? "border-primary bg-primary/10"
+                  : "border-border"
+              )}
+              onDragOver={(e) => handleDragOver(e, "first")}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDrop(e, "first")}
+            >
               <img
                 src={firstFrame}
                 alt="First frame"
@@ -130,22 +258,46 @@ export function VideoInputFrames({
               <div className="absolute bottom-1 left-1 bg-black/60 rounded px-1.5 py-0.5 text-xs text-white">
                 Inicio
               </div>
+              {dragOverTarget === "first" && (
+                <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
+                  <span className="text-sm font-medium text-primary">Reemplazar</span>
+                </div>
+              )}
             </div>
           ) : (
-            <button
-              onClick={() => setModalMode("first")}
-              disabled={disabled}
-              className={`w-full aspect-video rounded-md border-2 border-dashed border-border flex flex-col items-center justify-center gap-2 transition-colors ${
+            <div
+              className={cn(
+                "w-full aspect-video rounded-md border-2 border-dashed flex flex-col items-center justify-center gap-2 transition-colors",
                 disabled
-                  ? "opacity-50 cursor-not-allowed"
-                  : "hover:border-primary hover:bg-muted/50 cursor-pointer"
-              }`}
+                  ? "opacity-50 cursor-not-allowed border-border"
+                  : dragOverTarget === "first"
+                  ? "border-primary bg-primary/10"
+                  : "border-border hover:border-primary hover:bg-muted/50 cursor-pointer"
+              )}
+              onClick={() => !disabled && setModalMode("first")}
+              onDragOver={(e) => handleDragOver(e, "first")}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDrop(e, "first")}
             >
-              <ImagePlus className="w-6 h-6 text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">
-                Seleccionar imagen inicial
-              </span>
-            </button>
+              {isUploading && dragOverTarget === "first" ? (
+                <div className="flex flex-col items-center gap-2">
+                  <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  <span className="text-xs text-muted-foreground">Procesando...</span>
+                </div>
+              ) : dragOverTarget === "first" ? (
+                <>
+                  <Upload className="w-6 h-6 text-primary" />
+                  <span className="text-xs text-primary font-medium">Soltar aquí</span>
+                </>
+              ) : (
+                <>
+                  <ImagePlus className="w-6 h-6 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">
+                    Arrastra o haz clic
+                  </span>
+                </>
+              )}
+            </div>
           )}
         </div>
 
@@ -156,7 +308,17 @@ export function VideoInputFrames({
             <span className="text-muted-foreground/60">(opcional)</span>
           </Label>
           {lastFrame ? (
-            <div className="relative w-full aspect-video rounded-md overflow-hidden border border-border">
+            <div
+              className={cn(
+                "relative w-full aspect-video rounded-md overflow-hidden border-2 transition-colors",
+                dragOverTarget === "last"
+                  ? "border-primary bg-primary/10"
+                  : "border-border"
+              )}
+              onDragOver={(e) => handleDragOver(e, "last")}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDrop(e, "last")}
+            >
               <img
                 src={lastFrame}
                 alt="Last frame"
@@ -174,22 +336,46 @@ export function VideoInputFrames({
               <div className="absolute bottom-1 left-1 bg-black/60 rounded px-1.5 py-0.5 text-xs text-white">
                 Final
               </div>
+              {dragOverTarget === "last" && (
+                <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
+                  <span className="text-sm font-medium text-primary">Reemplazar</span>
+                </div>
+              )}
             </div>
           ) : (
-            <button
-              onClick={() => setModalMode("last")}
-              disabled={disabled}
-              className={`w-full aspect-video rounded-md border-2 border-dashed border-border flex flex-col items-center justify-center gap-2 transition-colors ${
+            <div
+              className={cn(
+                "w-full aspect-video rounded-md border-2 border-dashed flex flex-col items-center justify-center gap-2 transition-colors",
                 disabled
-                  ? "opacity-50 cursor-not-allowed"
-                  : "hover:border-primary hover:bg-muted/50 cursor-pointer"
-              }`}
+                  ? "opacity-50 cursor-not-allowed border-border"
+                  : dragOverTarget === "last"
+                  ? "border-primary bg-primary/10"
+                  : "border-border hover:border-primary hover:bg-muted/50 cursor-pointer"
+              )}
+              onClick={() => !disabled && setModalMode("last")}
+              onDragOver={(e) => handleDragOver(e, "last")}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDrop(e, "last")}
             >
-              <ImagePlus className="w-6 h-6 text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">
-                Seleccionar imagen final
-              </span>
-            </button>
+              {isUploading && dragOverTarget === "last" ? (
+                <div className="flex flex-col items-center gap-2">
+                  <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  <span className="text-xs text-muted-foreground">Procesando...</span>
+                </div>
+              ) : dragOverTarget === "last" ? (
+                <>
+                  <Upload className="w-6 h-6 text-primary" />
+                  <span className="text-xs text-primary font-medium">Soltar aquí</span>
+                </>
+              ) : (
+                <>
+                  <ImagePlus className="w-6 h-6 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">
+                    Arrastra o haz clic
+                  </span>
+                </>
+              )}
+            </div>
           )}
           {firstFrame && lastFrame && (
             <p className="text-xs text-muted-foreground">
@@ -238,18 +424,34 @@ export function VideoInputFrames({
                 </div>
               ))}
               {referenceImages.length < 3 && (
-                <button
-                  onClick={() => setModalMode("reference")}
-                  disabled={disabled}
-                  className={`aspect-square rounded-md border-2 border-dashed border-border flex flex-col items-center justify-center gap-1 transition-colors ${
+                <div
+                  className={cn(
+                    "aspect-square rounded-md border-2 border-dashed flex flex-col items-center justify-center gap-1 transition-colors",
                     disabled
-                      ? "opacity-50 cursor-not-allowed"
-                      : "hover:border-primary hover:bg-muted/50 cursor-pointer"
-                  }`}
+                      ? "opacity-50 cursor-not-allowed border-border"
+                      : dragOverTarget === "reference"
+                      ? "border-primary bg-primary/10"
+                      : "border-border hover:border-primary hover:bg-muted/50 cursor-pointer"
+                  )}
+                  onClick={() => !disabled && setModalMode("reference")}
+                  onDragOver={(e) => handleDragOver(e, "reference")}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, "reference")}
                 >
-                  <ImagePlus className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-[10px] text-muted-foreground">Agregar</span>
-                </button>
+                  {isUploading && dragOverTarget === "reference" ? (
+                    <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  ) : dragOverTarget === "reference" ? (
+                    <>
+                      <Upload className="w-4 h-4 text-primary" />
+                      <span className="text-[10px] text-primary font-medium">Soltar</span>
+                    </>
+                  ) : (
+                    <>
+                      <ImagePlus className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-[10px] text-muted-foreground">Agregar</span>
+                    </>
+                  )}
+                </div>
               )}
             </div>
             <p className="text-xs text-muted-foreground">

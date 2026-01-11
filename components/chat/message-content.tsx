@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Download, ZoomIn, Loader2, Check, Mic, AlertCircle, ChevronDown } from "lucide-react";
+import { Download, Loader2, Check, Mic, AlertCircle, ChevronDown, GripVertical, ZoomIn } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VideoPlayer } from "./video-player";
 import { VideoProgress } from "./video-progress";
@@ -77,6 +77,8 @@ interface MessageContentProps {
   isImageSelected?: boolean;
   onImageSelect?: (imageUrl: string) => void;
   allowImageSelection?: boolean;
+  // View image in modal
+  onViewImage?: () => void;
 }
 
 interface ImageMetadata {
@@ -181,6 +183,7 @@ export function MessageContent({
   isImageSelected = false,
   onImageSelect,
   allowImageSelection = false,
+  onViewImage,
 }: MessageContentProps) {
   const [errorExpanded, setErrorExpanded] = useState(false);
   const isError = contentType === "error" || content.startsWith("Error");
@@ -283,8 +286,31 @@ export function MessageContent({
             <img
               src={imageUrl}
               alt="Imagen adjunta"
-              className="w-full h-auto object-cover"
+              className={cn(
+                "w-full h-auto object-cover",
+                !isUser && "cursor-grab active:cursor-grabbing"
+              )}
+              draggable={!isUser}
+              onDragStart={(e) => {
+                if (isUser) return;
+                e.dataTransfer.effectAllowed = "copy";
+                e.dataTransfer.setData("text/uri-list", imageUrl);
+                e.dataTransfer.setData(
+                  "application/x-nanano-image",
+                  JSON.stringify({
+                    type: "chat-image",
+                    url: imageUrl,
+                  })
+                );
+              }}
             />
+            {/* Indicador de drag - solo para imágenes del modelo */}
+            {!isUser && (
+              <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 rounded px-1.5 py-1 flex items-center gap-1">
+                <GripVertical className="h-3 w-3 text-white" />
+                <span className="text-[10px] text-white">Arrastrar</span>
+              </div>
+            )}
             {/* Botón de selección - esquina inferior izquierda */}
             {allowImageSelection && onImageSelect && (
               <button
@@ -306,9 +332,18 @@ export function MessageContent({
                 Seleccionada
               </div>
             )}
-            {/* Botones de descarga - solo para imágenes del modelo (no del usuario) */}
+            {/* Botones de acciones - solo para imágenes del modelo (no del usuario) */}
             {!isUser && (
               <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                {onViewImage && (
+                  <button
+                    onClick={onViewImage}
+                    className="p-2 bg-black/60 hover:bg-black/80 rounded-lg"
+                    title="Ver imagen"
+                  >
+                    <ZoomIn className="h-4 w-4 text-white" />
+                  </button>
+                )}
                 <button
                   onClick={() => downloadImage(imageUrl)}
                   className="p-2 bg-black/60 hover:bg-black/80 rounded-lg"
@@ -327,7 +362,7 @@ export function MessageContent({
                       <Loader2 className="h-4 w-4 text-white animate-spin" />
                     ) : (
                       <>
-                        <ZoomIn className="h-4 w-4 text-white" />
+                        <Download className="h-4 w-4 text-white" />
                         <span className="text-xs text-white font-medium">2X</span>
                       </>
                     )}
@@ -589,6 +624,7 @@ export function MessageContent({
           )}
         </div>
       )}
+
     </div>
   );
 }
