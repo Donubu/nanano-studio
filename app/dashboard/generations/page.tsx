@@ -34,6 +34,7 @@ import {
   ChevronRight,
   Calendar,
   Trash2,
+  Sparkles,
 } from "lucide-react";
 
 interface Generation {
@@ -67,7 +68,18 @@ interface Generation {
   audio_duration: number | null;
   created_at: string;
   deleted_at: string | null;
-  type: "image" | "video" | "audio" | "text";
+  type: "image" | "video" | "audio" | "text" | "topaz_image" | "topaz_video";
+  // Topaz-specific fields
+  original_url?: string;
+  result_url?: string;
+  input_width?: number;
+  input_height?: number;
+  output_width?: number;
+  output_height?: number;
+  scale_factor?: number;
+  input_duration?: number;
+  credits_consumed?: number;
+  output_file_size?: number;
 }
 
 interface FilterOption {
@@ -82,6 +94,10 @@ interface Totals {
   image_count: number;
   video_count: number;
   audio_count: number;
+  topaz_image_count?: number;
+  topaz_video_count?: number;
+  topaz_image_credits?: number;
+  topaz_video_credits?: number;
 }
 
 interface ApiResponse {
@@ -99,7 +115,7 @@ interface ApiResponse {
   };
 }
 
-type TypeFilter = "all" | "image" | "video" | "audio" | "text";
+type TypeFilter = "all" | "image" | "video" | "audio" | "text" | "topaz_image" | "topaz_video";
 
 export default function GenerationsPage() {
   const [data, setData] = useState<ApiResponse | null>(null);
@@ -206,6 +222,10 @@ export default function GenerationsPage() {
         return <Video className="h-4 w-4 text-orange-400" />;
       case "audio":
         return <Music className="h-4 w-4 text-green-400" />;
+      case "topaz_image":
+        return <Sparkles className="h-4 w-4 text-purple-400" />;
+      case "topaz_video":
+        return <Sparkles className="h-4 w-4 text-orange-400" />;
       default:
         return <MessageSquare className="h-4 w-4 text-blue-400" />;
     }
@@ -219,6 +239,10 @@ export default function GenerationsPage() {
         return "Video";
       case "audio":
         return "Audio";
+      case "topaz_image":
+        return "Topaz Img";
+      case "topaz_video":
+        return "Topaz Vid";
       default:
         return "Texto";
     }
@@ -243,7 +267,7 @@ export default function GenerationsPage() {
 
       {/* Summary Cards */}
       {data && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
           <Card className="bg-card border-border/50">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -320,6 +344,36 @@ export default function GenerationsPage() {
               <div className="text-2xl font-bold">{data.totals.audio_count}</div>
             </CardContent>
           </Card>
+
+          <Card className="bg-card border-border/50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Topaz Img
+              </CardTitle>
+              <Sparkles className="h-4 w-4 text-purple-400" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{data.totals.topaz_image_count || 0}</div>
+              <p className="text-xs text-muted-foreground">
+                {formatNumber(data.totals.topaz_image_credits || 0)} créditos
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-card border-border/50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Topaz Vid
+              </CardTitle>
+              <Sparkles className="h-4 w-4 text-orange-400" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{data.totals.topaz_video_count || 0}</div>
+              <p className="text-xs text-muted-foreground">
+                {formatNumber(data.totals.topaz_video_credits || 0)} créditos
+              </p>
+            </CardContent>
+          </Card>
         </div>
       )}
 
@@ -340,7 +394,7 @@ export default function GenerationsPage() {
 
             {/* Type filter */}
             <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as TypeFilter)}>
-              <SelectTrigger className="w-[140px] bg-muted border-border/50">
+              <SelectTrigger className="w-[160px] bg-muted border-border/50">
                 <SelectValue placeholder="Tipo" />
               </SelectTrigger>
               <SelectContent>
@@ -349,6 +403,8 @@ export default function GenerationsPage() {
                 <SelectItem value="video">Videos</SelectItem>
                 <SelectItem value="audio">Audios</SelectItem>
                 <SelectItem value="text">Texto</SelectItem>
+                <SelectItem value="topaz_image">Topaz Imagen</SelectItem>
+                <SelectItem value="topaz_video">Topaz Video</SelectItem>
               </SelectContent>
             </Select>
 
@@ -416,8 +472,8 @@ export default function GenerationsPage() {
                       <TableHead>Cliente</TableHead>
                       <TableHead>Usuario</TableHead>
                       <TableHead>Modelo</TableHead>
-                      <TableHead className="text-right">Tokens</TableHead>
-                      <TableHead className="text-right">Costo</TableHead>
+                      <TableHead className="text-right">Tokens / Res</TableHead>
+                      <TableHead className="text-right">Costo / Créditos</TableHead>
                       <TableHead className="text-right">Tamaño</TableHead>
                       <TableHead className="w-[60px]"></TableHead>
                     </TableRow>
@@ -468,17 +524,43 @@ export default function GenerationsPage() {
                             {gen.model_name || "-"}
                           </span>
                         </TableCell>
-                        <TableCell className="text-right">
-                          <div className="text-sm">{formatNumber(gen.tokens_input + gen.tokens_output)}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {formatNumber(gen.tokens_input)} / {formatNumber(gen.tokens_output)}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <span className={`text-sm ${gen.estimated_cost > 0 ? "text-green-400" : "text-muted-foreground"}`}>
-                            {formatCost(gen.estimated_cost)}
-                          </span>
-                        </TableCell>
+                        {gen.type === "topaz_image" || gen.type === "topaz_video" ? (
+                          <>
+                            <TableCell className="text-right">
+                              {gen.input_width && gen.input_height && (
+                                <div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {gen.input_width}×{gen.input_height}
+                                  </div>
+                                  {gen.output_width && gen.output_height && (
+                                    <div className="text-sm text-purple-400">
+                                      → {gen.output_width}×{gen.output_height}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <span className="text-sm text-purple-400">
+                                {gen.credits_consumed || 0}
+                              </span>
+                            </TableCell>
+                          </>
+                        ) : (
+                          <>
+                            <TableCell className="text-right">
+                              <div className="text-sm">{formatNumber(gen.tokens_input + gen.tokens_output)}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {formatNumber(gen.tokens_input)} / {formatNumber(gen.tokens_output)}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <span className={`text-sm ${gen.estimated_cost > 0 ? "text-green-400" : "text-muted-foreground"}`}>
+                                {formatCost(gen.estimated_cost)}
+                              </span>
+                            </TableCell>
+                          </>
+                        )}
                         <TableCell className="text-right">
                           {gen.type === "image" && (
                             <div>
@@ -504,12 +586,20 @@ export default function GenerationsPage() {
                               )}
                             </div>
                           )}
+                          {(gen.type === "topaz_image" || gen.type === "topaz_video") && (
+                            <div>
+                              <div className="text-sm">{formatFileSize(gen.output_file_size || null)}</div>
+                              {gen.input_duration && (
+                                <div className="text-xs text-muted-foreground">{formatDuration(gen.input_duration)}</div>
+                              )}
+                            </div>
+                          )}
                           {gen.type === "text" && <span className="text-muted-foreground">-</span>}
                         </TableCell>
                         <TableCell>
-                          {(gen.image_url || gen.video_url || gen.audio_url) && (
+                          {(gen.image_url || gen.video_url || gen.audio_url || gen.result_url) && (
                             <a
-                              href={gen.image_url || gen.video_url || gen.audio_url || "#"}
+                              href={gen.result_url || gen.image_url || gen.video_url || gen.audio_url || "#"}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="p-1.5 hover:bg-accent rounded-md inline-flex"

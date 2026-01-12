@@ -37,6 +37,14 @@ interface TopazVideoEdit {
   outputWidth: number | null;
   outputHeight: number | null;
   outputFileSize: number | null;
+  parameters: {
+    scaleFactor?: number;
+    slowmoFactor?: number;
+    denoise?: number;
+    sharpen?: number;
+    targetFps?: number;
+    outputFormat?: string;
+  } | null;
   creditsEstimated: number;
   creditsConsumed: number | null;
   status: string;
@@ -124,10 +132,19 @@ export function TopazStudioVideo({
     height: videoMetadata.height || 0,
   });
 
-  // Find existing processed version for current model
+  // Find existing processed version for current model with same parameters
   const existingEdit = useMemo(() => {
-    return history.find(edit => edit.model === selectedModel && edit.status === "completed");
-  }, [history, selectedModel]);
+    return history.find(edit => {
+      if (edit.model !== selectedModel || edit.status !== "completed") return false;
+      // Compare scale factor (default to 1 if not set)
+      const editScale = edit.parameters?.scaleFactor ?? 1;
+      if (editScale !== scaleFactor) return false;
+      // Compare slowmo factor (default to 1 if not set)
+      const editSlowmo = edit.parameters?.slowmoFactor ?? 1;
+      if (editSlowmo !== slowmoFactor) return false;
+      return true;
+    });
+  }, [history, selectedModel, scaleFactor, slowmoFactor]);
 
   // Reset parameters when model changes
   useEffect(() => {
@@ -715,17 +732,17 @@ export function TopazStudioVideo({
 
                 {/* Error */}
                 {error && (
-                  <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-start gap-2">
-                    <AlertCircle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
-                    <span className="text-sm text-red-400">{error}</span>
+                  <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 flex items-start gap-2">
+                    <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                    <span className="text-sm text-red-600 dark:text-red-400">{error}</span>
                   </div>
                 )}
 
                 {/* Existing edit notice */}
                 {existingEdit && (
-                  <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
-                    <p className="text-sm text-green-400">
-                      Ya existe una versión procesada con este modelo
+                  <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/30">
+                    <p className="text-sm text-green-700 dark:text-green-400 font-medium">
+                      Ya existe una versión procesada con esta configuración
                     </p>
                     <Button
                       variant="outline"

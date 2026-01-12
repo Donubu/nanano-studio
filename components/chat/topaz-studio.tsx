@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import NextImage from "next/image";
 import { useNavigation } from "@/contexts/navigation-context";
 import {
   X, Loader2, Download, Sparkles, Settings2, User,
@@ -396,11 +397,16 @@ export function TopazStudio({ imageUrl, messageId, imageDimensions, onClose }: T
 
           {/* Image display */}
           <div className="flex-1 flex items-center justify-center bg-black/50 rounded-xl overflow-hidden relative">
-            <img
-              src={result?.url || existingEdit?.result_url || imageUrl}
-              alt="Preview"
-              className="max-w-full max-h-full object-contain"
-            />
+            <div className="relative w-full h-full">
+              <NextImage
+                src={result?.url || existingEdit?.result_url || imageUrl}
+                alt="Preview"
+                fill
+                className="object-contain"
+                sizes="(max-width: 1280px) 60vw, 800px"
+                priority
+              />
+            </div>
             {processing && (
               <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
                 <div className="text-center">
@@ -500,7 +506,7 @@ export function TopazStudio({ imageUrl, messageId, imageDimensions, onClose }: T
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="z-[70]">
                   <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
                     Standard (Rápido)
                   </div>
@@ -766,7 +772,7 @@ export function TopazStudio({ imageUrl, messageId, imageDimensions, onClose }: T
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="z-[70]">
                   <SelectItem value="png">PNG (sin pérdida)</SelectItem>
                   <SelectItem value="jpeg">JPEG (comprimido)</SelectItem>
                   <SelectItem value="tiff">TIFF (profesional)</SelectItem>
@@ -802,39 +808,40 @@ export function TopazStudio({ imageUrl, messageId, imageDimensions, onClose }: T
                     return (
                       <div
                         key={edit.id}
-                        className="bg-accent/30 rounded-lg overflow-hidden"
+                        className="p-3 rounded-lg bg-card border border-border hover:border-purple-500/30 transition-colors"
                       >
-                        <div className="aspect-video bg-black/50 relative">
-                          <img
-                            src={edit.result_url}
-                            alt=""
-                            className="w-full h-full object-contain"
-                          />
-                          <div className="absolute top-2 left-2 flex gap-1">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-sm">{edit.model}</span>
                             <span className="text-xs bg-purple-600 text-white px-1.5 py-0.5 rounded">
                               {edit.scale_factor}x
                             </span>
                           </div>
+                          <span className="text-xs text-muted-foreground">{formattedDate}</span>
                         </div>
-                        <div className="p-3 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium">{edit.model}</span>
-                            <span className="text-xs text-muted-foreground">{formattedDate}</span>
+                        <div className="text-xs text-muted-foreground space-y-1">
+                          <div className="flex justify-between">
+                            <span>Resolución</span>
+                            <span>{edit.output_width} × {edit.output_height}</span>
                           </div>
-                          <div className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span>{edit.output_width} × {edit.output_height} ({megapixels.toFixed(1)} MP)</span>
-                            <span>{edit.credits_consumed} créditos</span>
+                          <div className="flex justify-between">
+                            <span>Megapíxeles</span>
+                            <span>{megapixels.toFixed(1)} MP</span>
                           </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleDownload(edit.result_url, `${edit.scale_factor}x`)}
-                            className="w-full gap-2"
-                          >
-                            <Download className="h-4 w-4" />
-                            Descargar
-                          </Button>
+                          <div className="flex justify-between">
+                            <span>Créditos</span>
+                            <span>{edit.credits_consumed}</span>
+                          </div>
                         </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDownload(edit.result_url, `${edit.scale_factor}x`)}
+                          className="w-full mt-2"
+                        >
+                          <Download className="h-4 w-4 mr-1" />
+                          Descargar
+                        </Button>
                       </div>
                     );
                   })
@@ -846,7 +853,7 @@ export function TopazStudio({ imageUrl, messageId, imageDimensions, onClose }: T
           {/* Footer: Credits & Process Button */}
           <div className="border-t border-border/50 p-4 space-y-3">
             {error && (
-              <div className="flex items-center gap-2 text-sm text-red-400 bg-red-500/10 px-3 py-2 rounded-lg">
+              <div className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400 bg-red-500/10 px-3 py-2 rounded-lg">
                 <AlertCircle className="h-4 w-4 flex-shrink-0" />
                 <span>{error}</span>
               </div>
@@ -860,7 +867,7 @@ export function TopazStudio({ imageUrl, messageId, imageDimensions, onClose }: T
             )}
 
             {result && (
-              <div className="text-sm text-green-400 bg-green-500/10 px-3 py-2 rounded-lg">
+              <div className="text-sm text-green-700 dark:text-green-400 bg-green-500/10 px-3 py-2 rounded-lg font-medium">
                 Procesado en {(result.processingTimeMs / 1000).toFixed(1)}s • {result.creditsConsumed} créditos
               </div>
             )}

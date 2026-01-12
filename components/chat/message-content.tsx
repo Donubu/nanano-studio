@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import NextImage from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Download, Loader2, Check, Mic, AlertCircle, ChevronDown, GripVertical, ZoomIn } from "lucide-react";
@@ -227,54 +228,49 @@ export function MessageContent({
     }
   };
 
-  // Cargar metadatos de la imagen cuando se monta el componente
+  // Cargar tamaño del archivo cuando se monta el componente
+  // Las dimensiones se obtienen del onLoad del NextImage
+  const [fileSize, setFileSize] = useState<string>("—");
+
   useEffect(() => {
     if (!imageUrl || isUser) return;
 
-    const loadImageMetadata = async () => {
+    const loadFileSize = async () => {
       try {
-        // Cargar dimensiones de la imagen
-        const img = new Image();
-        img.src = imageUrl;
-
-        img.onload = async () => {
-          const width = img.naturalWidth;
-          const height = img.naturalHeight;
-
-          // Obtener tamaño del archivo
-          let fileSize = "—";
-          try {
-            const response = await fetch(imageUrl, { method: "HEAD" });
-            const contentLength = response.headers.get("content-length");
-            if (contentLength) {
-              fileSize = formatFileSize(parseInt(contentLength, 10));
-            }
-          } catch {
-            // Si HEAD falla, intentar con GET
-            try {
-              const response = await fetch(imageUrl);
-              const blob = await response.blob();
-              fileSize = formatFileSize(blob.size);
-            } catch {
-              // Ignorar errores de tamaño
-            }
-          }
-
-          setImageMetadata({
-            width,
-            height,
-            aspectRatio: calculateAspectRatio(width, height),
-            format: getImageFormat(imageUrl),
-            fileSize,
-          });
-        };
-      } catch (error) {
-        console.error("Error cargando metadatos de imagen:", error);
+        const response = await fetch(imageUrl, { method: "HEAD" });
+        const contentLength = response.headers.get("content-length");
+        if (contentLength) {
+          setFileSize(formatFileSize(parseInt(contentLength, 10)));
+        }
+      } catch {
+        // Ignorar errores de tamaño
       }
     };
 
-    loadImageMetadata();
+    loadFileSize();
   }, [imageUrl, isUser]);
+
+  // Handler para obtener dimensiones cuando NextImage carga
+  const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    if (isUser) return;
+    const img = e.target as HTMLImageElement;
+    const width = img.naturalWidth;
+    const height = img.naturalHeight;
+    setImageMetadata({
+      width,
+      height,
+      aspectRatio: calculateAspectRatio(width, height),
+      format: getImageFormat(imageUrl || ""),
+      fileSize,
+    });
+  };
+
+  // Actualizar metadata cuando fileSize cambia y ya tenemos dimensiones
+  useEffect(() => {
+    if (imageMetadata && fileSize !== "—") {
+      setImageMetadata(prev => prev ? { ...prev, fileSize } : null);
+    }
+  }, [fileSize]);
 
   return (
     <div className="space-y-2">
@@ -285,28 +281,42 @@ export function MessageContent({
           isImageSelected && "ring-2 ring-primary ring-offset-2 ring-offset-background"
         )}>
           <div className="relative group">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={imageUrl}
-              alt="Imagen adjunta"
-              className={cn(
-                "w-full h-auto object-cover",
-                !isUser && "cursor-grab active:cursor-grabbing"
-              )}
-              draggable={!isUser}
-              onDragStart={(e) => {
-                if (isUser) return;
-                e.dataTransfer.effectAllowed = "copy";
-                e.dataTransfer.setData("text/uri-list", imageUrl);
-                e.dataTransfer.setData(
-                  "application/x-nanano-image",
-                  JSON.stringify({
-                    type: "chat-image",
-                    url: imageUrl,
-                  })
-                );
-              }}
-            />
+            {imageUrl.startsWith("data:") ? (
+              // Para imágenes base64 (subidas por usuario), usar img normal
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={imageUrl}
+                alt="Imagen adjunta"
+                className="w-full h-auto object-cover"
+              />
+            ) : (
+              // Para URLs de CloudFront, usar NextImage optimizado
+              <NextImage
+                src={imageUrl}
+                alt="Imagen adjunta"
+                width={512}
+                height={512}
+                className={cn(
+                  "w-full h-auto object-cover",
+                  !isUser && "cursor-grab active:cursor-grabbing"
+                )}
+                sizes="(max-width: 640px) 100vw, 384px"
+                draggable={!isUser}
+                onLoad={handleImageLoad}
+                onDragStart={(e) => {
+                  if (isUser) return;
+                  e.dataTransfer.effectAllowed = "copy";
+                  e.dataTransfer.setData("text/uri-list", imageUrl);
+                  e.dataTransfer.setData(
+                    "application/x-nanano-image",
+                    JSON.stringify({
+                      type: "chat-image",
+                      url: imageUrl,
+                    })
+                  );
+                }}
+              />
+            )}
             {/* Indicador de drag - solo para imágenes del modelo */}
             {!isUser && (
               <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 rounded px-1.5 py-1 flex items-center gap-1">

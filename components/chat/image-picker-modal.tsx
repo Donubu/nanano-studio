@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Image from "next/image";
 import { X, Loader2, Upload, Image as ImageIcon, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -257,20 +258,22 @@ export function ImagePickerModal({
                       : "border-transparent hover:border-border"
                   }`}
                 >
-                  <img
+                  <Image
                     src={gen.image_url!}
                     alt={gen.content || ""}
-                    className="w-full h-full object-cover"
+                    fill
+                    className="object-cover"
+                    sizes="(max-width: 640px) 33vw, 20vw"
                   />
                   {/* Badge to distinguish uploaded vs generated images */}
                   {gen.source === "upload" && (
-                    <div className="absolute top-1 left-1 bg-blue-500/90 text-white text-[9px] font-medium px-1.5 py-0.5 rounded flex items-center gap-1">
+                    <div className="absolute top-1 left-1 bg-blue-500/90 text-white text-[9px] font-medium px-1.5 py-0.5 rounded flex items-center gap-1 z-10">
                       <Upload className="h-2.5 w-2.5" />
                       Subida
                     </div>
                   )}
                   {selectedImage === gen.image_url && (
-                    <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
+                    <div className="absolute inset-0 bg-primary/20 flex items-center justify-center z-10">
                       <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
                         <Check className="h-5 w-5 text-primary-foreground" />
                       </div>
@@ -287,12 +290,23 @@ export function ImagePickerModal({
           <div className="p-4 border-t border-border/50 space-y-4">
             {/* Preview */}
             <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-lg overflow-hidden border border-border flex-shrink-0">
-                <img
-                  src={selectedImage}
-                  alt="Selected"
-                  className="w-full h-full object-cover"
-                />
+              <div className="relative w-16 h-16 rounded-lg overflow-hidden border border-border flex-shrink-0">
+                {selectedImage.startsWith("data:") ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={selectedImage}
+                    alt="Selected"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <Image
+                    src={selectedImage}
+                    alt="Selected"
+                    fill
+                    className="object-cover"
+                    sizes="64px"
+                  />
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium">Imagen seleccionada</p>

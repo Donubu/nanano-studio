@@ -231,14 +231,13 @@ export default function ProjectsPage() {
                           <Image
                             src={project.client_logo}
                             alt={project.client_name}
-                            width={24}
-                            height={24}
+                            width={48}
+                            height={48}
                             className="rounded"
                           />
                         ) : (
                           <Building2 className="h-5 w-5 text-muted-foreground" />
                         )}
-                        <span className="text-sm">{project.client_name}</span>
                       </div>
                     ) : (
                       <span className="text-muted-foreground">-</span>

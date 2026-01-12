@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="NANANO STUDIO - Plataforma de generación de contenido con IA. Crea imágenes, videos, audio y texto con inteligencia artificial de última generación.">
+  <meta name="keywords" content="IA, inteligencia artificial, generación de imágenes, videos, audio, Gemini, Imagen 4 Ultra, Nano Banana Pro, VEO 3.1, estudio creativo">
+  <title>NANANO STUDIO - Estudio Creativo con Inteligencia Artificial</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <!-- Navigation -->
+  <nav class="navbar" id="navbar">
+    <div class="container">
+      <a href="#" class="logo">
+        <span class="logo-badge">NS</span>
+        <span class="logo-text">NANANO STUDIO</span>
+      </a>
+      <div class="nav-links" id="navLinks">
+        <a href="#features">Características</a>
+        <a href="#capabilities">Capacidades</a>
+        <a href="#benefits">Ventajas</a>
+        <a href="#pricing">Planes</a>
+        <a href="#contact" class="btn btn-primary btn-nav">Comenzar</a>
+      </div>
+      <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Menú">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <header class="hero" id="hero">
+    <div class="hero-bg">
+      <div class="hero-gradient"></div>
+      <div class="hero-grid"></div>
+    </div>
+    <div class="container">
+      <div class="hero-content">
+        <div class="hero-badge">
+          <span class="pulse"></span>
+          Potenciado por Google Gemini & Vertex AI
+        </div>
+        <h1 class="hero-title">
+          El Estudio Creativo
+          <span class="gradient-text">Impulsado por IA</span>
+        </h1>
+        <p class="hero-description">
+          Genera imágenes, videos, audio y texto con la inteligencia artificial más avanzada del mercado.
+          Todo en una plataforma unificada diseñada para equipos creativos y agencias.
+        </p>
+        <div class="hero-cta">
+          <a href="#contact" class="btn btn-primary btn-lg">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+            Solicitar Demo
+          </a>
+          <a href="#features" class="btn btn-secondary btn-lg">
+            Explorar Características
+          </a>
+        </div>
+        <div class="hero-stats">
+          <div class="stat">
+            <span class="stat-number">3</span>
+            <span class="stat-label">Modelos de Imagen</span>
+          </div>
+          <div class="stat">
+            <span class="stat-number">4K</span>
+            <span class="stat-label">Resolución Máxima</span>
+          </div>
+          <div class="stat">
+            <span class="stat-number">60s</span>
+            <span class="stat-label">Videos con Audio</span>
+          </div>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <div class="floating-cards">
+          <div class="float-card card-image">
+            <div class="card-icon purple">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+              </svg>
+            </div>
+            <span>Imagen 4 Ultra</span>
+          </div>
+          <div class="float-card card-video">
+            <div class="card-icon orange">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+              </svg>
+            </div>
+            <span>VEO 3.1</span>
+          </div>
+          <div class="float-card card-audio">
+            <div class="card-icon cyan">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+              </svg>
+            </div>
+            <span>Nano Banana Pro</span>
+          </div>
+          <div class="float-card card-text">
+            <div class="card-icon green">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              </svg>
+            </div>
+            <span>Gemini TTS</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="scroll-indicator">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 5v14M19 12l-7 7-7-7"></path>
+      </svg>
+    </div>
+  </header>
+
+  <!-- Features Section -->
+  <section class="features" id="features">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Características</span>
+        <h2 class="section-title">Todo lo que necesitas para crear</h2>
+        <p class="section-description">
+          Una suite completa de herramientas de IA para equipos creativos que buscan eficiencia y calidad.
+        </p>
+      </div>
+
+      <div class="features-grid">
+        <div class="feature-card feature-main">
+          <div class="feature-icon gradient-bg">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+              <path d="M2 17l10 5 10-5"></path>
+              <path d="M2 12l10 5 10-5"></path>
+            </svg>
+          </div>
+          <h3>Generación Multimodal</h3>
+          <p>Crea texto, imágenes, videos y audio desde una única interfaz. Combina modalidades para flujos de trabajo complejos.</p>
+          <ul class="feature-list">
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              Imágenes con Imagen 4 Ultra
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              Imágenes con Nano Banana Pro
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              Videos con VEO 3.1
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              Audio con Gemini TTS
+            </li>
+          </ul>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon purple-bg">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <circle cx="8.5" cy="8.5" r="1.5"></circle>
+              <polyline points="21 15 16 10 5 21"></polyline>
+            </svg>
+          </div>
+          <h3>Imágenes de Alta Calidad</h3>
+          <p>Imagen 4 Ultra para fotorrealismo hasta 2K y Nano Banana Pro con razonamiento IA para 4K y texto preciso.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon orange-bg">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="23 7 16 12 23 17 23 7"></polygon>
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+            </svg>
+          </div>
+          <h3>Videos con Audio Nativo</h3>
+          <p>VEO 3.1 genera videos 1080p con diálogos, efectos de sonido y audio ambiente sincronizado automáticamente.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon green-bg">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+          </div>
+          <h3>Síntesis de Voz</h3>
+          <p>30 voces naturales con estilos personalizables. Soporte multilenguaje y multi-hablante.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon cyan-bg">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 20V10"></path>
+              <path d="M18 20V4"></path>
+              <path d="M6 20v-4"></path>
+            </svg>
+          </div>
+          <h3>Analytics en Tiempo Real</h3>
+          <p>Monitorea costos, tokens y generaciones. Análisis por proyecto, usuario y tipo de contenido.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon pink-bg">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+            </svg>
+          </div>
+          <h3>Gestión de Equipos</h3>
+          <p>Organiza por proyectos y clientes. Asigna usuarios, establece límites y controla accesos.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Capabilities Section -->
+  <section class="capabilities" id="capabilities">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Capacidades de IA</span>
+        <h2 class="section-title">Tecnología de Vanguardia</h2>
+        <p class="section-description">
+          Integración directa con los modelos más avanzados de Google y herramientas profesionales de mejora.
+        </p>
+      </div>
+
+      <div class="capabilities-showcase">
+        <div class="capability-tabs">
+          <button class="capability-tab active" data-tab="images">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <circle cx="8.5" cy="8.5" r="1.5"></circle>
+              <polyline points="21 15 16 10 5 21"></polyline>
+            </svg>
+            Imágenes
+          </button>
+          <button class="capability-tab" data-tab="videos">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="23 7 16 12 23 17 23 7"></polygon>
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+            </svg>
+            Videos
+          </button>
+          <button class="capability-tab" data-tab="audio">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 18V5l12-2v13"></path>
+              <circle cx="6" cy="18" r="3"></circle>
+              <circle cx="18" cy="16" r="3"></circle>
+            </svg>
+            Audio
+          </button>
+          <button class="capability-tab" data-tab="enhance">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+            </svg>
+            Mejora
+          </button>
+        </div>
+
+        <div class="capability-content">
+          <div class="capability-panel active" id="panel-images">
+            <div class="panel-info">
+              <h3>Imagen 4 Ultra + Nano Banana Pro</h3>
+              <p>Dos modelos de generación de imágenes de última generación. Imagen 4 Ultra ofrece fotorrealismo inigualable hasta 2K. Nano Banana Pro, basado en Gemini 3 Pro, genera imágenes 4K con razonamiento IA y texto multilenguaje preciso.</p>
+              <ul class="specs-list">
+                <li>
+                  <span class="spec-label">Imagen 4 Ultra</span>
+                  <span class="spec-value">2K, fotorrealismo, consistencia de personajes</span>
+                </li>
+                <li>
+                  <span class="spec-label">Nano Banana Pro</span>
+                  <span class="spec-value">4K, texto legible, razonamiento IA</span>
+                </li>
+                <li>
+                  <span class="spec-label">Aspect ratios</span>
+                  <span class="spec-value">1:1, 3:4, 4:3, 9:16, 16:9</span>
+                </li>
+                <li>
+                  <span class="spec-label">Features</span>
+                  <span class="spec-value">Branding consistente, SynthID watermark</span>
+                </li>
+              </ul>
+            </div>
+            <div class="panel-visual">
+              <div class="model-badge">
+                <span class="badge-icon purple">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                    <polyline points="21 15 16 10 5 21"></polyline>
+                  </svg>
+                </span>
+                <div class="badge-info">
+                  <span class="badge-name">Imagen 4 Ultra</span>
+                  <span class="badge-version">+ Nano Banana Pro</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="capability-panel" id="panel-videos">
+            <div class="panel-info">
+              <h3>Google VEO 3.1</h3>
+              <p>El modelo de video generativo más avanzado de Google. Crea videos 1080p con audio nativo sincronizado: diálogos, efectos de sonido y audio ambiente. Perfecto para marketing, prototipos y storytelling visual.</p>
+              <ul class="specs-list">
+                <li>
+                  <span class="spec-label">Resolución</span>
+                  <span class="spec-value">720p / 1080p @ 24 FPS</span>
+                </li>
+                <li>
+                  <span class="spec-label">Duración</span>
+                  <span class="spec-value">4, 6 u 8 seg (extensible hasta 60s)</span>
+                </li>
+                <li>
+                  <span class="spec-label">Audio nativo</span>
+                  <span class="spec-value">Diálogos, SFX, ambiente sincronizado</span>
+                </li>
+                <li>
+                  <span class="spec-label">Features</span>
+                  <span class="spec-value">3 imgs referencia, Insert/Remove, Scene extension</span>
+                </li>
+              </ul>
+            </div>
+            <div class="panel-visual">
+              <div class="model-badge">
+                <span class="badge-icon orange">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                  </svg>
+                </span>
+                <div class="badge-info">
+                  <span class="badge-name">VEO 3.1</span>
+                  <span class="badge-version">Audio nativo + Scene extension</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="capability-panel" id="panel-audio">
+            <div class="panel-info">
+              <h3>Gemini TTS</h3>
+              <p>Síntesis de voz de última generación con voces naturales y expresivas. Perfecto para voiceovers, podcasts, asistentes virtuales y contenido multimedia.</p>
+              <ul class="specs-list">
+                <li>
+                  <span class="spec-label">Voces</span>
+                  <span class="spec-value">30+ voces naturales</span>
+                </li>
+                <li>
+                  <span class="spec-label">Estilos</span>
+                  <span class="spec-value">Alegre, informativo, cálido, firme...</span>
+                </li>
+                <li>
+                  <span class="spec-label">Formatos</span>
+                  <span class="spec-value">WAV, MP3</span>
+                </li>
+                <li>
+                  <span class="spec-label">Features</span>
+                  <span class="spec-value">Multi-hablante, Prompts de estilo</span>
+                </li>
+              </ul>
+            </div>
+            <div class="panel-visual">
+              <div class="model-badge">
+                <span class="badge-icon green">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                    <line x1="12" y1="19" x2="12" y2="23"></line>
+                  </svg>
+                </span>
+                <div class="badge-info">
+                  <span class="badge-name">Gemini TTS</span>
+                  <span class="badge-version">Voces expresivas</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="capability-panel" id="panel-enhance">
+            <div class="panel-info">
+              <h3>Topaz Studio</h3>
+              <p>Mejora profesional de imágenes y videos con IA. Upscaling hasta 6x, restauración, eliminación de ruido y mejora de detalles con calidad de estudio.</p>
+              <ul class="specs-list">
+                <li>
+                  <span class="spec-label">Upscaling</span>
+                  <span class="spec-value">Hasta 6x</span>
+                </li>
+                <li>
+                  <span class="spec-label">Modelos</span>
+                  <span class="spec-value">Standard, High Fidelity, CGI, Text</span>
+                </li>
+                <li>
+                  <span class="spec-label">Generativos</span>
+                  <span class="spec-value">Wonder, Redefine, Recovery</span>
+                </li>
+                <li>
+                  <span class="spec-label">Video</span>
+                  <span class="spec-value">Proteus, Artemis, Apollo</span>
+                </li>
+              </ul>
+            </div>
+            <div class="panel-visual">
+              <div class="model-badge">
+                <span class="badge-icon gradient">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                  </svg>
+                </span>
+                <div class="badge-info">
+                  <span class="badge-name">Topaz Studio</span>
+                  <span class="badge-version">Mejora profesional</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Benefits Section -->
+  <section class="benefits" id="benefits">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Ventajas</span>
+        <h2 class="section-title">¿Por qué elegir NANANO STUDIO?</h2>
+        <p class="section-description">
+          Diseñado para equipos creativos y agencias que necesitan control, eficiencia y resultados profesionales.
+        </p>
+      </div>
+
+      <div class="benefits-grid">
+        <div class="benefit-card">
+          <div class="benefit-number">01</div>
+          <h3>Control Total de Costos</h3>
+          <p>Monitoreo en tiempo real de tokens, créditos y costos por proyecto, usuario y cliente. Integración con Google Cloud para facturación precisa.</p>
+        </div>
+        <div class="benefit-card">
+          <div class="benefit-number">02</div>
+          <h3>Flujo de Trabajo Unificado</h3>
+          <p>Una sola plataforma para texto, imágenes, video y audio. Sin cambiar entre herramientas. Todo el contenido organizado por proyectos.</p>
+        </div>
+        <div class="benefit-card">
+          <div class="benefit-number">03</div>
+          <h3>Gestión de Clientes</h3>
+          <p>Organiza el trabajo por clientes con logos, proyectos asociados y análisis de consumo independientes. Ideal para agencias.</p>
+        </div>
+        <div class="benefit-card">
+          <div class="benefit-number">04</div>
+          <h3>Límites y Cuotas</h3>
+          <p>Establece límites de generación por usuario, proyecto o tipo de contenido. Control granular sobre quién puede generar qué.</p>
+        </div>
+        <div class="benefit-card">
+          <div class="benefit-number">05</div>
+          <h3>Historial Completo</h3>
+          <p>Accede a todas las generaciones con filtros avanzados. Busca por tipo, fecha, proyecto o usuario. Nada se pierde.</p>
+        </div>
+        <div class="benefit-card">
+          <div class="benefit-number">06</div>
+          <h3>Mejora Profesional</h3>
+          <p>Topaz Studio integrado para upscaling y mejora de imágenes y videos. Calidad de estudio sin herramientas adicionales.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Use Cases Section -->
+  <section class="use-cases">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Casos de Uso</span>
+        <h2 class="section-title">Creado para Creativos</h2>
+      </div>
+
+      <div class="use-cases-grid">
+        <div class="use-case">
+          <div class="use-case-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+            </svg>
+          </div>
+          <h3>Agencias Creativas</h3>
+          <p>Gestiona múltiples clientes con proyectos separados, límites de presupuesto y reportes de consumo individuales.</p>
+        </div>
+        <div class="use-case">
+          <div class="use-case-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+          </div>
+          <h3>Marketing Digital</h3>
+          <p>Genera contenido visual para campañas, redes sociales y anuncios con velocidad y consistencia de marca.</p>
+        </div>
+        <div class="use-case">
+          <div class="use-case-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+            </svg>
+          </div>
+          <h3>Producción de Contenido</h3>
+          <p>Crea videos promocionales, voiceovers profesionales y assets visuales para proyectos multimedia.</p>
+        </div>
+        <div class="use-case">
+          <div class="use-case-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="2" y1="12" x2="22" y2="12"></line>
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            </svg>
+          </div>
+          <h3>Equipos Distribuidos</h3>
+          <p>Colaboración en tiempo real con múltiples usuarios. Control de acceso por proyecto y seguimiento de actividad.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing Section -->
+  <section class="pricing" id="pricing">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Planes</span>
+        <h2 class="section-title">Precios Transparentes</h2>
+        <p class="section-description">
+          Paga solo por lo que usas. Sin costos ocultos. Escala según tus necesidades.
+        </p>
+      </div>
+
+      <div class="pricing-cards">
+        <div class="pricing-card">
+          <div class="pricing-header">
+            <h3>Starter</h3>
+            <p>Para freelancers y proyectos pequeños</p>
+          </div>
+          <div class="pricing-price">
+            <span class="currency">$</span>
+            <span class="amount">49</span>
+            <span class="period">/mes</span>
+          </div>
+          <ul class="pricing-features">
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              1 proyecto activo
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              2 usuarios
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              500 generaciones/mes
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              Texto, Imágenes, Audio
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              Soporte por email
+            </li>
+          </ul>
+          <a href="#contact" class="btn btn-secondary btn-block">Comenzar</a>
+        </div>
+
+        <div class="pricing-card featured">
+          <div class="pricing-badge">Más Popular</div>
+          <div class="pricing-header">
+            <h3>Professional</h3>
+            <p>Para equipos creativos en crecimiento</p>
+          </div>
+          <div class="pricing-price">
+            <span class="currency">$</span>
+            <span class="amount">149</span>
+            <span class="period">/mes</span>
+          </div>
+          <ul class="pricing-features">
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              5 proyectos activos
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              10 usuarios
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              2,000 generaciones/mes
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              Todas las modalidades
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              Topaz Studio incluido
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              Analytics avanzados
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              Soporte prioritario
+            </li>
+          </ul>
+          <a href="#contact" class="btn btn-primary btn-block">Comenzar</a>
+        </div>
+
+        <div class="pricing-card">
+          <div class="pricing-header">
+            <h3>Enterprise</h3>
+            <p>Para agencias y grandes equipos</p>
+          </div>
+          <div class="pricing-price">
+            <span class="currency"></span>
+            <span class="amount">Custom</span>
+            <span class="period"></span>
+          </div>
+          <ul class="pricing-features">
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              Proyectos ilimitados
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              Usuarios ilimitados
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              Generaciones ilimitadas
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              Gestión de clientes
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              API personalizada
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              SSO / SAML
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              Account Manager dedicado
+            </li>
+          </ul>
+          <a href="#contact" class="btn btn-secondary btn-block">Contactar Ventas</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA Section -->
+  <section class="cta" id="contact">
+    <div class="container">
+      <div class="cta-content">
+        <h2>¿Listo para transformar tu proceso creativo?</h2>
+        <p>Solicita una demo personalizada y descubre cómo NANANO STUDIO puede potenciar tu equipo.</p>
+        <form class="cta-form" id="contactForm">
+          <div class="form-row">
+            <input type="text" name="name" placeholder="Tu nombre" required>
+            <input type="email" name="email" placeholder="tu@email.com" required>
+          </div>
+          <div class="form-row">
+            <input type="text" name="company" placeholder="Empresa (opcional)">
+            <select name="size">
+              <option value="">Tamaño del equipo</option>
+              <option value="1-5">1-5 personas</option>
+              <option value="6-20">6-20 personas</option>
+              <option value="21-50">21-50 personas</option>
+              <option value="50+">50+ personas</option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary btn-lg btn-block">
+            Solicitar Demo Gratuita
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+          </button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a href="#" class="logo">
+            <span class="logo-badge">NS</span>
+            <span class="logo-text">NANANO STUDIO</span>
+          </a>
+          <p>Plataforma de generación de contenido con IA para equipos creativos y agencias.</p>
+          <div class="footer-social">
+            <a href="#" aria-label="Twitter">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+              </svg>
+            </a>
+            <a href="#" aria-label="LinkedIn">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+              </svg>
+            </a>
+            <a href="#" aria-label="Instagram">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+              </svg>
+            </a>
+          </div>
+        </div>
+
+        <div class="footer-links">
+          <h4>Producto</h4>
+          <ul>
+            <li><a href="#features">Características</a></li>
+            <li><a href="#capabilities">Capacidades</a></li>
+            <li><a href="#pricing">Precios</a></li>
+            <li><a href="#">Changelog</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links">
+          <h4>Recursos</h4>
+          <ul>
+            <li><a href="#">Documentación</a></li>
+            <li><a href="#">Guías</a></li>
+            <li><a href="#">API Reference</a></li>
+            <li><a href="#">Blog</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links">
+          <h4>Empresa</h4>
+          <ul>
+            <li><a href="#">Sobre Nosotros</a></li>
+            <li><a href="#">Contacto</a></li>
+            <li><a href="#">Privacidad</a></li>
+            <li><a href="#">Términos</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <p>&copy; 2025 NANANO STUDIO. Todos los derechos reservados.</p>
+        <p>Potenciado por Google Gemini & Vertex AI</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="js/main.js"></script>
+</body>
+</html>

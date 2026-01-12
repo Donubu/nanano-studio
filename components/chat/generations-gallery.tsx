@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import NextImage from "next/image";
 import { useNavigation } from "@/contexts/navigation-context";
 import {
   X, Loader2, ExternalLink, Image as ImageIcon, Video, Calendar, FileType,
@@ -378,21 +379,11 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [selectedIndex, goToPrev, goToNext, showTopazStudio, showTopazVideoStudio]);
 
-  // Load image dimensions
+  // Reset image dimensions when selection changes
   useEffect(() => {
-    if (!selectedItem || selectedItem.type !== "image" || !selectedItem.image_url) {
+    if (!selectedItem || selectedItem.type !== "image") {
       setImageDimensions(null);
-      return;
     }
-
-    const img = new Image();
-    img.onload = () => {
-      setImageDimensions({
-        width: img.naturalWidth,
-        height: img.naturalHeight,
-      });
-    };
-    img.src = selectedItem.image_url;
   }, [selectedItem]);
 
   // Tag management functions
@@ -828,7 +819,13 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                 }`}
               >
                 {gen.type === "image" && gen.image_url ? (
-                  <img src={gen.image_url} alt="" className="w-full h-full object-cover" />
+                  <NextImage
+                    src={gen.image_url}
+                    alt=""
+                    fill
+                    className="object-cover"
+                    sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, 20vw"
+                  />
                 ) : gen.type === "video" && gen.video_url ? (
                   <>
                     <video src={gen.video_url} className="w-full h-full object-cover" preload="metadata" muted playsInline />
@@ -1005,7 +1002,23 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
             {/* Content */}
             <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-black/50">
               {selectedItem.type === "image" && selectedItem.image_url ? (
-                <img src={selectedItem.image_url} alt="" className="max-w-full max-h-[60vh] object-contain rounded-lg" />
+                <div className="relative w-full h-[60vh]">
+                  <NextImage
+                    src={selectedItem.image_url}
+                    alt=""
+                    fill
+                    className="object-contain rounded-lg"
+                    sizes="(max-width: 1280px) 90vw, 1024px"
+                    priority
+                    onLoad={(e) => {
+                      const img = e.target as HTMLImageElement;
+                      setImageDimensions({
+                        width: img.naturalWidth,
+                        height: img.naturalHeight,
+                      });
+                    }}
+                  />
+                </div>
               ) : selectedItem.type === "video" && selectedItem.video_url ? (
                 <VideoPlayer
                   videoUrl={selectedItem.video_url}

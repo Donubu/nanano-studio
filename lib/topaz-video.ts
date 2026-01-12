@@ -480,6 +480,8 @@ export async function createVideoEnhancement(
   }
 
   const data = await response.json();
+  console.log("Topaz create response:", JSON.stringify(data, null, 2));
+  console.log("Topaz estimated credits from API:", data.cost?.credits, "or", data.estimated_credits);
   return {
     requestId: data.requestId || data.request_id,
     estimatedCredits: data.cost?.credits || data.estimated_credits || 0,
