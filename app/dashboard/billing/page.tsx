@@ -82,6 +82,7 @@ export default function BillingPage() {
   const [data, setData] = useState<SummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [period, setPeriod] = useState<PeriodType>("30");
 
   const fetchData = useCallback(async () => {
@@ -104,19 +105,24 @@ export default function BillingPage() {
 
   const handleSync = async () => {
     setSyncing(true);
+    setSyncError(null);
     try {
       const res = await fetch(`/api/admin/gcp-costs/sync?days=${period}`, {
         method: "POST",
       });
+      const result = await res.json();
       if (res.ok) {
         // Refresh data after sync
         await fetchData();
       } else {
-        const error = await res.json();
-        console.error("Sync error:", error);
+        const errorMsg = result.details || result.error || "Error desconocido al sincronizar";
+        console.error("Sync error:", result);
+        setSyncError(errorMsg);
       }
     } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Error de conexión";
       console.error("Error syncing:", err);
+      setSyncError(errorMsg);
     } finally {
       setSyncing(false);
     }
@@ -266,6 +272,25 @@ export default function BillingPage() {
         </div>
       </div>
 
+      {/* Sync Error */}
+      {syncError && (
+        <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/30 flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-red-700 dark:text-red-400">Error al sincronizar</p>
+            <p className="text-sm text-red-600 dark:text-red-400/80 mt-1 break-words">{syncError}</p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSyncError(null)}
+            className="shrink-0 text-red-600 dark:text-red-400 hover:text-red-700 hover:bg-red-500/10"
+          >
+            ✕
+          </Button>
+        </div>
+      )}
+
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="bg-card border-border/50">
@@ -356,13 +381,9 @@ export default function BillingPage() {
                     tickFormatter={(v) => `$${v}`}
                   />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: "#1a1a22",
-                      border: "1px solid #333",
-                      borderRadius: "8px",
-                      color: "#fff",
-                    }}
+                    contentStyle={{ backgroundColor: "#1a1a22", border: "1px solid #333", borderRadius: "8px", color: "#fff" }}
                     labelStyle={{ color: "#fff" }}
+                    itemStyle={{ color: "#fff" }}
                     labelFormatter={formatDate}
                     formatter={(value) => [formatCost(Number(value) || 0), "Costo"]}
                   />
@@ -411,12 +432,9 @@ export default function BillingPage() {
                       ))}
                     </Pie>
                     <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#1a1a22",
-                        border: "1px solid #333",
-                        borderRadius: "8px",
-                        color: "#fff",
-                      }}
+                      contentStyle={{ backgroundColor: "#1a1a22", border: "1px solid #333", borderRadius: "8px", color: "#fff" }}
+                      labelStyle={{ color: "#fff" }}
+                      itemStyle={{ color: "#fff" }}
                       formatter={(value) => [formatCost(Number(value) || 0), "Costo"]}
                     />
                   </PieChart>

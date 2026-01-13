@@ -181,8 +181,29 @@ export async function syncGcpCosts(daysBack: number = 2): Promise<SyncResult> {
       totalCost,
     };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    console.error("Error syncing GCP costs:", errorMessage);
+    // Extract detailed error information
+    let errorMessage = "Unknown error";
+    let errorDetails = "";
+
+    if (error instanceof Error) {
+      errorMessage = error.message;
+      errorDetails = error.stack || "";
+      // Check for BigQuery specific error properties
+      const bqError = error as Error & { code?: string; errors?: Array<{ message: string }> };
+      if (bqError.code) {
+        errorMessage = `[${bqError.code}] ${errorMessage}`;
+      }
+      if (bqError.errors && Array.isArray(bqError.errors)) {
+        errorDetails = bqError.errors.map(e => e.message).join("; ");
+        errorMessage = `${errorMessage} - ${errorDetails}`;
+      }
+    } else if (typeof error === "object" && error !== null) {
+      errorMessage = JSON.stringify(error);
+    } else {
+      errorMessage = String(error);
+    }
+
+    console.error("Error syncing GCP costs:", errorMessage, errorDetails);
 
     // Log failed sync
     await logSync(startedAt, 0, 0, "error", errorMessage);
