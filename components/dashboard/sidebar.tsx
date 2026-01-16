@@ -76,8 +76,8 @@ export function Sidebar() {
     const pathname = usePathname();
 
     return (
-        <aside className="w-60 border-r border-border/50 bg-sidebar min-h-[calc(100vh-3.5rem)]">
-            <nav className="p-3 space-y-1">
+        <aside className="w-60 border-r border-border/50 bg-sidebar min-h-[calc(100vh-3.5rem)] flex flex-col">
+            <nav className="p-3 space-y-1 flex-1">
                 {menuItems.map((item) => {
                     const isActive =
                         pathname === item.href ||
@@ -101,6 +101,9 @@ export function Sidebar() {
                     );
                 })}
             </nav>
+            <div className="p-3 text-[10px] text-muted-foreground/50">
+                v{process.env.NEXT_PUBLIC_APP_VERSION || "2.0.0"}
+            </div>
         </aside>
     );
 }

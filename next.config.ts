@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import packageJson from "./package.json";
 
 const nextConfig: NextConfig = {
   images: {
@@ -8,6 +9,9 @@ const nextConfig: NextConfig = {
         hostname: "static.puer.to",
       },
     ],
+  },
+  env: {
+    NEXT_PUBLIC_APP_VERSION: packageJson.version,
   },
 };
 
