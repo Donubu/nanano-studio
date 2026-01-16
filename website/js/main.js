@@ -1,5 +1,5 @@
 /**
- * Duaria Studio - Marketing Website JavaScript
+ * Puerto Studio - Marketing Website JavaScript
  */
 
 document.addEventListener('DOMContentLoaded', () => {

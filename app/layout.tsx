@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Duaria Studio",
-  description: "AI Studio powered by Vertex AI",
+  title: "Puerto Studio",
+  description: "Potenciado con Vertex AI",
 };
 
 export default function RootLayout({

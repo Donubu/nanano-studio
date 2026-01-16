@@ -2139,10 +2139,10 @@ export function ChatInterface() {
                             className={`flex items-center gap-2 ${selectedProjectId ? 'mb-3' : ''}`}
                         >
                             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-yellow-400 to-yellow-500 flex items-center justify-center text-black font-bold text-sm">
-                                DS
+                                PS
                             </div>
                             <span className="text-lg font-semibold tracking-tight">
-                                Duaria <span className="text-yellow-400">Studio</span>
+                                Puerto <span className="text-yellow-400">Studio</span>
                             </span>
                         </button>
                         {selectedProjectId && (
@@ -2683,7 +2683,7 @@ export function ChatInterface() {
                                 <div className="flex flex-col items-center justify-center h-full text-center">
                                     <div className="flex items-center gap-3 mb-3">
                                         <div className="w-16 h-16 rounded-lg bg-gradient-to-br from-yellow-400 to-yellow-500 flex items-center justify-center text-black font-bold text-2xl">
-                                            DS
+                                            PS
                                         </div>
                                     </div>
                                     <p className="text-muted-foreground max-w-md">
@@ -2704,7 +2704,7 @@ export function ChatInterface() {
                                                         <Loader2 className="h-4 w-4 text-primary animate-spin"/>
                                                     ) : (
                                                         <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-yellow-400 to-yellow-500 flex items-center justify-center text-black font-bold text-sm">
-                                                            DS
+                                                            PS
                                                         </div>
                                                     )}
                                                 </div>

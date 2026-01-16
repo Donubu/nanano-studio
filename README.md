@@ -1,4 +1,4 @@
-# Duaria Studio
+# Puerto Studio
 
 Plataforma de chat con inteligencia artificial que integra Google Generative AI (Vertex AI) para conversaciones y generación de imágenes.
 

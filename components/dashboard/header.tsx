@@ -39,10 +39,10 @@ export function Header() {
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-yellow-400 to-yellow-500 flex items-center justify-center text-black font-bold text-sm">
-            DS
+            PS
           </div>
           <span className="text-lg font-semibold tracking-tight">
-            Duaria <span className="text-yellow-400">Studio</span>
+            Puerto <span className="text-yellow-400">Studio</span>
           </span>
         </div>
       </div>
