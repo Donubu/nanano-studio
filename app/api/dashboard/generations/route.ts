@@ -221,7 +221,7 @@ export async function GET(request: NextRequest) {
         u.name as user_name,
         u.email as user_email,
         c.model_id,
-        COALESCE(mo_msg.display_name, mo_conv.display_name) as model_name,
+        COALESCE(mo_req.display_name, mo_conv.display_name) as model_name,
         m.content,
         m.content_type,
         m.quality_tier,
@@ -245,7 +245,15 @@ export async function GET(request: NextRequest) {
       LEFT JOIN projects p ON c.project_id = p.id
       LEFT JOIN clients cl ON p.client_id = cl.id
       LEFT JOIN users u ON c.user_id = u.id
-      LEFT JOIN models mo_msg ON mo_msg.model_id = JSON_UNQUOTE(JSON_EXTRACT(m.request_data, '$.model'))
+      LEFT JOIN models mo_req ON mo_req.model_id = (
+        SELECT JSON_UNQUOTE(JSON_EXTRACT(mu.request_data, '$.model'))
+        FROM messages mu
+        WHERE mu.conversation_id = m.conversation_id
+          AND mu.role = 'user'
+          AND mu.id < m.id
+        ORDER BY mu.id DESC
+        LIMIT 1
+      )
       LEFT JOIN models mo_conv ON c.model_id = mo_conv.id
       WHERE ${conditions.join(" AND ")}
       ORDER BY m.created_at DESC
@@ -761,7 +769,7 @@ async function handleAllGenerations(
       u.name as user_name,
       u.email as user_email,
       c.model_id,
-      COALESCE(mo_msg.display_name, mo_conv.display_name) as model_name,
+      COALESCE(mo_req.display_name, mo_conv.display_name) as model_name,
       m.content,
       m.content_type,
       m.quality_tier,
@@ -785,7 +793,15 @@ async function handleAllGenerations(
     LEFT JOIN projects p ON c.project_id = p.id
     LEFT JOIN clients cl ON p.client_id = cl.id
     LEFT JOIN users u ON c.user_id = u.id
-    LEFT JOIN models mo_msg ON mo_msg.model_id = JSON_UNQUOTE(JSON_EXTRACT(m.request_data, '$.model'))
+    LEFT JOIN models mo_req ON mo_req.model_id = (
+      SELECT JSON_UNQUOTE(JSON_EXTRACT(mu.request_data, '$.model'))
+      FROM messages mu
+      WHERE mu.conversation_id = m.conversation_id
+        AND mu.role = 'user'
+        AND mu.id < m.id
+      ORDER BY mu.id DESC
+      LIMIT 1
+    )
     LEFT JOIN models mo_conv ON c.model_id = mo_conv.id
     WHERE ${msgConditions.join(" AND ")}
     ORDER BY m.created_at DESC
