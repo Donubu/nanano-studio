@@ -384,16 +384,13 @@ export function TopazStudioVideo({
     return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
   };
 
-  // Format date as dd-mm-yyyy HH:mm:ss
+  // Format date as dd-mm-yyyy HH:mm:ss (sin conversión de timezone)
   const formatDateTime = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const day = String(date.getDate()).padStart(2, "0");
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const year = date.getFullYear();
-    const hours = String(date.getHours()).padStart(2, "0");
-    const minutes = String(date.getMinutes()).padStart(2, "0");
-    const seconds = String(date.getSeconds()).padStart(2, "0");
-    return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+    const str = String(dateStr);
+    const [datePart, timePart] = str.includes("T") ? str.split("T") : str.split(" ");
+    const [year, month, day] = datePart.split("-");
+    const [hours, minutes, seconds] = (timePart || "00:00:00").split(":");
+    return `${day}-${month}-${year} ${hours}:${minutes}:${seconds?.split(".")[0] || "00"}`;
   };
 
   // Format file size

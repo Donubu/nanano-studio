@@ -5,31 +5,36 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+const MONTH_NAMES = ["", "ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
 /**
- * Convierte una fecha de la BD (UTC) a objeto Date
- * @param dateString - Fecha en formato string (de MySQL o ISO)
+ * Parsea una fecha de MySQL a sus componentes
+ * Las fechas vienen sin indicador de timezone, se muestran tal cual
  */
-function parseUTCDate(dateString: string | Date): Date {
+function parseDateComponents(dateString: string | Date): { year: string; month: string; day: string; hour: string; minute: string } {
   if (dateString instanceof Date) {
-    return dateString;
+    return {
+      year: dateString.getFullYear().toString(),
+      month: (dateString.getMonth() + 1).toString().padStart(2, "0"),
+      day: dateString.getDate().toString().padStart(2, "0"),
+      hour: dateString.getHours().toString().padStart(2, "0"),
+      minute: dateString.getMinutes().toString().padStart(2, "0"),
+    };
   }
 
-  // Las fechas de la BD vienen en UTC sin indicador de zona
-  // Verificar si ya tiene indicador de zona horaria (Z o +/-HH:MM al final)
-  const hasTimezone = /Z$|[+-]\d{2}:\d{2}$/.test(dateString);
+  const str = String(dateString);
+  const [datePart, timePart] = str.includes("T") ? str.split("T") : str.split(" ");
+  const [year, month, day] = datePart.split("-");
+  const [hour, minute] = (timePart || "00:00:00").split(":");
 
-  if (hasTimezone) {
-    return new Date(dateString);
-  } else {
-    // Agregar 'Z' para indicar que es UTC
-    return new Date(dateString.replace(' ', 'T') + 'Z');
-  }
+  return { year, month, day, hour, minute };
 }
 
 /**
- * Formatea una fecha de la BD (UTC) a la zona horaria local
+ * Formatea una fecha de la BD sin conversión de timezone
+ * Las fechas de MySQL ya vienen en hora Chile
  * @param dateString - Fecha en formato string (de MySQL o ISO)
- * @param options - Opciones de formato (default: fecha corta)
+ * @param options - Opciones de formato
  */
 export function formatDateLocal(
   dateString: string | Date,
@@ -41,13 +46,17 @@ export function formatDateLocal(
 ): string {
   if (!dateString) return "";
 
-  const date = parseUTCDate(dateString);
+  const { year, month, day, hour, minute } = parseDateComponents(dateString);
+  const monthName = MONTH_NAMES[parseInt(month)] || month;
 
-  // Usar timeZone explícito para Chile
-  return date.toLocaleDateString("es-CL", {
-    ...options,
-    timeZone: "America/Santiago",
-  });
+  // Construir formato según opciones
+  let result = `${day} ${monthName} ${year}`;
+
+  if (options.hour !== undefined) {
+    result += `, ${hour}:${minute}`;
+  }
+
+  return result;
 }
 
 /**

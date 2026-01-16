@@ -1,6 +1,6 @@
 import mysql from "mysql2/promise";
 
-const pool = mysql.createPool({
+const basePool = mysql.createPool({
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT) || 3306,
   user: process.env.DB_USER,
@@ -12,5 +12,12 @@ const pool = mysql.createPool({
   timezone: "+00:00", // Interpretar fechas como UTC
   dateStrings: true, // Devolver fechas como strings para mejor control
 });
+
+// Configurar timezone UTC en cada conexión nueva
+basePool.on("connection", (connection) => {
+  connection.query("SET time_zone = '+00:00'");
+});
+
+const pool = basePool;
 
 export default pool;

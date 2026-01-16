@@ -200,18 +200,14 @@ export default function GenerationsPage() {
   };
 
   const formatDate = (dateStr: string) => {
-    // MySQL dates come without timezone, append Z to parse as UTC
-    const utcDate = dateStr.includes("Z") || dateStr.includes("+")
-      ? new Date(dateStr)
-      : new Date(dateStr.replace(" ", "T") + "Z");
-    return utcDate.toLocaleString("es-CL", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZone: "America/Santiago",
-    });
+    // Las fechas de MySQL vienen en hora Chile (sin indicador de zona)
+    // Formatear directamente sin conversión adicional
+    const [datePart, timePart] = dateStr.split(" ");
+    const [year, month, day] = datePart.split("-");
+    const [hour, minute] = (timePart || "00:00:00").split(":");
+
+    const monthNames = ["", "ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+    return `${day} ${monthNames[parseInt(month)]} ${year}, ${hour}:${minute}`;
   };
 
   const getTypeIcon = (type: string) => {
