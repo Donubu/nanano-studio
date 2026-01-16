@@ -1,5 +1,5 @@
 /**
- * NANANO STUDIO - Marketing Website JavaScript
+ * Duaria Studio - Marketing Website JavaScript
  */
 
 document.addEventListener('DOMContentLoaded', () => {

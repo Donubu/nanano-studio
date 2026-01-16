@@ -6,25 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { VoiceSelector } from "./voice-selector";
 import {
   AudioVoiceId,
   AudioVoiceConfig,
   AudioOutputFormat,
   AudioSpeakerConfig,
-  AUDIO_VOICES,
   getVoiceById,
 } from "@/types/audio";
 import { AudioRestoreData } from "./audio-generation-history";
@@ -58,15 +49,6 @@ interface TTSComposerProps {
   }) => void;
   onRestoreHandled?: () => void;
 }
-
-// Group voices by style
-const voiceGroups = {
-  "Brillantes / Animadas": AUDIO_VOICES.filter(v => ["bright", "upbeat", "lively"].includes(v.style)),
-  "Informativas / Claras": AUDIO_VOICES.filter(v => ["informative", "clear"].includes(v.style)),
-  "Firmes / Suaves": AUDIO_VOICES.filter(v => ["firm", "smooth", "even"].includes(v.style)),
-  "Expresivas / Casuales": AUDIO_VOICES.filter(v => ["excitable", "breezy", "easygoing", "casual", "friendly"].includes(v.style)),
-  "Distintivas": AUDIO_VOICES.filter(v => ["breathy", "gravelly", "soft", "mature", "forward", "gentle", "warm"].includes(v.style)),
-};
 
 // Helper to generate unique IDs
 function generateId(): string {
@@ -277,45 +259,11 @@ export function TTSComposer({
           {/* Voice Selector */}
           <div className="space-y-2">
             <Label className="text-sm font-medium">Voz</Label>
-            <Select
+            <VoiceSelector
               value={voiceId}
-              onValueChange={(value: string) => onSettingsChange({ voiceId: value as AudioVoiceId })}
+              onValueChange={(value) => onSettingsChange({ voiceId: value })}
               disabled={disabled || isGenerating}
-            >
-              <SelectTrigger className="w-full h-11">
-                <SelectValue>
-                  {selectedVoice ? (
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{selectedVoice.name}</span>
-                      <span className="text-muted-foreground">
-                        - {selectedVoice.description}
-                      </span>
-                    </div>
-                  ) : (
-                    "Seleccionar voz..."
-                  )}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent className="max-h-[300px]">
-                {Object.entries(voiceGroups).map(([groupName, voices]) => (
-                  <SelectGroup key={groupName}>
-                    <SelectLabel className="text-xs text-muted-foreground">
-                      {groupName}
-                    </SelectLabel>
-                    {voices.map((voice) => (
-                      <SelectItem key={voice.id} value={voice.id}>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{voice.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            ({voice.description})
-                          </span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                ))}
-              </SelectContent>
-            </Select>
+            />
           </div>
 
           {/* Text Input */}

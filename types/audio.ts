@@ -179,17 +179,3 @@ export type AudioSSEEvent =
 export function getVoiceById(voiceId: string): typeof AUDIO_VOICES[number] | undefined {
   return AUDIO_VOICES.find(v => v.id === voiceId);
 }
-
-export function getVoicesByGender(gender: AudioVoiceGender): typeof AUDIO_VOICES[number][] {
-  return AUDIO_VOICES.filter(v => v.gender === gender);
-}
-
-export function getDefaultAudioSettings(): AudioGenerationSettings {
-  return {
-    voiceId: "Kore",
-    stylePrompt: "",
-    multiSpeaker: false,
-    speakerConfig: null,
-    outputFormat: "mp3",
-  };
-}

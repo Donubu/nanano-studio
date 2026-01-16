@@ -32,10 +32,11 @@ interface NavigationContextType {
   currentPath: string;
   projectSlug: string | null;
   initialState: NavigationState | null; // State parsed from initial URL for deep linking
-  setProjectSlug: (slug: string) => void;
+  setProjectSlug: (slug: string | null, useReplace?: boolean) => void;
   push: (path: string, onClose: () => void) => void;
   replace: (path: string) => void;
   back: () => void;
+  onProjectChange: (callback: (slug: string | null) => void) => () => void; // Subscribe to project changes from popstate
   // Register a close callback without pushing to history (for deep linking)
   registerLayer: (onClose: () => void) => void;
   // Helper methods for common routes
@@ -98,31 +99,48 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
   const [initialState, setInitialState] = useState<NavigationState | null>(null);
   const isHandlingPopState = useRef(false);
   const projectSlugRef = useRef<string | null>(null);
+  const projectChangeCallbacksRef = useRef<Set<(slug: string | null) => void>>(new Set());
 
   const clearInitialState = useCallback(() => {
     setInitialState(null);
   }, []);
 
-  const setProjectSlug = useCallback((slug: string) => {
+  const onProjectChange = useCallback((callback: (slug: string | null) => void) => {
+    projectChangeCallbacksRef.current.add(callback);
+    return () => {
+      projectChangeCallbacksRef.current.delete(callback);
+    };
+  }, []);
+
+  const setProjectSlug = useCallback((slug: string | null, useReplace: boolean = false) => {
     // Avoid unnecessary state updates that cause infinite loops
     if (projectSlugRef.current === slug) return;
 
     projectSlugRef.current = slug;
     setProjectSlugState(slug);
-    // Only update URL if we're at root or on a different project
+
     if (typeof window !== 'undefined') {
+      const historyMethod = useReplace ? history.replaceState.bind(history) : history.pushState.bind(history);
+
+      // Handle clearing the project (deselection)
+      if (!slug) {
+        historyMethod({ path: '/', type: 'base' }, '', '/');
+        setCurrentPath('/');
+        return;
+      }
+
       const currentPathname = window.location.pathname;
       const currentState = parsePath(currentPathname);
 
-      // Only replace URL if we're at root OR the current path has a different project slug
+      // Only update URL if we're at root OR the current path has a different project slug
       if (currentPathname === '/' || (currentState.projectSlug && currentState.projectSlug !== slug)) {
         const state = parsePath(`/${slug}/`);
-        history.replaceState(state, '', `/${slug}/`);
+        historyMethod(state, '', `/${slug}/`);
         setCurrentPath(`/${slug}/`);
       } else if (!currentState.projectSlug) {
         // We're at root, set the project URL
         const state = parsePath(`/${slug}/`);
-        history.replaceState(state, '', `/${slug}/`);
+        historyMethod(state, '', `/${slug}/`);
         setCurrentPath(`/${slug}/`);
       }
       // If we're already on a path with the same project slug, don't change the URL
@@ -191,13 +209,25 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
     const handlePopState = () => {
       isHandlingPopState.current = true;
 
+      const newPath = window.location.pathname;
+      const newState = parsePath(newPath);
+      const newProjectSlug = newState.projectSlug || null;
+
+      // Check if project changed
+      if (projectSlugRef.current !== newProjectSlug) {
+        projectSlugRef.current = newProjectSlug;
+        setProjectSlugState(newProjectSlug);
+        // Notify subscribers about project change
+        projectChangeCallbacksRef.current.forEach(callback => callback(newProjectSlug));
+      }
+
       if (layersRef.current.length > 0) {
         const layer = layersRef.current.pop();
         if (layer) {
           layer.onClose();
         }
       }
-      setCurrentPath(window.location.pathname);
+      setCurrentPath(newPath);
 
       // Reset flag after a tick
       setTimeout(() => {
@@ -265,6 +295,7 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
       push,
       replace,
       back,
+      onProjectChange,
       registerLayer,
       openGallery,
       openGeneration,

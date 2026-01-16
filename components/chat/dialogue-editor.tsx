@@ -7,13 +7,12 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AudioVoiceId, AUDIO_VOICES, getVoiceById } from "@/types/audio";
+import { VoiceSelector } from "./voice-selector";
+import { AudioVoiceId, getVoiceById } from "@/types/audio";
 
 // Character definition
 export interface Character {
@@ -29,14 +28,6 @@ export interface DialogueLine {
   text: string;
 }
 
-// For backwards compatibility - exported for API formatting
-export interface LegacyDialogueLine {
-  id: string;
-  speakerName: string;
-  voiceId: AudioVoiceId;
-  text: string;
-}
-
 interface DialogueEditorProps {
   characters: Character[];
   lines: DialogueLine[];
@@ -44,15 +35,6 @@ interface DialogueEditorProps {
   onCharactersChange: (characters: Character[]) => void;
   onLinesChange: (lines: DialogueLine[]) => void;
 }
-
-// Group voices by style for better organization
-const voiceGroups = {
-  "Brillantes / Animadas": AUDIO_VOICES.filter(v => ["bright", "upbeat", "lively"].includes(v.style)),
-  "Informativas / Claras": AUDIO_VOICES.filter(v => ["informative", "clear"].includes(v.style)),
-  "Firmes / Suaves": AUDIO_VOICES.filter(v => ["firm", "smooth", "even"].includes(v.style)),
-  "Expresivas / Casuales": AUDIO_VOICES.filter(v => ["excitable", "breezy", "easygoing", "casual", "friendly"].includes(v.style)),
-  "Distintivas": AUDIO_VOICES.filter(v => ["breathy", "gravelly", "soft", "mature", "forward", "gentle", "warm"].includes(v.style)),
-};
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substring(7)}`;
@@ -172,35 +154,14 @@ export function DialogueEditor({
                 />
 
                 {/* Voice Selector */}
-                <Select
-                  value={character.voiceId}
-                  onValueChange={(value: string) => handleCharacterChange(character.id, "voiceId", value as AudioVoiceId)}
-                  disabled={disabled}
-                >
-                  <SelectTrigger className="h-8 flex-1">
-                    <SelectValue>
-                      {voice ? (
-                        <span className="text-sm">{voice.name} - {voice.description}</span>
-                      ) : (
-                        "Seleccionar voz"
-                      )}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent className="max-h-[250px]">
-                    {Object.entries(voiceGroups).map(([groupName, voices]) => (
-                      <SelectGroup key={groupName}>
-                        <SelectLabel className="text-xs text-muted-foreground">
-                          {groupName}
-                        </SelectLabel>
-                        {voices.map((v) => (
-                          <SelectItem key={v.id} value={v.id}>
-                            <span className="text-sm">{v.name} - {v.description}</span>
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex-1">
+                  <VoiceSelector
+                    value={character.voiceId}
+                    onValueChange={(value) => handleCharacterChange(character.id, "voiceId", value)}
+                    disabled={disabled}
+                    compact
+                  />
+                </div>
 
                 {/* Delete Button */}
                 <Button
@@ -358,27 +319,3 @@ export function extractSpeakersFromDialogue(characters: Character[], lines: Dial
     .map(c => ({ name: c.name, voiceId: c.voiceId }));
 }
 
-// Backwards compatible exports for existing code
-export function createDefaultLinesLegacy(): LegacyDialogueLine[] {
-  return [
-    { id: generateId(), speakerName: "Narrador", voiceId: "Kore", text: "" },
-    { id: generateId(), speakerName: "Personaje1", voiceId: "Puck", text: "" },
-  ];
-}
-
-export function formatDialogueForAPILegacy(lines: LegacyDialogueLine[]): string {
-  return lines
-    .filter(line => line.text.trim() !== "")
-    .map(line => `${line.speakerName}: ${line.text}`)
-    .join("\n");
-}
-
-export function extractSpeakersFromLines(lines: LegacyDialogueLine[]): Array<{ name: string; voiceId: AudioVoiceId }> {
-  const uniqueSpeakers = new Map<string, AudioVoiceId>();
-  lines.forEach(line => {
-    if (line.text.trim() !== "") {
-      uniqueSpeakers.set(line.speakerName, line.voiceId);
-    }
-  });
-  return Array.from(uniqueSpeakers.entries()).map(([name, voiceId]) => ({ name, voiceId }));
-}

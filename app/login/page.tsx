@@ -27,12 +27,12 @@ function LoginContent() {
         <div className="text-center space-y-4">
           <div className="flex justify-center">
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-yellow-400 to-yellow-500 flex items-center justify-center text-black font-bold text-2xl shadow-lg shadow-yellow-500/20">
-              B
+              DS
             </div>
           </div>
           <div>
             <h1 className="text-3xl font-bold tracking-tight">
-              NANANO <span className="text-yellow-400">STUDIO</span>
+              Duaria <span className="text-yellow-400">Studio</span>
             </h1>
             <p className="mt-2 text-sm text-muted-foreground">
               AI Studio powered by Vertex AI

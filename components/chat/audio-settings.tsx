@@ -12,22 +12,12 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { VoiceSelector } from "./voice-selector";
 import {
   AudioVoiceId,
   AudioOutputFormat,
   AudioSpeaker,
   AudioSpeakerConfig,
-  AUDIO_VOICES,
-  getVoiceById,
 } from "@/types/audio";
 
 interface AudioSettingsProps {
@@ -46,15 +36,6 @@ interface AudioSettingsProps {
   }) => void;
 }
 
-// Group voices by style for better organization
-const voiceGroups = {
-  "Brillantes / Animadas": AUDIO_VOICES.filter(v => ["bright", "upbeat", "lively"].includes(v.style)),
-  "Informativas / Claras": AUDIO_VOICES.filter(v => ["informative", "clear"].includes(v.style)),
-  "Firmes / Suaves": AUDIO_VOICES.filter(v => ["firm", "smooth", "even"].includes(v.style)),
-  "Expresivas / Casuales": AUDIO_VOICES.filter(v => ["excitable", "breezy", "easygoing", "casual", "friendly"].includes(v.style)),
-  "Distintivas": AUDIO_VOICES.filter(v => ["breathy", "gravelly", "soft", "mature", "forward", "gentle", "warm"].includes(v.style)),
-};
-
 export function AudioSettings({
   voiceId,
   stylePrompt,
@@ -65,8 +46,6 @@ export function AudioSettings({
   onChange,
 }: AudioSettingsProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
-
-  const selectedVoice = getVoiceById(voiceId);
 
   const handleAddSpeaker = () => {
     const newSpeaker: AudioSpeaker = {
@@ -133,45 +112,11 @@ export function AudioSettings({
       {!multiSpeaker && (
         <div className="space-y-2">
           <Label className="text-xs text-muted-foreground">Voz</Label>
-          <Select
+          <VoiceSelector
             value={voiceId}
-            onValueChange={(value: string) => onChange({ voiceId: value as AudioVoiceId })}
+            onValueChange={(value) => onChange({ voiceId: value })}
             disabled={disabled}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue>
-                {selectedVoice ? (
-                  <div className="flex items-center gap-2">
-                    <span>{selectedVoice.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      ({selectedVoice.description})
-                    </span>
-                  </div>
-                ) : (
-                  "Seleccionar voz..."
-                )}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent className="max-h-[300px]">
-              {Object.entries(voiceGroups).map(([groupName, voices]) => (
-                <SelectGroup key={groupName}>
-                  <SelectLabel className="text-xs text-muted-foreground">
-                    {groupName}
-                  </SelectLabel>
-                  {voices.map((voice) => (
-                    <SelectItem key={voice.id} value={voice.id}>
-                      <div className="flex items-center gap-2">
-                        <span>{voice.name}</span>
-                        <span className="text-xs text-muted-foreground">
-                          ({voice.description})
-                        </span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              ))}
-            </SelectContent>
-          </Select>
+          />
         </div>
       )}
 
@@ -257,24 +202,16 @@ export function AudioSettings({
                   className="h-8 w-24 text-sm"
                   disabled={disabled}
                 />
-                <Select
-                  value={speaker.voiceId}
-                  onValueChange={(value: string) =>
-                    handleSpeakerChange(index, "voiceId", value)
-                  }
-                  disabled={disabled}
-                >
-                  <SelectTrigger className="h-8 flex-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-[200px]">
-                    {AUDIO_VOICES.map((voice) => (
-                      <SelectItem key={voice.id} value={voice.id}>
-                        {voice.name} - {voice.description}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex-1">
+                  <VoiceSelector
+                    value={speaker.voiceId}
+                    onValueChange={(value) =>
+                      handleSpeakerChange(index, "voiceId", value)
+                    }
+                    disabled={disabled}
+                    compact
+                  />
+                </div>
                 <Button
                   variant="ghost"
                   size="icon"

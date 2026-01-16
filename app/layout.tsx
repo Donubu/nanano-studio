@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "NANANO STUDIO",
+  title: "Duaria Studio",
   description: "AI Studio powered by Vertex AI",
 };
 

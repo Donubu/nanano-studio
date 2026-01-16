@@ -354,8 +354,11 @@ export function ChatInterface() {
         setMounted(true);
     }, []);
 
-    // Load from localStorage on mount (only if no URL slug to follow)
+    // Load from localStorage on mount (only if URL has a project slug to restore)
     useEffect(() => {
+        // If URL is root "/", don't auto-load from localStorage - show project selection
+        if (typeof window !== 'undefined' && window.location.pathname === '/') return;
+
         // If URL has a project slug, that will be handled by the next effect
         if (navigation.initialState?.projectSlug) return;
 
@@ -401,8 +404,28 @@ export function ChatInterface() {
                     navigation.setProjectSlug(newSlug);
                 }
             }
+        } else if (!selectedProjectId && navigation.projectSlug) {
+            // Clear URL when no project is selected
+            navigation.setProjectSlug(null);
         }
     }, [selectedProjectId, projects, navigation.projectSlug, navigation.setProjectSlug]);
+
+    // Handle browser back/forward navigation for project changes
+    useEffect(() => {
+        const unsubscribe = navigation.onProjectChange((newSlug) => {
+            if (newSlug === null) {
+                // User navigated back to home
+                setSelectedProjectId(null);
+            } else {
+                // User navigated to a project - find matching project
+                const matchingProject = projects.find(p => generateSlug(p.title) === newSlug);
+                if (matchingProject) {
+                    setSelectedProjectId(matchingProject.id);
+                }
+            }
+        });
+        return unsubscribe;
+    }, [projects, navigation.onProjectChange]);
 
     // Handle deep linking - open gallery or conversation based on URL
     const deepLinkHandled = useRef(false);
@@ -2109,30 +2132,34 @@ export function ChatInterface() {
             {/* Left Sidebar - Conversations */}
             {leftSidebarOpen && (
                 <div className="w-64 border-r border-border/50 bg-sidebar flex flex-col">
-                    {/* Header */}
-                    <div className="p-3 border-b border-border/50">
-                        <div className="flex items-center gap-3 mb-3">
-                            <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-yellow-400 to-yellow-500 flex items-center justify-center text-black font-bold text-sm">
-                                    NS
-                                </div>
-                                <Link href="/" className="text-lg font-semibold tracking-tight">
-                  NANANO <span className="text-yellow-400">STUDIO</span>
-                </Link>
-                            </div>
-                        </div>
-                        <Button
-                            onClick={() => setShowNewConversationModal(true)}
-                            className="w-full gap-2"
-                            size="sm"
-                            disabled={!selectedProjectId || !generationConfig.some(c => c.is_enabled)}
+                    {/* Header - Logo always visible */}
+                    <div className={`p-3 ${selectedProjectId ? 'border-b border-border/50' : ''}`}>
+                        <button
+                            onClick={() => setSelectedProjectId(null)}
+                            className={`flex items-center gap-2 ${selectedProjectId ? 'mb-3' : ''}`}
                         >
-                            <Plus className="h-4 w-4"/>
-                            Nueva conversación
-                        </Button>
+                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-yellow-400 to-yellow-500 flex items-center justify-center text-black font-bold text-sm">
+                                DS
+                            </div>
+                            <span className="text-lg font-semibold tracking-tight">
+                                Duaria <span className="text-yellow-400">Studio</span>
+                            </span>
+                        </button>
+                        {selectedProjectId && (
+                            <Button
+                                onClick={() => setShowNewConversationModal(true)}
+                                className="w-full gap-2"
+                                size="sm"
+                                disabled={!generationConfig.some(c => c.is_enabled)}
+                            >
+                                <Plus className="h-4 w-4"/>
+                                Nueva conversación
+                            </Button>
+                        )}
                     </div>
 
-                    {/* Project Selector */}
+                    {/* Project Selector - Only when project is selected */}
+                    {selectedProjectId && (
                     <div className="p-3 border-b border-border/50">
                         <label className="text-xs text-muted-foreground mb-1 block">Proyecto</label>
                         <select
@@ -2240,14 +2267,12 @@ export function ChatInterface() {
                             </Button>
                         )}
                     </div>
+                    )}
 
-                    {/* Conversations List */}
+                    {/* Conversations List - Only when project is selected */}
+                    {selectedProjectId && (
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                        {!selectedProjectId ? (
-                            <div className="text-center text-muted-foreground text-sm py-4">
-                                Selecciona un proyecto para ver las conversaciones
-                            </div>
-                        ) : loadingConversations ? (
+                        {loadingConversations ? (
                             <div className="flex justify-center py-4">
                                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground"/>
                             </div>
@@ -2289,6 +2314,7 @@ export function ChatInterface() {
                             })
                         )}
                     </div>
+                    )}
 
                     {/* Archived Conversations - Only show when project is selected */}
                     {selectedProjectId && (
@@ -2657,7 +2683,7 @@ export function ChatInterface() {
                                 <div className="flex flex-col items-center justify-center h-full text-center">
                                     <div className="flex items-center gap-3 mb-3">
                                         <div className="w-16 h-16 rounded-lg bg-gradient-to-br from-yellow-400 to-yellow-500 flex items-center justify-center text-black font-bold text-2xl">
-                                            NS
+                                            DS
                                         </div>
                                     </div>
                                     <p className="text-muted-foreground max-w-md">
@@ -2678,7 +2704,7 @@ export function ChatInterface() {
                                                         <Loader2 className="h-4 w-4 text-primary animate-spin"/>
                                                     ) : (
                                                         <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-yellow-400 to-yellow-500 flex items-center justify-center text-black font-bold text-sm">
-                                                            NS
+                                                            DS
                                                         </div>
                                                     )}
                                                 </div>

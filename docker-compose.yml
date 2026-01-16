@@ -1,0 +1,15 @@
+services:
+  puerto_studio:
+    build: .
+    container_name: puerto_studio
+    restart: unless-stopped
+    env_file:
+      - /var/www/vhosts/puerto.to/private/.env
+    volumes:
+      - /var/www/vhosts/puerto.to/private/credentials.json:/run/secrets/credentials.json:ro
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
+      - NODE_ENV=production
+      - PORT=3000
+    ports:
+      - "127.0.0.1:3005:3000"

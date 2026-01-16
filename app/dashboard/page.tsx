@@ -62,7 +62,7 @@ export default function DashboardPage() {
       <div>
         <h1 className="text-2xl font-bold">Dashboard</h1>
         <p className="text-muted-foreground">
-          Bienvenido a NANANO STUDIO
+          Bienvenido a Duaria Studio
         </p>
       </div>
 
