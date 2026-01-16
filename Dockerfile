@@ -30,8 +30,9 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 
 # Configurar timezone a UTC para consistencia con MySQL
+# Instalar ffmpeg para conversión de audio (WAV a MP3)
 ENV TZ=UTC
-RUN apk add --no-cache tzdata
+RUN apk add --no-cache tzdata ffmpeg
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
