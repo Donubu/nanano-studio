@@ -43,6 +43,7 @@ import {
     Dices,
     X,
     Download,
+    EyeOff,
 } from "lucide-react";
 import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
 import {
@@ -118,6 +119,7 @@ interface Message {
     content_type?: "text" | "image" | "video" | "audio" | "mixed" | "error";
     image_url?: string | null;
     is_favorite?: boolean;
+    ignore_in_context?: boolean;
     generation_seed?: number | null;
     // Video fields
     video_url?: string | null;
@@ -213,6 +215,7 @@ export function ChatInterface() {
     const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
     const [showAdvanced, setShowAdvanced] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const prevMessageCountRef = useRef<number>(0);
     const nextTabId = useRef(1);
 
     // Settings state
@@ -245,6 +248,7 @@ export function ChatInterface() {
     const [audioMultiSpeaker, setAudioMultiSpeaker] = useState(false);
     const [audioSpeakerConfig, setAudioSpeakerConfig] = useState<AudioSpeakerConfig | null>(null);
     const [audioOutputFormat, setAudioOutputFormat] = useState<AudioOutputFormat>("mp3");
+    const [audioQualityTier, setAudioQualityTier] = useState<"normal" | "hq">("normal");
     const [audioRestoreData, setAudioRestoreData] = useState<AudioRestoreData | null>(null);
 
     // Generation mode (for video models that can also generate images)
@@ -315,7 +319,8 @@ export function ChatInterface() {
     const imageTypeConfig = generationConfig.find(c => c.generation_type === "image");
 
     // UI mode helpers based on conversation generation_type
-    const isTextConversation = currentConversation?.generation_type === "text";
+    // Default to text if generation_type is null/undefined (for legacy conversations)
+    const isTextConversation = !currentConversation?.generation_type || currentConversation?.generation_type === "text";
     const isImageConversation = currentConversation?.generation_type === "image";
     const isVideoConversation = currentConversation?.generation_type === "video";
     const isAudioConversation = currentConversation?.generation_type === "audio";
@@ -788,8 +793,13 @@ export function ChatInterface() {
         fetchConversations();
     }, [fetchConversations]);
 
+    // Only scroll to bottom when new messages are added, not when existing messages are updated
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({behavior: "smooth"});
+        const currentCount = messages.length;
+        if (currentCount > prevMessageCountRef.current) {
+            messagesEndRef.current?.scrollIntoView({behavior: "smooth"});
+        }
+        prevMessageCountRef.current = currentCount;
     }, [messages]);
 
     // Update settings when switching tabs
@@ -1349,7 +1359,8 @@ export function ChatInterface() {
         files?: AttachedFile[],
         modelIdOverride?: number | null,
         imageSettings?: { aspectRatio: string; size: string; negativePrompt?: string; isImagen4?: boolean; seed?: number },
-        generationTypeOverride?: "text" | "image" | "video" | "audio"
+        generationTypeOverride?: "text" | "image" | "video" | "audio",
+        noContext?: boolean
     ) => {
         if (!activeTabId || (!content.trim() && (!files || files.length === 0))) return;
 
@@ -1445,6 +1456,7 @@ export function ChatInterface() {
                     ...(modelIdOverride && { modelIdOverride }),
                     ...(imageSettings && { imageSettings: { aspectRatio: imageSettings.aspectRatio, size: imageSettings.size } }),
                     ...(generationTypeOverride && { generation_type_override: generationTypeOverride }),
+                    ...(noContext && { no_context: noContext }),
                 };
 
             // Use streaming endpoint
@@ -1632,6 +1644,25 @@ export function ChatInterface() {
             }
         } catch (err) {
             console.error("Error toggling favorite:", err);
+        }
+    };
+
+    // Toggle ignore_in_context status for a message
+    const handleToggleIgnoreContext = async (messageId: number) => {
+        if (!activeTabId) return;
+        try {
+            const res = await fetch(`/api/messages/${messageId}/ignore-context`, { method: "POST" });
+            if (res.ok) {
+                const data = await res.json();
+                setTabMessages((prev) => ({
+                    ...prev,
+                    [activeTabId]: prev[activeTabId].map((msg) =>
+                        msg.id === messageId ? { ...msg, ignore_in_context: data.ignore_in_context } : msg
+                    ),
+                }));
+            }
+        } catch (err) {
+            console.error("Error toggling ignore_in_context:", err);
         }
     };
 
@@ -1881,7 +1912,7 @@ export function ChatInterface() {
     };
 
     // Send audio generation message
-    const sendAudioMessage = async (content: string) => {
+    const sendAudioMessage = async (content: string, qualityTier: "normal" | "hq" = "normal") => {
         if (!activeTabId || !content.trim()) return;
 
         let tabId = activeTabId;
@@ -1909,6 +1940,7 @@ export function ChatInterface() {
             stylePrompt: audioStylePrompt,
             multiSpeaker: audioMultiSpeaker,
             outputFormat: audioOutputFormat,
+            qualityTier,
         });
 
         // Add optimistic user message
@@ -1951,7 +1983,7 @@ export function ChatInterface() {
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({
                     content,
-                    quality_tier: selectedQualityTier,
+                    quality_tier: qualityTier,
                     audioSettings: {
                         voiceId: audioVoiceId,
                         stylePrompt: audioStylePrompt || undefined,
@@ -2510,7 +2542,7 @@ export function ChatInterface() {
 
                         </div>
                         <div className="flex items-center gap-2">
-                            {activeTabId !== null && !activeTab?.isGallery && (
+                            {activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && (
                                 <>
                                     <Button
                                         variant="ghost"
@@ -2540,16 +2572,17 @@ export function ChatInterface() {
                             />
                         </div>
                     ) : isAudioConversation && activeTabId !== null ? (
-                        /* TTS Composer View - Split layout with history column */
+                        /* TTS Composer View - Split layout with history column (expanded since no right sidebar) */
                         <div className="flex-1 flex overflow-hidden">
                             {/* Left: TTSComposer */}
-                            <div className="flex-1 overflow-y-auto">
+                            <div className="flex-1 overflow-y-auto max-w-2xl mx-auto">
                                 <TTSComposer
                                     voiceId={audioVoiceId}
                                     multiSpeaker={audioMultiSpeaker}
                                     speakerConfig={audioSpeakerConfig}
                                     stylePrompt={audioStylePrompt}
                                     outputFormat={audioOutputFormat}
+                                    qualityTier={audioQualityTier}
                                     disabled={isSending}
                                     isGenerating={(() => {
                                         const msgs = tabMessages[activeTabId] || [];
@@ -2561,13 +2594,13 @@ export function ChatInterface() {
                                         return generatingMsg?.audioProgress;
                                     })()}
                                     restoreData={audioRestoreData}
-                                    onGenerate={(text, speakers) => {
+                                    onGenerate={(text, speakers, qualityTier) => {
                                         if (speakers) {
                                             // Multi-speaker mode
                                             setAudioSpeakerConfig(speakers);
                                             setAudioMultiSpeaker(true);
                                         }
-                                        sendAudioMessage(text);
+                                        sendAudioMessage(text, qualityTier || audioQualityTier);
                                     }}
                                     onSettingsChange={(settings) => {
                                         if (settings.voiceId !== undefined) {
@@ -2590,12 +2623,15 @@ export function ChatInterface() {
                                             setAudioOutputFormat(settings.outputFormat);
                                             handleSettingChange("audio_output_format", settings.outputFormat);
                                         }
+                                        if (settings.qualityTier !== undefined) {
+                                            setAudioQualityTier(settings.qualityTier);
+                                        }
                                     }}
                                     onRestoreHandled={() => setAudioRestoreData(null)}
                                 />
                             </div>
-                            {/* Right: Audio Generation History Column */}
-                            <div className="w-80 border-l border-border/50 bg-card/50 overflow-y-auto p-4">
+                            {/* Right: Audio Generation History Column - wider now */}
+                            <div className="w-96 border-l border-border/50 bg-card/50 overflow-y-auto p-4">
                                 <AudioGenerationHistory
                                     messages={tabMessages[activeTabId] || []}
                                     onRestore={(data) => setAudioRestoreData(data)}
@@ -2693,13 +2729,21 @@ export function ChatInterface() {
                                 </div>
                             ) : (
                                 <div className="max-w-4xl mx-auto space-y-4">
-                                    {messages.map((msg) => (
+                                    {messages.map((msg, msgIndex) => {
+                                        // Check if this message should be shown as ignored
+                                        // User messages: check their own ignore_in_context flag
+                                        // Model messages: check if the previous user message is ignored
+                                        const isIgnored = msg.role === "user"
+                                            ? msg.ignore_in_context
+                                            : (msgIndex > 0 && messages[msgIndex - 1]?.role === "user" && messages[msgIndex - 1]?.ignore_in_context);
+
+                                        return (
                                         <div
                                             key={msg.id}
                                             className={`group flex gap-3 ${msg.role === "user" ? "justify-end" : ""}`}
                                         >
                                             {msg.role === "model" && (
-                                                <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+                                                <div className={`w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0 ${isIgnored ? "opacity-40" : ""}`}>
                                                     {msg.isStreaming ? (
                                                         <Loader2 className="h-4 w-4 text-primary animate-spin"/>
                                                     ) : (
@@ -2714,8 +2758,17 @@ export function ChatInterface() {
                                                     msg.role === "user"
                                                         ? "bg-primary text-primary-foreground"
                                                         : "bg-card border border-border/50"
-                                                }`}
+                                                } ${isIgnored ? "opacity-60" : ""}`}
                                             >
+                                                {/* Ignored badge overlay */}
+                                                {isIgnored && (
+                                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                                                        <div className="bg-orange-500/90 text-white text-xs font-medium px-2 py-0.5 rounded-full shadow-sm flex items-center gap-1">
+                                                            <EyeOff className="h-3 w-3" />
+                                                            <span>Ignorado</span>
+                                                        </div>
+                                                    </div>
+                                                )}
                                                 {/* Favorite star for model messages with assets */}
                                                 {msg.role === "model" && (msg.image_url || msg.video_url || msg.audio_url) && (
                                                     <button
@@ -2765,6 +2818,23 @@ export function ChatInterface() {
                                                         <Dices className={`h-4 w-4 ${selectedSeed === msg.generation_seed ? "fill-purple-400" : ""}`} />
                                                     </button>
                                                 )}
+                                                {/* Ignore in context button - only for user messages */}
+                                                {!activeTab?.isArchived && msg.role === "user" && (
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleToggleIgnoreContext(msg.id);
+                                                        }}
+                                                        className={`absolute -top-2 -left-2 p-1.5 rounded-full transition-all z-20 ${
+                                                            msg.ignore_in_context
+                                                                ? "bg-orange-500/20 text-orange-400 border border-orange-500/30"
+                                                                : "bg-card border border-border/50 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-orange-400 hover:border-orange-500/30"
+                                                        }`}
+                                                        title={msg.ignore_in_context ? "Incluir en contexto" : "Ignorar en contexto (este mensaje y su respuesta)"}
+                                                    >
+                                                        <EyeOff className="h-3.5 w-3.5" />
+                                                    </button>
+                                                )}
                                                 <MessageContent
                                                     content={msg.content}
                                                     contentType={msg.content_type}
@@ -2799,7 +2869,8 @@ export function ChatInterface() {
                                                 </Avatar>
                                             )}
                                         </div>
-                                    ))}
+                                        );
+                                    })}
                                     <div ref={messagesEndRef}/>
                                 </div>
                             )}
@@ -2875,7 +2946,7 @@ export function ChatInterface() {
                                     </div>
                                 )}
                                 <MessageInput
-                                    onSend={(content, files) => {
+                                    onSend={(content, files, noContext) => {
                                         // Route based on generation type
                                         if (isVideoConversation && generationMode === "video") {
                                             sendVideoMessage(content, selectedSeed || undefined);
@@ -2885,7 +2956,7 @@ export function ChatInterface() {
                                                 setSeedPrompt(null);
                                             }
                                         } else if (isImageConversation || (isVideoConversation && generationMode === "image")) {
-                                            // Image generation
+                                            // Image generation - pass noContext parameter
                                             const imgSettings = {
                                                 aspectRatio: imageAspectRatio,
                                                 size: imageSize,
@@ -2895,15 +2966,15 @@ export function ChatInterface() {
                                             };
                                             // Pass generation_type_override when in video conversation with image mode
                                             const typeOverride = isVideoConversation && generationMode === "image" ? "image" as const : undefined;
-                                            sendMessage(content, files, undefined, imgSettings, typeOverride);
+                                            sendMessage(content, files, undefined, imgSettings, typeOverride, noContext);
                                             // Clear selected seed and prompt after use
                                             if (selectedSeed) {
                                                 setSelectedSeed(null);
                                                 setSeedPrompt(null);
                                             }
                                         } else {
-                                            // Text generation
-                                            sendMessage(content, files);
+                                            // Text generation - pass noContext parameter
+                                            sendMessage(content, files, undefined, undefined, undefined, noContext);
                                         }
                                         // Clear selected images after sending
                                         setSelectedConversationImages([]);
@@ -2914,6 +2985,7 @@ export function ChatInterface() {
                                     onRemovePreselectedImage={(url) => setSelectedConversationImages(prev => prev.filter(u => u !== url))}
                                     initialValue={seedPrompt || undefined}
                                     onInitialValueUsed={() => setSeedPrompt(null)}
+                                    showNoContextOption={true}
                                 />
                             </div>
                         )
@@ -2988,8 +3060,8 @@ export function ChatInterface() {
                 </div>
             )}
 
-            {/* Right Sidebar - Settings (solo visible con conversación activa, no galería) */}
-            {selectedProjectId && rightSidebarOpen && activeTabId !== null && !activeTab?.isGallery && (
+            {/* Right Sidebar - Settings (solo visible con conversación activa, no galería, no audio) */}
+            {selectedProjectId && rightSidebarOpen && activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && (
                 <div className="w-72 border-l border-border/50 bg-sidebar overflow-y-auto">
                     <div className="p-4 space-y-6">
                         {/* Archived indicator */}

@@ -45,6 +45,7 @@ interface MessageRow extends RowDataPacket {
   tokens_input: number;
   tokens_output: number;
   created_at: Date;
+  ignore_in_context: number;
 }
 
 type GenerationType = "text" | "image" | "video" | "audio";
@@ -124,7 +125,7 @@ export async function POST(
 
     const { id } = await params;
     const body = await request.json();
-    const { content, files, useProjectSystemInstruction = true, modelIdOverride, imageSettings, quality_tier = "normal", generation_type_override } = body as {
+    const { content, files, useProjectSystemInstruction = true, modelIdOverride, imageSettings, quality_tier = "normal", generation_type_override, no_context = false } = body as {
       content: string;
       files?: AttachedFile[];
       useProjectSystemInstruction?: boolean;
@@ -132,6 +133,7 @@ export async function POST(
       imageSettings?: { aspectRatio: string; size: string };
       quality_tier?: QualityTier;
       generation_type_override?: GenerationType;
+      no_context?: boolean;
     };
 
     // Validate quality_tier
@@ -377,18 +379,45 @@ export async function POST(
     const userMessageId = userMessageResult.insertId;
 
     // Obtener historial de mensajes para contexto (excluir errores)
-    const [historyRows] = await pool.execute<MessageRow[]>(
-      `SELECT role, content, image_url, image_mime_type
-       FROM messages
-       WHERE conversation_id = ? AND content_type != 'error'
-       ORDER BY created_at ASC`,
-      [id]
-    );
+    // Si no_context es true, solo obtenemos el mensaje actual (será el último en el historial)
+    const [historyRows] = no_context
+      ? await pool.execute<MessageRow[]>(
+          `SELECT role, content, image_url, image_mime_type, ignore_in_context
+           FROM messages
+           WHERE id = ?`,
+          [userMessageId]
+        )
+      : await pool.execute<MessageRow[]>(
+          `SELECT role, content, image_url, image_mime_type, ignore_in_context
+           FROM messages
+           WHERE conversation_id = ? AND content_type != 'error'
+           ORDER BY created_at ASC`,
+          [id]
+        );
+
+    // Filter out ignored messages:
+    // - User messages with ignore_in_context = 1
+    // - Model messages that follow an ignored user message
+    const filteredHistory: MessageRow[] = [];
+    let lastUserIgnored = false;
+    for (const msg of historyRows) {
+      if (msg.role === "user") {
+        lastUserIgnored = msg.ignore_in_context === 1;
+        if (!lastUserIgnored) {
+          filteredHistory.push(msg);
+        }
+      } else {
+        // Model message: include only if previous user message was not ignored
+        if (!lastUserIgnored) {
+          filteredHistory.push(msg);
+        }
+      }
+    }
 
     // Convertir historial al formato de ChatMessage
-    const messages: ChatMessage[] = historyRows
+    const messages: ChatMessage[] = filteredHistory
       .map((msg, index) => {
-        const isLastMessage = index === historyRows.length - 1;
+        const isLastMessage = index === filteredHistory.length - 1;
 
         // Para el último mensaje (el actual del usuario), incluir todos los archivos
         if (isLastMessage && hasFiles && files) {

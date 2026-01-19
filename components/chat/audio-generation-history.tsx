@@ -1,9 +1,8 @@
 "use client";
 
-import { Volume2, Clock, Users, User, Loader2, RotateCcw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Volume2, Clock, Loader2 } from "lucide-react";
 import { AudioPlayer } from "./audio-player";
-import { AudioVoiceConfig, AudioSpeakerConfig, getVoiceById } from "@/types/audio";
+import { AudioVoiceConfig, AudioSpeakerConfig } from "@/types/audio";
 
 interface AudioMessage {
   id: number;
@@ -30,13 +29,6 @@ interface AudioGenerationHistoryProps {
   onRestore?: (data: AudioRestoreData) => void;
 }
 
-function isAudioSpeakerConfig(config: AudioVoiceConfig | AudioSpeakerConfig | string | null | undefined): config is AudioSpeakerConfig {
-  if (!config) return false;
-  // Handle case where config is still a JSON string
-  const parsed = typeof config === "string" ? JSON.parse(config) : config;
-  return parsed && typeof parsed === "object" && "speakers" in parsed;
-}
-
 function parseVoiceConfig(config: AudioVoiceConfig | AudioSpeakerConfig | string | null | undefined): AudioVoiceConfig | AudioSpeakerConfig | null {
   if (!config) return null;
   if (typeof config === "string") {
@@ -47,20 +39,6 @@ function parseVoiceConfig(config: AudioVoiceConfig | AudioSpeakerConfig | string
     }
   }
   return config;
-}
-
-function formatDuration(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, "0")}`;
-}
-
-function formatTime(dateString: string): string {
-  const date = new Date(dateString);
-  return date.toLocaleTimeString("es-CL", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 export function AudioGenerationHistory({ messages, onRestore }: AudioGenerationHistoryProps) {
@@ -98,7 +76,7 @@ export function AudioGenerationHistory({ messages, onRestore }: AudioGenerationH
 
       <div className="space-y-3">
         {audioMessages.map((msg) => (
-          <AudioHistoryItem key={msg.id} message={msg} onRestore={onRestore} />
+          <AudioHistoryItem key={msg.id} message={msg} />
         ))}
       </div>
     </div>
@@ -107,37 +85,11 @@ export function AudioGenerationHistory({ messages, onRestore }: AudioGenerationH
 
 function AudioHistoryItem({
   message,
-  onRestore
 }: {
   message: AudioMessage;
-  onRestore?: (data: AudioRestoreData) => void;
 }) {
   // Parse voice config (might be JSON string from DB)
   const voiceConfig = parseVoiceConfig(message.audio_voice_config);
-  const isMultiSpeaker = isAudioSpeakerConfig(voiceConfig);
-
-  // Get voice info for display
-  let voiceInfo: string;
-  if (isMultiSpeaker && voiceConfig) {
-    const speakerCount = (voiceConfig as AudioSpeakerConfig).speakers.length;
-    voiceInfo = `${speakerCount} voces`;
-  } else if (voiceConfig && "voiceId" in voiceConfig) {
-    const voice = getVoiceById((voiceConfig as AudioVoiceConfig).voiceId);
-    voiceInfo = voice?.name || (voiceConfig as AudioVoiceConfig).voiceId;
-  } else {
-    voiceInfo = "Voz desconocida";
-  }
-
-  // Handle restore button click
-  const handleRestore = () => {
-    if (onRestore) {
-      onRestore({
-        content: message.content,
-        voiceConfig,
-        isMultiSpeaker,
-      });
-    }
-  };
 
   // If generating, show progress
   if (message.isAudioGenerating) {
@@ -166,57 +118,13 @@ function AudioHistoryItem({
   }
 
   return (
-    <div className="p-4 bg-card rounded-lg border border-border/50 space-y-3">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          {isMultiSpeaker ? (
-            <Users className="w-4 h-4 text-muted-foreground" />
-          ) : (
-            <User className="w-4 h-4 text-muted-foreground" />
-          )}
-          <span className="text-sm font-medium">{voiceInfo}</span>
-          {message.audio_duration && (
-            <span className="text-xs text-muted-foreground">
-              {formatDuration(message.audio_duration)}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {onRestore && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleRestore}
-              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-              title="Restaurar en el formulario"
-            >
-              <RotateCcw className="w-3.5 h-3.5 mr-1" />
-              Restaurar
-            </Button>
-          )}
-          <span className="text-xs text-muted-foreground">
-            {formatTime(message.created_at)}
-          </span>
-        </div>
-      </div>
-
-      {/* Audio Player */}
+    <div className="group relative">
       <AudioPlayer
         audioUrl={message.audio_url}
         duration={message.audio_duration ?? undefined}
         mimeType={message.audio_mime_type ?? undefined}
         voiceConfig={voiceConfig}
       />
-
-      {/* Original text preview (if content exists) */}
-      {message.content && (
-        <div className="pt-2 border-t border-border/50">
-          <p className="text-xs text-muted-foreground line-clamp-2">
-            {message.content}
-          </p>
-        </div>
-      )}
     </div>
   );
 }

@@ -1025,6 +1025,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                   duration={selectedItem.video_duration || undefined}
                   hasAudio={selectedItem.video_has_audio || false}
                   aspectRatio={selectedItem.video_aspect_ratio || "16:9"}
+                  size="large"
                 />
               ) : selectedItem.type === "audio" && selectedItem.audio_url ? (
                 <div className="w-full max-w-md p-6 bg-card rounded-xl border border-border/50">

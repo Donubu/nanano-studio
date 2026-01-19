@@ -19,7 +19,7 @@ export interface PreselectedImage {
 }
 
 interface MessageInputProps {
-  onSend: (content: string, files?: AttachedFile[]) => void;
+  onSend: (content: string, files?: AttachedFile[], noContext?: boolean) => void;
   disabled?: boolean;
   placeholder?: string;
   supportsFiles?: boolean;
@@ -27,6 +27,7 @@ interface MessageInputProps {
   onRemovePreselectedImage?: (url: string) => void;
   initialValue?: string;
   onInitialValueUsed?: () => void;
+  showNoContextOption?: boolean;
 }
 
 const MAX_FILES = 5;
@@ -69,8 +70,10 @@ export function MessageInput({
   onRemovePreselectedImage,
   initialValue,
   onInitialValueUsed,
+  showNoContextOption = false,
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
+  const [noContext, setNoContext] = useState(false);
 
   // Set initial value when provided (e.g., when reusing a seed)
   useEffect(() => {
@@ -203,11 +206,12 @@ export function MessageInput({
     }
 
     const allFiles = [...preselectedAsFiles, ...attachedFiles];
-    onSend(message.trim(), allFiles.length > 0 ? allFiles : undefined);
+    onSend(message.trim(), allFiles.length > 0 ? allFiles : undefined, noContext);
 
     setMessage("");
     setAttachedFiles([]);
-  }, [message, attachedFiles, preselectedImages, disabled, onSend]);
+    setNoContext(false); // Reset after sending
+  }, [message, attachedFiles, preselectedImages, disabled, onSend, noContext]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -388,6 +392,41 @@ export function MessageInput({
               }}
             />
           </div>
+
+          {/* Sin contexto checkbox */}
+          {showNoContextOption && (
+            <div className="flex items-center shrink-0">
+              <label
+                className={cn(
+                  "flex items-center gap-1.5 text-xs cursor-pointer select-none px-2 py-1 rounded-md transition-colors",
+                  noContext
+                    ? "bg-orange-500/10 text-orange-400 border border-orange-500/30"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+                title="Solo se enviará este mensaje, sin historial de conversación"
+              >
+                <input
+                  type="checkbox"
+                  checked={noContext}
+                  onChange={(e) => setNoContext(e.target.checked)}
+                  className="sr-only"
+                />
+                <span className={cn(
+                  "w-3 h-3 rounded border flex items-center justify-center transition-colors",
+                  noContext
+                    ? "bg-orange-500 border-orange-500"
+                    : "border-muted-foreground/50"
+                )}>
+                  {noContext && (
+                    <svg className="w-2 h-2 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </span>
+                <span>Sin contexto</span>
+              </label>
+            </div>
+          )}
 
           {/* Botón enviar */}
           <Button

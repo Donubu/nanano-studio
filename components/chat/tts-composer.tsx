@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
-import { Mic, Users, User, ChevronDown, Volume2, Loader2 } from "lucide-react";
+import { Mic, Users, User, ChevronDown, Volume2, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -29,23 +29,27 @@ import {
   extractSpeakersFromDialogue,
 } from "./dialogue-editor";
 
+type QualityTier = "normal" | "hq";
+
 interface TTSComposerProps {
   voiceId: AudioVoiceId;
   multiSpeaker: boolean;
   speakerConfig: AudioSpeakerConfig | null;
   stylePrompt: string;
   outputFormat: AudioOutputFormat;
+  qualityTier: QualityTier;
   disabled: boolean;
   isGenerating: boolean;
   generationProgress?: { status: string; message: string };
   restoreData?: AudioRestoreData | null;
-  onGenerate: (text: string, speakers?: AudioSpeakerConfig) => void;
+  onGenerate: (text: string, speakers?: AudioSpeakerConfig, qualityTier?: QualityTier) => void;
   onSettingsChange: (settings: {
     voiceId?: AudioVoiceId;
     stylePrompt?: string;
     multiSpeaker?: boolean;
     speakerConfig?: AudioSpeakerConfig | null;
     outputFormat?: AudioOutputFormat;
+    qualityTier?: QualityTier;
   }) => void;
   onRestoreHandled?: () => void;
 }
@@ -104,6 +108,7 @@ export function TTSComposer({
   speakerConfig,
   stylePrompt,
   outputFormat,
+  qualityTier,
   disabled,
   isGenerating,
   generationProgress,
@@ -187,11 +192,11 @@ export function TTSComposer({
       const formattedText = formatDialogueForAPI(characters, dialogueLines);
       const speakers = extractSpeakersFromDialogue(characters, dialogueLines);
       if (formattedText.trim() && speakers.length >= 2) {
-        onGenerate(formattedText, { speakers });
+        onGenerate(formattedText, { speakers }, qualityTier);
       }
     } else {
       if (text.trim()) {
-        onGenerate(text);
+        onGenerate(text, undefined, qualityTier);
       }
     }
   };
@@ -329,34 +334,67 @@ export function TTSComposer({
         </CollapsibleContent>
       </Collapsible>
 
-      {/* Footer: Format + Generate */}
-      <div className="flex items-center justify-between pt-4 border-t border-border/50">
-        {/* Output Format */}
-        <div className="flex items-center gap-2">
-          <Label className="text-xs text-muted-foreground">Formato:</Label>
-          <div className="flex gap-1">
-            <button
-              onClick={() => onSettingsChange({ outputFormat: "mp3" })}
-              disabled={disabled || isGenerating}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                outputFormat === "mp3"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:text-foreground"
-              } ${disabled || isGenerating ? "opacity-50 cursor-not-allowed" : ""}`}
-            >
-              MP3
-            </button>
-            <button
-              onClick={() => onSettingsChange({ outputFormat: "wav" })}
-              disabled={disabled || isGenerating}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                outputFormat === "wav"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:text-foreground"
-              } ${disabled || isGenerating ? "opacity-50 cursor-not-allowed" : ""}`}
-            >
-              WAV
-            </button>
+      {/* Footer: Format + Quality + Generate */}
+      <div className="flex flex-col gap-4 pt-4 border-t border-border/50">
+        {/* Settings Row */}
+        <div className="flex items-center justify-between">
+          {/* Output Format */}
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground">Formato:</Label>
+            <div className="flex gap-1">
+              <button
+                onClick={() => onSettingsChange({ outputFormat: "mp3" })}
+                disabled={disabled || isGenerating}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  outputFormat === "mp3"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                } ${disabled || isGenerating ? "opacity-50 cursor-not-allowed" : ""}`}
+              >
+                MP3
+              </button>
+              <button
+                onClick={() => onSettingsChange({ outputFormat: "wav" })}
+                disabled={disabled || isGenerating}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  outputFormat === "wav"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                } ${disabled || isGenerating ? "opacity-50 cursor-not-allowed" : ""}`}
+              >
+                WAV
+              </button>
+            </div>
+          </div>
+
+          {/* Quality Tier */}
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground">Calidad:</Label>
+            <div className="flex gap-1">
+              <button
+                onClick={() => onSettingsChange({ qualityTier: "normal" })}
+                disabled={disabled || isGenerating}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  qualityTier === "normal"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                } ${disabled || isGenerating ? "opacity-50 cursor-not-allowed" : ""}`}
+              >
+                Normal
+              </button>
+              <button
+                onClick={() => onSettingsChange({ qualityTier: "hq" })}
+                disabled={disabled || isGenerating}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1 ${
+                  qualityTier === "hq"
+                    ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                } ${disabled || isGenerating ? "opacity-50 cursor-not-allowed" : ""}`}
+              >
+                <Sparkles className="w-3 h-3" />
+                HQ
+              </button>
+            </div>
           </div>
         </div>
 
@@ -364,7 +402,8 @@ export function TTSComposer({
         <Button
           onClick={handleGenerate}
           disabled={disabled || isGenerating || !canGenerate}
-          className="min-w-[160px]"
+          className="w-full"
+          size="lg"
         >
           {isGenerating ? (
             <>

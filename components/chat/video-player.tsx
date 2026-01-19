@@ -11,6 +11,7 @@ interface VideoPlayerProps {
   aspectRatio?: string;
   mimeType?: string;
   onDownload?: () => void;
+  size?: "default" | "large";
 }
 
 export function VideoPlayer({
@@ -20,6 +21,7 @@ export function VideoPlayer({
   aspectRatio = "16:9",
   mimeType = "video/mp4",
   onDownload,
+  size = "default",
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -113,8 +115,13 @@ export function VideoPlayer({
     };
   };
 
+  // Size classes based on size prop
+  const sizeClasses = size === "large"
+    ? "w-full max-w-4xl"  // Large: use available width up to max-w-4xl
+    : "w-[400px] max-w-full";  // Default: 400px width
+
   return (
-    <div className="relative w-[400px] max-w-full rounded-lg overflow-hidden bg-black">
+    <div className={`relative ${sizeClasses} rounded-lg overflow-hidden bg-black`}>
       {/* Contenedor con aspect ratio */}
       <div style={getContainerStyle()} className="relative">
         <video
