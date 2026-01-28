@@ -44,6 +44,12 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/next.config.* ./
 
+# Copy migration scripts
+COPY --from=builder /app/scripts/migrate.js ./scripts/migrate.js
+COPY --from=builder /app/scripts/migrations ./scripts/migrations
+COPY --from=builder /app/scripts/docker-start.sh ./scripts/docker-start.sh
+RUN chmod +x ./scripts/docker-start.sh
+
 EXPOSE 3000
 
-CMD ["npm", "run", "start"]
+CMD ["./scripts/docker-start.sh"]

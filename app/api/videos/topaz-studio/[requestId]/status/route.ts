@@ -154,7 +154,7 @@ export async function GET(
 
         const outputDuration = topazStatus.outputDuration
           ? Number(topazStatus.outputDuration).toFixed(2)
-          : edit.input_duration.toFixed(2);
+          : Number(edit.input_duration).toFixed(2);
 
         // Update database with result - ensure all numbers are integers
         const updateParams = [

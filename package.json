@@ -1,12 +1,14 @@
 {
   "name": "nanano",
-  "version": "2.0.6",
+  "version": "3.0.0",
   "private": true,
   "scripts": {
     "dev": "node scripts/bump-version.js && next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "migrate": "node scripts/migrate.js",
+    "migrate:init": "node scripts/migrate-init.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.962.0",
