@@ -72,7 +72,7 @@ const migrationChecks = {
   '014_add_soft_delete_to_conversations.sql': (c) => columnExists(c, 'conversations', 'deleted_at'),
   '015_add_request_data_to_messages.sql': (c) => columnExists(c, 'messages', 'request_data'),
   '016_add_token_totals_to_conversations.sql': (c) => columnExists(c, 'conversations', 'total_tokens_input'),
-  '017_add_file_size_to_messages.sql': (c) => columnExists(c, 'messages', 'file_size'),
+  '017_add_file_size_to_messages.sql': (c) => columnExists(c, 'messages', 'image_file_size'),
   '018_add_video_generation_to_models.sql': (c) => columnExists(c, 'models', 'supports_video_generation'),
   '019_add_video_settings_to_conversations.sql': (c) => columnExists(c, 'conversations', 'video_duration'),
   '020_add_video_fields_to_messages.sql': (c) => columnExists(c, 'messages', 'video_url'),
@@ -163,8 +163,21 @@ async function executeMigration(connection, filename) {
   const filepath = path.join(MIGRATIONS_DIR, filename);
   const sql = fs.readFileSync(filepath, 'utf8');
 
-  // Split by semicolon but be careful with strings containing semicolons
-  // For simplicity, we'll execute the whole file at once (multipleStatements: true)
+  // Check if migration is already applied (even if not tracked)
+  const checkFn = migrationChecks[filename];
+  if (checkFn) {
+    const alreadyApplied = await checkFn(connection);
+    if (alreadyApplied) {
+      // Migration already applied but not tracked - just mark it
+      await connection.execute(
+        'INSERT INTO _migrations (name) VALUES (?)',
+        [filename]
+      );
+      return { success: true, skipped: true };
+    }
+  }
+
+  // Execute the migration
   try {
     await connection.query(sql);
     await connection.execute(
@@ -217,7 +230,11 @@ async function migrate() {
       const result = await executeMigration(connection, file);
 
       if (result.success) {
-        console.log('OK');
+        if (result.skipped) {
+          console.log('SKIPPED (already applied)');
+        } else {
+          console.log('OK');
+        }
         successCount++;
       } else {
         console.log('FAILED');

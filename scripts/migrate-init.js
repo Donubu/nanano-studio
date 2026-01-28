@@ -33,10 +33,10 @@ const MIGRATIONS_DIR = path.join(__dirname, 'migrations');
 
 async function getConnection() {
   const config = {
-    host: process.env.DB_HOST || 'localhost',
+    host: process.env.DB_HOST || 'host.docker.internal',
     port: parseInt(process.env.DB_PORT || '3306'),
     user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
+    password: process.env.DB_PASSWORD || '121314',
     database: process.env.DB_NAME || 'nanano',
   };
 
