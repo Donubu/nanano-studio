@@ -100,12 +100,24 @@ const migrationChecks = {
   '042_add_ignore_context_to_messages.sql': (c) => columnExists(c, 'messages', 'ignore_in_context'),
 };
 
-async function autoInitExistingDatabase(connection) {
-  // Check if this is an existing database without migration tracking
-  const migrationsTableExists = await tableExists(connection, '_migrations');
+async function ensureMigrationsTable(connection) {
+  // Create migrations table if it doesn't exist
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS _migrations (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(255) NOT NULL UNIQUE,
+      executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Check if we need to auto-initialize:
+  // - _migrations table is empty (no records)
+  // - But models table exists (database has been used)
+  const [migrationCount] = await connection.execute('SELECT COUNT(*) as count FROM _migrations');
+  const hasMigrationRecords = migrationCount[0].count > 0;
   const modelsTableExists = await tableExists(connection, 'models');
 
-  if (!migrationsTableExists && modelsTableExists) {
+  if (!hasMigrationRecords && modelsTableExists) {
     console.log('[Migrate] Detected existing database without migration tracking');
     console.log('[Migrate] Auto-initializing migration records...');
 
@@ -132,19 +144,6 @@ async function autoInitExistingDatabase(connection) {
 
     console.log(`[Migrate] Marked ${markedCount} existing migrations as executed`);
   }
-}
-
-async function ensureMigrationsTable(connection) {
-  await connection.execute(`
-    CREATE TABLE IF NOT EXISTS _migrations (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      name VARCHAR(255) NOT NULL UNIQUE,
-      executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // Auto-initialize if this is an existing database
-  await autoInitExistingDatabase(connection);
 }
 
 async function getExecutedMigrations(connection) {
