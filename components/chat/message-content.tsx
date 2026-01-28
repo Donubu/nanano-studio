@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import NextImage from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
 import { Download, Loader2, Check, Mic, AlertCircle, ChevronDown, GripVertical, ZoomIn } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VideoPlayer } from "./video-player";
@@ -516,7 +517,7 @@ export function MessageContent({
           )}
         >
           <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
+            remarkPlugins={[remarkGfm, remarkBreaks]}
             components={{
               // Personalizar renderizado de código
               code({ className, children, ...props }) {
@@ -644,7 +645,7 @@ export function MessageContent({
               },
             }}
           >
-            {content}
+            {content.replace(/\\n/g, '\n')}
           </ReactMarkdown>
           {isStreaming && (
             <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1" />
