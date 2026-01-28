@@ -7,6 +7,6 @@ echo "=== Starting nanano ==="
 echo "Running database migrations..."
 node /app/scripts/migrate.js
 
-# Start the application
+# Start the application (standalone mode)
 echo "Starting Next.js server..."
-exec npm run start
+exec node server.js
