@@ -7,6 +7,7 @@
  * - Reads SQL files from scripts/migrations/ in numeric order
  * - Executes only pending migrations
  * - Works with both MySQL and MariaDB
+ * - Auto-detects existing databases and initializes tracking
  *
  * Usage: node scripts/migrate.js
  */
@@ -40,6 +41,99 @@ async function getConnection() {
   return mysql.createConnection(config);
 }
 
+async function tableExists(connection, tableName) {
+  const [rows] = await connection.execute(
+    `SELECT COUNT(*) as count FROM information_schema.tables
+     WHERE table_schema = DATABASE() AND table_name = ?`,
+    [tableName]
+  );
+  return rows[0].count > 0;
+}
+
+async function columnExists(connection, tableName, columnName) {
+  const [rows] = await connection.execute(
+    `SELECT COUNT(*) as count FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+    [tableName, columnName]
+  );
+  return rows[0].count > 0;
+}
+
+// Map of migration files to their detection logic
+const migrationChecks = {
+  '001_create_models_table.sql': (c) => tableExists(c, 'models'),
+  '002_create_conversations_table.sql': (c) => tableExists(c, 'conversations'),
+  '003_create_messages_table.sql': (c) => tableExists(c, 'messages'),
+  '004_create_project_models_table.sql': (c) => tableExists(c, 'project_models'),
+  '005_add_images_to_messages.sql': (c) => columnExists(c, 'messages', 'image_url'),
+  '011_add_image_settings_to_conversations.sql': (c) => columnExists(c, 'conversations', 'image_aspect_ratio'),
+  '012_add_image_generation_to_models.sql': (c) => columnExists(c, 'models', 'supports_image_generation'),
+  '013_add_system_instruction_to_project_models.sql': (c) => columnExists(c, 'project_models', 'system_instruction'),
+  '014_add_soft_delete_to_conversations.sql': (c) => columnExists(c, 'conversations', 'deleted_at'),
+  '015_add_request_data_to_messages.sql': (c) => columnExists(c, 'messages', 'request_data'),
+  '016_add_token_totals_to_conversations.sql': (c) => columnExists(c, 'conversations', 'total_tokens_input'),
+  '017_add_file_size_to_messages.sql': (c) => columnExists(c, 'messages', 'file_size'),
+  '018_add_video_generation_to_models.sql': (c) => columnExists(c, 'models', 'supports_video_generation'),
+  '019_add_video_settings_to_conversations.sql': (c) => columnExists(c, 'conversations', 'video_duration'),
+  '020_add_video_fields_to_messages.sql': (c) => columnExists(c, 'messages', 'video_url'),
+  '021_add_video_aspect_ratio_to_messages.sql': (c) => columnExists(c, 'messages', 'video_aspect_ratio'),
+  '022_create_project_uploads_table.sql': (c) => tableExists(c, 'project_uploads'),
+  '023_add_image_settings_to_messages.sql': (c) => columnExists(c, 'messages', 'image_aspect_ratio'),
+  '024_separate_generation_limits.sql': (c) => columnExists(c, 'project_users', 'video_generation_limit'),
+  '025_create_tags_system.sql': (c) => tableExists(c, 'tags'),
+  '026_add_cost_tracking.sql': (c) => columnExists(c, 'messages', 'estimated_cost'),
+  '027_add_reference_images_to_models.sql': (c) => columnExists(c, 'models', 'supports_reference_images'),
+  '028_add_audio_generation_to_models.sql': (c) => columnExists(c, 'models', 'supports_audio_generation'),
+  '029_add_audio_fields_to_messages.sql': (c) => columnExists(c, 'messages', 'audio_url'),
+  '030_add_audio_settings_to_conversations.sql': (c) => columnExists(c, 'conversations', 'audio_voice_id'),
+  '031_add_project_generation_config.sql': (c) => tableExists(c, 'project_generation_config'),
+  '032_add_generation_type_to_conversations.sql': (c) => columnExists(c, 'conversations', 'generation_type'),
+  '033_add_quality_and_seed_to_messages.sql': (c) => columnExists(c, 'messages', 'quality_tier'),
+  '034_add_quality_limits_to_project_users.sql': (c) => columnExists(c, 'project_users', 'image_hq_limit'),
+  '035_add_favorite_to_messages.sql': (c) => columnExists(c, 'messages', 'is_favorite'),
+  '036_add_has_2x_to_messages.sql': (c) => columnExists(c, 'messages', 'has_2x'),
+  '037_create_gcp_costs_table.sql': (c) => tableExists(c, 'gcp_daily_costs'),
+  '038_add_topaz_tracking.sql': (c) => columnExists(c, 'messages', 'topaz_credits'),
+  '039_create_topaz_edits_table.sql': (c) => tableExists(c, 'topaz_edits'),
+  '040_create_topaz_video_edits_table.sql': (c) => tableExists(c, 'topaz_video_edits'),
+  '041_fix_gcp_usage_amount_range.sql': (c) => tableExists(c, 'gcp_daily_costs'),
+  '042_add_ignore_context_to_messages.sql': (c) => columnExists(c, 'messages', 'ignore_in_context'),
+};
+
+async function autoInitExistingDatabase(connection) {
+  // Check if this is an existing database without migration tracking
+  const migrationsTableExists = await tableExists(connection, '_migrations');
+  const modelsTableExists = await tableExists(connection, 'models');
+
+  if (!migrationsTableExists && modelsTableExists) {
+    console.log('[Migrate] Detected existing database without migration tracking');
+    console.log('[Migrate] Auto-initializing migration records...');
+
+    // Get all migration files
+    const files = fs.readdirSync(MIGRATIONS_DIR)
+      .filter(f => f.endsWith('.sql'))
+      .sort();
+
+    let markedCount = 0;
+    for (const file of files) {
+      const checkFn = migrationChecks[file];
+
+      if (checkFn) {
+        const isApplied = await checkFn(connection);
+        if (isApplied) {
+          await connection.execute(
+            'INSERT INTO _migrations (name) VALUES (?)',
+            [file]
+          );
+          markedCount++;
+        }
+      }
+    }
+
+    console.log(`[Migrate] Marked ${markedCount} existing migrations as executed`);
+  }
+}
+
 async function ensureMigrationsTable(connection) {
   await connection.execute(`
     CREATE TABLE IF NOT EXISTS _migrations (
@@ -48,6 +142,9 @@ async function ensureMigrationsTable(connection) {
       executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  // Auto-initialize if this is an existing database
+  await autoInitExistingDatabase(connection);
 }
 
 async function getExecutedMigrations(connection) {

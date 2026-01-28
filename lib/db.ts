@@ -11,6 +11,12 @@ const basePool = mysql.createPool({
   queueLimit: 0,
   timezone: "+00:00", // Interpretar fechas como UTC
   dateStrings: true, // Devolver fechas como strings para mejor control
+  // Producción: manejar conexiones perdidas
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000, // 10 segundos
+  // Timeouts para evitar conexiones colgadas
+  connectTimeout: 10000, // 10 segundos para conectar
+  // idleTimeout: 60000, // No disponible en mysql2, se maneja automáticamente
 });
 
 // Configurar timezone UTC en cada conexión nueva
