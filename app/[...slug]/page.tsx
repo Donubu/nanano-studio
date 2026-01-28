@@ -2,6 +2,9 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { ChatInterface } from "@/components/chat/chat-interface";
 
+// Force dynamic rendering for catch-all routes
+export const dynamic = "force-dynamic";
+
 // This catch-all route handles virtual navigation URLs like:
 // /{project-slug}/
 // /{project-slug}/gallery

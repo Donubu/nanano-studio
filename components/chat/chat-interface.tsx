@@ -1304,14 +1304,14 @@ export function ChatInterface() {
                     } else if (newActiveTab.conversationId) {
                         navigation.replace(`/${navigation.projectSlug}/conversation/${newActiveTab.conversationId}`);
                     } else {
-                        navigation.replace(`/${navigation.projectSlug}/`);
+                        navigation.replace(`/${navigation.projectSlug}`);
                     }
                 }
             } else {
                 setActiveTabId(null);
                 // No tabs left, go back to project base URL
                 if (!fromNavigation && navigation.projectSlug) {
-                    navigation.replace(`/${navigation.projectSlug}/`);
+                    navigation.replace(`/${navigation.projectSlug}`);
                 }
             }
         }

@@ -3,6 +3,8 @@ import packageJson from "./package.json";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  trailingSlash: false,
+  skipTrailingSlashRedirect: false,
   images: {
     remotePatterns: [
       {

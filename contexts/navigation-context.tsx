@@ -134,14 +134,14 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
 
       // Only update URL if we're at root OR the current path has a different project slug
       if (currentPathname === '/' || (currentState.projectSlug && currentState.projectSlug !== slug)) {
-        const state = parsePath(`/${slug}/`);
-        historyMethod(state, '', `/${slug}/`);
-        setCurrentPath(`/${slug}/`);
+        const state = parsePath(`/${slug}`);
+        historyMethod(state, '', `/${slug}`);
+        setCurrentPath(`/${slug}`);
       } else if (!currentState.projectSlug) {
         // We're at root, set the project URL
-        const state = parsePath(`/${slug}/`);
-        historyMethod(state, '', `/${slug}/`);
-        setCurrentPath(`/${slug}/`);
+        const state = parsePath(`/${slug}`);
+        historyMethod(state, '', `/${slug}`);
+        setCurrentPath(`/${slug}`);
       }
       // If we're already on a path with the same project slug, don't change the URL
     }
