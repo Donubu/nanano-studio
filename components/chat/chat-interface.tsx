@@ -3,6 +3,7 @@
 import {useState, useEffect, useRef, useCallback} from "react";
 import {useSession, signOut} from "next-auth/react";
 import {useTheme} from "next-themes";
+import {cn} from "@/lib/utils";
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
 import {Avatar, AvatarFallback, AvatarImage} from "@/components/ui/avatar";
@@ -2163,7 +2164,18 @@ export function ChatInterface() {
         <div className="flex h-screen bg-background">
             {/* Left Sidebar - Conversations */}
             {leftSidebarOpen && (
-                <div className="w-64 border-r border-border/50 bg-sidebar flex flex-col">
+                <div className="w-64 border-r border-border/50 bg-sidebar flex flex-col relative">
+                    {/* Close button */}
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setLeftSidebarOpen(false)}
+                        className="absolute top-2 right-2 h-7 w-7 text-muted-foreground hover:text-foreground z-10"
+                        title="Cerrar panel"
+                    >
+                        <PanelLeftClose className="h-4 w-4"/>
+                    </Button>
+
                     {/* Header - Logo always visible */}
                     <div className={`p-3 ${selectedProjectId ? 'border-b border-border/50' : ''}`}>
                         <button
@@ -2511,7 +2523,7 @@ export function ChatInterface() {
 
             {/* Main Chat Area */}
             {selectedProjectId ? (
-                <div className="flex-1 flex flex-col">
+                <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                     {/* Tabs Bar */}
                     {openTabs.length > 0 && (
                         <ConversationTabs
@@ -2524,42 +2536,46 @@ export function ChatInterface() {
                         />
                     )}
 
-                    {/* Top Bar */}
-                    <div className="h-14 border-b border-border/50 flex items-center justify-between px-4">
-                        <div className="flex items-center gap-2">
+                    {/* Content Area - with floating sidebar toggles */}
+                    <div className={cn(
+                        "relative flex-1 flex flex-col overflow-hidden",
+                        activeTab?.isGallery
+                            ? "bg-gradient-to-b from-purple-50/50 via-transparent to-transparent dark:from-purple-950/20 dark:via-transparent dark:to-transparent"
+                            : activeTab?.isArchived
+                                ? "bg-gradient-to-b from-orange-50/50 via-transparent to-transparent dark:from-orange-950/20 dark:via-transparent dark:to-transparent"
+                                : openTabs.length > 0
+                                    ? "bg-gradient-to-b from-blue-50/50 via-transparent to-transparent dark:from-blue-950/20 dark:via-transparent dark:to-transparent"
+                                    : ""
+                    )}>
+                        {/* Floating toggle for left sidebar */}
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
+                            className={cn(
+                                "absolute top-2 left-2 z-20 h-8 w-8 bg-background/80 backdrop-blur-sm border border-border/50 shadow-sm",
+                                leftSidebarOpen && "hidden"
+                            )}
+                            title="Abrir panel izquierdo"
+                        >
+                            <PanelLeft className="h-4 w-4"/>
+                        </Button>
+
+                        {/* Floating toggle for right sidebar */}
+                        {activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && (
                             <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
-                                className="h-8 w-8"
-                            >
-                                {leftSidebarOpen ? (
-                                    <PanelLeftClose className="h-4 w-4"/>
-                                ) : (
-                                    <PanelLeft className="h-4 w-4"/>
+                                onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
+                                className={cn(
+                                    "absolute top-2 right-2 z-20 h-8 w-8 bg-background/80 backdrop-blur-sm border border-border/50 shadow-sm",
+                                    rightSidebarOpen && "hidden"
                                 )}
+                                title="Abrir panel derecho"
+                            >
+                                <PanelRight className="h-4 w-4"/>
                             </Button>
-
-                        </div>
-                        <div className="flex items-center gap-2">
-                            {activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && (
-                                <>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
-                                        className="h-8 w-8"
-                                    >
-                                        {rightSidebarOpen ? (
-                                            <PanelRightClose className="h-4 w-4"/>
-                                        ) : (
-                                            <PanelRight className="h-4 w-4"/>
-                                        )}
-                                    </Button>
-                                </>
-                            )}
-                        </div>
-                    </div>
+                        )}
 
                     {/* Content Area */}
                     {activeTab?.isGallery ? (
@@ -2990,6 +3006,7 @@ export function ChatInterface() {
                             </div>
                         )
                     )}
+                    </div>
                 </div>
             ) : (
                 /* Welcome Screen - Project Grid */
@@ -3062,8 +3079,19 @@ export function ChatInterface() {
 
             {/* Right Sidebar - Settings (solo visible con conversación activa, no galería, no audio) */}
             {selectedProjectId && rightSidebarOpen && activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && (
-                <div className="w-72 border-l border-border/50 bg-sidebar overflow-y-auto">
-                    <div className="p-4 space-y-6">
+                <div className="w-72 border-l border-border/50 bg-sidebar overflow-y-auto relative">
+                    {/* Close button */}
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setRightSidebarOpen(false)}
+                        className="absolute top-2 left-2 h-7 w-7 text-muted-foreground hover:text-foreground z-10"
+                        title="Cerrar panel"
+                    >
+                        <PanelRightClose className="h-4 w-4"/>
+                    </Button>
+
+                    <div className="p-4 pt-10 space-y-6">
                         {/* Archived indicator */}
                         {activeTab?.isArchived && (
                             <div className="flex items-center gap-2 p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg text-orange-400 text-sm">
