@@ -3036,30 +3036,24 @@ export function ChatInterface() {
                                                 <img
                                                     src={project.client_logo}
                                                     alt={project.client_name || ""}
-                                                    className="h-16 max-w-[80%] object-contain opacity-70 group-hover:opacity-100 transition-opacity"
+                                                    className="w-[200px] border rounded-md border-[#999] object-contain  transition-opacity"
                                                 />
                                             ) : (
                                                 <Folder className="h-16 w-16 text-primary/70 group-hover:text-primary transition-colors fill-primary/10 group-hover:fill-primary/20" />
                                             )}
                                             {project.generation_count > 0 && (
-                                                <div className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[10px] font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1">
+                                                <div className="absolute -top-5 -right-5 bg-primary text-primary-foreground text-[12px] font-bold rounded-full h-[40px] w-[40px] flex items-center justify-center px-1">
                                                     {project.generation_count > 999 ? "999+" : project.generation_count}
                                                 </div>
                                             )}
                                         </div>
 
                                         {/* Project name */}
-                                        <h3 className="font-medium text-sm text-center truncate w-full group-hover:text-primary transition-colors">
+                                        <h3 className="font-medium text-md text-center truncate w-full group-hover:text-primary transition-colors">
                                             {project.title}
                                         </h3>
 
-                                        {/* Generation count */}
-                                        <p className="text-xs text-muted-foreground mt-1">
-                                            {project.generation_count === 0
-                                                ? "Sin generaciones"
-                                                : `${project.generation_count} ${project.generation_count === 1 ? "generación" : "generaciones"}`
-                                            }
-                                        </p>
+
                                     </button>
                                 ))}
                             </div>
