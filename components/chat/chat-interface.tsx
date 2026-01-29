@@ -3030,26 +3030,17 @@ export function ChatInterface() {
                                         onClick={() => setSelectedProjectId(project.id)}
                                         className="group flex flex-col items-center p-4 rounded-xl border border-border/50 bg-card hover:bg-accent hover:border-primary/50 transition-all text-left"
                                     >
-                                        {/* Client logo or name */}
-                                        <div className="w-full mb-3 flex items-center justify-center h-8">
+                                        {/* Brand logo or folder icon */}
+                                        <div className="relative mb-3">
                                             {project.client_logo ? (
                                                 <img
                                                     src={project.client_logo}
                                                     alt={project.client_name || ""}
-                                                    className="h-6 max-w-[80%] object-contain opacity-60 group-hover:opacity-100 transition-opacity"
+                                                    className="h-16 max-w-[80%] object-contain opacity-70 group-hover:opacity-100 transition-opacity"
                                                 />
-                                            ) : project.client_name ? (
-                                                <span className="text-xs text-muted-foreground group-hover:text-foreground truncate max-w-full">
-                                                    {project.client_name}
-                                                </span>
                                             ) : (
-                                                <span className="text-xs text-muted-foreground/50">Sin cliente</span>
+                                                <Folder className="h-16 w-16 text-primary/70 group-hover:text-primary transition-colors fill-primary/10 group-hover:fill-primary/20" />
                                             )}
-                                        </div>
-
-                                        {/* Folder icon */}
-                                        <div className="relative mb-3">
-                                            <Folder className="h-16 w-16 text-primary/70 group-hover:text-primary transition-colors fill-primary/10 group-hover:fill-primary/20" />
                                             {project.generation_count > 0 && (
                                                 <div className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[10px] font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1">
                                                     {project.generation_count > 999 ? "999+" : project.generation_count}
