@@ -91,14 +91,15 @@ export async function POST(
     }
 
     // Obtener conversacion con configuracion de imagen y costos del modelo
+    const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
       `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, p.title as project_name,
               m.cost_image_1k, m.cost_image_2k, m.cost_image_4k
        FROM conversations c
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
-       WHERE c.id = ? AND c.user_id = ? AND c.deleted_at IS NULL`,
-      [id, session.user.id]
+       WHERE c.id = ? ${isAdmin ? "" : "AND c.user_id = ?"} AND c.deleted_at IS NULL`,
+      isAdmin ? [id] : [id, session.user.id]
     );
 
     if (conversations.length === 0) {

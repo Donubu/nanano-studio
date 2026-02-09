@@ -45,20 +45,24 @@ export async function GET(request: NextRequest) {
     const projectId = searchParams.get("project_id");
     const archived = searchParams.get("archived") === "true";
 
+    const isAdmin = session.user.role === "admin";
+
     let query = `
       SELECT
         c.*,
         m.display_name as model_display_name,
         p.title as project_title,
+        ${isAdmin ? "u.name as user_name, u.email as user_email," : ""}
         (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message,
         (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id) as message_count
       FROM conversations c
       JOIN models m ON c.model_id = m.id
       LEFT JOIN projects p ON c.project_id = p.id
-      WHERE c.user_id = ? AND ${archived ? "c.deleted_at IS NOT NULL" : "c.deleted_at IS NULL"}
+      ${isAdmin ? "LEFT JOIN users u ON c.user_id = u.id" : ""}
+      WHERE ${isAdmin ? "1=1" : "c.user_id = ?"} AND ${archived ? "c.deleted_at IS NOT NULL" : "c.deleted_at IS NULL"}
     `;
 
-    const params: (number | string)[] = [session.user.id];
+    const params: (number | string)[] = isAdmin ? [] : [session.user.id];
 
     if (projectId) {
       query += " AND c.project_id = ?";

@@ -46,11 +46,12 @@ export async function GET(
     }
 
     const { id } = await params;
+    const isAdmin = session.user.role === "admin";
 
     // Verificar que la conversación pertenece al usuario
     const [conversation] = await pool.execute<RowDataPacket[]>(
-      "SELECT id FROM conversations WHERE id = ? AND user_id = ?",
-      [id, session.user.id]
+      `SELECT id FROM conversations WHERE id = ? ${isAdmin ? "" : "AND user_id = ?"}`,
+      isAdmin ? [id] : [id, session.user.id]
     );
 
     if (conversation.length === 0) {
@@ -103,13 +104,14 @@ export async function POST(
     }
 
     // Obtener conversación con configuración y nombre del proyecto
+    const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
       `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, p.title as project_name
        FROM conversations c
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
-       WHERE c.id = ? AND c.user_id = ?`,
-      [id, session.user.id]
+       WHERE c.id = ? ${isAdmin ? "" : "AND c.user_id = ?"}`,
+      isAdmin ? [id] : [id, session.user.id]
     );
 
     if (conversations.length === 0) {

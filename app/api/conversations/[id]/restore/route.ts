@@ -16,11 +16,12 @@ export async function POST(
     }
 
     const { id } = await params;
+    const isAdmin = session.user.role === "admin";
 
     // Restaurar: establecer deleted_at a NULL
     const [result] = await pool.execute<ResultSetHeader>(
-      "UPDATE conversations SET deleted_at = NULL WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL",
-      [id, session.user.id]
+      `UPDATE conversations SET deleted_at = NULL WHERE id = ? ${isAdmin ? "" : "AND user_id = ?"} AND deleted_at IS NOT NULL`,
+      isAdmin ? [id] : [id, session.user.id]
     );
 
     if (result.affectedRows === 0) {

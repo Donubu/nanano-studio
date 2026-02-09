@@ -53,6 +53,7 @@ export async function GET(
     const { id } = await params;
     const { searchParams } = new URL(request.url);
     const includeArchived = searchParams.get("archived") === "true";
+    const isAdmin = session.user.role === "admin";
 
     // Obtener conversación (incluir archivadas si se solicita)
     const [conversations] = await pool.execute<ConversationRow[]>(
@@ -67,8 +68,8 @@ export async function GET(
       FROM conversations c
       JOIN models m ON c.model_id = m.id
       LEFT JOIN projects p ON c.project_id = p.id
-      WHERE c.id = ? AND c.user_id = ? ${includeArchived ? "" : "AND c.deleted_at IS NULL"}`,
-      [id, session.user.id]
+      WHERE c.id = ? ${isAdmin ? "" : "AND c.user_id = ?"} ${includeArchived ? "" : "AND c.deleted_at IS NULL"}`,
+      isAdmin ? [id] : [id, session.user.id]
     );
 
     if (conversations.length === 0) {
@@ -156,9 +157,10 @@ export async function PUT(
     console.log("[PUT /conversations] Extracted image_aspect_ratio:", image_aspect_ratio);
 
     // Verificar que la conversación pertenece al usuario y no está eliminada
+    const isAdmin = session.user.role === "admin";
     const [existing] = await pool.execute<ConversationRow[]>(
-      "SELECT id FROM conversations WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
-      [id, session.user.id]
+      `SELECT id FROM conversations WHERE id = ? ${isAdmin ? "" : "AND user_id = ?"} AND deleted_at IS NULL`,
+      isAdmin ? [id] : [id, session.user.id]
     );
 
     if (existing.length === 0) {
@@ -239,9 +241,10 @@ export async function DELETE(
     const { id } = await params;
 
     // Soft delete: marcar como eliminada en lugar de borrar
+    const isAdmin = session.user.role === "admin";
     const [result] = await pool.execute<ResultSetHeader>(
-      "UPDATE conversations SET deleted_at = NOW() WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
-      [id, session.user.id]
+      `UPDATE conversations SET deleted_at = NOW() WHERE id = ? ${isAdmin ? "" : "AND user_id = ?"} AND deleted_at IS NULL`,
+      isAdmin ? [id] : [id, session.user.id]
     );
 
     if (result.affectedRows === 0) {
