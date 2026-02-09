@@ -303,6 +303,7 @@ export async function POST(
             JOIN conversations c ON m.conversation_id = c.id
             WHERE c.project_id = ?
               AND c.user_id = ?
+              AND c.generation_type = ?
               AND m.role = 'model'
               AND m.quality_tier = ?
               ${urlColumn ? `AND m.${urlColumn} IS NOT NULL` : "AND m.content IS NOT NULL AND m.image_url IS NULL AND m.video_url IS NULL AND m.audio_url IS NULL"}
@@ -310,7 +311,7 @@ export async function POST(
           ) as current_count
         FROM project_users pu
         WHERE pu.project_id = ? AND pu.user_id = ?
-      `, [conversation.project_id, session.user.id, effectiveQualityTier, conversation.project_id, session.user.id]);
+      `, [conversation.project_id, session.user.id, generationType, effectiveQualityTier, conversation.project_id, session.user.id]);
 
       if (limitRows.length > 0) {
         const maxLimit = limitRows[0].max_limit;

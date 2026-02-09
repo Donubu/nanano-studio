@@ -37,6 +37,69 @@ function buildLabels(labels?: Labels): Record<string, string> | undefined {
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
+// ============================================
+// RETRY WITH EXPONENTIAL BACKOFF
+// ============================================
+
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  initialDelayMs: 5000,
+  maxDelayMs: 60000,
+  backoffMultiplier: 2,
+};
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+function isRetriableError(error: unknown): boolean {
+  if (error && typeof error === 'object') {
+    const errorObj = error as { status?: number; code?: number; message?: string };
+    if (errorObj.status === 429 || errorObj.status === 503 || errorObj.status === 500) return true;
+    if (errorObj.code === 429 || errorObj.code === 503 || errorObj.code === 500) return true;
+    const message = errorObj.message?.toLowerCase() || '';
+    if (message.includes('resource_exhausted') || message.includes('rate limit') ||
+        message.includes('quota') || message.includes('429') || message.includes('503')) return true;
+  }
+  return false;
+}
+
+export interface RetryInfo {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  error: string;
+}
+
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  operationName: string,
+  onRetry?: (info: RetryInfo) => void
+): Promise<T> {
+  let lastError: Error | undefined;
+  let delay = RETRY_CONFIG.initialDelayMs;
+
+  for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (!isRetriableError(error) || attempt === RETRY_CONFIG.maxRetries) throw lastError;
+
+      console.warn(
+        `[Imagen] ${operationName} falló (intento ${attempt + 1}/${RETRY_CONFIG.maxRetries + 1}). ` +
+        `Reintentando en ${delay / 1000}s... Error: ${lastError.message}`
+      );
+
+      if (onRetry) {
+        onRetry({ attempt: attempt + 1, maxAttempts: RETRY_CONFIG.maxRetries + 1, delayMs: delay, error: lastError.message });
+      }
+
+      await sleep(delay);
+      delay = Math.min(delay * RETRY_CONFIG.backoffMultiplier, RETRY_CONFIG.maxDelayMs);
+    }
+  }
+  throw lastError;
+}
+
 // Inicializar cliente según configuración
 function createClient(): GoogleGenAI {
   if (isVertexAI) {
@@ -148,28 +211,37 @@ export async function generateImagen(
     // Build labels for Vertex AI tracking
     const builtLabels = buildLabels(labels);
 
-    // Llamar a la API de generateImages
+    // Llamar a la API de generateImages con retry
     // IMPORTANTE: addWatermark: false es requerido para que seed funcione
     // enhancePrompt: false evita que se modifique el prompt
-    const response = await ai.models.generateImages({
-      model: normalizedModelId,
-      prompt: prompt,
-      config: {
-        numberOfImages: config.numberOfImages || 1,
-        aspectRatio: config.aspectRatio,
-        // Parameters for deterministic generation with seed
-        addWatermark: false, // Required for seed to work
-        seed: effectiveSeed,
-        // Resolution (only for Standard and Ultra models)
-        ...(config.resolution && { sampleImageSize: config.resolution }),
-        // Negative prompt
-        ...(config.negativePrompt && { negativePrompt: config.negativePrompt }),
-        // Person generation (allow adults by default)
-        personGeneration: "allow_adult",
-        // Labels for Vertex AI tracking
-        ...(builtLabels && { labels: builtLabels }),
-      } as Record<string, unknown>,
-    });
+    const response = await withRetry(
+      () => ai.models.generateImages({
+        model: normalizedModelId,
+        prompt: prompt,
+        config: {
+          numberOfImages: config.numberOfImages || 1,
+          aspectRatio: config.aspectRatio,
+          // Parameters for deterministic generation with seed
+          addWatermark: false, // Required for seed to work
+          seed: effectiveSeed,
+          // Resolution (only for Standard and Ultra models)
+          ...(config.resolution && { sampleImageSize: config.resolution }),
+          // Negative prompt
+          ...(config.negativePrompt && { negativePrompt: config.negativePrompt }),
+          // Person generation (allow adults by default)
+          personGeneration: "allow_adult",
+          // Labels for Vertex AI tracking
+          ...(builtLabels && { labels: builtLabels }),
+        } as Record<string, unknown>,
+      }),
+      "generateImages",
+      (info) => {
+        onProgress?.({
+          status: "processing",
+          message: `Reintentando (${info.attempt}/${info.maxAttempts})... Esperando ${Math.round(info.delayMs / 1000)}s`,
+        });
+      }
+    );
 
     // Extraer imágenes de la respuesta
     const generatedImages = response.generatedImages;

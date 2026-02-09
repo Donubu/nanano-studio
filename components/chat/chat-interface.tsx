@@ -2759,7 +2759,10 @@ export function ChatInterface() {
                                             className={`group flex gap-3 ${msg.role === "user" ? "justify-end" : ""}`}
                                         >
                                             {msg.role === "model" && (
-                                                <div className={`w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0 ${isIgnored ? "opacity-40" : ""}`}>
+                                                <div
+                                                    title={msg.created_at ? new Date(msg.created_at).toLocaleString() : undefined}
+                                                    className={`w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0 ${isIgnored ? "opacity-40" : ""}`}
+                                                >
                                                     {msg.isStreaming ? (
                                                         <Loader2 className="h-4 w-4 text-primary animate-spin"/>
                                                     ) : (
@@ -2877,7 +2880,10 @@ export function ChatInterface() {
                                                 />
                                             </div>
                                             {msg.role === "user" && (
-                                                <Avatar className="h-8 w-8 shrink-0">
+                                                <Avatar
+                                                    title={msg.created_at ? new Date(msg.created_at).toLocaleString() : undefined}
+                                                    className="h-8 w-8 shrink-0"
+                                                >
                                                     <AvatarImage src={session?.user?.image || undefined}/>
                                                     <AvatarFallback className="bg-accent text-xs">
                                                         {getInitials(session?.user?.name)}

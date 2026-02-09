@@ -39,6 +39,69 @@ function buildLabels(labels?: Labels): Record<string, string> | undefined {
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
+// ============================================
+// RETRY WITH EXPONENTIAL BACKOFF
+// ============================================
+
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  initialDelayMs: 5000,
+  maxDelayMs: 60000,
+  backoffMultiplier: 2,
+};
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+function isRetriableError(error: unknown): boolean {
+  if (error && typeof error === 'object') {
+    const errorObj = error as { status?: number; code?: number; message?: string };
+    if (errorObj.status === 429 || errorObj.status === 503 || errorObj.status === 500) return true;
+    if (errorObj.code === 429 || errorObj.code === 503 || errorObj.code === 500) return true;
+    const message = errorObj.message?.toLowerCase() || '';
+    if (message.includes('resource_exhausted') || message.includes('rate limit') ||
+        message.includes('quota') || message.includes('429') || message.includes('503')) return true;
+  }
+  return false;
+}
+
+export interface RetryInfo {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  error: string;
+}
+
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  operationName: string,
+  onRetry?: (info: RetryInfo) => void
+): Promise<T> {
+  let lastError: Error | undefined;
+  let delay = RETRY_CONFIG.initialDelayMs;
+
+  for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (!isRetriableError(error) || attempt === RETRY_CONFIG.maxRetries) throw lastError;
+
+      console.warn(
+        `[Audio] ${operationName} falló (intento ${attempt + 1}/${RETRY_CONFIG.maxRetries + 1}). ` +
+        `Reintentando en ${delay / 1000}s... Error: ${lastError.message}`
+      );
+
+      if (onRetry) {
+        onRetry({ attempt: attempt + 1, maxAttempts: RETRY_CONFIG.maxRetries + 1, delayMs: delay, error: lastError.message });
+      }
+
+      await sleep(delay);
+      delay = Math.min(delay * RETRY_CONFIG.backoffMultiplier, RETRY_CONFIG.maxDelayMs);
+    }
+  }
+  throw lastError;
+}
+
 // Inicializar cliente según configuración
 function createClient(): GoogleGenAI {
   if (isVertexAI) {
@@ -101,23 +164,32 @@ export async function generateSingleSpeakerAudio(
       ? `${config.stylePrompt}\n\n${text}`
       : text;
 
-    const response = await ai.models.generateContent({
-      model: normalizedModelId,
-      contents: [{
-        role: "user",
-        parts: [{ text: prompt }]
-      }],
-      config: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: {
-              voiceName: config.voiceId,
+    const response = await withRetry(
+      () => ai.models.generateContent({
+        model: normalizedModelId,
+        contents: [{
+          role: "user",
+          parts: [{ text: prompt }]
+        }],
+        config: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: config.voiceId,
+              },
             },
           },
         },
-      },
-    });
+      }),
+      "generateSingleSpeakerAudio",
+      (info) => {
+        onProgress?.({
+          status: "processing",
+          message: `Reintentando (${info.attempt}/${info.maxAttempts})... Esperando ${Math.round(info.delayMs / 1000)}s`,
+        });
+      }
+    );
 
     const audioData = extractAudioFromResponse(response);
 
@@ -186,21 +258,30 @@ export async function generateMultiSpeakerAudio(
       ? `${config.stylePrompt}\n\n${text}`
       : text;
 
-    const response = await ai.models.generateContent({
-      model: normalizedModelId,
-      contents: [{
-        role: "user",
-        parts: [{ text: prompt }]
-      }],
-      config: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          multiSpeakerVoiceConfig: {
-            speakerVoiceConfigs,
+    const response = await withRetry(
+      () => ai.models.generateContent({
+        model: normalizedModelId,
+        contents: [{
+          role: "user",
+          parts: [{ text: prompt }]
+        }],
+        config: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            multiSpeakerVoiceConfig: {
+              speakerVoiceConfigs,
+            },
           },
         },
-      },
-    });
+      }),
+      "generateMultiSpeakerAudio",
+      (info) => {
+        onProgress?.({
+          status: "processing",
+          message: `Reintentando (${info.attempt}/${info.maxAttempts})... Esperando ${Math.round(info.delayMs / 1000)}s`,
+        });
+      }
+    );
 
     const audioData = extractAudioFromResponse(response);
 
