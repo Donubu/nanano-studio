@@ -5,6 +5,12 @@ const nextConfig: NextConfig = {
   output: "standalone",
   trailingSlash: false,
   skipTrailingSlashRedirect: false,
+  experimental: {
+    middlewareClientMaxBodySize: "50mb",
+    serverActions: {
+      bodySizeLimit: "50mb",
+    },
+  },
   images: {
     remotePatterns: [
       {
