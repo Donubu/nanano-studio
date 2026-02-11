@@ -486,10 +486,12 @@ export async function POST(
                 "UPDATE conversations SET title = ? WHERE id = ?",
                 [title, id]
               );
-              // Enviar el nuevo título al frontend
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ type: "title", title })}\n\n`)
-              );
+              // Enviar el nuevo título al frontend solo si el controller sigue abierto
+              if (!controllerClosed) {
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({ type: "title", title })}\n\n`)
+                );
+              }
               console.log("[Stream] Generated title:", title);
             })
             .catch((err) => {
@@ -553,11 +555,21 @@ export async function POST(
             {
               onChunk: (text) => {
                 fullResponse += text;
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ type: "chunk", text })}\n\n`)
-                );
+                if (!controllerClosed) {
+                  controller.enqueue(
+                    encoder.encode(`data: ${JSON.stringify({ type: "chunk", text })}\n\n`)
+                  );
+                }
               },
               onRetry: (info) => {
+                // Resetear estado acumulado para que el reintento empiece limpio
+                fullResponse = "";
+                imageUploadStarted = false;
+                imageUploadPromise = null;
+                savedImageUrl = null;
+                savedImageFileSize = null;
+                savedImageMimeType = null;
+
                 if (!controllerClosed) {
                   controller.enqueue(
                     encoder.encode(`data: ${JSON.stringify({
@@ -672,21 +684,23 @@ export async function POST(
                 const totalCost = Number(totalsResult[0]?.total_estimated_cost) || 0;
 
                 // Enviar evento de finalización con tokens, costo del mensaje y totales de conversación
-                controller.enqueue(
-                  encoder.encode(
-                    `data: ${JSON.stringify({
-                      type: "complete",
-                      id: modelMessageId,
-                      tokens: tokenCount,
-                      totalTokens,
-                      estimatedCost,
-                      totalCost,
-                      imageUrl: imageUrl,
-                    })}\n\n`
-                  )
-                );
-                controllerClosed = true;
-                controller.close();
+                if (!controllerClosed) {
+                  controller.enqueue(
+                    encoder.encode(
+                      `data: ${JSON.stringify({
+                        type: "complete",
+                        id: modelMessageId,
+                        tokens: tokenCount,
+                        totalTokens,
+                        estimatedCost,
+                        totalCost,
+                        imageUrl: imageUrl,
+                      })}\n\n`
+                    )
+                  );
+                  controllerClosed = true;
+                  controller.close();
+                }
               },
               onError: async (error) => {
                 console.error("Error en streaming:", error);

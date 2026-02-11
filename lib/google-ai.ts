@@ -330,6 +330,8 @@ export async function sendMessage(
 }
 
 // Enviar mensaje con streaming
+// El retry envuelve el ciclo completo (conexión + consumo del stream)
+// para que errores mid-stream (429 durante iteración) también se reintenten
 export async function sendMessageStream(
   modelId: string,
   messages: ChatMessage[],
@@ -361,53 +363,59 @@ export async function sendMessageStream(
     // Nota: Gemini 2.5 Flash Image tiene un bug conocido donde ignora aspectRatio
     // Ver: https://discuss.ai.google.dev/t/gemini-2-5-flash-nano-banana-auto-aspect-ratio-issue/108225
 
-    const responseStream = await withRetry(
-      () => ai.models.generateContentStream({
-        model: normalizeModelId(modelId),
-        contents,
-        config,
-      }),
+    // withRetry envuelve conexión + consumo completo del stream
+    // Si falla mid-stream (429 durante iteración), se reintenta desde cero
+    const result = await withRetry(
+      async () => {
+        const responseStream = await ai.models.generateContentStream({
+          model: normalizeModelId(modelId),
+          contents,
+          config,
+        });
+
+        let fullText = "";
+        const allImages: GeneratedImage[] = [];
+        let usageMetadata: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined;
+
+        for await (const chunk of responseStream) {
+          // Extraer texto del chunk
+          const parts = chunk.candidates?.[0]?.content?.parts;
+          const chunkText = extractTextFromParts(parts);
+
+          if (chunkText) {
+            fullText += chunkText;
+            callbacks.onChunk(chunkText);
+          }
+
+          // Extraer imágenes del chunk
+          const chunkImages = extractImagesFromParts(parts);
+          if (chunkImages.length > 0) {
+            allImages.push(...chunkImages);
+            if (callbacks.onImage) {
+              for (const img of chunkImages) {
+                callbacks.onImage(img);
+              }
+            }
+          }
+
+          if (chunk.usageMetadata) {
+            usageMetadata = chunk.usageMetadata;
+          }
+        }
+
+        return { fullText, allImages, usageMetadata };
+      },
       "generateContentStream",
       callbacks.onRetry
     );
 
-    let fullText = "";
-    const allImages: GeneratedImage[] = [];
-    let usageMetadata: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined;
-
-    for await (const chunk of responseStream) {
-      // Extraer texto del chunk
-      const parts = chunk.candidates?.[0]?.content?.parts;
-      const chunkText = extractTextFromParts(parts);
-
-      if (chunkText) {
-        fullText += chunkText;
-        callbacks.onChunk(chunkText);
-      }
-
-      // Extraer imágenes del chunk
-      const chunkImages = extractImagesFromParts(parts);
-      if (chunkImages.length > 0) {
-        allImages.push(...chunkImages);
-        if (callbacks.onImage) {
-          for (const img of chunkImages) {
-            callbacks.onImage(img);
-          }
-        }
-      }
-
-      if (chunk.usageMetadata) {
-        usageMetadata = chunk.usageMetadata;
-      }
-    }
-
     callbacks.onComplete(
-      fullText,
+      result.fullText,
       {
-        input: usageMetadata?.promptTokenCount || 0,
-        output: usageMetadata?.candidatesTokenCount || 0,
+        input: result.usageMetadata?.promptTokenCount || 0,
+        output: result.usageMetadata?.candidatesTokenCount || 0,
       },
-      allImages.length > 0 ? allImages : undefined
+      result.allImages.length > 0 ? result.allImages : undefined
     );
   } catch (error) {
     callbacks.onError(error instanceof Error ? error : new Error(String(error)));
