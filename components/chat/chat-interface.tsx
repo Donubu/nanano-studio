@@ -2216,7 +2216,7 @@ export function ChatInterface() {
                             <option value="">Selecciona un proyecto</option>
                             {projects.map((p) => (
                                 <option key={p.id} value={p.id}>
-                                    {p.title}
+                                    {p.client_name} - {p.title}
                                 </option>
                             ))}
                         </select>
