@@ -259,10 +259,10 @@ export async function POST(
 
     // Crear el stream de respuesta SSE
     const encoder = new TextEncoder();
+    let controllerClosed = false;
 
     const stream = new ReadableStream({
       async start(controller) {
-        let controllerClosed = false;
 
         const sendEvent = (data: Record<string, unknown>) => {
           if (!controllerClosed) {
@@ -495,6 +495,9 @@ export async function POST(
           controllerClosed = true;
           controller.close();
         }
+      },
+      cancel() {
+        controllerClosed = true;
       },
     });
 

@@ -469,6 +469,7 @@ export async function POST(
     const encoder = new TextEncoder();
     let modelMessageId: number | null = null;
     let fullResponse = "";
+    let controllerClosed = false; // Hoisted para que cancel() pueda accederlo
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -544,7 +545,6 @@ export async function POST(
         let savedImageMimeType: string | null = null;
         let imageUploadStarted = false; // Flag síncrono para evitar race condition
         let imageUploadPromise: Promise<void> | null = null; // Promise para esperar upload
-        let controllerClosed = false; // Flag para saber si el controller ya cerró
 
         try {
           await sendMessageStream(
@@ -755,6 +755,10 @@ export async function POST(
             controller.close();
           }
         }
+      },
+      cancel() {
+        // Cliente se desconectó (navegó, abortó fetch, reintentó)
+        controllerClosed = true;
       },
     });
 
