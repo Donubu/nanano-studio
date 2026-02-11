@@ -2945,6 +2945,8 @@ export function ChatInterface() {
                                                     : projectUsage[currentConversation.generation_type]?.hq
                                             }
                                             showUsage={true}
+                                            normalModelName={currentTypeConfig?.model_normal_name}
+                                            hqModelName={currentTypeConfig?.model_hq_name}
                                         />
                                     </div>
                                 )}
@@ -3108,6 +3110,8 @@ export function ChatInterface() {
                                         selectedQuality={selectedQualityTier}
                                         onSelect={setSelectedQualityTier}
                                         disabled={isSending || messages.length > 0}
+                                        normalModelName={currentTypeConfig?.model_normal_name}
+                                        hqModelName={currentTypeConfig?.model_hq_name}
                                     />
                                     {messages.length > 0 && (
                                         <p className="text-xs text-muted-foreground mt-1">

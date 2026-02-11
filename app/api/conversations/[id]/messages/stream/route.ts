@@ -703,6 +703,9 @@ export async function POST(
                 }
               },
               onError: async (error) => {
+                // Si el cliente se desconectó, no guardar error ni intentar enviar
+                if (controllerClosed) return;
+
                 console.error("Error en streaming:", error);
 
                 // Guardar mensaje de error (con content_type 'error' para excluirlo del historial)
@@ -728,9 +731,13 @@ export async function POST(
                 }
               },
             },
-            labels
+            labels,
+            request.signal
           );
         } catch (error) {
+          // Si el cliente se desconectó, no guardar error ni intentar enviar
+          if (controllerClosed) return;
+
           console.error("Error iniciando streaming:", error);
           const errorMessage = error instanceof Error ? error.message : "Error desconocido";
 

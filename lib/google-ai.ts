@@ -11,8 +11,16 @@ const RETRY_CONFIG = {
   backoffMultiplier: 2,  // duplicar cada vez
 };
 
-// Helper para esperar
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+// Helper para esperar (con soporte para abort)
+const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve) => {
+  if (signal?.aborted) { resolve(); return; }
+  const timer = setTimeout(() => {
+    signal?.removeEventListener('abort', onAbort);
+    resolve();
+  }, ms);
+  const onAbort = () => { clearTimeout(timer); resolve(); };
+  if (signal) signal.addEventListener('abort', onAbort, { once: true });
+});
 
 // Verificar si el error es retriable (429, 503, etc.)
 function isRetriableError(error: unknown): boolean {
@@ -50,16 +58,27 @@ export interface RetryInfo {
 async function withRetry<T>(
   operation: () => Promise<T>,
   operationName: string,
-  onRetry?: (info: RetryInfo) => void
+  onRetry?: (info: RetryInfo) => void,
+  abortSignal?: AbortSignal
 ): Promise<T> {
   let lastError: Error | undefined;
   let delay = RETRY_CONFIG.initialDelayMs;
 
   for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+    // Si el cliente se desconectó, no reintentar
+    if (abortSignal?.aborted) {
+      throw lastError || new Error('Operation cancelled');
+    }
+
     try {
       return await operation();
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Si el cliente se desconectó, no reintentar
+      if (abortSignal?.aborted) {
+        throw lastError;
+      }
 
       // Si no es retriable o ya no quedan intentos, lanzar error
       if (!isRetriableError(error) || attempt === RETRY_CONFIG.maxRetries) {
@@ -82,8 +101,8 @@ async function withRetry<T>(
         });
       }
 
-      // Esperar antes de reintentar
-      await sleep(delay);
+      // Esperar antes de reintentar (se interrumpe si el cliente se desconecta)
+      await sleep(delay, abortSignal);
 
       // Aumentar delay para el siguiente intento (backoff exponencial)
       delay = Math.min(delay * RETRY_CONFIG.backoffMultiplier, RETRY_CONFIG.maxDelayMs);
@@ -338,7 +357,8 @@ export async function sendMessageStream(
   systemInstruction: string | null,
   settings: GenerationSettings = {},
   callbacks: StreamCallbacks,
-  labels?: Labels
+  labels?: Labels,
+  abortSignal?: AbortSignal
 ): Promise<void> {
   try {
     const contents = convertToGoogleFormat(messages);
@@ -406,7 +426,8 @@ export async function sendMessageStream(
         return { fullText, allImages, usageMetadata };
       },
       "generateContentStream",
-      callbacks.onRetry
+      callbacks.onRetry,
+      abortSignal
     );
 
     callbacks.onComplete(

@@ -22,6 +22,8 @@ interface QualitySelectorProps {
   normalUsage?: UsageInfo;
   hqUsage?: UsageInfo;
   showUsage?: boolean;
+  normalModelName?: string | null;
+  hqModelName?: string | null;
 }
 
 export function QualitySelector({
@@ -31,6 +33,8 @@ export function QualitySelector({
   normalUsage,
   hqUsage,
   showUsage = true,
+  normalModelName,
+  hqModelName,
 }: QualitySelectorProps) {
   const normalDisabled = normalUsage ? normalUsage.limit > 0 && normalUsage.used >= normalUsage.limit : false;
   const hqDisabled = hqUsage ? hqUsage.limit > 0 && hqUsage.used >= hqUsage.limit : false;
@@ -39,6 +43,9 @@ export function QualitySelector({
     if (!usage || usage.limit === 0) return null;
     return `${usage.used}/${usage.limit}`;
   };
+
+  const normalLabel = normalModelName || "Normal";
+  const hqLabel = hqModelName || "HQ";
 
   return (
     <div className="flex items-center gap-1 p-1 bg-muted rounded-lg">
@@ -55,18 +62,20 @@ export function QualitySelector({
             }`}
             disabled={disabled || normalDisabled}
           >
-            <Zap className="w-4 h-4" />
-            Normal
+            <Zap className="w-4 h-4 shrink-0" />
+            <span className="truncate max-w-[120px]">{normalLabel}</span>
             {showUsage && formatUsage(normalUsage) && (
-              <span className="text-xs opacity-60">({formatUsage(normalUsage)})</span>
+              <span className="text-xs opacity-60 shrink-0">({formatUsage(normalUsage)})</span>
             )}
           </button>
         </TooltipTrigger>
-        {normalDisabled && (
+        {normalDisabled ? (
           <TooltipContent>
             Has alcanzado el límite de generaciones normales para este mes
           </TooltipContent>
-        )}
+        ) : normalModelName ? (
+          <TooltipContent>Normal — {normalModelName}</TooltipContent>
+        ) : null}
       </Tooltip>
 
       <Tooltip>
@@ -82,10 +91,10 @@ export function QualitySelector({
             }`}
             disabled={disabled || hqDisabled}
           >
-            <Sparkles className="w-4 h-4" />
-            HQ
+            <Sparkles className="w-4 h-4 shrink-0" />
+            <span className="truncate max-w-[120px]">{hqLabel}</span>
             {showUsage && formatUsage(hqUsage) && (
-              <span className="text-xs opacity-60">({formatUsage(hqUsage)})</span>
+              <span className="text-xs opacity-60 shrink-0">({formatUsage(hqUsage)})</span>
             )}
           </button>
         </TooltipTrigger>
@@ -93,6 +102,8 @@ export function QualitySelector({
           <TooltipContent>
             Has alcanzado el límite de generaciones HQ para este mes
           </TooltipContent>
+        ) : hqModelName ? (
+          <TooltipContent>HQ — {hqModelName}</TooltipContent>
         ) : (
           <TooltipContent>
             Alta calidad - Modelo premium con mejores resultados
@@ -121,31 +132,46 @@ export function QualitySelectorCompact({
   selectedQuality,
   onSelect,
   disabled,
-}: Pick<QualitySelectorProps, "selectedQuality" | "onSelect" | "disabled">) {
+  normalModelName,
+  hqModelName,
+}: Pick<QualitySelectorProps, "selectedQuality" | "onSelect" | "disabled" | "normalModelName" | "hqModelName">) {
+  const normalLabel = normalModelName || "Normal";
+  const hqLabel = hqModelName || "HQ";
+
   return (
     <div className="flex items-center gap-0.5 p-0.5 bg-muted rounded-md">
-      <button
-        onClick={() => onSelect("normal")}
-        className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
-          selectedQuality === "normal"
-            ? "bg-background text-foreground shadow-sm"
-            : "text-muted-foreground hover:text-foreground"
-        }`}
-        disabled={disabled}
-      >
-        Normal
-      </button>
-      <button
-        onClick={() => onSelect("hq")}
-        className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
-          selectedQuality === "hq"
-            ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-sm"
-            : "text-muted-foreground hover:text-foreground"
-        }`}
-        disabled={disabled}
-      >
-        HQ
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={() => onSelect("normal")}
+            className={`px-2 py-1 rounded text-xs font-medium transition-colors truncate max-w-[100px] ${
+              selectedQuality === "normal"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            disabled={disabled}
+          >
+            {normalLabel}
+          </button>
+        </TooltipTrigger>
+        {normalModelName && <TooltipContent>{normalModelName}</TooltipContent>}
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={() => onSelect("hq")}
+            className={`px-2 py-1 rounded text-xs font-medium transition-colors truncate max-w-[100px] ${
+              selectedQuality === "hq"
+                ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            disabled={disabled}
+          >
+            {hqLabel}
+          </button>
+        </TooltipTrigger>
+        {hqModelName && <TooltipContent>{hqModelName}</TooltipContent>}
+      </Tooltip>
     </div>
   );
 }
