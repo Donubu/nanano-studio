@@ -373,6 +373,8 @@ export async function generateVideo(
     const builtLabels = buildLabels(labels, backend);
 
     // Iniciar la operación de generación de video (con retry)
+    console.log("[Video] Calling generateVideos API...");
+    const operationStartTime = Date.now();
     const operation = await withRetry(
       () => client.models.generateVideos({
         model: normalizedModelId,
@@ -424,10 +426,13 @@ export async function generateVideo(
       }
     );
 
+    const operationElapsed = ((Date.now() - operationStartTime) / 1000).toFixed(1);
+    console.log(`[Video] generateVideos returned after ${operationElapsed}s. done=${operation?.done}, hasResponse=${!!operation?.response}`);
+
     // Si la operación ya tiene el resultado (el SDK esperó internamente)
     const immediateVideo = extractVideoFromResponse(operation?.response);
     if (immediateVideo) {
-
+      console.log(`[Video] SDK returned completed video immediately (waited ${operationElapsed}s internally)`);
       onProgress?.({
         status: "completed",
         message: "Video generado, descargando...",
@@ -451,6 +456,7 @@ export async function generateVideo(
       };
     }
 
+    console.log("[Video] Operation not done yet, starting polling...");
     onProgress?.({
       status: "processing",
       message: "Video en cola de generación...",
@@ -510,9 +516,10 @@ async function pollVideoOperation(
     try {
       // Actualizar el estado de la operación usando el SDK
       operation = await aiClient.operations.getVideosOperation({ operation });
+      console.log(`[Video] Poll #${pollCount} (${elapsedMinutes} min) - done=${operation.done}`);
     } catch (pollError) {
       // Log poll errors but continue polling
-      console.error(`[Video] Poll error:`, pollError);
+      console.error(`[Video] Poll #${pollCount} error:`, pollError);
     }
   }
 
