@@ -251,7 +251,7 @@ export async function generateImagen(
       numberOfImages: config.numberOfImages || 1,
       aspectRatio: config.aspectRatio,
       // Person generation (allow adults by default) - supported by both APIs
-      personGeneration: "allow_adult",
+      personGeneration: "allow_all",
     };
 
     if (isVertex) {

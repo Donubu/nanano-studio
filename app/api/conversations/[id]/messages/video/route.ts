@@ -289,6 +289,7 @@ export async function POST(
             generateAudio: audioEnabled,
             negativePrompt: videoSettings?.negativePrompt || conversation.video_negative_prompt || undefined,
             seed: generatedSeed,
+            personGeneration: "allow_all",
           };
 
           // Debug: log final config
