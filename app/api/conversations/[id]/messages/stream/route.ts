@@ -507,7 +507,7 @@ export async function POST(
         };
 
         // Debug: log completo de la solicitud al modelo
-        console.log("\n========== [GOOGLE AI REQUEST] ==========");
+        console.log(`\n========== [GOOGLE AI REQUEST] (${process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API"}) ==========`);
         console.log(JSON.stringify(requestData, null, 2));
         console.log("==========================================\n");
 

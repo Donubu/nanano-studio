@@ -218,7 +218,7 @@ export async function POST(
     const resolution: ImagenResolution = (imageSettings?.resolution ||
       conversation.image_size || "1K") as ImagenResolution;
 
-    console.log("\n========== [IMAGEN 4 GENERATION REQUEST] ==========");
+    console.log(`\n========== [IMAGEN 4 GENERATION REQUEST] (${process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API"}) ==========`);
     console.log("Model:", effectiveModelId);
     console.log("Quality tier:", effectiveQualityTier);
     console.log("Aspect Ratio:", aspectRatio);

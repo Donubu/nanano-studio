@@ -205,7 +205,7 @@ export async function generateImagen(
   });
 
   try {
-    console.log("\n========== [IMAGEN 4 GENERATION REQUEST] ==========");
+    console.log(`\n========== [IMAGEN 4 GENERATION REQUEST] (${isVertexAI ? "Vertex AI" : "Gemini API"}) ==========`);
     console.log("Model:", normalizedModelId);
     console.log("Seed:", effectiveSeed);
     console.log("Aspect Ratio:", config.aspectRatio);

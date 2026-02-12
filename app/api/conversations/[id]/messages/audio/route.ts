@@ -289,7 +289,7 @@ export async function POST(
             }
           }
 
-          console.log("\n========== [AUDIO GENERATION REQUEST] ==========");
+          console.log(`\n========== [AUDIO GENERATION REQUEST] (${process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API"}) ==========`);
           console.log("Model:", effectiveModelId);
           console.log("Quality tier:", effectiveQualityTier);
           console.log("Voice ID:", voiceId);

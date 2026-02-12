@@ -299,7 +299,7 @@ export async function POST(
             referenceImages: refImages,
           };
 
-          console.log("\n========== [VIDEO GENERATION REQUEST] ==========");
+          console.log(`\n========== [VIDEO GENERATION REQUEST] (${process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API"}) ==========`);
           console.log("Model:", effectiveModelId);
           console.log("Quality tier:", effectiveQualityTier);
           console.log("Seed:", generatedSeed, videoSettings?.seed ? "(user-provided)" : "(auto-generated)");
