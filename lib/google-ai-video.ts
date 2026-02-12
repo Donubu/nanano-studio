@@ -293,16 +293,20 @@ export async function generateVideo(
     const generateConfig: Record<string, unknown> = {
       aspectRatio: config.aspectRatio,
       durationSeconds: config.durationSeconds,
-      generateAudio: config.generateAudio,
     };
+
+    // generateAudio solo soportado en Vertex AI (Gemini API genera audio por defecto en VEO 3+)
+    if (isVertexAI) {
+      generateConfig.generateAudio = config.generateAudio;
+    }
 
     // Solo VEO 3+ soporta resolución
     if (modelId.includes("veo-3")) {
       generateConfig.resolution = config.resolution;
     }
 
-    // Agregar negative prompt si existe
-    if (config.negativePrompt) {
+    // Agregar negative prompt si existe (solo Vertex AI)
+    if (config.negativePrompt && isVertexAI) {
       generateConfig.negativePrompt = config.negativePrompt;
     }
 
@@ -366,8 +370,10 @@ export async function generateVideo(
           aspectRatio: config.aspectRatio,
           durationSeconds: config.durationSeconds,
           numberOfVideos: 1,
-          generateAudio: config.generateAudio,
-          ...(config.negativePrompt && { negativePrompt: config.negativePrompt }),
+          // generateAudio solo soportado en Vertex AI
+          ...(isVertexAI && { generateAudio: config.generateAudio }),
+          // negativePrompt solo soportado en Vertex AI
+          ...(config.negativePrompt && isVertexAI && { negativePrompt: config.negativePrompt }),
           ...(config.personGeneration && { personGeneration: config.personGeneration }),
           ...(config.seed !== undefined && isVertexAI && { seed: config.seed }),
           ...(preparedLastFrame && {

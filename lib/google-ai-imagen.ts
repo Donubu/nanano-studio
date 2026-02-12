@@ -207,11 +207,13 @@ export async function generateImagen(
   try {
     console.log(`\n========== [IMAGEN 4 GENERATION REQUEST] (${isVertexAI ? "Vertex AI" : "Gemini API"}) ==========`);
     console.log("Model:", normalizedModelId);
-    console.log("Seed:", effectiveSeed);
+    if (isVertexAI) {
+      console.log("Seed:", effectiveSeed);
+    }
     console.log("Aspect Ratio:", config.aspectRatio);
     console.log("Resolution:", config.resolution);
     console.log("Prompt:", prompt.substring(0, 100) + (prompt.length > 100 ? "..." : ""));
-    if (config.negativePrompt) {
+    if (config.negativePrompt && isVertexAI) {
       console.log("Negative Prompt:", config.negativePrompt.substring(0, 50));
     }
     console.log("====================================================\n");
@@ -225,27 +227,36 @@ export async function generateImagen(
     const builtLabels = buildLabels(labels);
 
     // Llamar a la API de generateImages con retry
-    // IMPORTANTE: addWatermark: false es requerido para que seed funcione
-    // enhancePrompt: false evita que se modifique el prompt
+    // Vertex AI soporta: seed, addWatermark, negativePrompt, sampleImageSize, labels
+    // Gemini API soporta: numberOfImages, aspectRatio, personGeneration
+    // Gemini API NO soporta: seed, addWatermark, negativePrompt, sampleImageSize
+    const imageConfig: Record<string, unknown> = {
+      numberOfImages: config.numberOfImages || 1,
+      aspectRatio: config.aspectRatio,
+      // Person generation (allow adults by default) - supported by both APIs
+      personGeneration: "allow_adult",
+    };
+
+    if (isVertexAI) {
+      // Vertex AI-only parameters
+      imageConfig.addWatermark = false; // Required for seed to work
+      imageConfig.seed = effectiveSeed;
+      if (config.resolution) {
+        imageConfig.sampleImageSize = config.resolution;
+      }
+      if (config.negativePrompt) {
+        imageConfig.negativePrompt = config.negativePrompt;
+      }
+      if (builtLabels) {
+        imageConfig.labels = builtLabels;
+      }
+    }
+
     const response = await withRetry(
       () => ai.models.generateImages({
         model: normalizedModelId,
         prompt: prompt,
-        config: {
-          numberOfImages: config.numberOfImages || 1,
-          aspectRatio: config.aspectRatio,
-          // Parameters for deterministic generation with seed
-          addWatermark: false, // Required for seed to work
-          seed: effectiveSeed,
-          // Resolution (only for Standard and Ultra models)
-          ...(config.resolution && { sampleImageSize: config.resolution }),
-          // Negative prompt
-          ...(config.negativePrompt && { negativePrompt: config.negativePrompt }),
-          // Person generation (allow adults by default)
-          personGeneration: "allow_adult",
-          // Labels for Vertex AI tracking
-          ...(builtLabels && { labels: builtLabels }),
-        } as Record<string, unknown>,
+        config: imageConfig,
       }),
       "generateImages",
       (info) => {
