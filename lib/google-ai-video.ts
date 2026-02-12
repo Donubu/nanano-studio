@@ -306,8 +306,8 @@ export async function generateVideo(
       generateConfig.negativePrompt = config.negativePrompt;
     }
 
-    // Agregar seed si existe
-    if (config.seed !== undefined) {
+    // Agregar seed si existe (solo Vertex AI, Gemini API no lo soporta)
+    if (config.seed !== undefined && isVertexAI) {
       generateConfig.seed = config.seed;
     }
 
@@ -369,7 +369,7 @@ export async function generateVideo(
           generateAudio: config.generateAudio,
           ...(config.negativePrompt && { negativePrompt: config.negativePrompt }),
           ...(config.personGeneration && { personGeneration: config.personGeneration }),
-          ...(config.seed !== undefined && { seed: config.seed }),
+          ...(config.seed !== undefined && isVertexAI && { seed: config.seed }),
           ...(preparedLastFrame && {
             lastFrame: {
               imageBytes: prepareImageInput(preparedLastFrame, detectMimeType(preparedLastFrame)).bytesBase64Encoded,
