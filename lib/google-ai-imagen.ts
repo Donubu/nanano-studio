@@ -21,9 +21,16 @@ function sanitizeLabel(value: string): string {
     .substring(0, 63);
 }
 
+// Per-model backend resolution
+function useVertexForBackend(backend?: string): boolean {
+  if (backend === 'vertex') return true;
+  if (backend === 'gemini') return false;
+  return isVertexAI;
+}
+
 // Construir labels para Vertex AI
-function buildLabels(labels?: Labels): Record<string, string> | undefined {
-  if (!labels || !isVertexAI) return undefined;
+function buildLabels(labels?: Labels, backend?: string): Record<string, string> | undefined {
+  if (!labels || !useVertexForBackend(backend)) return undefined;
 
   const result: Record<string, string> = {};
 
@@ -113,21 +120,28 @@ async function withRetry<T>(
   throw lastError;
 }
 
-// Inicializar cliente según configuración
-function createClient(): GoogleGenAI {
-  if (isVertexAI) {
-    return new GoogleGenAI({
-      vertexai: true,
-      project: process.env.GOOGLE_CLOUD_PROJECT,
-      location: process.env.GOOGLE_CLOUD_LOCATION,
+// Lazy dual-client support for per-model backend selection
+let vertexClient: GoogleGenAI | null = null;
+let geminiClient: GoogleGenAI | null = null;
+
+function getClient(backend?: string): GoogleGenAI {
+  if (useVertexForBackend(backend)) {
+    if (!vertexClient) {
+      vertexClient = new GoogleGenAI({
+        vertexai: true,
+        project: process.env.GOOGLE_CLOUD_PROJECT,
+        location: process.env.GOOGLE_CLOUD_LOCATION,
+      });
+    }
+    return vertexClient;
+  }
+  if (!geminiClient) {
+    geminiClient = new GoogleGenAI({
+      apiKey: process.env.GOOGLE_API_KEY,
     });
   }
-  return new GoogleGenAI({
-    apiKey: process.env.GOOGLE_API_KEY,
-  });
+  return geminiClient;
 }
-
-const ai = createClient();
 
 // ============================================
 // INTERFACES
@@ -162,8 +176,8 @@ export interface ImagenGenerationProgress {
 /**
  * Normaliza el model ID para compatibilidad entre Gemini API y Vertex AI
  */
-function normalizeModelId(modelId: string): string {
-  if (isVertexAI && modelId.startsWith("models/")) {
+function normalizeModelId(modelId: string, backend?: string): string {
+  if (useVertexForBackend(backend) && modelId.startsWith("models/")) {
     return modelId.replace("models/", "");
   }
   return modelId;
@@ -192,9 +206,12 @@ export async function generateImagen(
   prompt: string,
   config: ImagenGenerationConfig,
   onProgress?: (progress: ImagenGenerationProgress) => void,
-  labels?: Labels
+  labels?: Labels,
+  backend?: string
 ): Promise<GeneratedImage[]> {
-  const normalizedModelId = normalizeModelId(modelId);
+  const normalizedModelId = normalizeModelId(modelId, backend);
+  const isVertex = useVertexForBackend(backend);
+  const client = getClient(backend);
 
   // Generar seed si no se proporciona
   const effectiveSeed = config.seed ?? generateSeed();
@@ -205,15 +222,15 @@ export async function generateImagen(
   });
 
   try {
-    console.log(`\n========== [IMAGEN 4 GENERATION REQUEST] (${isVertexAI ? "Vertex AI" : "Gemini API"}) ==========`);
+    console.log(`\n========== [IMAGEN 4 GENERATION REQUEST] (${isVertex ? "Vertex AI" : "Gemini API"}) ==========`);
     console.log("Model:", normalizedModelId);
-    if (isVertexAI) {
+    if (isVertex) {
       console.log("Seed:", effectiveSeed);
     }
     console.log("Aspect Ratio:", config.aspectRatio);
     console.log("Resolution:", config.resolution);
     console.log("Prompt:", prompt.substring(0, 100) + (prompt.length > 100 ? "..." : ""));
-    if (config.negativePrompt && isVertexAI) {
+    if (config.negativePrompt && isVertex) {
       console.log("Negative Prompt:", config.negativePrompt.substring(0, 50));
     }
     console.log("====================================================\n");
@@ -224,7 +241,7 @@ export async function generateImagen(
     });
 
     // Build labels for Vertex AI tracking
-    const builtLabels = buildLabels(labels);
+    const builtLabels = buildLabels(labels, backend);
 
     // Llamar a la API de generateImages con retry
     // Vertex AI soporta: seed, addWatermark, negativePrompt, sampleImageSize, labels
@@ -237,7 +254,7 @@ export async function generateImagen(
       personGeneration: "allow_adult",
     };
 
-    if (isVertexAI) {
+    if (isVertex) {
       // Vertex AI-only parameters
       imageConfig.addWatermark = false; // Required for seed to work
       imageConfig.seed = effectiveSeed;
@@ -253,7 +270,7 @@ export async function generateImagen(
     }
 
     const response = await withRetry(
-      () => ai.models.generateImages({
+      () => client.models.generateImages({
         model: normalizedModelId,
         prompt: prompt,
         config: imageConfig,
@@ -327,10 +344,9 @@ export function isImagen4Model(modelId: string): boolean {
  * Verifica si la API de Imagen está configurada
  */
 export function isImagenConfigured(): boolean {
-  if (isVertexAI) {
-    return !!process.env.GOOGLE_CLOUD_PROJECT && !!process.env.GOOGLE_CLOUD_LOCATION;
-  }
-  return !!process.env.GOOGLE_API_KEY;
+  const vertexConfigured = !!process.env.GOOGLE_CLOUD_PROJECT && !!process.env.GOOGLE_CLOUD_LOCATION;
+  const geminiConfigured = !!process.env.GOOGLE_API_KEY;
+  return vertexConfigured || geminiConfigured;
 }
 
 /**

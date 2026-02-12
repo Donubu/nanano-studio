@@ -24,6 +24,7 @@ interface ModelRow extends RowDataPacket {
   cost_image_4k: number;
   cost_video_per_second: number;
   cost_audio_per_minute: number;
+  api_backend: string | null;
 }
 
 // GET - Obtener modelo por ID
@@ -96,6 +97,7 @@ export async function PUT(
       cost_image_4k,
       cost_video_per_second,
       cost_audio_per_minute,
+      api_backend,
     } = body;
 
     // Verificar que existe
@@ -146,7 +148,8 @@ export async function PUT(
         cost_image_2k = COALESCE(?, cost_image_2k),
         cost_image_4k = COALESCE(?, cost_image_4k),
         cost_video_per_second = COALESCE(?, cost_video_per_second),
-        cost_audio_per_minute = COALESCE(?, cost_audio_per_minute)
+        cost_audio_per_minute = COALESCE(?, cost_audio_per_minute),
+        api_backend = IF(? = 'KEEP', api_backend, ?)
        WHERE id = ?`,
       [
         model_id || null,
@@ -168,6 +171,8 @@ export async function PUT(
         cost_image_4k ?? null,
         cost_video_per_second ?? null,
         cost_audio_per_minute ?? null,
+        api_backend === undefined ? 'KEEP' : (api_backend || null),
+        api_backend === undefined ? null : (api_backend || null),
         id,
       ]
     );

@@ -27,6 +27,7 @@ interface ConversationRow extends RowDataPacket {
   project_name: string | null;
   // Cost fields from model
   cost_video_per_second: number;
+  model_api_backend: string | null;
 }
 
 interface VideoLimitRow extends RowDataPacket {
@@ -123,7 +124,7 @@ export async function POST(
     // Obtener conversación con configuración de video y costos del modelo
     const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, m.model_id as model_model_id, m.supports_video_generation, p.title as project_name,
+      `SELECT c.*, m.model_id as model_model_id, m.supports_video_generation, m.api_backend as model_api_backend, p.title as project_name,
               m.cost_video_per_second
        FROM conversations c
        JOIN models m ON c.model_id = m.id
@@ -143,6 +144,7 @@ export async function POST(
 
     // Get the correct model from project_generation_config based on quality_tier
     let effectiveModelId = conversation.model_model_id;
+    let effectiveBackend = conversation.model_api_backend || undefined;
     let effectiveCostVideoPerSecond = Number(conversation.cost_video_per_second) || 0;
     const generationType = conversation.generation_type || "video";
 
@@ -152,8 +154,10 @@ export async function POST(
           pgc.model_normal_id,
           pgc.model_hq_id,
           mn.model_id as model_normal_model_id,
+          mn.api_backend as mn_api_backend,
           mn.cost_video_per_second as mn_cost_video,
           mh.model_id as model_hq_model_id,
+          mh.api_backend as mh_api_backend,
           mh.cost_video_per_second as mh_cost_video
         FROM project_generation_config pgc
         LEFT JOIN models mn ON pgc.model_normal_id = mn.id
@@ -165,12 +169,14 @@ export async function POST(
         const config = configRows[0];
         if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
           effectiveModelId = config.model_hq_model_id;
+          effectiveBackend = config.mh_api_backend || undefined;
           effectiveCostVideoPerSecond = Number(config.mh_cost_video) || 0;
-          console.log(`[Video] Using HQ model from config: ${effectiveModelId}`);
+          console.log(`[Video] Using HQ model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
         } else if (config.model_normal_model_id) {
           effectiveModelId = config.model_normal_model_id;
+          effectiveBackend = config.mn_api_backend || undefined;
           effectiveCostVideoPerSecond = Number(config.mn_cost_video) || 0;
-          console.log(`[Video] Using Normal model from config: ${effectiveModelId}`);
+          console.log(`[Video] Using Normal model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
         }
       }
     }
@@ -299,7 +305,8 @@ export async function POST(
             referenceImages: refImages,
           };
 
-          console.log(`\n========== [VIDEO GENERATION REQUEST] (${process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API"}) ==========`);
+          const backendLabel = effectiveBackend === 'vertex' ? 'Vertex AI' : effectiveBackend === 'gemini' ? 'Gemini API' : (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API");
+          console.log(`\n========== [VIDEO GENERATION REQUEST] (${backendLabel}) ==========`);
           console.log("Model:", effectiveModelId);
           console.log("Quality tier:", effectiveQualityTier);
           console.log("Seed:", generatedSeed, videoSettings?.seed ? "(user-provided)" : "(auto-generated)");
@@ -329,7 +336,8 @@ export async function POST(
             videoInput,
             videoConfig,
             onProgress,
-            labels
+            labels,
+            effectiveBackend
           );
 
           // Guardar video en S3

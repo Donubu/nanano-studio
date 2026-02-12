@@ -23,9 +23,16 @@ function sanitizeLabel(value: string): string {
     .substring(0, 63);
 }
 
+// Per-model backend resolution
+function useVertexForBackend(backend?: string): boolean {
+  if (backend === 'vertex') return true;
+  if (backend === 'gemini') return false;
+  return isVertexAI;
+}
+
 // Construir labels para Vertex AI
-function buildLabels(labels?: Labels): Record<string, string> | undefined {
-  if (!labels || !isVertexAI) return undefined;
+function buildLabels(labels?: Labels, backend?: string): Record<string, string> | undefined {
+  if (!labels || !useVertexForBackend(backend)) return undefined;
 
   const result: Record<string, string> = {};
 
@@ -102,21 +109,28 @@ async function withRetry<T>(
   throw lastError;
 }
 
-// Inicializar cliente según configuración
-function createClient(): GoogleGenAI {
-  if (isVertexAI) {
-    return new GoogleGenAI({
-      vertexai: true,
-      project: process.env.GOOGLE_CLOUD_PROJECT,
-      location: process.env.GOOGLE_CLOUD_LOCATION,
+// Lazy dual-client support for per-model backend selection
+let vertexClient: GoogleGenAI | null = null;
+let geminiClient: GoogleGenAI | null = null;
+
+function getClient(backend?: string): GoogleGenAI {
+  if (useVertexForBackend(backend)) {
+    if (!vertexClient) {
+      vertexClient = new GoogleGenAI({
+        vertexai: true,
+        project: process.env.GOOGLE_CLOUD_PROJECT,
+        location: process.env.GOOGLE_CLOUD_LOCATION,
+      });
+    }
+    return vertexClient;
+  }
+  if (!geminiClient) {
+    geminiClient = new GoogleGenAI({
+      apiKey: process.env.GOOGLE_API_KEY,
     });
   }
-  return new GoogleGenAI({
-    apiKey: process.env.GOOGLE_API_KEY,
-  });
+  return geminiClient;
 }
-
-const ai = createClient();
 
 // ============================================
 // INTERFACES
@@ -149,9 +163,11 @@ export async function generateSingleSpeakerAudio(
   text: string,
   config: SingleSpeakerConfig,
   onProgress?: (progress: AudioGenerationProgress) => void,
-  labels?: Labels
+  labels?: Labels,
+  backend?: string
 ): Promise<GeneratedAudio> {
-  const normalizedModelId = normalizeModelId(modelId);
+  const normalizedModelId = normalizeModelId(modelId, backend);
+  const client = getClient(backend);
 
   onProgress?.({
     status: "processing",
@@ -165,7 +181,7 @@ export async function generateSingleSpeakerAudio(
       : text;
 
     const response = await withRetry(
-      () => ai.models.generateContent({
+      () => client.models.generateContent({
         model: normalizedModelId,
         contents: [{
           role: "user",
@@ -233,9 +249,11 @@ export async function generateMultiSpeakerAudio(
   text: string,
   config: MultiSpeakerConfig,
   onProgress?: (progress: AudioGenerationProgress) => void,
-  labels?: Labels
+  labels?: Labels,
+  backend?: string
 ): Promise<GeneratedAudio> {
-  const normalizedModelId = normalizeModelId(modelId);
+  const normalizedModelId = normalizeModelId(modelId, backend);
+  const client = getClient(backend);
 
   onProgress?.({
     status: "processing",
@@ -259,7 +277,7 @@ export async function generateMultiSpeakerAudio(
       : text;
 
     const response = await withRetry(
-      () => ai.models.generateContent({
+      () => client.models.generateContent({
         model: normalizedModelId,
         contents: [{
           role: "user",
@@ -407,8 +425,8 @@ export function convertPcmToWav(pcmBuffer: Buffer): Buffer {
 /**
  * Normaliza el model ID para compatibilidad entre Gemini API y Vertex AI
  */
-function normalizeModelId(modelId: string): string {
-  if (isVertexAI && modelId.startsWith("models/")) {
+function normalizeModelId(modelId: string, backend?: string): string {
+  if (useVertexForBackend(backend) && modelId.startsWith("models/")) {
     return modelId.replace("models/", "");
   }
   return modelId;
@@ -461,10 +479,9 @@ function estimateAudioDuration(base64Data: string): number {
  * Verifica si la API de audio está configurada
  */
 export function isAudioConfigured(): boolean {
-  if (isVertexAI) {
-    return !!process.env.GOOGLE_CLOUD_PROJECT && !!process.env.GOOGLE_CLOUD_LOCATION;
-  }
-  return !!process.env.GOOGLE_API_KEY;
+  const vertexConfigured = !!process.env.GOOGLE_CLOUD_PROJECT && !!process.env.GOOGLE_CLOUD_LOCATION;
+  const geminiConfigured = !!process.env.GOOGLE_API_KEY;
+  return vertexConfigured || geminiConfigured;
 }
 
 /**

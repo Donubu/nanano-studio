@@ -123,21 +123,36 @@ async function withRetry<T>(
   throw lastError;
 }
 
-// Inicializar cliente según configuración
-function createClient(): GoogleGenAI {
-  if (isVertexAI) {
-    return new GoogleGenAI({
-      vertexai: true,
-      project: process.env.GOOGLE_CLOUD_PROJECT,
-      location: process.env.GOOGLE_CLOUD_LOCATION,
-    });
-  }
-  return new GoogleGenAI({
-    apiKey: process.env.GOOGLE_API_KEY,
-  });
+// Per-model backend resolution
+// backend param: 'vertex' | 'gemini' | undefined (use global default)
+function useVertexForBackend(backend?: string): boolean {
+  if (backend === 'vertex') return true;
+  if (backend === 'gemini') return false;
+  return isVertexAI;
 }
 
-const ai = createClient();
+// Lazy dual-client support for per-model backend selection
+let vertexClient: GoogleGenAI | null = null;
+let geminiClient: GoogleGenAI | null = null;
+
+function getClient(backend?: string): GoogleGenAI {
+  if (useVertexForBackend(backend)) {
+    if (!vertexClient) {
+      vertexClient = new GoogleGenAI({
+        vertexai: true,
+        project: process.env.GOOGLE_CLOUD_PROJECT,
+        location: process.env.GOOGLE_CLOUD_LOCATION,
+      });
+    }
+    return vertexClient;
+  }
+  if (!geminiClient) {
+    geminiClient = new GoogleGenAI({
+      apiKey: process.env.GOOGLE_API_KEY,
+    });
+  }
+  return geminiClient;
+}
 
 export interface AttachedFile {
   dataUrl: string;
@@ -249,16 +264,16 @@ function sanitizeLabel(value: string): string {
 
 // Normalizar model ID para compatibilidad entre Gemini API y Vertex AI
 // Gemini API usa "models/gemini-..." pero Vertex AI usa solo "gemini-..."
-function normalizeModelId(modelId: string): string {
-  if (isVertexAI && modelId.startsWith("models/")) {
+function normalizeModelId(modelId: string, backend?: string): string {
+  if (useVertexForBackend(backend) && modelId.startsWith("models/")) {
     return modelId.replace("models/", "");
   }
   return modelId;
 }
 
 // Construir labels para Vertex AI
-function buildLabels(labels?: Labels): Record<string, string> | undefined {
-  if (!labels || !isVertexAI) return undefined;
+function buildLabels(labels?: Labels, backend?: string): Record<string, string> | undefined {
+  if (!labels || !useVertexForBackend(backend)) return undefined;
 
   const result: Record<string, string> = {};
 
@@ -310,13 +325,15 @@ export async function sendMessage(
   messages: ChatMessage[],
   systemInstruction: string | null,
   settings: GenerationSettings = {},
-  labels?: Labels
+  labels?: Labels,
+  backend?: string
 ): Promise<{
   text: string;
   images: GeneratedImage[];
   tokenCount: { input: number; output: number };
 }> {
   const contents = convertToGoogleFormat(messages);
+  const client = getClient(backend);
 
   const config: GenerateContentConfig = {
     temperature: settings.temperature ?? 1.0,
@@ -324,7 +341,7 @@ export async function sendMessage(
     topK: settings.topK ?? 40,
     maxOutputTokens: settings.maxOutputTokens ?? 8192,
     ...(systemInstruction && { systemInstruction }),
-    labels: buildLabels(labels),
+    labels: buildLabels(labels, backend),
     // Configuración para generación de imágenes
     ...(settings.imageConfig && {
       responseModalities: ["TEXT", "IMAGE"],
@@ -336,8 +353,8 @@ export async function sendMessage(
   };
 
   const response = await withRetry(
-    () => ai.models.generateContent({
-      model: normalizeModelId(modelId),
+    () => client.models.generateContent({
+      model: normalizeModelId(modelId, backend),
       contents,
       config,
     }),
@@ -369,10 +386,12 @@ export async function sendMessageStream(
   settings: GenerationSettings = {},
   callbacks: StreamCallbacks,
   labels?: Labels,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  backend?: string
 ): Promise<void> {
   try {
     const contents = convertToGoogleFormat(messages);
+    const client = getClient(backend);
 
     const config: GenerateContentConfig = {
       temperature: settings.temperature ?? 1.0,
@@ -380,7 +399,7 @@ export async function sendMessageStream(
       topK: settings.topK ?? 40,
       maxOutputTokens: settings.maxOutputTokens ?? 8192,
       ...(systemInstruction && { systemInstruction }),
-      labels: buildLabels(labels),
+      labels: buildLabels(labels, backend),
       // Configuración para generación de imágenes
       ...(settings.imageConfig && {
         responseModalities: ["TEXT", "IMAGE"],
@@ -398,8 +417,8 @@ export async function sendMessageStream(
     // Si falla mid-stream (429 durante iteración), se reintenta desde cero
     const result = await withRetry(
       async () => {
-        const responseStream = await ai.models.generateContentStream({
-          model: normalizeModelId(modelId),
+        const responseStream = await client.models.generateContentStream({
+          model: normalizeModelId(modelId, backend),
           contents,
           config,
         });
@@ -482,7 +501,7 @@ Reglas:
     };
 
     const response = await withRetry(
-      () => ai.models.generateContent({
+      () => getClient().models.generateContent({
         model: normalizeModelId(TITLE_MODEL),
         contents: [
           {
@@ -513,12 +532,12 @@ Reglas:
   }
 }
 
-// Validar que la API está configurada
+// Validar que la API está configurada (checks both backends since models may use either)
 export function isConfigured(): boolean {
-  if (isVertexAI) {
-    return !!process.env.GOOGLE_CLOUD_PROJECT && !!process.env.GOOGLE_CLOUD_LOCATION;
-  }
-  return !!process.env.GOOGLE_API_KEY;
+  const vertexConfigured = !!process.env.GOOGLE_CLOUD_PROJECT && !!process.env.GOOGLE_CLOUD_LOCATION;
+  const geminiConfigured = !!process.env.GOOGLE_API_KEY;
+  // At least one backend must be configured
+  return vertexConfigured || geminiConfigured;
 }
 
 // Exportar si estamos usando Vertex AI (útil para debugging)

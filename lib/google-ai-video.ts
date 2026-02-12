@@ -21,9 +21,16 @@ function sanitizeLabel(value: string): string {
     .substring(0, 63);
 }
 
+// Per-model backend resolution
+function useVertexForBackend(backend?: string): boolean {
+  if (backend === 'vertex') return true;
+  if (backend === 'gemini') return false;
+  return isVertexAI;
+}
+
 // Construir labels para Vertex AI
-function buildLabels(labels?: Labels): Record<string, string> | undefined {
-  if (!labels || !isVertexAI) return undefined;
+function buildLabels(labels?: Labels, backend?: string): Record<string, string> | undefined {
+  if (!labels || !useVertexForBackend(backend)) return undefined;
 
   const result: Record<string, string> = {};
 
@@ -109,21 +116,28 @@ async function withRetry<T>(
   throw lastError;
 }
 
-// Inicializar cliente según configuración
-function createClient(): GoogleGenAI {
-  if (isVertexAI) {
-    return new GoogleGenAI({
-      vertexai: true,
-      project: process.env.GOOGLE_CLOUD_PROJECT,
-      location: process.env.GOOGLE_CLOUD_LOCATION,
+// Lazy dual-client support for per-model backend selection
+let vertexClient: GoogleGenAI | null = null;
+let geminiClient: GoogleGenAI | null = null;
+
+function getClient(backend?: string): GoogleGenAI {
+  if (useVertexForBackend(backend)) {
+    if (!vertexClient) {
+      vertexClient = new GoogleGenAI({
+        vertexai: true,
+        project: process.env.GOOGLE_CLOUD_PROJECT,
+        location: process.env.GOOGLE_CLOUD_LOCATION,
+      });
+    }
+    return vertexClient;
+  }
+  if (!geminiClient) {
+    geminiClient = new GoogleGenAI({
+      apiKey: process.env.GOOGLE_API_KEY,
     });
   }
-  return new GoogleGenAI({
-    apiKey: process.env.GOOGLE_API_KEY,
-  });
+  return geminiClient;
 }
-
-const ai = createClient();
 
 // ============================================
 // INTERFACES
@@ -175,8 +189,8 @@ export interface VideoGenerationProgress {
 /**
  * Normaliza el model ID para compatibilidad entre Gemini API y Vertex AI
  */
-function normalizeModelId(modelId: string): string {
-  if (isVertexAI && modelId.startsWith("models/")) {
+function normalizeModelId(modelId: string, backend?: string): string {
+  if (useVertexForBackend(backend) && modelId.startsWith("models/")) {
     return modelId.replace("models/", "");
   }
   return modelId;
@@ -250,9 +264,12 @@ export async function generateVideo(
   input: VideoInput,
   config: VideoGenerationConfig,
   onProgress?: (progress: VideoGenerationProgress) => void,
-  labels?: Labels
+  labels?: Labels,
+  backend?: string
 ): Promise<GeneratedVideo> {
-  const normalizedModelId = normalizeModelId(modelId);
+  const normalizedModelId = normalizeModelId(modelId, backend);
+  const isVertex = useVertexForBackend(backend);
+  const client = getClient(backend);
 
   // Notificar inicio
   onProgress?.({
@@ -296,7 +313,7 @@ export async function generateVideo(
     };
 
     // generateAudio solo soportado en Vertex AI (Gemini API genera audio por defecto en VEO 3+)
-    if (isVertexAI) {
+    if (isVertex) {
       generateConfig.generateAudio = config.generateAudio;
     }
 
@@ -306,12 +323,12 @@ export async function generateVideo(
     }
 
     // Agregar negative prompt si existe (solo Vertex AI)
-    if (config.negativePrompt && isVertexAI) {
+    if (config.negativePrompt && isVertex) {
       generateConfig.negativePrompt = config.negativePrompt;
     }
 
     // Agregar seed si existe (solo Vertex AI, Gemini API no lo soporta)
-    if (config.seed !== undefined && isVertexAI) {
+    if (config.seed !== undefined && isVertex) {
       generateConfig.seed = config.seed;
     }
 
@@ -353,11 +370,11 @@ export async function generateVideo(
     });
 
     // Build labels for Vertex AI tracking
-    const builtLabels = buildLabels(labels);
+    const builtLabels = buildLabels(labels, backend);
 
     // Iniciar la operación de generación de video (con retry)
     const operation = await withRetry(
-      () => ai.models.generateVideos({
+      () => client.models.generateVideos({
         model: normalizedModelId,
         prompt: input.prompt,
         ...(preparedFirstFrame && {
@@ -371,11 +388,11 @@ export async function generateVideo(
           durationSeconds: config.durationSeconds,
           numberOfVideos: 1,
           // generateAudio solo soportado en Vertex AI
-          ...(isVertexAI && { generateAudio: config.generateAudio }),
+          ...(isVertex && { generateAudio: config.generateAudio }),
           // negativePrompt solo soportado en Vertex AI
-          ...(config.negativePrompt && isVertexAI && { negativePrompt: config.negativePrompt }),
+          ...(config.negativePrompt && isVertex && { negativePrompt: config.negativePrompt }),
           ...(config.personGeneration && { personGeneration: config.personGeneration }),
-          ...(config.seed !== undefined && isVertexAI && { seed: config.seed }),
+          ...(config.seed !== undefined && isVertex && { seed: config.seed }),
           ...(preparedLastFrame && {
             lastFrame: {
               imageBytes: prepareImageInput(preparedLastFrame, detectMimeType(preparedLastFrame)).bytesBase64Encoded,
@@ -441,7 +458,7 @@ export async function generateVideo(
     });
 
     // Polling para esperar a que complete (si el SDK no esperó)
-    const video = await pollVideoOperation(operation, config, onProgress);
+    const video = await pollVideoOperation(client, operation, config, onProgress);
 
     return {
       ...video,
@@ -457,7 +474,8 @@ export async function generateVideo(
  * Polling de la operación de video usando ai.operations.getVideosOperation()
  */
 async function pollVideoOperation(
-  initialOperation: Awaited<ReturnType<typeof ai.models.generateVideos>>,
+  aiClient: GoogleGenAI,
+  initialOperation: Awaited<ReturnType<GoogleGenAI["models"]["generateVideos"]>>,
   config: VideoGenerationConfig,
   onProgress?: (progress: VideoGenerationProgress) => void
 ): Promise<GeneratedVideo> {
@@ -491,7 +509,7 @@ async function pollVideoOperation(
 
     try {
       // Actualizar el estado de la operación usando el SDK
-      operation = await ai.operations.getVideosOperation({ operation });
+      operation = await aiClient.operations.getVideosOperation({ operation });
     } catch (pollError) {
       // Log poll errors but continue polling
       console.error(`[Video] Poll error:`, pollError);
@@ -603,10 +621,9 @@ export function supportsAdvancedFeatures(modelId: string): boolean {
  * Verifica si la API de video está configurada
  */
 export function isVideoConfigured(): boolean {
-  if (isVertexAI) {
-    return !!process.env.GOOGLE_CLOUD_PROJECT && !!process.env.GOOGLE_CLOUD_LOCATION;
-  }
-  return !!process.env.GOOGLE_API_KEY;
+  const vertexConfigured = !!process.env.GOOGLE_CLOUD_PROJECT && !!process.env.GOOGLE_CLOUD_LOCATION;
+  const geminiConfigured = !!process.env.GOOGLE_API_KEY;
+  return vertexConfigured || geminiConfigured;
 }
 
 /**

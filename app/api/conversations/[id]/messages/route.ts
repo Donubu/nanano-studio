@@ -31,6 +31,7 @@ interface ConversationRow extends RowDataPacket {
   image_size: string;
   supports_image_generation: boolean;
   project_name: string | null;
+  model_api_backend: string | null;
 }
 
 // GET - Obtener mensajes de una conversación
@@ -106,7 +107,7 @@ export async function POST(
     // Obtener conversación con configuración y nombre del proyecto
     const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, p.title as project_name
+      `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, m.api_backend as model_api_backend, p.title as project_name
        FROM conversations c
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
@@ -189,7 +190,8 @@ export async function POST(
               },
             }),
           },
-          labels
+          labels,
+          conversation.model_api_backend || undefined
         );
         modelResponse = result.text;
         tokensInput = result.tokenCount.input;

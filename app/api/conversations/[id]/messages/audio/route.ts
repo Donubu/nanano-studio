@@ -41,6 +41,7 @@ interface ConversationRow extends RowDataPacket {
   supports_audio_generation: boolean;
   project_name: string | null;
   cost_audio_per_minute: number;
+  model_api_backend: string | null;
 }
 
 interface AudioLimitRow extends RowDataPacket {
@@ -128,7 +129,7 @@ export async function POST(
     // Obtener conversación con configuración de audio y costos del modelo
     const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, m.model_id as model_model_id, m.supports_audio_generation, p.title as project_name,
+      `SELECT c.*, m.model_id as model_model_id, m.supports_audio_generation, m.api_backend as model_api_backend, p.title as project_name,
               m.cost_audio_per_minute
        FROM conversations c
        JOIN models m ON c.model_id = m.id
@@ -148,6 +149,7 @@ export async function POST(
 
     // Get the correct model from project_generation_config based on quality_tier
     let effectiveModelId = conversation.model_model_id;
+    let effectiveBackend = conversation.model_api_backend || undefined;
     let effectiveCostAudioPerMinute = Number(conversation.cost_audio_per_minute) || 0;
     const generationType = conversation.generation_type || "audio";
 
@@ -157,8 +159,10 @@ export async function POST(
           pgc.model_normal_id,
           pgc.model_hq_id,
           mn.model_id as model_normal_model_id,
+          mn.api_backend as mn_api_backend,
           mn.cost_audio_per_minute as mn_cost_audio,
           mh.model_id as model_hq_model_id,
+          mh.api_backend as mh_api_backend,
           mh.cost_audio_per_minute as mh_cost_audio
         FROM project_generation_config pgc
         LEFT JOIN models mn ON pgc.model_normal_id = mn.id
@@ -170,12 +174,14 @@ export async function POST(
         const config = configRows[0];
         if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
           effectiveModelId = config.model_hq_model_id;
+          effectiveBackend = config.mh_api_backend || undefined;
           effectiveCostAudioPerMinute = Number(config.mh_cost_audio) || 0;
-          console.log(`[Audio] Using HQ model from config: ${effectiveModelId}`);
+          console.log(`[Audio] Using HQ model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
         } else if (config.model_normal_model_id) {
           effectiveModelId = config.model_normal_model_id;
+          effectiveBackend = config.mn_api_backend || undefined;
           effectiveCostAudioPerMinute = Number(config.mn_cost_audio) || 0;
-          console.log(`[Audio] Using Normal model from config: ${effectiveModelId}`);
+          console.log(`[Audio] Using Normal model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
         }
       }
     }
@@ -289,7 +295,8 @@ export async function POST(
             }
           }
 
-          console.log(`\n========== [AUDIO GENERATION REQUEST] (${process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API"}) ==========`);
+          const backendLabel = effectiveBackend === 'vertex' ? 'Vertex AI' : effectiveBackend === 'gemini' ? 'Gemini API' : (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API");
+          console.log(`\n========== [AUDIO GENERATION REQUEST] (${backendLabel}) ==========`);
           console.log("Model:", effectiveModelId);
           console.log("Quality tier:", effectiveQualityTier);
           console.log("Voice ID:", voiceId);
@@ -330,7 +337,8 @@ export async function POST(
                 stylePrompt: stylePrompt || undefined,
               },
               onProgress,
-              labels
+              labels,
+              effectiveBackend
             );
             voiceConfig = speakerConfig;
           } else {
@@ -342,7 +350,8 @@ export async function POST(
                 stylePrompt: stylePrompt || undefined,
               },
               onProgress,
-              labels
+              labels,
+              effectiveBackend
             );
             voiceConfig = { voiceId };
           }

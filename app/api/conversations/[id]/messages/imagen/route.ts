@@ -29,6 +29,7 @@ interface ConversationRow extends RowDataPacket {
   cost_image_1k: number;
   cost_image_2k: number;
   cost_image_4k: number;
+  model_api_backend: string | null;
 }
 
 // POST - Generar imagen con Imagen 4 (SSE stream con retry feedback)
@@ -81,7 +82,7 @@ export async function POST(
     // Obtener conversacion con configuracion de imagen y costos del modelo
     const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, p.title as project_name,
+      `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, m.api_backend as model_api_backend, p.title as project_name,
               m.cost_image_1k, m.cost_image_2k, m.cost_image_4k
        FROM conversations c
        JOIN models m ON c.model_id = m.id
@@ -99,6 +100,7 @@ export async function POST(
     // Get the correct model from project_generation_config based on quality_tier
     // Use generation_type_override if provided (e.g., when video conversation is in image mode)
     let effectiveModelId = conversation.model_model_id;
+    let effectiveBackend = conversation.model_api_backend || undefined;
     let effectiveCostImage1k = Number(conversation.cost_image_1k) || 0;
     let effectiveCostImage2k = Number(conversation.cost_image_2k) || 0;
     let effectiveCostImage4k = Number(conversation.cost_image_4k) || 0;
@@ -113,10 +115,12 @@ export async function POST(
           pgc.model_normal_id,
           pgc.model_hq_id,
           mn.model_id as model_normal_model_id,
+          mn.api_backend as mn_api_backend,
           mn.cost_image_1k as mn_cost_1k,
           mn.cost_image_2k as mn_cost_2k,
           mn.cost_image_4k as mn_cost_4k,
           mh.model_id as model_hq_model_id,
+          mh.api_backend as mh_api_backend,
           mh.cost_image_1k as mh_cost_1k,
           mh.cost_image_2k as mh_cost_2k,
           mh.cost_image_4k as mh_cost_4k
@@ -130,16 +134,18 @@ export async function POST(
         const config = configRows[0];
         if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
           effectiveModelId = config.model_hq_model_id;
+          effectiveBackend = config.mh_api_backend || undefined;
           effectiveCostImage1k = Number(config.mh_cost_1k) || 0;
           effectiveCostImage2k = Number(config.mh_cost_2k) || 0;
           effectiveCostImage4k = Number(config.mh_cost_4k) || 0;
-          console.log(`[Imagen] Using HQ model from config: ${effectiveModelId}`);
+          console.log(`[Imagen] Using HQ model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
         } else if (config.model_normal_model_id) {
           effectiveModelId = config.model_normal_model_id;
+          effectiveBackend = config.mn_api_backend || undefined;
           effectiveCostImage1k = Number(config.mn_cost_1k) || 0;
           effectiveCostImage2k = Number(config.mn_cost_2k) || 0;
           effectiveCostImage4k = Number(config.mn_cost_4k) || 0;
-          console.log(`[Imagen] Using Normal model from config: ${effectiveModelId}`);
+          console.log(`[Imagen] Using Normal model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
         }
       }
     }
@@ -218,7 +224,8 @@ export async function POST(
     const resolution: ImagenResolution = (imageSettings?.resolution ||
       conversation.image_size || "1K") as ImagenResolution;
 
-    console.log(`\n========== [IMAGEN 4 GENERATION REQUEST] (${process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API"}) ==========`);
+    const backendLabel = effectiveBackend === 'vertex' ? 'Vertex AI' : effectiveBackend === 'gemini' ? 'Gemini API' : (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API");
+    console.log(`\n========== [IMAGEN 4 GENERATION REQUEST] (${backendLabel}) ==========`);
     console.log("Model:", effectiveModelId);
     console.log("Quality tier:", effectiveQualityTier);
     console.log("Aspect Ratio:", aspectRatio);
@@ -277,7 +284,8 @@ export async function POST(
               seed: imageSettings?.seed,
             },
             onProgress,
-            labels
+            labels,
+            effectiveBackend
           );
 
           if (generatedImages.length === 0) {

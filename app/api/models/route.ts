@@ -24,6 +24,7 @@ interface ModelRow extends RowDataPacket {
   cost_image_4k: number;
   cost_video_per_second: number;
   cost_audio_per_minute: number;
+  api_backend: string | null;
   created_at: Date;
 }
 
@@ -87,6 +88,7 @@ export async function POST(request: NextRequest) {
       cost_image_4k = 0,
       cost_video_per_second = 0,
       cost_audio_per_minute = 0,
+      api_backend = null,
     } = body;
 
     if (!model_id || !display_name) {
@@ -116,15 +118,17 @@ export async function POST(request: NextRequest) {
         supports_image_generation, supports_video_generation, supports_audio_generation,
         supports_reference_images, max_tokens,
         cost_input_per_million, cost_output_per_million,
-        cost_image_1k, cost_image_2k, cost_image_4k, cost_video_per_second, cost_audio_per_minute
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        cost_image_1k, cost_image_2k, cost_image_4k, cost_video_per_second, cost_audio_per_minute,
+        api_backend
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         model_id, display_name, description || null, is_active,
         supports_images, supports_audio, supports_video,
         supports_image_generation, supports_video_generation, supports_audio_generation,
         supports_reference_images, max_tokens,
         cost_input_per_million, cost_output_per_million,
-        cost_image_1k, cost_image_2k, cost_image_4k, cost_video_per_second, cost_audio_per_minute
+        cost_image_1k, cost_image_2k, cost_image_4k, cost_video_per_second, cost_audio_per_minute,
+        api_backend
       ]
     );
 

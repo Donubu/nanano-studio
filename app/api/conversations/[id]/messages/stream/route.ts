@@ -75,6 +75,7 @@ interface ConversationRow extends RowDataPacket {
   cost_image_2k: number;
   cost_image_4k: number;
   cost_video_per_second: number;
+  model_api_backend: string | null;
 }
 
 interface GenerationConfigRow extends RowDataPacket {
@@ -155,7 +156,7 @@ export async function POST(
     // Obtener conversación con configuración, nombre del proyecto y costos del modelo
     const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, c.generation_type, m.model_id as model_model_id, m.supports_image_generation, p.title as project_name,
+      `SELECT c.*, c.generation_type, m.model_id as model_model_id, m.supports_image_generation, m.api_backend as model_api_backend, p.title as project_name,
               m.cost_input_per_million, m.cost_output_per_million,
               m.cost_image_1k, m.cost_image_2k, m.cost_image_4k, m.cost_video_per_second
        FROM conversations c
@@ -180,6 +181,7 @@ export async function POST(
     let effectiveImageAspectRatio = conversation.image_aspect_ratio;
     let effectiveImageSize = conversation.image_size;
     let effectiveModelDbId = conversation.model_id; // Track the DB id for cost lookup
+    let effectiveBackend = conversation.model_api_backend || undefined;
 
     // Get the correct model from project_generation_config based on quality_tier
     // Use generation_type_override if provided (e.g., when video conversation is in image mode)
@@ -204,6 +206,7 @@ export async function POST(
           pgc.model_hq_id,
           mn.model_id as model_normal_model_id,
           mn.supports_image_generation as model_normal_supports_image,
+          mn.api_backend as mn_api_backend,
           mn.cost_input_per_million as mn_cost_input,
           mn.cost_output_per_million as mn_cost_output,
           mn.cost_image_1k as mn_cost_image_1k,
@@ -212,6 +215,7 @@ export async function POST(
           mn.cost_video_per_second as mn_cost_video,
           mh.model_id as model_hq_model_id,
           mh.supports_image_generation as model_hq_supports_image,
+          mh.api_backend as mh_api_backend,
           mh.cost_input_per_million as mh_cost_input,
           mh.cost_output_per_million as mh_cost_output,
           mh.cost_image_1k as mh_cost_image_1k,
@@ -230,6 +234,7 @@ export async function POST(
           effectiveModelId = config.model_hq_model_id;
           effectiveSupportsImageGeneration = config.model_hq_supports_image;
           effectiveModelDbId = config.model_hq_id;
+          effectiveBackend = config.mh_api_backend || undefined;
           effectiveCosts = {
             cost_input_per_million: Number(config.mh_cost_input) || 0,
             cost_output_per_million: Number(config.mh_cost_output) || 0,
@@ -238,11 +243,12 @@ export async function POST(
             cost_image_4k: Number(config.mh_cost_image_4k) || 0,
             cost_video_per_second: Number(config.mh_cost_video) || 0,
           };
-          console.log(`[Stream] Using HQ model from config: ${effectiveModelId}`);
+          console.log(`[Stream] Using HQ model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
         } else if (config.model_normal_model_id) {
           effectiveModelId = config.model_normal_model_id;
           effectiveSupportsImageGeneration = config.model_normal_supports_image;
           effectiveModelDbId = config.model_normal_id;
+          effectiveBackend = config.mn_api_backend || undefined;
           effectiveCosts = {
             cost_input_per_million: Number(config.mn_cost_input) || 0,
             cost_output_per_million: Number(config.mn_cost_output) || 0,
@@ -251,7 +257,7 @@ export async function POST(
             cost_image_4k: Number(config.mn_cost_image_4k) || 0,
             cost_video_per_second: Number(config.mn_cost_video) || 0,
           };
-          console.log(`[Stream] Using Normal model from config: ${effectiveModelId}`);
+          console.log(`[Stream] Using Normal model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
         }
       }
     }
@@ -507,7 +513,8 @@ export async function POST(
         };
 
         // Debug: log completo de la solicitud al modelo
-        console.log(`\n========== [GOOGLE AI REQUEST] (${process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API"}) ==========`);
+        const backendLabel = effectiveBackend === 'vertex' ? 'Vertex AI' : effectiveBackend === 'gemini' ? 'Gemini API' : (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API");
+        console.log(`\n========== [GOOGLE AI REQUEST] (${backendLabel}) ==========`);
         console.log(JSON.stringify(requestData, null, 2));
         console.log("==========================================\n");
 
@@ -731,7 +738,8 @@ export async function POST(
               },
             },
             labels,
-            request.signal
+            request.signal,
+            effectiveBackend
           );
         } catch (error) {
           // Si el cliente se desconectó, no guardar error ni intentar enviar
