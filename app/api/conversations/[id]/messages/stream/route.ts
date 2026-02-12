@@ -709,11 +709,16 @@ export async function POST(
                 console.error("Error en streaming:", error);
 
                 // Guardar mensaje de error (con content_type 'error' para excluirlo del historial)
+                // También marcar el mensaje del usuario con ignore_in_context para no enviarlo como contexto
                 const errorMessage = `Error al generar respuesta: ${error.message}`;
                 const [modelResult] = await pool.execute<ResultSetHeader>(
                   `INSERT INTO messages (conversation_id, role, content_type, content)
                    VALUES (?, 'model', 'error', ?)`,
                   [id, errorMessage]
+                );
+                await pool.execute(
+                  `UPDATE messages SET ignore_in_context = 1 WHERE id = ?`,
+                  [userMessageId]
                 );
 
                 if (!controllerClosed) {

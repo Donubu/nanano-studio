@@ -480,10 +480,15 @@ export async function POST(
           const errorMessage = error instanceof Error ? error.message : "Error desconocido";
 
           // Guardar mensaje de error (con content_type 'error' para excluirlo del historial)
+          // También marcar el mensaje del usuario con ignore_in_context para no enviarlo como contexto
           const [modelResult] = await pool.execute<ResultSetHeader>(
             `INSERT INTO messages (conversation_id, role, content_type, content)
              VALUES (?, 'model', 'error', ?)`,
             [id, `Error generando audio: ${errorMessage}`]
+          );
+          await pool.execute(
+            `UPDATE messages SET ignore_in_context = 1 WHERE id = ?`,
+            [userMessageId]
           );
 
           sendEvent({

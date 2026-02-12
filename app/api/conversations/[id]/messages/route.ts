@@ -212,6 +212,14 @@ export async function POST(
       [id, contentTypeResponse, modelResponse, tokensInput, tokensOutput]
     );
 
+    // Si hubo error, marcar el mensaje del usuario con ignore_in_context para no enviarlo como contexto
+    if (isError) {
+      await pool.execute(
+        `UPDATE messages SET ignore_in_context = 1 WHERE id = ?`,
+        [userMessageResult.insertId]
+      );
+    }
+
     return NextResponse.json({
       userMessage: {
         id: userMessageResult.insertId,

@@ -1460,134 +1460,183 @@ export function ChatInterface() {
                     ...(noContext && { no_context: noContext }),
                 };
 
-            // Use streaming endpoint
             const response = await fetch(endpoint, {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify(requestBody),
             });
 
-            if (!response.ok) {
-                throw new Error("Error sending message");
-            }
+            // Imagen endpoint returns JSON (no streaming)
+            if (useImagenEndpoint) {
+                const data = await response.json();
 
-            const reader = response.body?.getReader();
-            const decoder = new TextDecoder();
-            let fullContent = "";
-            let imageUrl: string | null = null;
-            let realUserMessageId: number | null = null;
-            let realModelMessageId: number | null = null;
+                // Update user message with real ID
+                if (data.userMessageId) {
+                    setTabMessages((prev) => ({
+                        ...prev,
+                        [tabId]: prev[tabId].map((m) =>
+                            m.id === tempUserMessage.id ? {...m, id: data.userMessageId} : m
+                        ),
+                    }));
+                }
 
-            if (reader) {
-                while (true) {
-                    const {done, value} = await reader.read();
-                    if (done) break;
-
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split("\n");
-
-                    for (const line of lines) {
-                        if (line.startsWith("data: ")) {
-                            try {
-                                const data = JSON.parse(line.slice(6));
-
-                                if (data.type === "user_message") {
-                                    realUserMessageId = data.id;
-                                    // Update user message with real ID
-                                    setTabMessages((prev) => ({
-                                        ...prev,
-                                        [tabId]: prev[tabId].map((m) =>
-                                            m.id === tempUserMessage.id ? {...m, id: realUserMessageId!} : m
-                                        ),
-                                    }));
-                                } else if (data.type === "retry") {
-                                    // Mostrar mensaje de reintento al usuario
-                                    const retryMessage = `⏳ Reintentando (${data.attempt}/${data.maxAttempts})... Esperando ${data.delaySeconds}s`;
-                                    setTabMessages((prev) => ({
-                                        ...prev,
-                                        [tabId]: prev[tabId].map((m) =>
-                                            m.id === streamingMessageId
-                                                ? {...m, content: retryMessage, isRetrying: true}
-                                                : m
-                                        ),
-                                    }));
-                                } else if (data.type === "chunk") {
-                                    fullContent += data.text;
-                                    // Update streaming message (limpiar estado de retry)
-                                    setTabMessages((prev) => ({
-                                        ...prev,
-                                        [tabId]: prev[tabId].map((m) =>
-                                            m.id === streamingMessageId
-                                                ? {...m, content: fullContent, isRetrying: false}
-                                                : m
-                                        ),
-                                    }));
-                                } else if (data.type === "image") {
-                                    // Imagen recibida del modelo
-                                    imageUrl = data.imageUrl;
-                                    setTabMessages((prev) => ({
-                                        ...prev,
-                                        [tabId]: prev[tabId].map((m) =>
-                                            m.id === streamingMessageId
-                                                ? {...m, image_url: imageUrl, generation_seed: data.seed}
-                                                : m
-                                        ),
-                                    }));
-                                } else if (data.type === "complete") {
-                                    realModelMessageId = data.id;
-                                    // Finalize message with image if present
-                                    const finalImageUrl = data.imageUrl || imageUrl;
-                                    setTabMessages((prev) => ({
-                                        ...prev,
-                                        [tabId]: prev[tabId].map((m) =>
-                                            m.id === streamingMessageId
-                                                ? {
-                                                    ...m,
-                                                    id: realModelMessageId!,
-                                                    content: fullContent,
-                                                    image_url: finalImageUrl,
-                                                    generation_seed: data.seed,
-                                                    isStreaming: false
-                                                }
-                                                : m
-                                        ),
-                                    }));
-                                } else if (data.type === "title") {
-                                    // Actualizar título de la conversación
-                                    const newTitle = data.title;
-                                    setOpenTabs((prev) =>
-                                        prev.map((t) =>
-                                            t.id === tabId ? {...t, title: newTitle} : t
-                                        )
-                                    );
-                                    setTabConversations((prev) => ({
-                                        ...prev,
-                                        [tabId]: {...prev[tabId], title: newTitle},
-                                    }));
-                                    // También actualizar la lista de conversaciones del sidebar
-                                    setConversations((prev) =>
-                                        prev.map((c) =>
-                                            c.id === conversationId ? {...c, title: newTitle} : c
-                                        )
-                                    );
-                                } else if (data.type === "error") {
-                                    realModelMessageId = data.id;
-                                    setTabMessages((prev) => ({
-                                        ...prev,
-                                        [tabId]: prev[tabId].map((m) =>
-                                            m.id === streamingMessageId
-                                                ? {
-                                                    ...m,
-                                                    id: realModelMessageId!,
-                                                    content: `Error: ${data.message}`,
-                                                    isStreaming: false,
-                                                }
-                                                : m
-                                        ),
-                                    }));
+                if (!response.ok) {
+                    // Error response — show error in model message
+                    setTabMessages((prev) => ({
+                        ...prev,
+                        [tabId]: prev[tabId].map((m) =>
+                            m.id === streamingMessageId
+                                ? {
+                                    ...m,
+                                    ...(data.modelMessageId && { id: data.modelMessageId }),
+                                    content: `Error: ${data.error || "Error generando imagen"}`,
+                                    isStreaming: false,
                                 }
-                            } catch (e) {
-                                // Ignore parse errors for incomplete chunks
+                                : m
+                        ),
+                    }));
+                } else {
+                    // Success — show generated image
+                    setTabMessages((prev) => ({
+                        ...prev,
+                        [tabId]: prev[tabId].map((m) =>
+                            m.id === streamingMessageId
+                                ? {
+                                    ...m,
+                                    id: data.modelMessageId,
+                                    content: "",
+                                    image_url: data.imageUrl,
+                                    generation_seed: data.seed,
+                                    isStreaming: false,
+                                }
+                                : m
+                        ),
+                    }));
+                }
+            } else {
+                // Stream endpoint — SSE processing
+                if (!response.ok) {
+                    throw new Error("Error sending message");
+                }
+
+                const reader = response.body?.getReader();
+                const decoder = new TextDecoder();
+                let fullContent = "";
+                let imageUrl: string | null = null;
+                let realUserMessageId: number | null = null;
+                let realModelMessageId: number | null = null;
+
+                if (reader) {
+                    while (true) {
+                        const {done, value} = await reader.read();
+                        if (done) break;
+
+                        const chunk = decoder.decode(value);
+                        const lines = chunk.split("\n");
+
+                        for (const line of lines) {
+                            if (line.startsWith("data: ")) {
+                                try {
+                                    const data = JSON.parse(line.slice(6));
+
+                                    if (data.type === "user_message") {
+                                        realUserMessageId = data.id;
+                                        // Update user message with real ID
+                                        setTabMessages((prev) => ({
+                                            ...prev,
+                                            [tabId]: prev[tabId].map((m) =>
+                                                m.id === tempUserMessage.id ? {...m, id: realUserMessageId!} : m
+                                            ),
+                                        }));
+                                    } else if (data.type === "retry") {
+                                        // Mostrar mensaje de reintento al usuario
+                                        const retryMessage = `⏳ Reintentando (${data.attempt}/${data.maxAttempts})... Esperando ${data.delaySeconds}s`;
+                                        setTabMessages((prev) => ({
+                                            ...prev,
+                                            [tabId]: prev[tabId].map((m) =>
+                                                m.id === streamingMessageId
+                                                    ? {...m, content: retryMessage, isRetrying: true}
+                                                    : m
+                                            ),
+                                        }));
+                                    } else if (data.type === "chunk") {
+                                        fullContent += data.text;
+                                        // Update streaming message (limpiar estado de retry)
+                                        setTabMessages((prev) => ({
+                                            ...prev,
+                                            [tabId]: prev[tabId].map((m) =>
+                                                m.id === streamingMessageId
+                                                    ? {...m, content: fullContent, isRetrying: false}
+                                                    : m
+                                            ),
+                                        }));
+                                    } else if (data.type === "image") {
+                                        // Imagen recibida del modelo
+                                        imageUrl = data.imageUrl;
+                                        setTabMessages((prev) => ({
+                                            ...prev,
+                                            [tabId]: prev[tabId].map((m) =>
+                                                m.id === streamingMessageId
+                                                    ? {...m, image_url: imageUrl, generation_seed: data.seed}
+                                                    : m
+                                            ),
+                                        }));
+                                    } else if (data.type === "complete") {
+                                        realModelMessageId = data.id;
+                                        // Finalize message with image if present
+                                        const finalImageUrl = data.imageUrl || imageUrl;
+                                        setTabMessages((prev) => ({
+                                            ...prev,
+                                            [tabId]: prev[tabId].map((m) =>
+                                                m.id === streamingMessageId
+                                                    ? {
+                                                        ...m,
+                                                        id: realModelMessageId!,
+                                                        content: fullContent,
+                                                        image_url: finalImageUrl,
+                                                        generation_seed: data.seed,
+                                                        isStreaming: false
+                                                    }
+                                                    : m
+                                            ),
+                                        }));
+                                    } else if (data.type === "title") {
+                                        // Actualizar título de la conversación
+                                        const newTitle = data.title;
+                                        setOpenTabs((prev) =>
+                                            prev.map((t) =>
+                                                t.id === tabId ? {...t, title: newTitle} : t
+                                            )
+                                        );
+                                        setTabConversations((prev) => ({
+                                            ...prev,
+                                            [tabId]: {...prev[tabId], title: newTitle},
+                                        }));
+                                        // También actualizar la lista de conversaciones del sidebar
+                                        setConversations((prev) =>
+                                            prev.map((c) =>
+                                                c.id === conversationId ? {...c, title: newTitle} : c
+                                            )
+                                        );
+                                    } else if (data.type === "error") {
+                                        realModelMessageId = data.id;
+                                        setTabMessages((prev) => ({
+                                            ...prev,
+                                            [tabId]: prev[tabId].map((m) =>
+                                                m.id === streamingMessageId
+                                                    ? {
+                                                        ...m,
+                                                        id: realModelMessageId!,
+                                                        content: `Error: ${data.message}`,
+                                                        isStreaming: false,
+                                                    }
+                                                    : m
+                                            ),
+                                        }));
+                                    }
+                                } catch (e) {
+                                    // Ignore parse errors for incomplete chunks
+                                }
                             }
                         }
                     }

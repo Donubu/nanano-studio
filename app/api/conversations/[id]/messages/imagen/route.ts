@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
@@ -6,6 +6,9 @@ import { generateImagen, isImagenConfigured, ImagenAspectRatio, ImagenResolution
 import { uploadToS3, generateFileName, isS3Configured } from "@/lib/s3";
 import { generateConversationTitle } from "@/lib/google-ai";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
+
+// Allow up to 5 minutes for image generation (retries can be slow)
+export const maxDuration = 300;
 
 type QualityTier = "normal" | "hq";
 
@@ -31,7 +34,7 @@ interface MessageRow extends RowDataPacket {
   id: number;
 }
 
-// POST - Generar imagen con Imagen 4
+// POST - Generar imagen con Imagen 4 (respuesta JSON, sin streaming)
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -40,24 +43,15 @@ export async function POST(
     const session = await auth();
 
     if (!session?.user) {
-      return new Response(JSON.stringify({ error: "No autorizado" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
+      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 
     if (!isImagenConfigured()) {
-      return new Response(JSON.stringify({ error: "API de Imagen no configurada" }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
+      return NextResponse.json({ error: "API de Imagen no configurada" }, { status: 500 });
     }
 
     if (!isS3Configured()) {
-      return new Response(JSON.stringify({ error: "S3 no configurado para almacenar imagenes" }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
+      return NextResponse.json({ error: "S3 no configurado para almacenar imagenes" }, { status: 500 });
     }
 
     const { id } = await params;
@@ -84,10 +78,7 @@ export async function POST(
     const effectiveQualityTier: QualityTier = quality_tier === "hq" ? "hq" : "normal";
 
     if (!content || content.trim() === "") {
-      return new Response(JSON.stringify({ error: "El prompt de la imagen es requerido" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
+      return NextResponse.json({ error: "El prompt de la imagen es requerido" }, { status: 400 });
     }
 
     // Obtener conversacion con configuracion de imagen y costos del modelo
@@ -103,10 +94,7 @@ export async function POST(
     );
 
     if (conversations.length === 0) {
-      return new Response(JSON.stringify({ error: "Conversacion no encontrada" }), {
-        status: 404,
-        headers: { "Content-Type": "application/json" },
-      });
+      return NextResponse.json({ error: "Conversacion no encontrada" }, { status: 404 });
     }
 
     const conversation = conversations[0];
@@ -161,10 +149,7 @@ export async function POST(
 
     // Verificar que el modelo es Imagen 4
     if (!effectiveModelId.includes("imagen-4")) {
-      return new Response(JSON.stringify({ error: "El modelo seleccionado no es Imagen 4" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
+      return NextResponse.json({ error: "El modelo seleccionado no es Imagen 4" }, { status: 400 });
     }
 
     // Verificar limite de generaciones de imagen mensuales (por calidad)
@@ -195,16 +180,13 @@ export async function POST(
         const maxLimit = limitRows[0].max_limit;
         const currentCount = limitRows[0].current_count;
         if (maxLimit > 0 && currentCount >= maxLimit) {
-          return new Response(JSON.stringify({
+          return NextResponse.json({
             error: `Has alcanzado el limite de generaciones de imagen ${effectiveQualityTier === 'hq' ? 'HQ' : 'normales'} mensuales para este proyecto`,
             type: "image_limit",
             limit: maxLimit,
             used: currentCount,
             quality_tier: effectiveQualityTier
-          }), {
-            status: 429,
-            headers: { "Content-Type": "application/json" },
-          });
+          }, { status: 429 });
         }
       }
     }
@@ -237,212 +219,163 @@ export async function POST(
       user_name: userIdentifier,
     };
 
-    // Crear el stream de respuesta SSE
-    const encoder = new TextEncoder();
-    let controllerClosed = false;
-
-    const stream = new ReadableStream({
-      async start(controller) {
-
-        const sendEvent = (data: Record<string, unknown>) => {
-          if (!controllerClosed) {
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
-            );
-          }
-        };
-
-        try {
-          // Enviar el ID del mensaje del usuario
-          sendEvent({ type: "user_message", id: userMessageId });
-
-          // Generar titulo si es el primer mensaje (async)
-          if (isFirstMessage) {
-            generateConversationTitle(content, labels)
-              .then(async (title) => {
-                await pool.execute(
-                  "UPDATE conversations SET title = ? WHERE id = ?",
-                  [title, id]
-                );
-                sendEvent({ type: "title", title });
-              })
-              .catch((err) => {
-                console.error("[Imagen] Error generating title:", err);
-              });
-          }
-
-          // Configuracion de generacion de imagen (usa request settings, fallback a conversation settings)
-          const aspectRatio: ImagenAspectRatio = (imageSettings?.aspectRatio ||
-            conversation.image_aspect_ratio || "16:9") as ImagenAspectRatio;
-          const resolution: ImagenResolution = (imageSettings?.resolution ||
-            conversation.image_size || "1K") as ImagenResolution;
-
-          console.log("\n========== [IMAGEN 4 GENERATION REQUEST] ==========");
-          console.log("Model:", effectiveModelId);
-          console.log("Quality tier:", effectiveQualityTier);
-          console.log("Aspect Ratio:", aspectRatio);
-          console.log("Resolution:", resolution);
-          console.log("Prompt:", content);
-          if (imageSettings?.negativePrompt) {
-            console.log("Negative Prompt:", imageSettings.negativePrompt);
-          }
-          if (imageSettings?.seed) {
-            console.log("User-provided Seed:", imageSettings.seed);
-          }
-          console.log("====================================================\n");
-
-          // Callback de progreso
-          const onProgress = (progress: { status: string; message: string }) => {
-            sendEvent({
-              type: "progress",
-              status: progress.status,
-              message: progress.message,
-            });
-          };
-
-          // Generar imagen (use user-provided seed if available)
-          const generatedImages = await generateImagen(
-            effectiveModelId,
-            content,
-            {
-              aspectRatio,
-              resolution,
-              negativePrompt: imageSettings?.negativePrompt,
-              numberOfImages: 1,
-              seed: imageSettings?.seed,
-            },
-            onProgress,
-            labels
-          );
-
-          if (generatedImages.length === 0) {
-            throw new Error("No se genero ninguna imagen");
-          }
-
-          const generatedImage = generatedImages[0];
-
-          // Guardar imagen en S3
-          sendEvent({
-            type: "progress",
-            status: "processing",
-            message: "Guardando imagen...",
-          });
-
-          const extension = generatedImage.mimeType.split("/")[1] || "png";
-          const fileName = generateFileName(id, extension);
-          const uploadResult = await uploadToS3(
-            generatedImage.data,
-            fileName,
-            generatedImage.mimeType,
-            "generated"
-          );
-
-          // Calculate estimated cost for image generation using effective model cost
-          const estimatedCost = calculateEstimatedCost(
-            {
-              cost_input_per_million: 0,
-              cost_output_per_million: 0,
-              cost_image_1k: effectiveCostImage1k,
-              cost_image_2k: effectiveCostImage2k,
-              cost_image_4k: effectiveCostImage4k,
-              cost_video_per_second: 0,
-            },
-            {
-              tokensInput: 0,
-              tokensOutput: 0,
-              imageGenerated: true,
-              imageSize: resolution,
-              videoSeconds: 0,
-            }
-          );
-
-          // Guardar respuesta del modelo en la base de datos (con quality_tier y seed)
-          const [modelResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, quality_tier, generation_seed, content, image_url, image_mime_type, estimated_cost)
-             VALUES (?, 'model', 'image', ?, ?, '', ?, ?, ?)`,
-            [
-              id,
-              effectiveQualityTier,
-              generatedImage.seed,
-              uploadResult.url,
-              generatedImage.mimeType,
-              estimatedCost,
-            ]
-          );
-
-          const modelMessageId = modelResult.insertId;
-
-          // Actualizar costo total en la conversacion
+    // Generar titulo si es el primer mensaje (fire-and-forget, no bloquea la respuesta)
+    if (isFirstMessage) {
+      generateConversationTitle(content, labels)
+        .then(async (title) => {
           await pool.execute(
-            `UPDATE conversations
-             SET total_estimated_cost = total_estimated_cost + ?
-             WHERE id = ?`,
-            [estimatedCost, id]
+            "UPDATE conversations SET title = ? WHERE id = ?",
+            [title, id]
           );
+        })
+        .catch((err) => {
+          console.error("[Imagen] Error generating title:", err);
+        });
+    }
 
-          // Enviar evento de imagen generada
-          sendEvent({
-            type: "image",
-            imageUrl: uploadResult.url,
-            mimeType: generatedImage.mimeType,
-            seed: generatedImage.seed,
-            estimatedCost,
-          });
+    // Configuracion de generacion de imagen (usa request settings, fallback a conversation settings)
+    const aspectRatio: ImagenAspectRatio = (imageSettings?.aspectRatio ||
+      conversation.image_aspect_ratio || "16:9") as ImagenAspectRatio;
+    const resolution: ImagenResolution = (imageSettings?.resolution ||
+      conversation.image_size || "1K") as ImagenResolution;
 
-          // Enviar evento de finalizacion
-          sendEvent({
-            type: "complete",
-            id: modelMessageId,
-            imageUrl: uploadResult.url,
-            seed: generatedImage.seed,
-            estimatedCost,
-          });
+    console.log("\n========== [IMAGEN 4 GENERATION REQUEST] ==========");
+    console.log("Model:", effectiveModelId);
+    console.log("Quality tier:", effectiveQualityTier);
+    console.log("Aspect Ratio:", aspectRatio);
+    console.log("Resolution:", resolution);
+    console.log("Prompt:", content);
+    if (imageSettings?.negativePrompt) {
+      console.log("Negative Prompt:", imageSettings.negativePrompt);
+    }
+    if (imageSettings?.seed) {
+      console.log("User-provided Seed:", imageSettings.seed);
+    }
+    console.log("====================================================\n");
 
-          controllerClosed = true;
-          controller.close();
+    // Generar imagen (sin streaming, espera resultado completo)
+    let generatedImages;
+    try {
+      generatedImages = await generateImagen(
+        effectiveModelId,
+        content,
+        {
+          aspectRatio,
+          resolution,
+          negativePrompt: imageSettings?.negativePrompt,
+          numberOfImages: 1,
+          seed: imageSettings?.seed,
+        },
+        undefined, // no progress callback needed
+        labels
+      );
+    } catch (error) {
+      console.error("[Imagen] Error generating image:", error);
+      const errorMessage = error instanceof Error ? error.message : "Error desconocido";
 
-        } catch (error) {
-          console.error("[Imagen] Error generating image:", error);
-          const errorMessage = error instanceof Error ? error.message : "Error desconocido";
+      // Guardar mensaje de error (con content_type 'error' para excluirlo del historial)
+      // También marcar el mensaje del usuario con ignore_in_context para no enviarlo como contexto
+      const [modelResult] = await pool.execute<ResultSetHeader>(
+        `INSERT INTO messages (conversation_id, role, content_type, content)
+         VALUES (?, 'model', 'error', ?)`,
+        [id, `Error generando imagen: ${errorMessage}`]
+      );
+      await pool.execute(
+        `UPDATE messages SET ignore_in_context = 1 WHERE id = ?`,
+        [userMessageId]
+      );
 
-          // Guardar mensaje de error (con content_type 'error' para excluirlo del historial)
-          const [modelResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, content)
-             VALUES (?, 'model', 'error', ?)`,
-            [id, `Error generando imagen: ${errorMessage}`]
-          );
+      return NextResponse.json({
+        error: errorMessage,
+        userMessageId,
+        modelMessageId: modelResult.insertId,
+      }, { status: 502 });
+    }
 
-          sendEvent({
-            type: "error",
-            message: errorMessage,
-            id: modelResult.insertId,
-          });
+    if (generatedImages.length === 0) {
+      const [modelResult] = await pool.execute<ResultSetHeader>(
+        `INSERT INTO messages (conversation_id, role, content_type, content)
+         VALUES (?, 'model', 'error', ?)`,
+        [id, "Error generando imagen: No se genero ninguna imagen"]
+      );
 
-          controllerClosed = true;
-          controller.close();
-        }
+      return NextResponse.json({
+        error: "No se genero ninguna imagen",
+        userMessageId,
+        modelMessageId: modelResult.insertId,
+      }, { status: 502 });
+    }
+
+    const generatedImage = generatedImages[0];
+
+    // Guardar imagen en S3
+    const extension = generatedImage.mimeType.split("/")[1] || "png";
+    const fileName = generateFileName(id, extension);
+    const uploadResult = await uploadToS3(
+      generatedImage.data,
+      fileName,
+      generatedImage.mimeType,
+      "generated"
+    );
+
+    // Calculate estimated cost for image generation using effective model cost
+    const estimatedCost = calculateEstimatedCost(
+      {
+        cost_input_per_million: 0,
+        cost_output_per_million: 0,
+        cost_image_1k: effectiveCostImage1k,
+        cost_image_2k: effectiveCostImage2k,
+        cost_image_4k: effectiveCostImage4k,
+        cost_video_per_second: 0,
       },
-      cancel() {
-        controllerClosed = true;
-      },
-    });
+      {
+        tokensInput: 0,
+        tokensOutput: 0,
+        imageGenerated: true,
+        imageSize: resolution,
+        videoSeconds: 0,
+      }
+    );
 
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-      },
+    // Guardar respuesta del modelo en la base de datos (con quality_tier y seed)
+    const [modelResult] = await pool.execute<ResultSetHeader>(
+      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, generation_seed, content, image_url, image_mime_type, estimated_cost)
+       VALUES (?, 'model', 'image', ?, ?, '', ?, ?, ?)`,
+      [
+        id,
+        effectiveQualityTier,
+        generatedImage.seed,
+        uploadResult.url,
+        generatedImage.mimeType,
+        estimatedCost,
+      ]
+    );
+
+    const modelMessageId = modelResult.insertId;
+
+    // Actualizar costo total en la conversacion
+    await pool.execute(
+      `UPDATE conversations
+       SET total_estimated_cost = total_estimated_cost + ?
+       WHERE id = ?`,
+      [estimatedCost, id]
+    );
+
+    // Respuesta JSON con todos los datos
+    return NextResponse.json({
+      userMessageId,
+      modelMessageId,
+      imageUrl: uploadResult.url,
+      mimeType: generatedImage.mimeType,
+      seed: generatedImage.seed,
+      estimatedCost,
     });
 
   } catch (error) {
     console.error("[Imagen] Error en endpoint de imagen:", error);
-    return new Response(
-      JSON.stringify({ error: "Error interno del servidor" }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      }
+    return NextResponse.json(
+      { error: "Error interno del servidor" },
+      { status: 500 }
     );
   }
 }
