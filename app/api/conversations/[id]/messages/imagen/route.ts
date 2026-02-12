@@ -18,6 +18,7 @@ interface ConversationRow extends RowDataPacket {
   project_id: number | null;
   model_id: number;
   generation_type: string;
+  title: string | null;
   model_model_id: string;
   system_instruction: string | null;
   image_aspect_ratio: string;
@@ -30,11 +31,7 @@ interface ConversationRow extends RowDataPacket {
   cost_image_4k: number;
 }
 
-interface MessageRow extends RowDataPacket {
-  id: number;
-}
-
-// POST - Generar imagen con Imagen 4 (respuesta JSON, sin streaming)
+// POST - Generar imagen con Imagen 4 (SSE stream con retry feedback)
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -199,12 +196,8 @@ export async function POST(
     );
     const userMessageId = userMessageResult.insertId;
 
-    // Verificar si es el primer mensaje
-    const [messageCount] = await pool.execute<MessageRow[]>(
-      `SELECT id FROM messages WHERE conversation_id = ? LIMIT 2`,
-      [id]
-    );
-    const isFirstMessage = messageCount.length === 1;
+    // Verificar si necesita generar titulo (aún tiene el titulo por defecto)
+    const needsTitle = conversation.title === "Nueva conversación" || !conversation.title;
 
     // Actualizar timestamp de la conversacion
     await pool.execute(
@@ -218,20 +211,6 @@ export async function POST(
       project_name: conversation.project_name || "sin_proyecto",
       user_name: userIdentifier,
     };
-
-    // Generar titulo si es el primer mensaje (fire-and-forget, no bloquea la respuesta)
-    if (isFirstMessage) {
-      generateConversationTitle(content, labels)
-        .then(async (title) => {
-          await pool.execute(
-            "UPDATE conversations SET title = ? WHERE id = ?",
-            [title, id]
-          );
-        })
-        .catch((err) => {
-          console.error("[Imagen] Error generating title:", err);
-        });
-    }
 
     // Configuracion de generacion de imagen (usa request settings, fallback a conversation settings)
     const aspectRatio: ImagenAspectRatio = (imageSettings?.aspectRatio ||
@@ -253,122 +232,187 @@ export async function POST(
     }
     console.log("====================================================\n");
 
-    // Generar imagen (sin streaming, espera resultado completo)
-    let generatedImages;
-    try {
-      generatedImages = await generateImagen(
-        effectiveModelId,
-        content,
-        {
-          aspectRatio,
-          resolution,
-          negativePrompt: imageSettings?.negativePrompt,
-          numberOfImages: 1,
-          seed: imageSettings?.seed,
-        },
-        undefined, // no progress callback needed
-        labels
-      );
-    } catch (error) {
-      console.error("[Imagen] Error generating image:", error);
-      const errorMessage = error instanceof Error ? error.message : "Error desconocido";
+    // Crear el stream SSE para enviar retry/progress al usuario
+    const encoder = new TextEncoder();
+    let controllerClosed = false;
 
-      // Guardar mensaje de error (con content_type 'error' para excluirlo del historial)
-      // También marcar el mensaje del usuario con ignore_in_context para no enviarlo como contexto
-      const [modelResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO messages (conversation_id, role, content_type, content)
-         VALUES (?, 'model', 'error', ?)`,
-        [id, `Error generando imagen: ${errorMessage}`]
-      );
-      await pool.execute(
-        `UPDATE messages SET ignore_in_context = 1 WHERE id = ?`,
-        [userMessageId]
-      );
+    const stream = new ReadableStream({
+      async start(controller) {
 
-      return NextResponse.json({
-        error: errorMessage,
-        userMessageId,
-        modelMessageId: modelResult.insertId,
-      }, { status: 502 });
-    }
+        const sendEvent = (data: Record<string, unknown>) => {
+          if (!controllerClosed) {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
+            );
+          }
+        };
 
-    if (generatedImages.length === 0) {
-      const [modelResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO messages (conversation_id, role, content_type, content)
-         VALUES (?, 'model', 'error', ?)`,
-        [id, "Error generando imagen: No se genero ninguna imagen"]
-      );
+        try {
+          // Enviar el ID del mensaje del usuario
+          sendEvent({ type: "user_message", id: userMessageId });
 
-      return NextResponse.json({
-        error: "No se genero ninguna imagen",
-        userMessageId,
-        modelMessageId: modelResult.insertId,
-      }, { status: 502 });
-    }
+          // Callback de retry para notificar al usuario
+          const onProgress = (progress: { status: string; message: string }) => {
+            // Detectar si es un mensaje de retry y enviar con formato correcto para el frontend
+            const retryMatch = progress.message.match(/Reintentando \((\d+)\/(\d+)\).*?(\d+)s/);
+            if (retryMatch) {
+              sendEvent({
+                type: "retry",
+                attempt: parseInt(retryMatch[1]),
+                maxAttempts: parseInt(retryMatch[2]),
+                delaySeconds: parseInt(retryMatch[3]),
+              });
+            }
+          };
 
-    const generatedImage = generatedImages[0];
+          // Generar imagen
+          const generatedImages = await generateImagen(
+            effectiveModelId,
+            content,
+            {
+              aspectRatio,
+              resolution,
+              negativePrompt: imageSettings?.negativePrompt,
+              numberOfImages: 1,
+              seed: imageSettings?.seed,
+            },
+            onProgress,
+            labels
+          );
 
-    // Guardar imagen en S3
-    const extension = generatedImage.mimeType.split("/")[1] || "png";
-    const fileName = generateFileName(id, extension);
-    const uploadResult = await uploadToS3(
-      generatedImage.data,
-      fileName,
-      generatedImage.mimeType,
-      "generated"
-    );
+          if (generatedImages.length === 0) {
+            throw new Error("No se genero ninguna imagen");
+          }
 
-    // Calculate estimated cost for image generation using effective model cost
-    const estimatedCost = calculateEstimatedCost(
-      {
-        cost_input_per_million: 0,
-        cost_output_per_million: 0,
-        cost_image_1k: effectiveCostImage1k,
-        cost_image_2k: effectiveCostImage2k,
-        cost_image_4k: effectiveCostImage4k,
-        cost_video_per_second: 0,
+          const generatedImage = generatedImages[0];
+
+          // Guardar imagen en S3
+          const extension = generatedImage.mimeType.split("/")[1] || "png";
+          const fileName = generateFileName(id, extension);
+          const uploadResult = await uploadToS3(
+            generatedImage.data,
+            fileName,
+            generatedImage.mimeType,
+            "generated"
+          );
+
+          // Calculate estimated cost for image generation using effective model cost
+          const estimatedCost = calculateEstimatedCost(
+            {
+              cost_input_per_million: 0,
+              cost_output_per_million: 0,
+              cost_image_1k: effectiveCostImage1k,
+              cost_image_2k: effectiveCostImage2k,
+              cost_image_4k: effectiveCostImage4k,
+              cost_video_per_second: 0,
+            },
+            {
+              tokensInput: 0,
+              tokensOutput: 0,
+              imageGenerated: true,
+              imageSize: resolution,
+              videoSeconds: 0,
+            }
+          );
+
+          // Guardar respuesta del modelo en la base de datos (con quality_tier y seed)
+          const [modelResult] = await pool.execute<ResultSetHeader>(
+            `INSERT INTO messages (conversation_id, role, content_type, quality_tier, generation_seed, content, image_url, image_mime_type, estimated_cost)
+             VALUES (?, 'model', 'image', ?, ?, '', ?, ?, ?)`,
+            [
+              id,
+              effectiveQualityTier,
+              generatedImage.seed,
+              uploadResult.url,
+              generatedImage.mimeType,
+              estimatedCost,
+            ]
+          );
+
+          const modelMessageId = modelResult.insertId;
+
+          // Actualizar costo total en la conversacion
+          await pool.execute(
+            `UPDATE conversations
+             SET total_estimated_cost = total_estimated_cost + ?
+             WHERE id = ?`,
+            [estimatedCost, id]
+          );
+
+          // Enviar evento de imagen generada
+          sendEvent({
+            type: "image",
+            imageUrl: uploadResult.url,
+            mimeType: generatedImage.mimeType,
+            seed: generatedImage.seed,
+            estimatedCost,
+          });
+
+          // Enviar evento de finalizacion
+          sendEvent({
+            type: "complete",
+            id: modelMessageId,
+            imageUrl: uploadResult.url,
+            seed: generatedImage.seed,
+            estimatedCost,
+          });
+
+          controllerClosed = true;
+          controller.close();
+
+          // Generar titulo después de completar exitosamente (fire-and-forget)
+          // Se genera aquí para no competir por cuota API con la llamada principal
+          if (needsTitle) {
+            generateConversationTitle(content, labels)
+              .then(async (title) => {
+                await pool.execute(
+                  "UPDATE conversations SET title = ? WHERE id = ?",
+                  [title, id]
+                );
+                console.log("[Imagen] Generated title:", title);
+              })
+              .catch((err) => {
+                console.error("[Imagen] Error generating title:", err);
+              });
+          }
+
+        } catch (error) {
+          console.error("[Imagen] Error generating image:", error);
+          const errorMessage = error instanceof Error ? error.message : "Error desconocido";
+
+          // Guardar mensaje de error (con content_type 'error' para excluirlo del historial)
+          // También marcar el mensaje del usuario con ignore_in_context para no enviarlo como contexto
+          const [modelResult] = await pool.execute<ResultSetHeader>(
+            `INSERT INTO messages (conversation_id, role, content_type, content)
+             VALUES (?, 'model', 'error', ?)`,
+            [id, `Error generando imagen: ${errorMessage}`]
+          );
+          await pool.execute(
+            `UPDATE messages SET ignore_in_context = 1 WHERE id = ?`,
+            [userMessageId]
+          );
+
+          sendEvent({
+            type: "error",
+            message: errorMessage,
+            id: modelResult.insertId,
+          });
+
+          controllerClosed = true;
+          controller.close();
+        }
       },
-      {
-        tokensInput: 0,
-        tokensOutput: 0,
-        imageGenerated: true,
-        imageSize: resolution,
-        videoSeconds: 0,
-      }
-    );
+      cancel() {
+        controllerClosed = true;
+      },
+    });
 
-    // Guardar respuesta del modelo en la base de datos (con quality_tier y seed)
-    const [modelResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, generation_seed, content, image_url, image_mime_type, estimated_cost)
-       VALUES (?, 'model', 'image', ?, ?, '', ?, ?, ?)`,
-      [
-        id,
-        effectiveQualityTier,
-        generatedImage.seed,
-        uploadResult.url,
-        generatedImage.mimeType,
-        estimatedCost,
-      ]
-    );
-
-    const modelMessageId = modelResult.insertId;
-
-    // Actualizar costo total en la conversacion
-    await pool.execute(
-      `UPDATE conversations
-       SET total_estimated_cost = total_estimated_cost + ?
-       WHERE id = ?`,
-      [estimatedCost, id]
-    );
-
-    // Respuesta JSON con todos los datos
-    return NextResponse.json({
-      userMessageId,
-      modelMessageId,
-      imageUrl: uploadResult.url,
-      mimeType: generatedImage.mimeType,
-      seed: generatedImage.seed,
-      estimatedCost,
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
     });
 
   } catch (error) {

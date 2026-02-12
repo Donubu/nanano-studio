@@ -30,6 +30,7 @@ interface ConversationRow extends RowDataPacket {
   project_id: number | null;
   model_id: number;
   generation_type: string;
+  title: string | null;
   model_model_id: string;
   system_instruction: string | null;
   audio_voice_id: AudioVoiceId;
@@ -237,12 +238,8 @@ export async function POST(
     );
     const userMessageId = userMessageResult.insertId;
 
-    // Verificar si es el primer mensaje
-    const [messageCount] = await pool.execute<MessageRow[]>(
-      `SELECT id FROM messages WHERE conversation_id = ? LIMIT 2`,
-      [id]
-    );
-    const isFirstMessage = messageCount.length === 1;
+    // Verificar si necesita generar titulo (aún tiene el titulo por defecto)
+    const needsTitle = conversation.title === "Nueva conversación" || !conversation.title;
 
     // Actualizar timestamp de la conversación
     await pool.execute(
@@ -275,25 +272,6 @@ export async function POST(
         try {
           // Enviar el ID del mensaje del usuario
           sendEvent({ type: "user_message", id: userMessageId });
-
-          // Generar título si es el primer mensaje (async)
-          if (isFirstMessage) {
-            const titleLabels: AILabels = {
-              project_name: conversation.project_name || "sin_proyecto",
-              user_name: userIdentifier,
-            };
-            generateConversationTitle(content, titleLabels)
-              .then(async (title) => {
-                await pool.execute(
-                  "UPDATE conversations SET title = ? WHERE id = ?",
-                  [title, id]
-                );
-                sendEvent({ type: "title", title });
-              })
-              .catch((err) => {
-                console.error("[Audio] Error generating title:", err);
-              });
-          }
 
           // Configuración de generación de audio (usa request settings, fallback a conversation settings)
           const voiceId = audioSettings?.voiceId || conversation.audio_voice_id || "Kore";
@@ -474,6 +452,26 @@ export async function POST(
 
           controllerClosed = true;
           controller.close();
+
+          // Generar título después de completar exitosamente (fire-and-forget)
+          // Se genera aquí para no competir por cuota API con la llamada principal
+          if (needsTitle) {
+            const titleLabels: AILabels = {
+              project_name: conversation.project_name || "sin_proyecto",
+              user_name: userIdentifier,
+            };
+            generateConversationTitle(content, titleLabels)
+              .then(async (title) => {
+                await pool.execute(
+                  "UPDATE conversations SET title = ? WHERE id = ?",
+                  [title, id]
+                );
+                console.log("[Audio] Generated title:", title);
+              })
+              .catch((err) => {
+                console.error("[Audio] Error generating title:", err);
+              });
+          }
 
         } catch (error) {
           console.error("[Audio] Error generating audio:", error);

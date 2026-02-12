@@ -79,10 +79,23 @@ async function withRetry<T>(
 
   for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
     try {
-      return await operation();
+      const result = await operation();
+
+      // Log de recuperación si hubo retries previos
+      if (attempt > 0) {
+        console.log(`[Imagen] ${operationName} exitoso después de ${attempt} reintento(s)`);
+      }
+
+      return result;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      if (!isRetriableError(error) || attempt === RETRY_CONFIG.maxRetries) throw lastError;
+
+      if (!isRetriableError(error) || attempt === RETRY_CONFIG.maxRetries) {
+        if (attempt > 0) {
+          console.error(`[Imagen] ${operationName} falló después de ${attempt + 1} intento(s). Error final: ${lastError.message}`);
+        }
+        throw lastError;
+      }
 
       console.warn(
         `[Imagen] ${operationName} falló (intento ${attempt + 1}/${RETRY_CONFIG.maxRetries + 1}). ` +

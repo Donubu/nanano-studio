@@ -71,17 +71,28 @@ async function withRetry<T>(
     }
 
     try {
-      return await operation();
+      const result = await operation();
+
+      // Log de recuperación si hubo retries previos
+      if (attempt > 0) {
+        console.log(`[Google AI] ${operationName} exitoso después de ${attempt} reintento(s)`);
+      }
+
+      return result;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
       // Si el cliente se desconectó, no reintentar
       if (abortSignal?.aborted) {
+        console.warn(`[Google AI] ${operationName} cancelado (cliente desconectado)`);
         throw lastError;
       }
 
       // Si no es retriable o ya no quedan intentos, lanzar error
       if (!isRetriableError(error) || attempt === RETRY_CONFIG.maxRetries) {
+        if (attempt > 0) {
+          console.error(`[Google AI] ${operationName} falló después de ${attempt + 1} intento(s). Error final: ${lastError.message}`);
+        }
         throw lastError;
       }
 

@@ -1466,78 +1466,29 @@ export function ChatInterface() {
                 body: JSON.stringify(requestBody),
             });
 
-            // Imagen endpoint returns JSON (no streaming)
-            if (useImagenEndpoint) {
-                const data = await response.json();
+            if (!response.ok) {
+                throw new Error("Error sending message");
+            }
 
-                // Update user message with real ID
-                if (data.userMessageId) {
-                    setTabMessages((prev) => ({
-                        ...prev,
-                        [tabId]: prev[tabId].map((m) =>
-                            m.id === tempUserMessage.id ? {...m, id: data.userMessageId} : m
-                        ),
-                    }));
-                }
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+            let fullContent = "";
+            let imageUrl: string | null = null;
+            let realUserMessageId: number | null = null;
+            let realModelMessageId: number | null = null;
 
-                if (!response.ok) {
-                    // Error response — show error in model message
-                    setTabMessages((prev) => ({
-                        ...prev,
-                        [tabId]: prev[tabId].map((m) =>
-                            m.id === streamingMessageId
-                                ? {
-                                    ...m,
-                                    ...(data.modelMessageId && { id: data.modelMessageId }),
-                                    content: `Error: ${data.error || "Error generando imagen"}`,
-                                    isStreaming: false,
-                                }
-                                : m
-                        ),
-                    }));
-                } else {
-                    // Success — show generated image
-                    setTabMessages((prev) => ({
-                        ...prev,
-                        [tabId]: prev[tabId].map((m) =>
-                            m.id === streamingMessageId
-                                ? {
-                                    ...m,
-                                    id: data.modelMessageId,
-                                    content: "",
-                                    image_url: data.imageUrl,
-                                    generation_seed: data.seed,
-                                    isStreaming: false,
-                                }
-                                : m
-                        ),
-                    }));
-                }
-            } else {
-                // Stream endpoint — SSE processing
-                if (!response.ok) {
-                    throw new Error("Error sending message");
-                }
+            if (reader) {
+                while (true) {
+                    const {done, value} = await reader.read();
+                    if (done) break;
 
-                const reader = response.body?.getReader();
-                const decoder = new TextDecoder();
-                let fullContent = "";
-                let imageUrl: string | null = null;
-                let realUserMessageId: number | null = null;
-                let realModelMessageId: number | null = null;
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split("\n");
 
-                if (reader) {
-                    while (true) {
-                        const {done, value} = await reader.read();
-                        if (done) break;
-
-                        const chunk = decoder.decode(value);
-                        const lines = chunk.split("\n");
-
-                        for (const line of lines) {
-                            if (line.startsWith("data: ")) {
-                                try {
-                                    const data = JSON.parse(line.slice(6));
+                    for (const line of lines) {
+                        if (line.startsWith("data: ")) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
 
                                     if (data.type === "user_message") {
                                         realUserMessageId = data.id;
@@ -1641,7 +1592,6 @@ export function ChatInterface() {
                         }
                     }
                 }
-            }
 
             fetchConversations();
             // Actualizar contador de uso y stats

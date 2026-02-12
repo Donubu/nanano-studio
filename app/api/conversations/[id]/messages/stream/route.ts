@@ -57,6 +57,7 @@ interface ConversationRow extends RowDataPacket {
   project_id: number | null;
   model_id: number;
   generation_type: GenerationType;
+  title: string | null;
   model_model_id: string;
   system_instruction: string | null;
   temperature: number;
@@ -447,9 +448,8 @@ export async function POST(
       ? messages.slice(-1) // Solo el último mensaje (el actual)
       : messages;
 
-    // Detectar si es el primer mensaje (solo hay 1 mensaje válido en el historial)
-    // Usar messages.length, no messagesToSend.length (que puede ser recortado con modelIdOverride)
-    const isFirstMessage = messages.length === 1;
+    // Verificar si necesita generar titulo (aún tiene el titulo por defecto)
+    const needsTitle = conversation.title === "Nueva conversación" || !conversation.title;
 
     // Actualizar timestamp de la conversación
     await pool.execute(
@@ -477,28 +477,6 @@ export async function POST(
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify({ type: "user_message", id: userMessageId })}\n\n`)
         );
-
-        // Generar título si es el primer mensaje (async, no bloquea el stream)
-        if (isFirstMessage) {
-          generateConversationTitle(content, labels)
-            .then(async (title) => {
-              // Actualizar título en la base de datos
-              await pool.execute(
-                "UPDATE conversations SET title = ? WHERE id = ?",
-                [title, id]
-              );
-              // Enviar el nuevo título al frontend solo si el controller sigue abierto
-              if (!controllerClosed) {
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ type: "title", title })}\n\n`)
-                );
-              }
-              console.log("[Stream] Generated title:", title);
-            })
-            .catch((err) => {
-              console.error("[Stream] Error generating title:", err);
-            });
-        }
 
         // Construir configuración de generación
         const generationConfig = {
@@ -700,6 +678,22 @@ export async function POST(
                   );
                   controllerClosed = true;
                   controller.close();
+                }
+
+                // Generar título después de completar exitosamente (fire-and-forget)
+                // Se genera aquí para no competir por cuota API con la llamada principal
+                if (needsTitle) {
+                  generateConversationTitle(content, labels)
+                    .then(async (title) => {
+                      await pool.execute(
+                        "UPDATE conversations SET title = ? WHERE id = ?",
+                        [title, id]
+                      );
+                      console.log("[Stream] Generated title:", title);
+                    })
+                    .catch((err) => {
+                      console.error("[Stream] Error generating title:", err);
+                    });
                 }
               },
               onError: async (error) => {
