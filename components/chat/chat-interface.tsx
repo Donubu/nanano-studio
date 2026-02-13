@@ -1468,12 +1468,21 @@ export function ChatInterface() {
 
             if (!response.ok) {
                 // Leer el error real del backend en vez de descartarlo
-                let errorMessage = "Error al enviar mensaje";
+                let errorMessage = "";
                 try {
                     const errorData = await response.json();
-                    errorMessage = errorData.error || errorMessage;
+                    errorMessage = errorData.error || "";
                 } catch {
-                    // Si no se puede parsear, usar mensaje por defecto
+                    // Respuesta no-JSON (ej: página 413 de nginx)
+                }
+                if (!errorMessage) {
+                    if (response.status === 413) {
+                        errorMessage = "El contenido enviado es demasiado grande. Intenta con imágenes más pequeñas.";
+                    } else if (response.status === 429) {
+                        errorMessage = "Demasiadas solicitudes. Espera un momento e intenta de nuevo.";
+                    } else {
+                        errorMessage = `Error del servidor (${response.status})`;
+                    }
                 }
                 // Mostrar error en el mensaje streaming en vez de descartarlo silenciosamente
                 setTabMessages((prev) => ({
@@ -1639,14 +1648,17 @@ export function ChatInterface() {
             }
         } catch (err) {
             console.error("Error sending message:", err);
-            // Mostrar error al usuario en vez de silenciosamente borrar el mensaje
+            const isNetworkError = err instanceof TypeError || (err instanceof Error && /network|fetch|abort/i.test(err.message));
+            const errorMsg = isNetworkError
+                ? "Error de conexión. La generación puede haber tardado demasiado. Por favor intenta de nuevo."
+                : `Error: ${err instanceof Error ? err.message : "Error inesperado al enviar mensaje"}`;
             setTabMessages((prev) => ({
                 ...prev,
                 [tabId]: prev[tabId].map((m) =>
                     m.id === streamingMessageId
                         ? {
                             ...m,
-                            content: `Error: ${err instanceof Error ? err.message : "Error inesperado al enviar mensaje"}`,
+                            content: errorMsg,
                             content_type: "error" as const,
                             isStreaming: false,
                         }
@@ -1804,7 +1816,30 @@ export function ChatInterface() {
             });
 
             if (!response.ok) {
-                throw new Error("Error generating video");
+                let errorMessage = "";
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.error || "";
+                } catch { /* Respuesta no-JSON */ }
+                if (!errorMessage) {
+                    if (response.status === 413) {
+                        errorMessage = "El contenido enviado es demasiado grande. Intenta con archivos más pequeños.";
+                    } else if (response.status === 429) {
+                        errorMessage = "Demasiadas solicitudes. Espera un momento e intenta de nuevo.";
+                    } else {
+                        errorMessage = `Error del servidor (${response.status})`;
+                    }
+                }
+                setTabMessages((prev) => ({
+                    ...prev,
+                    [tabId]: prev[tabId].map((m) =>
+                        m.id === videoMessageId
+                            ? { ...m, content: `Error: ${errorMessage}`, isVideoGenerating: false, videoProgress: undefined }
+                            : m
+                    ),
+                }));
+                setSendingTabs((prev) => ({...prev, [tabId]: false}));
+                return;
             }
 
             const reader = response.body?.getReader();
@@ -1813,12 +1848,14 @@ export function ChatInterface() {
             let realModelMessageId: number | null = null;
 
             if (reader) {
+                let sseBuffer = "";
                 while (true) {
                     const {done, value} = await reader.read();
                     if (done) break;
 
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split("\n");
+                    sseBuffer += decoder.decode(value, { stream: true });
+                    const lines = sseBuffer.split("\n");
+                    sseBuffer = lines.pop() || "";
 
                     for (const line of lines) {
                         if (line.startsWith("data: ")) {
@@ -1940,13 +1977,18 @@ export function ChatInterface() {
             }
         } catch (err) {
             console.error("Error generating video:", err);
+            const isNetworkError = err instanceof TypeError || (err instanceof Error && /network|fetch|abort/i.test(err.message));
+            const errorMsg = isNetworkError
+                ? "Error de conexión. La generación puede haber tardado demasiado. Por favor intenta de nuevo."
+                : `Error: ${err instanceof Error ? err.message : "Error inesperado al generar video"}`;
             setTabMessages((prev) => ({
                 ...prev,
                 [tabId]: prev[tabId].map((m) =>
                     m.id === videoMessageId
                         ? {
                             ...m,
-                            content: "Error al generar el video. Por favor intenta de nuevo.",
+                            content: errorMsg,
+                            content_type: "error" as const,
                             isVideoGenerating: false,
                             videoProgress: undefined,
                         }
@@ -2042,7 +2084,30 @@ export function ChatInterface() {
             });
 
             if (!response.ok) {
-                throw new Error("Error generating audio");
+                let errorMessage = "";
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.error || "";
+                } catch { /* Respuesta no-JSON */ }
+                if (!errorMessage) {
+                    if (response.status === 413) {
+                        errorMessage = "El contenido enviado es demasiado grande. Intenta con archivos más pequeños.";
+                    } else if (response.status === 429) {
+                        errorMessage = "Demasiadas solicitudes. Espera un momento e intenta de nuevo.";
+                    } else {
+                        errorMessage = `Error del servidor (${response.status})`;
+                    }
+                }
+                setTabMessages((prev) => ({
+                    ...prev,
+                    [tabId]: prev[tabId].map((m) =>
+                        m.id === audioMessageId
+                            ? { ...m, content: `Error: ${errorMessage}`, isAudioGenerating: false, audioProgress: undefined }
+                            : m
+                    ),
+                }));
+                setSendingTabs((prev) => ({...prev, [tabId]: false}));
+                return;
             }
 
             const reader = response.body?.getReader();
@@ -2051,12 +2116,14 @@ export function ChatInterface() {
             let realModelMessageId: number | null = null;
 
             if (reader) {
+                let sseBuffer = "";
                 while (true) {
                     const {done, value} = await reader.read();
                     if (done) break;
 
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split("\n");
+                    sseBuffer += decoder.decode(value, { stream: true });
+                    const lines = sseBuffer.split("\n");
+                    sseBuffer = lines.pop() || "";
 
                     for (const line of lines) {
                         if (line.startsWith("data: ")) {
@@ -2167,13 +2234,18 @@ export function ChatInterface() {
             }
         } catch (err) {
             console.error("Error generating audio:", err);
+            const isNetworkError = err instanceof TypeError || (err instanceof Error && /network|fetch|abort/i.test(err.message));
+            const errorMsg = isNetworkError
+                ? "Error de conexión. La generación puede haber tardado demasiado. Por favor intenta de nuevo."
+                : `Error: ${err instanceof Error ? err.message : "Error inesperado al generar audio"}`;
             setTabMessages((prev) => ({
                 ...prev,
                 [tabId]: prev[tabId].map((m) =>
                     m.id === audioMessageId
                         ? {
                             ...m,
-                            content: "Error al generar el audio. Por favor intenta de nuevo.",
+                            content: errorMsg,
+                            content_type: "error" as const,
                             isAudioGenerating: false,
                             audioProgress: undefined,
                         }
