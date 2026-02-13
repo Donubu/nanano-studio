@@ -1496,12 +1496,15 @@ export function ChatInterface() {
             let realModelMessageId: number | null = null;
 
             if (reader) {
+                let sseBuffer = "";
                 while (true) {
                     const {done, value} = await reader.read();
                     if (done) break;
 
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split("\n");
+                    sseBuffer += decoder.decode(value, { stream: true });
+                    const lines = sseBuffer.split("\n");
+                    // Mantener la última línea incompleta en el buffer
+                    sseBuffer = lines.pop() || "";
 
                     for (const line of lines) {
                         if (line.startsWith("data: ")) {
