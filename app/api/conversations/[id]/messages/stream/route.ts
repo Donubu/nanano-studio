@@ -388,8 +388,9 @@ export async function POST(
     const userMessageId = userMessageResult.insertId;
 
     // Obtener historial de mensajes para contexto (excluir errores)
-    // Si no_context es true, solo obtenemos el mensaje actual (será el último en el historial)
-    const [historyRows] = no_context
+    // Si no_context es true, o es generación de imagen/video, solo obtenemos el mensaje actual
+    const skipHistoryQuery = no_context || generationType === "image" || generationType === "video";
+    const [historyRows] = skipHistoryQuery
       ? await pool.execute<MessageRow[]>(
           `SELECT role, content, image_url, image_mime_type, ignore_in_context
            FROM messages
@@ -448,9 +449,11 @@ export async function POST(
       // Filter out messages with empty content (can happen from error responses)
       .filter((msg) => msg.content && msg.content.trim() !== "");
 
-    // Si hay model override (generando imagen desde conversación de video),
-    // solo enviar el mensaje actual sin el historial de video
-    const messagesToSend = modelIdOverride
+    // Para imagen/video, solo enviar el mensaje actual (sin historial).
+    // Los modelos de generación visual no usan contexto conversacional.
+    // También aplica cuando hay model override (ej: generando imagen desde conversación de video).
+    const skipHistory = modelIdOverride || generationType === "image" || generationType === "video";
+    const messagesToSend = skipHistory
       ? messages.slice(-1) // Solo el último mensaje (el actual)
       : messages;
 

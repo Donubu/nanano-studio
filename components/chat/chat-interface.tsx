@@ -1467,7 +1467,25 @@ export function ChatInterface() {
             });
 
             if (!response.ok) {
-                throw new Error("Error sending message");
+                // Leer el error real del backend en vez de descartarlo
+                let errorMessage = "Error al enviar mensaje";
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.error || errorMessage;
+                } catch {
+                    // Si no se puede parsear, usar mensaje por defecto
+                }
+                // Mostrar error en el mensaje streaming en vez de descartarlo silenciosamente
+                setTabMessages((prev) => ({
+                    ...prev,
+                    [tabId]: prev[tabId].map((m) =>
+                        m.id === streamingMessageId
+                            ? { ...m, content: `Error: ${errorMessage}`, content_type: "error" as const, isStreaming: false }
+                            : m
+                    ),
+                }));
+                setSendingTabs((prev) => ({...prev, [tabId]: false}));
+                return;
             }
 
             const reader = response.body?.getReader();
@@ -1593,6 +1611,23 @@ export function ChatInterface() {
                     }
                 }
 
+            // Si el stream terminó sin evento complete ni error, finalizar el mensaje
+            if (!realModelMessageId) {
+                setTabMessages((prev) => ({
+                    ...prev,
+                    [tabId]: prev[tabId].map((m) =>
+                        m.id === streamingMessageId
+                            ? {
+                                ...m,
+                                content: fullContent || "Error: La respuesta se interrumpió inesperadamente",
+                                content_type: fullContent ? m.content_type : "error" as const,
+                                isStreaming: false,
+                            }
+                            : m
+                    ),
+                }));
+            }
+
             fetchConversations();
             // Actualizar contador de uso y stats
             if (selectedProjectId) {
@@ -1601,10 +1636,19 @@ export function ChatInterface() {
             }
         } catch (err) {
             console.error("Error sending message:", err);
-            // Remove streaming message on error
+            // Mostrar error al usuario en vez de silenciosamente borrar el mensaje
             setTabMessages((prev) => ({
                 ...prev,
-                [tabId]: prev[tabId].filter((m) => m.id !== streamingMessageId),
+                [tabId]: prev[tabId].map((m) =>
+                    m.id === streamingMessageId
+                        ? {
+                            ...m,
+                            content: `Error: ${err instanceof Error ? err.message : "Error inesperado al enviar mensaje"}`,
+                            content_type: "error" as const,
+                            isStreaming: false,
+                        }
+                        : m
+                ),
             }));
         } finally {
             setSendingTabs((prev) => ({...prev, [tabId]: false}));
