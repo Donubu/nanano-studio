@@ -36,7 +36,9 @@ export async function GET() {
 
     const config: Record<string, unknown> = {};
     for (const row of rows) {
-      config[row.config_key] = JSON.parse(row.config_value);
+      config[row.config_key] = typeof row.config_value === "string"
+        ? JSON.parse(row.config_value)
+        : row.config_value;
     }
 
     return NextResponse.json(config);

@@ -147,7 +147,9 @@ export async function POST(request: NextRequest) {
     );
     const configMap: Record<string, unknown> = {};
     for (const row of configRows) {
-      configMap[row.config_key] = JSON.parse(row.config_value);
+      configMap[row.config_key] = typeof row.config_value === "string"
+        ? JSON.parse(row.config_value)
+        : row.config_value;
     }
     const videoConfig = configMap.video as { basePlano: number; lipSync: number; training: number; complejo: number; adaptacion: number; reduccion: number } | undefined;
     const fotoConfig = configMap.foto as { baseImagen: number; training: number; capas: number; upscale: number; retouch: { b: number; m: number; c: number } } | undefined;
