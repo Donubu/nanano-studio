@@ -15,6 +15,7 @@ import {
     DollarSign,
     FileStack,
     Cloud,
+    Calculator,
 } from "lucide-react";
 
 const menuItems = [
@@ -52,6 +53,11 @@ const menuItems = [
         title: "Modelos",
         href: "/dashboard/models",
         icon: Cpu,
+    },
+    {
+        title: "Calculadora IA",
+        href: "/dashboard/calculadora",
+        icon: Calculator,
     },
     {
         title: "Chat",

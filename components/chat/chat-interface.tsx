@@ -45,6 +45,7 @@ import {
     X,
     Download,
     EyeOff,
+    Calculator,
 } from "lucide-react";
 import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
 import {
@@ -261,6 +262,9 @@ export function ChatInterface() {
 
     // Project system instruction
     const [useProjectSystemInstruction, setUseProjectSystemInstruction] = useState(true);
+
+    // Calculator access
+    const [hasCalculatorAccess, setHasCalculatorAccess] = useState(false);
 
     // Usage tracking (new format with quality tiers)
     const [projectUsage, setProjectUsage] = useState<{
@@ -749,6 +753,22 @@ export function ChatInterface() {
     useEffect(() => {
         fetchProjects();
     }, [fetchProjects]);
+
+    // Check calculator access
+    useEffect(() => {
+        const checkCalculatorAccess = async () => {
+            try {
+                const res = await fetch("/api/me/calculator-access");
+                if (res.ok) {
+                    const data = await res.json();
+                    setHasCalculatorAccess(data.hasAccess);
+                }
+            } catch (err) {
+                console.error("Error checking calculator access:", err);
+            }
+        };
+        checkCalculatorAccess();
+    }, []);
 
     // Select project from URL slug (takes precedence over localStorage for deep linking)
     useEffect(() => {
@@ -3149,7 +3169,7 @@ export function ChatInterface() {
                                 <p className="text-muted-foreground">No tienes proyectos asignados</p>
                             </div>
                         ) : (
-                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
                                 {projects.map((project) => (
                                     <button
                                         key={project.id}
@@ -3182,6 +3202,22 @@ export function ChatInterface() {
 
                                     </button>
                                 ))}
+                            </div>
+                        )}
+
+                        {/* Calculator Button */}
+                        {hasCalculatorAccess && (
+                            <div className="mt-8">
+                                <Link
+                                    href="/calculadora"
+                                    className="inline-flex items-center gap-3 px-6 py-4 rounded-xl border border-border/50 bg-card hover:bg-accent hover:border-primary/50 transition-all"
+                                >
+                                    <Calculator className="h-6 w-6 text-primary" />
+                                    <div>
+                                        <h3 className="font-medium text-md">Calculadora IA</h3>
+                                        <p className="text-sm text-muted-foreground">Presupuestos y cotizaciones</p>
+                                    </div>
+                                </Link>
                             </div>
                         )}
                     </div>

@@ -20,7 +20,11 @@ export async function GET() {
     }
 
     const [rows] = await pool.execute<ClientRow[]>(
-      "SELECT id, name, logo, created_at FROM clients ORDER BY name ASC"
+      `SELECT c.id, c.name, c.logo, c.created_at,
+        (SELECT COUNT(*) FROM budgets WHERE client_id = c.id AND deleted_at IS NULL) as project_count,
+        (SELECT COUNT(*) FROM client_users WHERE client_id = c.id) as user_count
+       FROM clients c
+       ORDER BY c.name ASC`
     );
 
     return NextResponse.json(rows);

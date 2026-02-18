@@ -9,6 +9,8 @@ interface UserRow extends RowDataPacket {
   name: string | null;
   image: string | null;
   role: string;
+  cargo: string;
+  ai_calculator_access: number;
   blocked_at: Date | null;
   deleted_at: Date | null;
   created_at: Date;
@@ -26,7 +28,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const includeDeleted = searchParams.get("includeDeleted") === "true";
 
-    let query = "SELECT id, email, name, image, role, blocked_at, deleted_at, created_at FROM users";
+    let query = "SELECT id, email, name, image, role, cargo, ai_calculator_access, blocked_at, deleted_at, created_at FROM users";
     if (!includeDeleted) {
       query += " WHERE deleted_at IS NULL";
     }
@@ -54,7 +56,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { email, name, role = "user" } = body;
+    const { email, name, role = "user", cargo = "Sin definir", ai_calculator_access = false } = body;
 
     if (!email) {
       return NextResponse.json(
@@ -73,11 +75,11 @@ export async function POST(request: NextRequest) {
       if (existing[0].deleted_at) {
         // Restaurar usuario eliminado
         await pool.execute<ResultSetHeader>(
-          "UPDATE users SET name = ?, role = ?, deleted_at = NULL, blocked_at = NULL WHERE id = ?",
-          [name || null, role, existing[0].id]
+          "UPDATE users SET name = ?, role = ?, cargo = ?, ai_calculator_access = ?, deleted_at = NULL, blocked_at = NULL WHERE id = ?",
+          [name || null, role, cargo, ai_calculator_access ? 1 : 0, existing[0].id]
         );
         return NextResponse.json(
-          { id: existing[0].id, email, name, role, restored: true },
+          { id: existing[0].id, email, name, role, cargo, ai_calculator_access, restored: true },
           { status: 200 }
         );
       }
@@ -88,12 +90,12 @@ export async function POST(request: NextRequest) {
     }
 
     const [result] = await pool.execute<ResultSetHeader>(
-      "INSERT INTO users (email, name, role) VALUES (?, ?, ?)",
-      [email, name || null, role]
+      "INSERT INTO users (email, name, role, cargo, ai_calculator_access) VALUES (?, ?, ?, ?, ?)",
+      [email, name || null, role, cargo, ai_calculator_access ? 1 : 0]
     );
 
     return NextResponse.json(
-      { id: result.insertId, email, name, role },
+      { id: result.insertId, email, name, role, cargo, ai_calculator_access },
       { status: 201 }
     );
   } catch (error) {

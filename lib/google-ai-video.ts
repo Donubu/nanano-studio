@@ -556,8 +556,20 @@ async function pollVideoOperation(
     };
   }
 
-  // No video found in any known format
+  // No video found - check if it was filtered by RAI (Responsible AI)
   const responseKeys = operation.response ? Object.keys(operation.response) : [];
+  const resp = operation.response as {
+    raiMediaFilteredCount?: number;
+    raiMediaFilteredReasons?: string[];
+  } | undefined;
+
+  if (resp?.raiMediaFilteredCount || resp?.raiMediaFilteredReasons) {
+    const reasons = resp.raiMediaFilteredReasons?.join(", ") || "unknown";
+    const count = resp.raiMediaFilteredCount || 0;
+    console.error(`[Video] Content filtered by Google Safety (RAI). Count: ${count}, Reasons: ${reasons}`);
+    throw new Error(`El video fue bloqueado por los filtros de seguridad de Google. Razones: ${reasons}. Intenta modificar el prompt para evitar contenido que pueda ser considerado inapropiado.`);
+  }
+
   console.error("[Video] No video found in response. Response keys:", responseKeys);
   throw new Error(`Video generation completed but no video in response. Response keys: ${responseKeys.join(", ") || "none"}`);
 }

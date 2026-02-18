@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, Loader2, Eye, Ban, RotateCcw, Zap, FolderOpen } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Eye, Ban, RotateCcw, Zap, FolderOpen, Calculator } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { formatDateLocal } from "@/lib/utils";
 
@@ -30,6 +30,8 @@ interface User {
   name: string | null;
   image: string | null;
   role: string;
+  cargo: string;
+  ai_calculator_access: number;
   blocked_at: string | null;
   deleted_at: string | null;
   created_at: string;
@@ -59,6 +61,8 @@ export default function UsersPage() {
     email: "",
     name: "",
     role: "user",
+    cargo: "Sin definir",
+    ai_calculator_access: false,
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -86,7 +90,7 @@ export default function UsersPage() {
 
   const openCreateDialog = () => {
     setEditingUser(null);
-    setFormData({ email: "", name: "", role: "user" });
+    setFormData({ email: "", name: "", role: "user", cargo: "Sin definir", ai_calculator_access: false });
     setError("");
     setIsDialogOpen(true);
   };
@@ -97,6 +101,8 @@ export default function UsersPage() {
       email: user.email,
       name: user.name || "",
       role: user.role,
+      cargo: user.cargo || "Sin definir",
+      ai_calculator_access: !!user.ai_calculator_access,
     });
     setError("");
     setIsDialogOpen(true);
@@ -259,6 +265,7 @@ export default function UsersPage() {
             <TableRow className="border-border/50 hover:bg-transparent">
               <TableHead className="text-muted-foreground">Usuario</TableHead>
               <TableHead className="text-muted-foreground">Rol</TableHead>
+              <TableHead className="text-muted-foreground">Cargo</TableHead>
               <TableHead className="text-muted-foreground">Estado</TableHead>
               <TableHead className="text-muted-foreground">Fecha de registro</TableHead>
               <TableHead className="w-[160px] text-muted-foreground">Acciones</TableHead>
@@ -267,7 +274,7 @@ export default function UsersPage() {
           <TableBody>
             {users.length === 0 ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                   No hay usuarios registrados
                 </TableCell>
               </TableRow>
@@ -300,6 +307,9 @@ export default function UsersPage() {
                     >
                       {user.role}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <span className="text-sm text-muted-foreground">{user.cargo || "Sin definir"}</span>
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
@@ -441,6 +451,42 @@ export default function UsersPage() {
                   <option value="admin">Administrador</option>
                 </select>
               </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Cargo</label>
+                <select
+                  className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
+                  value={formData.cargo}
+                  onChange={(e) =>
+                    setFormData({ ...formData, cargo: e.target.value })
+                  }
+                >
+                  <option value="Sin definir">Sin definir</option>
+                  <option value="Director de arte">Director de arte</option>
+                  <option value="Director de cuentas">Director de cuentas</option>
+                  <option value="Productor">Productor</option>
+                  <option value="Redactor">Redactor</option>
+                  <option value="Director creativo">Director creativo</option>
+                  <option value="Gerente general">Gerente general</option>
+                  <option value="Director general creativo">Director general creativo</option>
+                  <option value="Creador de contenidos">Creador de contenidos</option>
+                  <option value="Ejecutivo de cuentas">Ejecutivo de cuentas</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="ai_calculator_access"
+                  checked={formData.ai_calculator_access}
+                  onChange={(e) =>
+                    setFormData({ ...formData, ai_calculator_access: e.target.checked })
+                  }
+                  className="h-4 w-4 rounded border-border/50"
+                />
+                <label htmlFor="ai_calculator_access" className="text-sm font-medium flex items-center gap-2">
+                  <Calculator className="h-4 w-4 text-primary" />
+                  Acceso a Calculadora IA
+                </label>
+              </div>
             </div>
             <DialogFooter>
               <Button
@@ -531,6 +577,25 @@ export default function UsersPage() {
                     )}
                     {!selectedUser.blocked_at && !selectedUser.deleted_at && (
                       <Badge className="bg-green-500/20 text-green-400">Activo</Badge>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Cargo y accesos */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-muted rounded-lg p-3">
+                  <div className="text-xs text-muted-foreground mb-1">Cargo</div>
+                  <div className="text-sm font-medium">{selectedUser.cargo || "Sin definir"}</div>
+                </div>
+                <div className="bg-muted rounded-lg p-3">
+                  <div className="text-xs text-muted-foreground mb-1">Calculadora IA</div>
+                  <div className="text-sm font-medium flex items-center gap-1.5">
+                    <Calculator className="h-3.5 w-3.5" />
+                    {selectedUser.ai_calculator_access ? (
+                      <span className="text-green-400">Activado</span>
+                    ) : (
+                      <span className="text-muted-foreground">Desactivado</span>
                     )}
                   </div>
                 </div>

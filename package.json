@@ -1,6 +1,6 @@
 {
   "name": "nanano",
-  "version": "3.2.1",
+  "version": "3.2.9",
   "private": true,
   "scripts": {
     "dev": "node scripts/bump-version.js && next dev",
@@ -47,6 +47,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^17.3.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
     "tailwindcss": "^4",

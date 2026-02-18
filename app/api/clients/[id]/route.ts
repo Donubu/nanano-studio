@@ -24,7 +24,7 @@ export async function GET(
     const { id } = await params;
 
     const [rows] = await pool.execute<ClientRow[]>(
-      "SELECT id, name, logo FROM clients WHERE id = ?",
+      "SELECT id, name, logo, created_at FROM clients WHERE id = ?",
       [id]
     );
 

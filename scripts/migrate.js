@@ -98,6 +98,20 @@ const migrationChecks = {
   '040_create_topaz_video_edits_table.sql': (c) => tableExists(c, 'topaz_video_edits'),
   '041_fix_gcp_usage_amount_range.sql': (c) => tableExists(c, 'gcp_daily_costs'),
   '042_add_ignore_context_to_messages.sql': (c) => columnExists(c, 'messages', 'ignore_in_context'),
+  '045_add_cargo_and_calculator_to_users.sql': (c) => columnExists(c, 'users', 'cargo'),
+  '046_create_budgets_table.sql': (c) => tableExists(c, 'budgets'),
+  '047_create_budget_items_table.sql': (c) => tableExists(c, 'budget_items'),
+  '048_create_budget_item_hours_table.sql': (c) => tableExists(c, 'budget_item_hours'),
+  '049_create_budget_externals_tables.sql': (c) => tableExists(c, 'budget_item_externals'),
+  '050_create_budget_config_table.sql': (c) => tableExists(c, 'budget_config'),
+  '051_add_detail_and_discount_type_to_budgets.sql': (c) => columnExists(c, 'budgets', 'detail'),
+  '052_add_cost_breakdown_to_budget_items.sql': (c) => columnExists(c, 'budget_items', 'cost_breakdown'),
+  '053_add_gemini_3_pro_preview.sql': async (c) => {
+    const [rows] = await c.execute("SELECT COUNT(*) as count FROM models WHERE model_id = 'gemini-3-pro-preview'");
+    return rows[0].count > 0;
+  },
+  '054_add_ai_summary_to_budgets.sql': (c) => columnExists(c, 'budgets', 'ai_summary'),
+  '055_create_client_users_table.sql': (c) => tableExists(c, 'client_users'),
 };
 
 async function ensureMigrationsTable(connection) {

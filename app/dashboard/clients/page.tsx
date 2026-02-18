@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -19,7 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, Loader2, Upload, Building2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Upload, Building2, Eye } from "lucide-react";
 import Image from "next/image";
 import { formatDateLocal } from "@/lib/utils";
 
@@ -28,9 +29,12 @@ interface Client {
   name: string;
   logo: string | null;
   created_at: string;
+  project_count: number;
+  user_count: number;
 }
 
 export default function ClientsPage() {
+  const router = useRouter();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -68,14 +72,16 @@ export default function ClientsPage() {
     setIsDialogOpen(true);
   };
 
-  const openEditDialog = (client: Client) => {
+  const openEditDialog = (e: React.MouseEvent, client: Client) => {
+    e.stopPropagation();
     setEditingClient(client);
     setFormData({ name: client.name, logo: client.logo || "" });
     setError("");
     setIsDialogOpen(true);
   };
 
-  const openDeleteDialog = (client: Client) => {
+  const openDeleteDialog = (e: React.MouseEvent, client: Client) => {
+    e.stopPropagation();
     setDeletingClient(client);
     setIsDeleteDialogOpen(true);
   };
@@ -196,6 +202,8 @@ export default function ClientsPage() {
             <TableRow className="border-border/50 hover:bg-transparent">
               <TableHead className="text-muted-foreground w-[80px]">Logo</TableHead>
               <TableHead className="text-muted-foreground">Nombre</TableHead>
+              <TableHead className="text-muted-foreground text-center">Proyectos</TableHead>
+              <TableHead className="text-muted-foreground text-center">Usuarios</TableHead>
               <TableHead className="text-muted-foreground">Fecha de registro</TableHead>
               <TableHead className="w-[100px] text-muted-foreground">Acciones</TableHead>
             </TableRow>
@@ -203,13 +211,16 @@ export default function ClientsPage() {
           <TableBody>
             {clients.length === 0 ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                   No hay clientes registrados
                 </TableCell>
               </TableRow>
             ) : (
               clients.map((client) => (
-                <TableRow key={client.id} className="border-border/50 hover:bg-accent/50">
+                <TableRow
+                  key={client.id}
+                  className="border-border/50 hover:bg-accent/50"
+                >
                   <TableCell>
                     {client.logo ? (
                       <Image
@@ -226,6 +237,8 @@ export default function ClientsPage() {
                     )}
                   </TableCell>
                   <TableCell className="font-medium">{client.name}</TableCell>
+                  <TableCell className="text-center">{client.project_count}</TableCell>
+                  <TableCell className="text-center">{client.user_count}</TableCell>
                   <TableCell className="text-muted-foreground">
                     {formatDateLocal(client.created_at)}
                   </TableCell>
@@ -235,7 +248,15 @@ export default function ClientsPage() {
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 hover:bg-accent"
-                        onClick={() => openEditDialog(client)}
+                        onClick={() => router.push(`/dashboard/clients/${client.id}`)}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 hover:bg-accent"
+                        onClick={(e) => openEditDialog(e, client)}
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
@@ -243,7 +264,7 @@ export default function ClientsPage() {
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 hover:bg-red-500/10"
-                        onClick={() => openDeleteDialog(client)}
+                        onClick={(e) => openDeleteDialog(e, client)}
                       >
                         <Trash2 className="h-4 w-4 text-red-400" />
                       </Button>

@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Puerto Budget V18.0</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg-color: #e4e4e4;
+    --text-color: #141414;
+    --accent-color: #ff6c14;
+    --border-color: #9e9e9e;
+  }
+
+  body {
+    font-family: 'Roboto Mono', monospace; font-weight: 300;
+    background: var(--bg-color); padding: 0; margin: 0;
+    color: var(--text-color); padding-bottom: 80px;
+  }
+
+  .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+
+  /* HEADER */
+  header { background: var(--bg-color); padding: 40px 20px 20px 20px; text-align: center; }
+  h2 {
+    font-family: 'Press Start 2P', cursive; font-size: clamp(20px, 5vw, 40px);
+    text-align: center; margin: 0; color: var(--text-color);
+    text-transform: uppercase; line-height: 1.5; letter-spacing: -1px;
+  }
+
+  /* TABS */
+  .nav-tabs {
+    display: flex; background: var(--bg-color); border-bottom: 1px solid var(--border-color);
+    padding: 0 10px; max-width: 600px; margin: 0 auto 20px auto;
+  }
+  .nav-btn {
+    flex: 1; padding: 15px; border: none; background: transparent;
+    font-family: 'Roboto Mono', monospace; font-weight: 300; text-transform: uppercase;
+    cursor: pointer; color: #888; border-bottom: 3px solid transparent;
+    transition: 0.2s; font-size: 12px;
+  }
+  .nav-btn.active { color: var(--text-color); border-bottom-color: var(--accent-color); font-weight: 500; }
+  .nav-btn:hover:not(.active) { color: #555; }
+
+  /* VIEWS */
+  .view-section { display: none; }
+  .view-section.active { display: block; animation: fadeIn 0.3s; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
+
+  /* CARDS */
+  .card {
+    background: var(--bg-color); padding: 20px;
+    border: 1px solid var(--border-color); border-radius: 0px;
+    margin-bottom: 20px;
+  }
+  .card-header {
+    font-size: 16px; font-weight: 500; text-transform: uppercase;
+    border-bottom: 1px solid var(--border-color); padding-bottom: 10px;
+    margin-bottom: 15px; display:flex; justify-content:space-between;
+    align-items:center; color: var(--accent-color);
+  }
+
+  /* INPUTS */
+  .input-group { margin-bottom: 15px; }
+  label { display: block; font-size: 12px; font-weight: 500; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.5px; }
+  input[type="text"], input[type="number"] {
+    width: 100%; padding: 12px; border: 1px solid var(--border-color);
+    border-radius: 0px; font-size: 16px; font-family: 'Roboto Mono', monospace; font-weight: 300;
+    box-sizing: border-box; background: var(--bg-color); color: var(--text-color); outline: none;
+  }
+  input:focus { background: #fff; border-color: var(--accent-color); }
+
+  /* CUSTOM SELECT */
+  .custom-select-wrapper { position: relative; user-select: none; width: 100%; }
+  .custom-select-trigger {
+    position: relative; display: block; width: 100%; padding: 12px;
+    font-size: 16px; font-weight: 300; color: var(--text-color);
+    background: #fff; border: 1px solid var(--border-color);
+    cursor: pointer; box-sizing: border-box; font-family: 'Roboto Mono', monospace;
+  }
+  .custom-select-trigger:after {
+    position: absolute; display: block; content: '';
+    width: 10px; height: 10px; top: 50%; right: 15px; transform: translateY(-50%);
+    background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23141414%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
+    background-repeat: no-repeat; background-size: 100% 100%; transition: transform 0.2s;
+  }
+  .custom-select-wrapper.open .custom-select-trigger:after { transform: translateY(-50%) rotate(180deg); }
+  .custom-options {
+    position: absolute; display: block; top: 100%; left: 0; right: 0;
+    border: 1px solid var(--border-color); border-top: 0; background: #fff;
+    transition: all 0.2s; opacity: 0; visibility: hidden; pointer-events: none; z-index: 99;
+  }
+  .custom-select-wrapper.open .custom-options { opacity: 1; visibility: visible; pointer-events: all; }
+  .custom-option {
+    position: relative; display: block; padding: 12px; font-size: 16px;
+    font-weight: 300; color: var(--text-color); cursor: pointer; border-bottom: 1px solid #eee;
+    font-family: 'Roboto Mono', monospace;
+  }
+  .custom-option:hover, .custom-option.selected { background-color: var(--accent-color); color: #fff; }
+
+  /* GRID */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+  /* MODE BUTTONS */
+  .mode-selector { display: flex; gap: 0; margin-bottom: 20px; border: 1px solid var(--border-color); }
+  .mode-btn {
+    flex: 1; padding: 15px; border: none; background: var(--bg-color); color: var(--text-color);
+    font-weight: 300; cursor: pointer; font-size: 12px; text-transform: uppercase;
+    font-family: 'Roboto Mono', monospace; border-right: 1px solid var(--border-color);
+  }
+  .mode-btn:last-child { border-right: none; }
+  .mode-btn.active { background: var(--text-color); color: #fff; font-weight: 500; }
+
+  /* CUSTOM CHECKBOXES */
+  .toggle-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 10px; border: 1px solid var(--border-color); }
+  .custom-checkbox-container input { position: absolute; opacity: 0; cursor: pointer; height: 0; width: 0; }
+  .checkmark {
+    position: relative; display: block; height: 20px; width: 20px; background-color: transparent;
+    border: 1px solid #141414; cursor: pointer; transition: all 0.1s;
+  }
+  .custom-checkbox-container input:checked ~ .checkmark { background-color: var(--accent-color); border-color: var(--accent-color); }
+  .checkmark:after { content: ""; position: absolute; display: none; }
+  .custom-checkbox-container input:checked ~ .checkmark:after { display: block; }
+  .custom-checkbox-container .checkmark:after {
+    left: 6px; top: 2px; width: 5px; height: 10px; border: solid #141414; border-width: 0 2px 2px 0; transform: rotate(45deg);
+  }
+
+  /* DYNAMIC EXTERNAL ROWS */
+  .ext-row { display: flex; gap: 10px; margin-bottom: 10px; }
+  .ext-row input { flex: 1; }
+  .ext-row input[type="number"] { width: 120px; flex: none; }
+  .btn-del-row { background: #141414; color: white; border: none; width: 44px; cursor: pointer; font-size: 18px; }
+  .btn-add-row { background: transparent; border: 1px dashed var(--border-color); width: 100%; padding: 10px; color: #666; cursor: pointer; font-family: 'Roboto Mono', monospace; text-transform: uppercase; font-size: 12px; }
+  .btn-add-row:hover { border-color: var(--accent-color); color: var(--accent-color); }
+
+  /* BUTTONS MAIN */
+  .btn-generate {
+    background: var(--accent-color); color: #fff; border: none; padding: 16px; width: 100%;
+    font-size: 16px; font-weight: 500; text-transform: uppercase; cursor: pointer;
+    transition: background 0.2s; margin-bottom: 15px; font-family: 'Roboto Mono', monospace;
+  }
+  .btn-generate:hover { background: #e05600; }
+  .btn-reset { background: #999; color: #fff; border: none; padding: 12px; width: 100%; font-weight: 500; cursor: pointer; text-transform: uppercase; font-family: 'Roboto Mono', monospace; }
+  .btn-restore { background: var(--accent-color); color: white; margin-top: 20px; }
+  .btn-restore:hover { background: #e05600; }
+
+  /* HISTORY & MODAL */
+  .hidden { display: none !important; }
+  .history-list { display: flex; flex-direction: column; gap: 15px; }
+  .history-item { background: #fff; border: 1px solid var(--border-color); position: relative; transition: all 0.2s; }
+  .favorite .h-header { border-left: 5px solid #f1c40f; }
+  .h-header { padding: 15px; display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid var(--border-color); }
+  .h-title { font-weight: 500; font-size: 16px; margin-bottom: 5px; }
+  .h-meta { font-size: 12px; color: #666; display: flex; gap: 10px; text-transform: uppercase; }
+  .h-price { font-family: 'Press Start 2P'; font-size: 12px; color: var(--accent-color); margin-top: 10px;}
+  .h-actions { display: flex; }
+  .h-btn { flex: 1; border: none; background: #fff; padding: 12px; cursor: pointer; font-weight: 500; font-size: 12px; text-transform: uppercase; border-right: 1px solid var(--border-color); transition: background 0.2s; font-family: 'Roboto Mono', monospace; }
+  .h-btn:last-child { border-right: none; }
+  .h-btn:hover { background: #f5f5f5; }
+  .h-btn.fav-active { color: #f39c12; }
+  .h-btn.delete { color: #e74c3c; }
+
+  .config-note { font-size: 11px; color: #666; margin-bottom: 5px; }
+  .btn-save-config { background: #141414; color: white; margin-top: 10px; }
+
+  .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; display: none; justify-content: center; align-items: center; padding: 20px; box-sizing: border-box; }
+  .modal-content { background: #fff; width: 100%; max-width: 600px; height: 80vh; display: flex; flex-direction: column; border: 3px solid var(--accent-color); }
+  .modal-header { background: var(--text-color); color: #fff; padding: 15px; display: flex; justify-content: space-between; align-items: center; font-weight: 500; text-transform: uppercase; }
+  .modal-close { cursor: pointer; font-size: 24px; color: var(--accent-color); }
+  .modal-body { flex: 1; padding: 0; }
+  .modal-textarea { width: 100%; height: 100%; border: none; resize: none; padding: 20px; font-family: 'Roboto Mono', monospace; font-weight:300; font-size: 13px; box-sizing: border-box; outline: none; }
+  .modal-footer { padding: 15px; border-top: 1px solid var(--border-color); }
+</style>
+</head>
+<body>
+
+<header>
+  <h2>Puerto IA Budget</h2>
+</header>
+
+<div class="nav-tabs">
+  <button class="nav-btn active" onclick="switchTab('calc')">Calculadora</button>
+  <button class="nav-btn" onclick="switchTab('history')">Histórico</button>
+  <button class="nav-btn" onclick="switchTab('config')">Configuración</button>
+</div>
+
+<div class="container">
+
+  <div id="viewCalc" class="view-section active">
+
+    <div class="mode-selector">
+      <button class="mode-btn active" id="btnVideo" onclick="setMode('video')">Video</button>
+      <button class="mode-btn" id="btnPhoto" onclick="setMode('photo')">Foto</button>
+      <button class="mode-btn" id="btnMixed" onclick="setMode('mixed')">Mixto</button>
+    </div>
+
+    <div class="card">
+      <div class="card-header">1. Datos Generales</div>
+      <div class="input-group">
+        <label>Nombre del Cliente / Proyecto</label>
+        <input type="text" id="nombreProyecto" value="Proyecto Nuevo">
+      </div>
+      <div class="input-group">
+        <label>Días Hábiles</label>
+        <input type="number" id="dias" value="10">
+      </div>
+    </div>
+
+    <div id="sectionVideo" class="card">
+      <div class="card-header">Producción Audiovisual</div>
+      <div class="grid-2">
+        <div><label>Planos Totales</label><input type="number" id="v_planos" value="14"></div>
+        <div><label>Planos Complejos</label><input type="number" id="v_complejos" value="3"></div>
+      </div>
+      <br>
+      <div class="toggle-row">
+          <label for="v_lipsync" style="cursor: pointer; flex-grow: 1;">Lip-sync / Sinc. Labial</label>
+          <label class="custom-checkbox-container">
+             <input type="checkbox" id="v_lipsync" checked>
+             <span class="checkmark"></span>
+          </label>
+      </div>
+      <div class="toggle-row">
+          <label for="v_train" style="cursor: pointer; flex-grow: 1;">Entrenamiento IA</label>
+          <label class="custom-checkbox-container">
+             <input type="checkbox" id="v_train" checked>
+             <span class="checkmark"></span>
+          </label>
+      </div>
+
+      <div style="margin: 15px 0; border-bottom:1px solid var(--border-color)"></div>
+
+      <label style="color:var(--accent-color)">Máster</label>
+      <div class="grid-2" style="margin-bottom:15px;">
+        <div>
+            <label>Duración (seg)</label>
+            <input type="number" id="v_durMaster" value="20">
+        </div>
+        <div>
+            <label>Relación de Aspecto</label>
+            <div class="custom-select-wrapper" id="wrap_ratio">
+              <div class="custom-select-trigger" onclick="toggleSelect('wrap_ratio')"><span id="display_ratio">16:9 (Horizontal)</span></div>
+              <div class="custom-options">
+                 <div class="custom-option selected" onclick="selectRatio('16:9 (Horizontal)')">16:9 (Horizontal)</div>
+                 <div class="custom-option" onclick="selectRatio('9:16 (Vertical)')">9:16 (Vertical)</div>
+                 <div class="custom-option" onclick="selectRatio('1:1 (Cuadrado)')">1:1 (Cuadrado)</div>
+                 <div class="custom-option" onclick="selectRatio('Otro')">Otro...</div>
+              </div>
+            </div>
+            <input type="text" id="v_ratio_custom" placeholder="Ej: 4:5" style="display:none; margin-top:5px;">
+            <input type="hidden" id="v_ratio" value="16:9 (Horizontal)">
+        </div>
+      </div>
+
+      <label style="margin-top:10px">Adaptaciones Máster (Otras versiones)</label>
+      <div class="grid-3">
+        <div><label>16:9</label><input type="number" id="v_ad169" value="1"></div>
+        <div><label>9:16</label><input type="number" id="v_ad916" value="1"></div>
+        <div><label>1:1</label><input type="number" id="v_ad11" value="1"></div>
+      </div>
+
+      <label style="margin-top:10px; color:var(--accent-color)">Reducciones (Segundaje menor)</label>
+      <div class="input-group">
+        <label>Duración Reducción (seg)</label><input type="number" id="v_durRed" value="10">
+      </div>
+      <div class="grid-3">
+        <div><label>16:9</label><input type="number" id="v_red169" value="1"></div>
+        <div><label>9:16</label><input type="number" id="v_red916" value="1"></div>
+        <div><label>1:1</label><input type="number" id="v_red11" value="1"></div>
+      </div>
+    </div>
+
+    <div id="sectionPhoto" class="card hidden">
+      <div class="card-header">Producción Fotográfica</div>
+      <div class="input-group"><label>N° Imágenes Finales</label><input type="number" id="f_imagenes" value="5"></div>
+
+      <div class="toggle-row">
+          <label for="f_train" style="cursor: pointer; flex-grow: 1;">Entrenamiento IA (+100%)</label>
+          <label class="custom-checkbox-container">
+             <input type="checkbox" id="f_train" checked>
+             <span class="checkmark"></span>
+          </label>
+      </div>
+
+      <div class="card" style="margin-top:15px; border:1px solid var(--border-color); padding:15px;">
+        <label style="color:var(--accent-color)">Retoque Manual</label>
+        <label>Cantidad de Fotos a retocar</label><input type="number" id="f_retQty" value="0">
+        <label style="margin-top:5px">Nivel de Retoque</label>
+        <div class="custom-select-wrapper" id="wrap_retoque">
+          <div class="custom-select-trigger" onclick="toggleSelect('wrap_retoque')"><span id="display_retoque">Básico</span></div>
+          <div class="custom-options" id="opts_retoque"></div>
+          <input type="hidden" id="f_retLevel" value="">
+        </div>
+      </div>
+
+      <div class="toggle-row">
+          <label for="f_upscale" style="cursor: pointer; flex-grow: 1;">Escalado (Alta Res)</label>
+          <label class="custom-checkbox-container">
+             <input type="checkbox" id="f_upscale">
+             <span class="checkmark"></span>
+          </label>
+      </div>
+      <div class="toggle-row">
+          <label for="f_capas" style="cursor: pointer; flex-grow: 1;">Entrega en Capas (+50%)</label>
+          <label class="custom-checkbox-container">
+             <input type="checkbox" id="f_capas">
+             <span class="checkmark"></span>
+          </label>
+      </div>
+    </div>
+
+    <div id="sectionExternos" class="card">
+      <div class="card-header">Costos Externos</div>
+      <div id="externalList">
+          </div>
+      <button class="btn-add-row" onclick="addExternalRow()">+ Agregar Ítem</button>
+    </div>
+
+    <button class="btn-generate" onclick="generarPresupuesto()">Generar Presupuesto</button>
+    <button class="btn-reset" onclick="resetForm()">Limpiar Todo</button>
+
+  </div>
+
+  <div id="viewHistory" class="view-section">
+    <div id="historyContainer" class="history-list">
+      <div style="text-align:center; padding:40px; color:#999;">No hay presupuestos guardados aún.</div>
+    </div>
+  </div>
+
+  <div id="viewConfig" class="view-section">
+    <div class="card">
+        <div class="card-header">Video Config</div>
+        <div class="input-group">
+            <label>Costo Base Plano ($)</label>
+            <input type="number" id="cfg_v_base">
+        </div>
+        <div class="grid-2">
+            <div><label>% Lip-Sync</label><input type="number" id="cfg_v_lip" step="0.01"></div>
+            <div><label>% Training</label><input type="number" id="cfg_v_train" step="0.01"></div>
+        </div>
+        <br>
+        <div class="grid-3">
+            <div><label>% Recargo Comp</label><input type="number" id="cfg_v_comp" step="0.01"></div>
+            <div><label>% Adaptación</label><input type="number" id="cfg_v_adapt" step="0.01"></div>
+            <div><label>% Reducción</label><input type="number" id="cfg_v_reduccion" step="0.01"></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">Foto Config</div>
+        <div class="input-group">
+            <label>Costo Base Imagen ($)</label>
+            <input type="number" id="cfg_f_base">
+        </div>
+        <div class="grid-2">
+            <div><label>% Training (+1.0 = 100%)</label><input type="number" id="cfg_f_train" step="0.01"></div>
+            <div><label>% Capas (+0.5 = 50%)</label><input type="number" id="cfg_f_capas" step="0.01"></div>
+        </div>
+        <br>
+        <label>Retoque (Valores $)</label>
+        <div class="grid-3">
+             <div><label>Básico</label><input type="number" id="cfg_f_ret_b"></div>
+             <div><label>Medio</label><input type="number" id="cfg_f_ret_m"></div>
+             <div><label>Complejo</label><input type="number" id="cfg_f_ret_c"></div>
+        </div>
+        <br>
+        <div class="input-group">
+            <label>Costo Escalado ($)</label>
+            <input type="number" id="cfg_f_upscale">
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="input-group">
+            <label>Tech Fee (%)</label>
+            <input type="number" id="cfg_techFee" step="0.01">
+        </div>
+    </div>
+
+    <button class="btn-generate btn-save-config" onclick="saveConfig()">Guardar Cambios</button>
+    <button class="btn-reset btn-restore" onclick="resetConfigToFactory()">Restaurar Fábrica</button>
+  </div>
+
+</div>
+
+<div class="modal-overlay" id="modalView">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span id="modalTitle">Detalle</span>
+      <span class="modal-close" onclick="closeModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+      <textarea id="modalText" class="modal-textarea" readonly></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-generate" onclick="copyModalText()">Copiar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================================
+   CONFIG & DATA
+   ========================================= */
+const CONFIG_KEY = 'puerto_budget_config_v18'; // Llave V18 para aplicar cambios automáticos
+
+const DEFAULT_CONFIG = {
+  techFee: 0.05,
+  video: {
+    basePlano: 300000,
+    lipSync: 0.20, training: 0.15,
+    complejo: 0.10, adaptacion: 0.10, reduccion: 0.10
+  },
+  foto: {
+    baseImagen: 100000,
+    training: 1.0, // 100%
+    capas: 0.50,   // 50%
+    upscale: 100000, // Ajustado a 100k
+    retouch: {
+        b: 50000,
+        m: 100000, // Ajustado a 100k
+        c: 200000  // Ajustado a 200k
+    }
+  }
+};
+
+let APP_CONFIG = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+
+function loadConfig() {
+  const saved = localStorage.getItem(CONFIG_KEY);
+  if (saved) APP_CONFIG = JSON.parse(saved);
+
+  // Fill Config Inputs
+  document.getElementById('cfg_techFee').value = APP_CONFIG.techFee;
+  document.getElementById('cfg_v_base').value = APP_CONFIG.video.basePlano;
+  document.getElementById('cfg_v_lip').value = APP_CONFIG.video.lipSync;
+  document.getElementById('cfg_v_train').value = APP_CONFIG.video.training;
+  document.getElementById('cfg_v_comp').value = APP_CONFIG.video.complejo;
+  document.getElementById('cfg_v_adapt').value = APP_CONFIG.video.adaptacion;
+  document.getElementById('cfg_v_reduccion').value = APP_CONFIG.video.reduccion;
+
+  document.getElementById('cfg_f_base').value = APP_CONFIG.foto.baseImagen;
+  document.getElementById('cfg_f_train').value = APP_CONFIG.foto.training;
+  document.getElementById('cfg_f_capas').value = APP_CONFIG.foto.capas;
+  document.getElementById('cfg_f_upscale').value = APP_CONFIG.foto.upscale;
+  document.getElementById('cfg_f_ret_b').value = APP_CONFIG.foto.retouch.b;
+  document.getElementById('cfg_f_ret_m').value = APP_CONFIG.foto.retouch.m;
+  document.getElementById('cfg_f_ret_c').value = APP_CONFIG.foto.retouch.c;
+}
+
+function saveConfig() {
+  APP_CONFIG.techFee = parseFloat(document.getElementById('cfg_techFee').value);
+  APP_CONFIG.video.basePlano = parseFloat(document.getElementById('cfg_v_base').value);
+  APP_CONFIG.video.lipSync = parseFloat(document.getElementById('cfg_v_lip').value);
+  APP_CONFIG.video.training = parseFloat(document.getElementById('cfg_v_train').value);
+  APP_CONFIG.video.complejo = parseFloat(document.getElementById('cfg_v_comp').value);
+  APP_CONFIG.video.adaptacion = parseFloat(document.getElementById('cfg_v_adapt').value);
+  APP_CONFIG.video.reduccion = parseFloat(document.getElementById('cfg_v_reduccion').value);
+
+  APP_CONFIG.foto.baseImagen = parseFloat(document.getElementById('cfg_f_base').value);
+  APP_CONFIG.foto.training = parseFloat(document.getElementById('cfg_f_train').value);
+  APP_CONFIG.foto.capas = parseFloat(document.getElementById('cfg_f_capas').value);
+  APP_CONFIG.foto.upscale = parseFloat(document.getElementById('cfg_f_upscale').value);
+  APP_CONFIG.foto.retouch.b = parseFloat(document.getElementById('cfg_f_ret_b').value);
+  APP_CONFIG.foto.retouch.m = parseFloat(document.getElementById('cfg_f_ret_m').value);
+  APP_CONFIG.foto.retouch.c = parseFloat(document.getElementById('cfg_f_ret_c').value);
+
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(APP_CONFIG));
+  alert("Configuración Guardada");
+  buildRetouchOptions();
+}
+
+function resetConfigToFactory() {
+  if(confirm("¿Restaurar valores de fábrica?")) {
+    APP_CONFIG = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(APP_CONFIG));
+    loadConfig(); buildRetouchOptions();
+    alert("Restaurado.");
+  }
+}
+
+/* =========================================
+   UI LOGIC
+   ========================================= */
+function fmt(n) { return "$" + n.toLocaleString('es-CL', {maximumFractionDigits:0}); }
+
+window.addEventListener('click', e => {
+  if (!e.target.closest('.custom-select-wrapper')) document.querySelectorAll('.custom-select-wrapper').forEach(w => w.classList.remove('open'));
+});
+function toggleSelect(id) {
+  document.querySelectorAll('.custom-select-wrapper').forEach(w => { if(w.id!==id) w.classList.remove('open') });
+  document.getElementById(id).classList.toggle('open');
+}
+
+// Ratio Select
+function selectRatio(val) {
+  document.querySelector('#wrap_ratio .custom-select-trigger span').innerText = val;
+  document.getElementById('v_ratio').value = val;
+  document.getElementById('wrap_ratio').classList.remove('open');
+  // Show input if 'Otro'
+  const customInput = document.getElementById('v_ratio_custom');
+  if(val === 'Otro') customInput.style.display = 'block';
+  else customInput.style.display = 'none';
+}
+
+function selectRetouch(val, txt) {
+  document.querySelector('#wrap_retoque .custom-select-trigger span').innerText = txt;
+  document.getElementById('f_retLevel').value = val;
+  document.getElementById('wrap_retoque').classList.remove('open');
+}
+
+function buildRetouchOptions() {
+  const c = document.getElementById('opts_retoque');
+  const r = APP_CONFIG.foto.retouch;
+  c.innerHTML = '';
+  c.innerHTML += `<div class="custom-option selected" onclick="selectRetouch('${r.b}','Básico (+${fmt(r.b)})')">Básico (+${fmt(r.b)})</div>`;
+  c.innerHTML += `<div class="custom-option" onclick="selectRetouch('${r.m}','Medio (+${fmt(r.m)})')">Medio (+${fmt(r.m)})</div>`;
+  c.innerHTML += `<div class="custom-option" onclick="selectRetouch('${r.c}','Complejo (+${fmt(r.c)})')">Complejo (+${fmt(r.c)})</div>`;
+  selectRetouch(r.b, `Básico (+${fmt(r.b)})`);
+}
+
+// External Rows Dynamic
+function addExternalRow() {
+  const container = document.getElementById('externalList');
+  const div = document.createElement('div');
+  div.className = 'ext-row';
+  div.innerHTML = `
+    <input type="text" placeholder="Ítem (ej: Locución)" class="ext-name">
+    <input type="number" placeholder="$" class="ext-price" value="0">
+    <button class="btn-del-row" onclick="this.parentElement.remove()">×</button>
+  `;
+  container.appendChild(div);
+}
+
+// Tabs & Mode
+function switchTab(tab) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
+  if(tab==='calc'){ document.querySelector('.nav-btn:nth-child(1)').classList.add('active'); document.getElementById('viewCalc').classList.add('active'); }
+  else if(tab==='history'){ document.querySelector('.nav-btn:nth-child(2)').classList.add('active'); document.getElementById('viewHistory').classList.add('active'); renderHistory(); }
+  else { document.querySelector('.nav-btn:nth-child(3)').classList.add('active'); document.getElementById('viewConfig').classList.add('active'); }
+}
+
+let currentMode = 'video';
+function setMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  if(mode==='video') document.getElementById('btnVideo').classList.add('active');
+  if(mode==='photo') document.getElementById('btnPhoto').classList.add('active');
+  if(mode==='mixed') document.getElementById('btnMixed').classList.add('active');
+
+  const v = document.getElementById('sectionVideo'); const f = document.getElementById('sectionPhoto');
+  // Externos siempre visible ahora
+  v.classList.toggle('hidden', mode==='photo');
+  f.classList.toggle('hidden', mode==='video');
+  if(mode==='mixed') { v.classList.remove('hidden'); f.classList.remove('hidden'); }
+}
+
+/* =========================================
+   CALCULATION ENGINE
+   ========================================= */
+function generarPresupuesto() {
+  const proj = document.getElementById('nombreProyecto').value;
+  const dias = document.getElementById('dias').value;
+
+  // -- VIDEO --
+  let vidTotal = 0; let txtVid = "";
+  let v_pl = 0;
+  if(currentMode !== 'photo') {
+    v_pl = parseInt(document.getElementById('v_planos').value)||0;
+    const plComp = parseInt(document.getElementById('v_complejos').value)||0;
+    const v_lip = document.getElementById('v_lipsync').checked;
+    const v_train = document.getElementById('v_train').checked;
+
+    // Master Specs
+    const v_durM = document.getElementById('v_durMaster').value;
+    let v_ratio = document.getElementById('v_ratio').value;
+    if(v_ratio === 'Otro') v_ratio = document.getElementById('v_ratio_custom').value || 'Personalizado';
+
+    // Deliverables
+    const adT = (parseInt(document.getElementById('v_ad169').value)||0)+(parseInt(document.getElementById('v_ad916').value)||0)+(parseInt(document.getElementById('v_ad11').value)||0);
+    const reT = (parseInt(document.getElementById('v_red169').value)||0)+(parseInt(document.getElementById('v_red916').value)||0)+(parseInt(document.getElementById('v_red11').value)||0);
+
+    // Calc
+    const base = v_pl * APP_CONFIG.video.basePlano;
+    const cLip = v_lip ? base * APP_CONFIG.video.lipSync : 0;
+    const cTr = v_train ? base * APP_CONFIG.video.training : 0;
+    const cComp = (base * APP_CONFIG.video.complejo) * plComp;
+
+    const subM = base + cLip + cTr + cComp;
+
+    // Logic V18: Adapt/Reduc based on BASE, not subM
+    const cAd = (base * APP_CONFIG.video.adaptacion) * adT;
+    const cRe = (base * APP_CONFIG.video.reduccion) * reT;
+
+    vidTotal = subM + cAd + cRe;
+    txtVid = `PRODUCCIÓN AUDIOVISUAL\n- Base (${v_pl} planos @ ${fmt(APP_CONFIG.video.basePlano)}): ${fmt(base)}\n- Máster: ${v_durM}s | Formato: ${v_ratio}\n${v_train?`- Entrenamiento IA: ${fmt(cTr)}\n`:''}${v_lip?`- Sinc. Labial: ${fmt(cLip)}\n`:''}${plComp>0?`- Recargo Complejo (${plComp}): ${fmt(cComp)}\n`:''}- Entregables: ${fmt(cAd+cRe)}\nSUBTOTAL VIDEO: ${fmt(vidTotal)}`;
+  }
+
+  // -- FOTO --
+  let photTotal = 0; let txtPhot = "";
+  let f_num = 0;
+  if(currentMode !== 'video') {
+    f_num = parseInt(document.getElementById('f_imagenes').value)||0;
+    const tr = document.getElementById('f_train').checked;
+    const up = document.getElementById('f_upscale').checked;
+    const cap = document.getElementById('f_capas').checked;
+    const retQ = parseInt(document.getElementById('f_retQty').value)||0;
+    const retL = parseInt(document.getElementById('f_retLevel').value)||0;
+
+    const base = f_num * APP_CONFIG.foto.baseImagen;
+    const cTr = tr ? base * APP_CONFIG.foto.training : 0; // +100%
+    const cRet = retQ * retL;
+    const cUp = up ? (f_num * APP_CONFIG.foto.upscale) : 0;
+
+    const subPre = base + cTr + cRet + cUp;
+    const cCap = cap ? subPre * APP_CONFIG.foto.capas : 0; // +50% on subtotal
+
+    photTotal = subPre + cCap;
+    txtPhot = `PRODUCCIÓN FOTOGRÁFICA\n- Base (${f_num} imgs @ ${fmt(APP_CONFIG.foto.baseImagen)}): ${fmt(base)}\n${tr?`- Entrenamiento IA (+100%): ${fmt(cTr)}\n`:''}${retQ>0?`- Retoque (${retQ}): ${fmt(cRet)}\n`:''}${cUp>0?`- Escalado: ${fmt(cUp)}\n`:''}${cap?`- Capas PSD (+50%): ${fmt(cCap)}\n`:''}SUBTOTAL FOTO: ${fmt(photTotal)}`;
+  }
+
+  // -- EXTERNOS (Dynamic) --
+  let extTotal = 0;
+  let txtExt = "";
+  const rows = document.querySelectorAll('.ext-row');
+  if(rows.length > 0) {
+      txtExt = "COSTOS EXTERNOS\n";
+      rows.forEach(row => {
+          const name = row.querySelector('.ext-name').value || "Ítem";
+          const price = parseInt(row.querySelector('.ext-price').value) || 0;
+          extTotal += price;
+          txtExt += `- ${name}: ${fmt(price)}\n`;
+      });
+      txtExt += `Total Externos: ${fmt(extTotal)}`;
+  }
+
+  const accum = vidTotal + photTotal + extTotal;
+  const tech = accum * APP_CONFIG.techFee;
+  const total = accum + tech;
+
+  // -- NARRATIVE --
+  let narrative = "";
+  if(currentMode === 'video') narrative = `Producción audiovisual de ${v_pl} planos mediante flujos de IA Generativa. Precio base único por plano. Se priorizará la consistencia y el control estético.`;
+  else if(currentMode === 'photo') narrative = `Producción de ${f_num} imágenes estáticas de alta fidelidad. Incluye post-producción digital avanzada y entrega según requerimientos.`;
+  else narrative = `Proyecto mixto (Video + Foto). Producción integral de ${v_pl} planos de video y ${f_num} imágenes, unificando dirección de arte y entrenamiento de modelos.`;
+
+  // -- BODY --
+  let body = "";
+  if(currentMode==='video') body = `${txtVid}\n\n${txtExt}`;
+  else if(currentMode==='photo') body = `${txtPhot}\n\n${txtExt}`;
+  else body = `${txtVid}\n\n-----------------\n${txtPhot}\n\n${txtExt}`;
+
+  const finalReport = `PRESUPUESTO PUERTO [${currentMode.toUpperCase()}]
+PROYECTO: ${proj}
+TIEMPO ESTIMADO: ${dias} DÍAS
+
+DESCRIPCIÓN TÉCNICA
+${narrative}
+
+----------------------------------------
+${body}
+
+----------------------------------------
+ACUMULADO: ${fmt(accum)}
+TECH FEE (${(APP_CONFIG.techFee*100).toFixed(0)}%): ${fmt(tech)}
+TOTAL FINAL NETO: ${fmt(total)}`;
+
+  saveToHistory({ id: Date.now(), date: new Date().toLocaleDateString(), proj: proj, mode: currentMode, total: fmt(total), rawText: finalReport, fav: false });
+  openModal(finalReport);
+}
+
+// Helpers for History/Modal (Same as before)
+const DB_KEY = 'puerto_budget_history_v17';
+function getHistory() { const data = localStorage.getItem(DB_KEY); return data ? JSON.parse(data) : []; }
+function saveToHistory(item) { const list = getHistory(); list.unshift(item); localStorage.setItem(DB_KEY, JSON.stringify(list)); if(document.getElementById('viewHistory').classList.contains('active')) renderHistory(); }
+function toggleFav(id) { const list = getHistory(); const idx = list.findIndex(i => i.id === id); if(idx > -1) { list[idx].fav = !list[idx].fav; localStorage.setItem(DB_KEY, JSON.stringify(list)); renderHistory(); } }
+function deleteItem(id) { if(!confirm("¿Borrar?")) return; const list = getHistory(); const newList = list.filter(i => i.id !== id); localStorage.setItem(DB_KEY, JSON.stringify(newList)); renderHistory(); }
+function viewItem(id) { const list = getHistory(); const item = list.find(i => i.id === id); if(item) openModal(item.rawText); }
+function renderHistory() {
+  const list = getHistory(); const container = document.getElementById('historyContainer'); container.innerHTML = "";
+  if(list.length === 0) { container.innerHTML = '<div style="text-align:center; padding:40px; color:#999;">Sin historial.</div>'; return; }
+  list.forEach((item, index) => {
+    const isFav = item.fav ? 'favorite' : ''; const starClass = item.fav ? 'fav-active' : ''; const starIcon = item.fav ? '★' : '☆';
+    const num = list.length - index;
+    container.innerHTML += `<div class="history-item ${isFav}"><div class="h-header"><div><div class="h-title">#${num} ${item.proj}</div><div class="h-meta"><span class="h-tag">${item.mode}</span></div></div><div class="h-price">${item.total}</div></div><div class="h-actions"><button class="h-btn ${starClass}" onclick="toggleFav(${item.id})">${starIcon} Favorito</button><button class="h-btn" onclick="viewItem(${item.id})">👁 Ver</button><button class="h-btn delete" onclick="deleteItem(${item.id})">✕ Borrar</button></div></div>`;
+  });
+}
+function resetForm() {
+  if(confirm("¿Limpiar formulario?")) {
+    document.querySelectorAll('#viewCalc input').forEach(i => {
+      if(i.type==='checkbox') i.checked=false; else if(i.type==='number') i.value=0; else if(i.type==='text') i.value="";
+    });
+    // Remove dynamic external rows
+    document.getElementById('externalList').innerHTML = "";
+    // Default dynamic
+    addExternalRow();
+    document.getElementById('v_planos').value=14; document.getElementById('v_lipsync').checked=true; document.getElementById('f_imagenes').value=5;
+    window.scrollTo(0,0);
+  }
+}
+const modal = document.getElementById('modalView');
+function openModal(text) { document.getElementById('modalText').value = text; modal.style.display = 'flex'; }
+function closeModal() { modal.style.display = 'none'; }
+function copyModalText() { const t = document.getElementById('modalText'); t.select(); navigator.clipboard.writeText(t.value); alert("Copiado!"); }
+window.onclick = function(e) { if(e.target == modal) closeModal(); }
+
+// INIT
+loadConfig();
+setMode('video');
+buildRetouchOptions();
+addExternalRow(); // Add one external row by default
+</script>
+</body>
+</html>
