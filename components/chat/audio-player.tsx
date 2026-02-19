@@ -141,11 +141,12 @@ export function AudioPlayer({
       return `${voiceConfig.speakers.length} voces`;
     }
 
-    const voice = getVoiceById(voiceConfig.voiceId);
+    const voice = getVoiceById(voiceConfig.voiceId, voiceConfig.engine);
     return voice?.name || voiceConfig.voiceId;
   };
 
   const voiceLabel = getVoiceLabel();
+  const isChirpEngine = voiceConfig && !isAudioSpeakerConfig(voiceConfig) && voiceConfig.engine === "chirp";
 
   return (
     <div className="relative w-full max-w-md rounded-lg overflow-hidden bg-gradient-to-r from-violet-500/10 to-purple-500/10 border border-violet-200/50 dark:border-violet-800/50">
@@ -250,6 +251,9 @@ export function AudioPlayer({
               <div className="flex items-center gap-1 bg-violet-100 dark:bg-violet-900/30 rounded-full px-2 py-1">
                 <Mic className="h-3 w-3 text-violet-600 dark:text-violet-400" />
                 <span className="text-xs text-violet-700 dark:text-violet-300">{voiceLabel}</span>
+                {isChirpEngine && (
+                  <span className="text-[9px] bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 px-1 rounded font-medium">HD</span>
+                )}
               </div>
             )}
 

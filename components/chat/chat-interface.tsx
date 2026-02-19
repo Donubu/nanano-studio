@@ -46,6 +46,7 @@ import {
     Download,
     EyeOff,
     Calculator,
+    AudioLines,
 } from "lucide-react";
 import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
 import {
@@ -84,6 +85,8 @@ function getConversationIcon(generationType: string | undefined, className: stri
             return <ImageIcon className={className} />;
         case "video":
             return <Video className={className} />;
+        case "audio_hd":
+            return <AudioLines className={className} />;
         case "audio":
             return <Mic className={className} />;
         case "text":
@@ -250,8 +253,11 @@ export function ChatInterface() {
     const [audioMultiSpeaker, setAudioMultiSpeaker] = useState(false);
     const [audioSpeakerConfig, setAudioSpeakerConfig] = useState<AudioSpeakerConfig | null>(null);
     const [audioOutputFormat, setAudioOutputFormat] = useState<AudioOutputFormat>("mp3");
-    const [audioQualityTier, setAudioQualityTier] = useState<"normal" | "hq">("normal");
+    const [audioQualityTier, setAudioQualityTier] = useState<"normal" | "hq" | "chirp">("normal");
     const [audioRestoreData, setAudioRestoreData] = useState<AudioRestoreData | null>(null);
+    const [audioTTSEngine, setAudioTTSEngine] = useState<"gemini" | "chirp">("gemini");
+    const [audioSpeakingRate, setAudioSpeakingRate] = useState(1.0);
+    const [audioLocale, setAudioLocale] = useState("es-US");
 
     // Generation mode (for video models that can also generate images)
     const [generationMode, setGenerationMode] = useState<GenerationMode>("video");
@@ -290,10 +296,13 @@ export function ChatInterface() {
         is_enabled: boolean;
         model_normal_id: number | null;
         model_hq_id: number | null;
+        model_chirp_id: number | null;
         model_normal_name: string | null;
         model_hq_name: string | null;
+        model_chirp_name: string | null;
         model_normal_model_id: string | null;
         model_hq_model_id: string | null;
+        model_chirp_model_id: string | null;
     }
     const [generationConfig, setGenerationConfig] = useState<GenerationConfigItem[]>([]);
 
@@ -328,7 +337,7 @@ export function ChatInterface() {
     const isTextConversation = !currentConversation?.generation_type || currentConversation?.generation_type === "text";
     const isImageConversation = currentConversation?.generation_type === "image";
     const isVideoConversation = currentConversation?.generation_type === "video";
-    const isAudioConversation = currentConversation?.generation_type === "audio";
+    const isAudioConversation = currentConversation?.generation_type === "audio" || currentConversation?.generation_type === "audio_hd";
 
     // Get current model based on conversation type, generation mode, and quality tier
     // For video conversations in image mode, use the image model
@@ -648,17 +657,39 @@ export function ChatInterface() {
             if (res.ok) {
                 const data = await res.json();
                 // Transform object response to array format
-                const types: GenerationType[] = ["text", "image", "video", "audio"];
+                const types: ("text" | "image" | "video" | "audio")[] = ["text", "image", "video", "audio"];
                 const configArray: GenerationConfigItem[] = types.map((type) => ({
-                    generation_type: type,
+                    generation_type: type as GenerationType,
                     is_enabled: data[type]?.enabled ?? false,
                     model_normal_id: data[type]?.model_normal?.id ?? null,
                     model_hq_id: data[type]?.model_hq?.id ?? null,
+                    model_chirp_id: data[type]?.model_chirp?.id ?? null,
                     model_normal_name: data[type]?.model_normal?.display_name ?? null,
                     model_hq_name: data[type]?.model_hq?.display_name ?? null,
+                    model_chirp_name: data[type]?.model_chirp?.display_name ?? null,
                     model_normal_model_id: data[type]?.model_normal?.model_id ?? null,
                     model_hq_model_id: data[type]?.model_hq?.model_id ?? null,
+                    model_chirp_model_id: data[type]?.model_chirp?.model_id ?? null,
                 }));
+
+                // If audio has a chirp model configured, add "audio_hd" as a virtual generation type
+                const audioConfig = data["audio"];
+                if (audioConfig?.model_chirp?.id) {
+                    configArray.push({
+                        generation_type: "audio_hd",
+                        is_enabled: audioConfig.enabled ?? false,
+                        model_normal_id: audioConfig.model_chirp.id,
+                        model_hq_id: audioConfig.model_chirp.id,
+                        model_chirp_id: audioConfig.model_chirp.id,
+                        model_normal_name: audioConfig.model_chirp.display_name,
+                        model_hq_name: audioConfig.model_chirp.display_name,
+                        model_chirp_name: audioConfig.model_chirp.display_name,
+                        model_normal_model_id: audioConfig.model_chirp.model_id,
+                        model_hq_model_id: audioConfig.model_chirp.model_id,
+                        model_chirp_model_id: audioConfig.model_chirp.model_id,
+                    });
+                }
+
                 setGenerationConfig(configArray);
                 // Auto-select first enabled type
                 const firstEnabled = configArray.find((c) => c.is_enabled);
@@ -686,7 +717,13 @@ export function ChatInterface() {
             const res = await fetch(`/api/conversations?project_id=${selectedProjectId}`);
             if (res.ok) {
                 const data = await res.json();
-                setConversations(data);
+                // Map audio conversations with chirp engine to audio_hd type for UI
+                const mapped = data.map((conv: Record<string, unknown>) =>
+                    conv.generation_type === "audio" && conv.audio_tts_engine === "chirp"
+                        ? { ...conv, generation_type: "audio_hd" }
+                        : conv
+                );
+                setConversations(mapped);
             }
         } catch (err) {
             console.error("Error fetching conversations:", err);
@@ -715,7 +752,7 @@ export function ChatInterface() {
                         max_output_tokens: data.max_output_tokens,
                         system_instruction: data.system_instruction,
                         model_id: data.model_id,
-                        generation_type: data.generation_type,
+                        generation_type: data.generation_type === "audio" && data.audio_tts_engine === "chirp" ? "audio_hd" : data.generation_type,
                         image_aspect_ratio: data.image_aspect_ratio || "16:9",
                         image_size: data.image_size || "1K",
                         model_supports_image_generation: data.model_supports_image_generation,
@@ -848,8 +885,24 @@ export function ChatInterface() {
             // Reset generation mode and selected images when switching tabs
             setGenerationMode("video");
             setSelectedConversationImages([]);
+            // Set engine based on conversation type
+            if (conv.generation_type === "audio_hd") {
+                setAudioTTSEngine("chirp");
+                setAudioMultiSpeaker(false);
+            } else if (conv.generation_type === "audio") {
+                setAudioTTSEngine("gemini");
+            }
+            // Auto-select quality tier based on available models
+            const typeConf = generationConfig.find(c => c.generation_type === conv.generation_type);
+            if (typeConf) {
+                if (typeConf.model_normal_id) {
+                    setSelectedQualityTier("normal");
+                } else if (typeConf.model_hq_id) {
+                    setSelectedQualityTier("hq");
+                }
+            }
         }
-    }, [activeTabId, tabConversations]);
+    }, [activeTabId, tabConversations, generationConfig]);
 
     // Auto-set duration to 8 seconds when reference images are added (API requirement)
     useEffect(() => {
@@ -951,7 +1004,7 @@ export function ChatInterface() {
 
     // Manejar cambios de settings (excepto modelo)
     const handleSettingChange = async (
-        setting: "system_instruction" | "temperature" | "top_p" | "top_k" | "max_output_tokens" | "image_aspect_ratio" | "image_size" | "video_duration" | "video_resolution" | "video_aspect_ratio" | "video_audio_enabled" | "video_negative_prompt" | "audio_voice_id" | "audio_style_prompt" | "audio_multi_speaker" | "audio_speaker_config" | "audio_output_format",
+        setting: "system_instruction" | "temperature" | "top_p" | "top_k" | "max_output_tokens" | "image_aspect_ratio" | "image_size" | "video_duration" | "video_resolution" | "video_aspect_ratio" | "video_audio_enabled" | "video_negative_prompt" | "audio_voice_id" | "audio_style_prompt" | "audio_multi_speaker" | "audio_speaker_config" | "audio_output_format" | "audio_tts_engine" | "audio_speaking_rate" | "audio_locale",
         value: string | number | boolean | AudioSpeakerConfig | null
     ) => {
         // Actualizar estado local inmediatamente
@@ -1007,6 +1060,15 @@ export function ChatInterface() {
             case "audio_output_format":
                 setAudioOutputFormat(value as AudioOutputFormat);
                 break;
+            case "audio_tts_engine":
+                setAudioTTSEngine(value as "gemini" | "chirp");
+                break;
+            case "audio_speaking_rate":
+                setAudioSpeakingRate(value as number);
+                break;
+            case "audio_locale":
+                setAudioLocale(value as string);
+                break;
         }
 
         // Si hay conversación activa, guardar en DB
@@ -1020,6 +1082,9 @@ export function ChatInterface() {
         if (!selectedProjectId) return null;
         // For the new system, generation_type determines the model, so modelId might be optional
         const typeToUse = generationType || newConversationType;
+        // audio_hd is a virtual type — map to "audio" + chirp engine for the API
+        const apiGenerationType = typeToUse === "audio_hd" ? "audio" : typeToUse;
+        const isCreatingAudioHD = typeToUse === "audio_hd";
 
         const modelForConversation = modelIdToUse
             ? projectModels.find((m) => m.model_id === modelIdToUse)
@@ -1032,8 +1097,8 @@ export function ChatInterface() {
                 body: JSON.stringify({
                     model_id: modelIdToUse, // Can be null, API will use generation_config
                     project_id: selectedProjectId,
-                    generation_type: typeToUse,
-                    quality_tier: selectedQualityTier,
+                    generation_type: apiGenerationType,
+                    quality_tier: isCreatingAudioHD ? "chirp" : selectedQualityTier,
                     temperature,
                     top_p: topP,
                     top_k: topK,
@@ -1048,9 +1113,14 @@ export function ChatInterface() {
                     video_negative_prompt: videoNegativePrompt || null,
                     audio_voice_id: audioVoiceId,
                     audio_style_prompt: audioStylePrompt || null,
-                    audio_multi_speaker: audioMultiSpeaker,
-                    audio_speaker_config: audioSpeakerConfig,
+                    audio_multi_speaker: isCreatingAudioHD ? false : audioMultiSpeaker,
+                    audio_speaker_config: isCreatingAudioHD ? null : audioSpeakerConfig,
                     audio_output_format: audioOutputFormat,
+                    ...(isCreatingAudioHD && {
+                        audio_tts_engine: "chirp",
+                        audio_speaking_rate: audioSpeakingRate,
+                        audio_locale: audioLocale,
+                    }),
                 }),
             });
 
@@ -1068,7 +1138,7 @@ export function ChatInterface() {
                     model_supports_image_generation: resolvedModel?.supports_image_generation,
                     model_supports_video_generation: resolvedModel?.supports_video_generation,
                     model_supports_audio_generation: resolvedModel?.supports_audio_generation,
-                    generation_type: data.generation_type || typeToUse,
+                    generation_type: isCreatingAudioHD ? "audio_hd" : (data.generation_type || typeToUse),
                     project_id: selectedProjectId,
                     project_title: null,
                     last_message: null,
@@ -1169,6 +1239,15 @@ export function ChatInterface() {
             isLoading: false,
             isDraft: true,
         };
+
+        // Reset or force engine based on conversation type
+        const isAudioHD = newConversationType === "audio_hd";
+        if (isAudioHD) {
+            setAudioTTSEngine("chirp");
+            setAudioMultiSpeaker(false);
+        } else {
+            setAudioTTSEngine("gemini");
+        }
 
         // Crear conversación draft en memoria (sin guardar en BD)
         const draftConversation: Conversation = {
@@ -2021,7 +2100,7 @@ export function ChatInterface() {
     };
 
     // Send audio generation message
-    const sendAudioMessage = async (content: string, qualityTier: "normal" | "hq" = "normal") => {
+    const sendAudioMessage = async (content: string, qualityTier: "normal" | "hq" | "chirp" = "normal") => {
         if (!activeTabId || !content.trim()) return;
 
         let tabId = activeTabId;
@@ -2096,9 +2175,12 @@ export function ChatInterface() {
                     audioSettings: {
                         voiceId: audioVoiceId,
                         stylePrompt: audioStylePrompt || undefined,
-                        multiSpeaker: audioMultiSpeaker,
-                        speakerConfig: audioMultiSpeaker ? audioSpeakerConfig : undefined,
+                        multiSpeaker: audioTTSEngine === "chirp" ? false : audioMultiSpeaker,
+                        speakerConfig: audioMultiSpeaker && audioTTSEngine !== "chirp" ? audioSpeakerConfig : undefined,
                         outputFormat: audioOutputFormat,
+                        ttsEngine: audioTTSEngine,
+                        speakingRate: audioTTSEngine === "chirp" ? audioSpeakingRate : undefined,
+                        locale: audioTTSEngine === "chirp" ? audioLocale : undefined,
                     },
                 }),
             });
@@ -2737,6 +2819,13 @@ export function ChatInterface() {
                                     stylePrompt={audioStylePrompt}
                                     outputFormat={audioOutputFormat}
                                     qualityTier={audioQualityTier}
+                                    ttsEngine={audioTTSEngine}
+                                    lockedEngine={currentConversation?.generation_type === "audio_hd"}
+                                    chirpAvailable={!!generationConfig.find(c => c.generation_type === "audio" && c.model_chirp_id)}
+                                    normalModelName={currentTypeConfig?.model_normal_name}
+                                    hqModelName={currentTypeConfig?.model_hq_name}
+                                    speakingRate={audioSpeakingRate}
+                                    locale={audioLocale}
                                     disabled={isSending}
                                     isGenerating={(() => {
                                         const msgs = tabMessages[activeTabId] || [];
@@ -2779,6 +2868,18 @@ export function ChatInterface() {
                                         }
                                         if (settings.qualityTier !== undefined) {
                                             setAudioQualityTier(settings.qualityTier);
+                                        }
+                                        if (settings.ttsEngine !== undefined) {
+                                            setAudioTTSEngine(settings.ttsEngine);
+                                            handleSettingChange("audio_tts_engine", settings.ttsEngine);
+                                        }
+                                        if (settings.speakingRate !== undefined) {
+                                            setAudioSpeakingRate(settings.speakingRate);
+                                            handleSettingChange("audio_speaking_rate", settings.speakingRate);
+                                        }
+                                        if (settings.locale !== undefined) {
+                                            setAudioLocale(settings.locale);
+                                            handleSettingChange("audio_locale", settings.locale);
                                         }
                                     }}
                                     onRestoreHandled={() => setAudioRestoreData(null)}
@@ -3066,7 +3167,7 @@ export function ChatInterface() {
                                     </div>
                                 )}
                                 {/* Quality Tier Selector */}
-                                {projectUsage && currentConversation?.generation_type && (
+                                {projectUsage && currentConversation?.generation_type && currentConversation.generation_type !== "audio_hd" && (
                                     <div className="flex justify-center py-2 border-t border-border/50">
                                         <QualitySelector
                                             selectedQuality={selectedQualityTier}
@@ -3675,7 +3776,7 @@ export function ChatInterface() {
 
             {/* New Conversation Modal */}
             <Dialog open={showNewConversationModal} onOpenChange={setShowNewConversationModal}>
-                <DialogContent className="sm:max-w-md">
+                <DialogContent className="sm:max-w-lg">
                     <DialogHeader>
                         <DialogTitle>Nueva conversación</DialogTitle>
                         <DialogDescription>
@@ -3684,7 +3785,14 @@ export function ChatInterface() {
                     </DialogHeader>
                     <div className="py-4">
                         <GenerationTypeSelector
-                            enabledTypes={generationConfig.map(c => ({ type: c.generation_type, isEnabled: c.is_enabled }))}
+                            enabledTypes={generationConfig.map(c => ({
+                                type: c.generation_type,
+                                isEnabled: c.is_enabled && !!(
+                                    c.generation_type === "audio_hd"
+                                        ? c.model_chirp_id
+                                        : (c.model_normal_id || c.model_hq_id)
+                                ),
+                            }))}
                             selectedType={newConversationType}
                             onSelect={setNewConversationType}
                         />
@@ -3698,7 +3806,9 @@ export function ChatInterface() {
                                 handleNewTab();
                                 setShowNewConversationModal(false);
                             }}
-                            disabled={!generationConfig.some(c => c.is_enabled && c.generation_type === newConversationType)}
+                            disabled={!generationConfig.some(c => c.is_enabled && c.generation_type === newConversationType && (
+                                c.generation_type === "audio_hd" ? c.model_chirp_id : (c.model_normal_id || c.model_hq_id)
+                            ))}
                         >
                             Crear conversación
                         </Button>

@@ -34,6 +34,9 @@ interface ConversationRow extends RowDataPacket {
   audio_multi_speaker: boolean;
   audio_speaker_config: string | null;
   audio_output_format: string;
+  audio_tts_engine: string;
+  audio_speaking_rate: number;
+  audio_locale: string;
   created_at: Date;
   updated_at: Date;
 }
@@ -150,6 +153,9 @@ export async function PUT(
       audio_multi_speaker,
       audio_speaker_config,
       audio_output_format,
+      audio_tts_engine,
+      audio_speaking_rate,
+      audio_locale,
     } = body;
 
     // Debug: log received body
@@ -190,7 +196,10 @@ export async function PUT(
         audio_style_prompt = COALESCE(?, audio_style_prompt),
         audio_multi_speaker = COALESCE(?, audio_multi_speaker),
         audio_speaker_config = COALESCE(?, audio_speaker_config),
-        audio_output_format = COALESCE(?, audio_output_format)
+        audio_output_format = COALESCE(?, audio_output_format),
+        audio_tts_engine = COALESCE(?, audio_tts_engine),
+        audio_speaking_rate = COALESCE(?, audio_speaking_rate),
+        audio_locale = COALESCE(?, audio_locale)
        WHERE id = ?`,
       [
         title ?? null,
@@ -212,6 +221,9 @@ export async function PUT(
         audio_multi_speaker !== undefined ? (audio_multi_speaker ? 1 : 0) : null,
         audio_speaker_config !== undefined ? (audio_speaker_config ? JSON.stringify(audio_speaker_config) : null) : null,
         audio_output_format ?? null,
+        audio_tts_engine ?? null,
+        audio_speaking_rate ?? null,
+        audio_locale ?? null,
         id,
       ]
     );

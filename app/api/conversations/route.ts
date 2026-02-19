@@ -4,7 +4,7 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 
 type GenerationType = "text" | "image" | "video" | "audio";
-type QualityTier = "normal" | "hq";
+type QualityTier = "normal" | "hq" | "chirp";
 
 interface ConversationRow extends RowDataPacket {
   id: number;
@@ -29,6 +29,7 @@ interface ConversationRow extends RowDataPacket {
 interface GenerationConfigRow extends RowDataPacket {
   model_normal_id: number | null;
   model_hq_id: number | null;
+  model_chirp_id: number | null;
   is_enabled: number;
 }
 
@@ -118,6 +119,9 @@ export async function POST(request: NextRequest) {
       audio_multi_speaker = false,
       audio_speaker_config = null,
       audio_output_format = "mp3",
+      audio_tts_engine = "gemini",
+      audio_speaking_rate = 1.0,
+      audio_locale = "en-US",
     } = body;
 
     // Validar generation_type
@@ -129,9 +133,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Validar quality_tier
-    if (!["normal", "hq"].includes(quality_tier)) {
+    if (!["normal", "hq", "chirp"].includes(quality_tier)) {
       return NextResponse.json(
-        { error: "quality_tier invalido. Debe ser: normal o hq" },
+        { error: "quality_tier invalido. Debe ser: normal, hq o chirp" },
         { status: 400 }
       );
     }
@@ -142,7 +146,7 @@ export async function POST(request: NextRequest) {
     if (project_id) {
       // Verificar que el tipo esta habilitado para el proyecto
       const [genConfig] = await pool.execute<GenerationConfigRow[]>(
-        `SELECT model_normal_id, model_hq_id, is_enabled
+        `SELECT model_normal_id, model_hq_id, model_chirp_id, is_enabled
          FROM project_generation_config
          WHERE project_id = ? AND generation_type = ?`,
         [project_id, generation_type]
@@ -157,13 +161,16 @@ export async function POST(request: NextRequest) {
 
       // Obtener el modelo segun la calidad
       const configRow = genConfig[0];
-      const selectedModelId = quality_tier === "hq"
-        ? configRow.model_hq_id
-        : configRow.model_normal_id;
+      const selectedModelId = quality_tier === "chirp"
+        ? configRow.model_chirp_id
+        : quality_tier === "hq"
+          ? configRow.model_hq_id
+          : configRow.model_normal_id;
 
       if (!selectedModelId) {
+        const tierLabel = quality_tier === "chirp" ? "Chirp HD" : quality_tier === "hq" ? "HQ" : "normal";
         return NextResponse.json(
-          { error: `No hay modelo ${quality_tier === 'hq' ? 'HQ' : 'normal'} configurado para '${generation_type}' en este proyecto` },
+          { error: `No hay modelo ${tierLabel} configurado para '${generation_type}' en este proyecto` },
           { status: 400 }
         );
       }
@@ -191,8 +198,8 @@ export async function POST(request: NextRequest) {
     }
 
     const [result] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO conversations (user_id, project_id, model_id, generation_type, title, system_instruction, temperature, top_p, top_k, max_output_tokens, image_aspect_ratio, image_size, video_duration, video_resolution, video_aspect_ratio, video_audio_enabled, video_negative_prompt, audio_voice_id, audio_style_prompt, audio_multi_speaker, audio_speaker_config, audio_output_format)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO conversations (user_id, project_id, model_id, generation_type, title, system_instruction, temperature, top_p, top_k, max_output_tokens, image_aspect_ratio, image_size, video_duration, video_resolution, video_aspect_ratio, video_audio_enabled, video_negative_prompt, audio_voice_id, audio_style_prompt, audio_multi_speaker, audio_speaker_config, audio_output_format, audio_tts_engine, audio_speaking_rate, audio_locale)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         session.user.id,
         project_id || null,
@@ -216,6 +223,9 @@ export async function POST(request: NextRequest) {
         audio_multi_speaker ? 1 : 0,
         audio_speaker_config ? JSON.stringify(audio_speaker_config) : null,
         audio_output_format,
+        audio_tts_engine,
+        audio_speaking_rate,
+        audio_locale,
       ]
     );
 

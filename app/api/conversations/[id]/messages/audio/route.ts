@@ -11,6 +11,11 @@ import {
   AudioGenerationProgress,
   Labels,
 } from "@/lib/google-ai-audio";
+import {
+  generateChirpAudio,
+  isChirpConfigured,
+  ChirpProgress,
+} from "@/lib/google-cloud-tts";
 import { uploadAudioToS3, generateAudioFileName, isS3Configured } from "@/lib/s3";
 import { generateConversationTitle, Labels as AILabels } from "@/lib/google-ai";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
@@ -20,9 +25,10 @@ import {
   AudioOutputFormat,
   AudioVoiceConfig,
   AudioSpeakerConfig,
+  AudioTTSEngine,
 } from "@/types/audio";
 
-type QualityTier = "normal" | "hq";
+type QualityTier = "normal" | "hq" | "chirp";
 
 interface ConversationRow extends RowDataPacket {
   id: number;
@@ -38,6 +44,9 @@ interface ConversationRow extends RowDataPacket {
   audio_multi_speaker: boolean;
   audio_speaker_config: string | null; // JSON string
   audio_output_format: AudioOutputFormat;
+  audio_tts_engine: AudioTTSEngine;
+  audio_speaking_rate: number;
+  audio_locale: string;
   supports_audio_generation: boolean;
   project_name: string | null;
   cost_audio_per_minute: number;
@@ -55,7 +64,7 @@ interface MessageRow extends RowDataPacket {
   id: number;
 }
 
-// POST - Generar audio con Gemini TTS
+// POST - Generar audio con Gemini TTS o Chirp 3 HD
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -66,13 +75,6 @@ export async function POST(
     if (!session?.user) {
       return new Response(JSON.stringify({ error: "No autorizado" }), {
         status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    if (!isAudioConfigured()) {
-      return new Response(JSON.stringify({ error: "API de Google AI Audio no configurada" }), {
-        status: 500,
         headers: { "Content-Type": "application/json" },
       });
     }
@@ -99,12 +101,34 @@ export async function POST(
         multiSpeaker?: boolean;
         speakerConfig?: AudioSpeakerConfig;
         outputFormat?: AudioOutputFormat;
+        ttsEngine?: AudioTTSEngine;
+        speakingRate?: number;
+        locale?: string;
       };
       quality_tier?: QualityTier;
     };
 
     // Validate quality_tier
-    const effectiveQualityTier: QualityTier = quality_tier === "hq" ? "hq" : "normal";
+    const validTiers: QualityTier[] = ["normal", "hq", "chirp"];
+    const effectiveQualityTier: QualityTier = validTiers.includes(quality_tier) ? quality_tier : "normal";
+    const isChirpTier = effectiveQualityTier === "chirp";
+
+    // Check appropriate engine is configured
+    if (isChirpTier) {
+      if (!isChirpConfigured()) {
+        return new Response(JSON.stringify({ error: "Google Cloud TTS (Chirp) no configurado" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    } else {
+      if (!isAudioConfigured()) {
+        return new Response(JSON.stringify({ error: "API de Google AI Audio no configurada" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
 
     console.log("[Audio API] Received audioSettings:", audioSettings);
 
@@ -115,11 +139,12 @@ export async function POST(
       });
     }
 
-    // Validar longitud del texto (límite de 4000 bytes)
+    // Validate text length based on engine
     const textBytes = Buffer.byteLength(content, "utf8");
-    if (textBytes > 4000) {
+    const maxBytes = isChirpTier ? 5000 : 4000;
+    if (textBytes > maxBytes) {
       return new Response(JSON.stringify({
-        error: `El texto excede el límite de 4000 bytes (actual: ${textBytes} bytes)`,
+        error: `El texto excede el límite de ${maxBytes} bytes (actual: ${textBytes} bytes)`,
       }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
@@ -158,21 +183,31 @@ export async function POST(
         SELECT
           pgc.model_normal_id,
           pgc.model_hq_id,
+          pgc.model_chirp_id,
           mn.model_id as model_normal_model_id,
           mn.api_backend as mn_api_backend,
           mn.cost_audio_per_minute as mn_cost_audio,
           mh.model_id as model_hq_model_id,
           mh.api_backend as mh_api_backend,
-          mh.cost_audio_per_minute as mh_cost_audio
+          mh.cost_audio_per_minute as mh_cost_audio,
+          mc.model_id as model_chirp_model_id,
+          mc.api_backend as mc_api_backend,
+          mc.cost_audio_per_minute as mc_cost_audio
         FROM project_generation_config pgc
         LEFT JOIN models mn ON pgc.model_normal_id = mn.id
         LEFT JOIN models mh ON pgc.model_hq_id = mh.id
+        LEFT JOIN models mc ON pgc.model_chirp_id = mc.id
         WHERE pgc.project_id = ? AND pgc.generation_type = ? AND pgc.is_enabled = 1
       `, [conversation.project_id, generationType]);
 
       if (configRows.length > 0) {
         const config = configRows[0];
-        if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
+        if (effectiveQualityTier === "chirp" && config.model_chirp_model_id) {
+          effectiveModelId = config.model_chirp_model_id;
+          effectiveBackend = config.mc_api_backend || undefined;
+          effectiveCostAudioPerMinute = Number(config.mc_cost_audio) || 0;
+          console.log(`[Audio] Using Chirp model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
+        } else if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
           effectiveModelId = config.model_hq_model_id;
           effectiveBackend = config.mh_api_backend || undefined;
           effectiveCostAudioPerMinute = Number(config.mh_cost_audio) || 0;
@@ -196,9 +231,11 @@ export async function POST(
 
     // Verificar límite de generaciones de audio mensuales (por calidad)
     if (conversation.project_id && session.user.role !== "admin") {
-      const limitColumn = effectiveQualityTier === "hq"
-        ? "max_monthly_audio_hq"
-        : "max_monthly_audio_normal";
+      const limitColumn = effectiveQualityTier === "chirp"
+        ? "max_monthly_audio_chirp"
+        : effectiveQualityTier === "hq"
+          ? "max_monthly_audio_hq"
+          : "max_monthly_audio_normal";
 
       const [limitRows] = await pool.execute<RowDataPacket[]>(`
         SELECT
@@ -222,8 +259,9 @@ export async function POST(
         const maxLimit = limitRows[0].max_limit;
         const currentCount = limitRows[0].current_count;
         if (maxLimit > 0 && currentCount >= maxLimit) {
+          const tierLabel = effectiveQualityTier === "chirp" ? "Chirp HD" : effectiveQualityTier === "hq" ? "HQ" : "normales";
           return new Response(JSON.stringify({
-            error: `Has alcanzado el límite de generaciones de audio ${effectiveQualityTier === 'hq' ? 'HQ' : 'normales'} mensuales para este proyecto`,
+            error: `Has alcanzado el límite de generaciones de audio ${tierLabel} mensuales para este proyecto`,
             type: "audio_limit",
             limit: maxLimit,
             used: currentCount,
@@ -282,8 +320,11 @@ export async function POST(
           // Configuración de generación de audio (usa request settings, fallback a conversation settings)
           const voiceId = audioSettings?.voiceId || conversation.audio_voice_id || "Kore";
           const stylePrompt = audioSettings?.stylePrompt ?? conversation.audio_style_prompt ?? "";
-          const multiSpeaker = audioSettings?.multiSpeaker ?? conversation.audio_multi_speaker ?? false;
+          const multiSpeaker = isChirpTier ? false : (audioSettings?.multiSpeaker ?? conversation.audio_multi_speaker ?? false);
           const outputFormat = audioSettings?.outputFormat || conversation.audio_output_format || "mp3";
+          const ttsEngine: AudioTTSEngine = isChirpTier ? "chirp" : (audioSettings?.ttsEngine || conversation.audio_tts_engine || "gemini");
+          const speakingRate = audioSettings?.speakingRate ?? (Number(conversation.audio_speaking_rate) || 1.0);
+          const locale = audioSettings?.locale || conversation.audio_locale || "en-US";
 
           // Parse speaker config from conversation if needed
           let speakerConfig: AudioSpeakerConfig | null = audioSettings?.speakerConfig || null;
@@ -295,86 +336,127 @@ export async function POST(
             }
           }
 
-          const backendLabel = effectiveBackend === 'vertex' ? 'Vertex AI' : effectiveBackend === 'gemini' ? 'Gemini API' : (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API");
-          console.log(`\n========== [AUDIO GENERATION REQUEST] (${backendLabel}) ==========`);
+          const engineLabel = isChirpTier ? "Chirp 3 HD (Cloud TTS)" : (effectiveBackend === 'vertex' ? 'Vertex AI' : effectiveBackend === 'gemini' ? 'Gemini API' : (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API"));
+          console.log(`\n========== [AUDIO GENERATION REQUEST] (${engineLabel}) ==========`);
           console.log("Model:", effectiveModelId);
           console.log("Quality tier:", effectiveQualityTier);
+          console.log("TTS Engine:", ttsEngine);
           console.log("Voice ID:", voiceId);
-          console.log("Style Prompt:", stylePrompt || "(none)");
-          console.log("Multi-speaker:", multiSpeaker);
+          if (isChirpTier) {
+            console.log("Locale:", locale);
+            console.log("Speaking rate:", speakingRate);
+          } else {
+            console.log("Style Prompt:", stylePrompt || "(none)");
+            console.log("Multi-speaker:", multiSpeaker);
+          }
           console.log("Output format:", outputFormat);
           console.log("Text length:", content.length, "characters,", textBytes, "bytes");
           console.log("================================================\n");
 
-          // Callback de progreso
-          const onProgress = (progress: AudioGenerationProgress) => {
-            sendEvent({
-              type: "progress",
-              status: progress.status,
-              message: progress.message,
-            });
-          };
-
-          // Generar audio
           let generatedAudio;
           let voiceConfig: AudioVoiceConfig | AudioSpeakerConfig;
-
-          if (multiSpeaker && speakerConfig && speakerConfig.speakers.length > 0) {
-            // Validar que el texto contenga los speakers
-            for (const speaker of speakerConfig.speakers) {
-              if (!content.includes(`${speaker.name}:`)) {
-                throw new Error(
-                  `El texto debe contener diálogos del speaker "${speaker.name}" en formato "${speaker.name}: texto"`
-                );
-              }
-            }
-
-            generatedAudio = await generateMultiSpeakerAudio(
-              effectiveModelId,
-              content,
-              {
-                speakers: speakerConfig.speakers,
-                stylePrompt: stylePrompt || undefined,
-              },
-              onProgress,
-              labels,
-              effectiveBackend
-            );
-            voiceConfig = speakerConfig;
-          } else {
-            generatedAudio = await generateSingleSpeakerAudio(
-              effectiveModelId,
-              content,
-              {
-                voiceId,
-                stylePrompt: stylePrompt || undefined,
-              },
-              onProgress,
-              labels,
-              effectiveBackend
-            );
-            voiceConfig = { voiceId };
-          }
-
-          // Convertir audio al formato solicitado
-          sendEvent({
-            type: "progress",
-            status: "processing",
-            message: outputFormat === "mp3" ? "Convirtiendo a MP3..." : "Procesando audio...",
-          });
-
           let finalAudioBuffer: Buffer;
           let mimeType: string;
           let fileExtension: string;
 
-          if (outputFormat === "mp3") {
-            finalAudioBuffer = await convertPcmToMp3(generatedAudio.data);
-            mimeType = "audio/mpeg";
-            fileExtension = "mp3";
+          if (isChirpTier) {
+            // ======== CHIRP 3 HD BRANCH ========
+            const onChirpProgress = (progress: ChirpProgress) => {
+              sendEvent({
+                type: "progress",
+                status: progress.status,
+                message: progress.message,
+              });
+            };
+
+            generatedAudio = await generateChirpAudio(
+              content,
+              {
+                voiceId,
+                locale,
+                speakingRate,
+                outputFormat: outputFormat === "wav" ? "linear16" : "mp3",
+              },
+              onChirpProgress,
+              (info) => {
+                sendEvent({
+                  type: "progress",
+                  status: "processing",
+                  message: `Reintentando (${info.attempt}/${info.maxAttempts})... Esperando ${Math.round(info.delayMs / 1000)}s`,
+                });
+              }
+            );
+
+            voiceConfig = { voiceId, engine: "chirp" };
+
+            // Chirp returns encoded audio directly - no PCM conversion needed
+            finalAudioBuffer = generatedAudio.data;
+            mimeType = generatedAudio.mimeType;
+            fileExtension = outputFormat === "wav" ? "wav" : "mp3";
+
           } else {
-            finalAudioBuffer = convertPcmToWav(generatedAudio.data);
-            mimeType = "audio/wav";
-            fileExtension = "wav";
+            // ======== GEMINI TTS BRANCH ========
+            const onProgress = (progress: AudioGenerationProgress) => {
+              sendEvent({
+                type: "progress",
+                status: progress.status,
+                message: progress.message,
+              });
+            };
+
+            if (multiSpeaker && speakerConfig && speakerConfig.speakers.length > 0) {
+              // Validar que el texto contenga los speakers
+              for (const speaker of speakerConfig.speakers) {
+                if (!content.includes(`${speaker.name}:`)) {
+                  throw new Error(
+                    `El texto debe contener diálogos del speaker "${speaker.name}" en formato "${speaker.name}: texto"`
+                  );
+                }
+              }
+
+              generatedAudio = await generateMultiSpeakerAudio(
+                effectiveModelId,
+                content,
+                {
+                  speakers: speakerConfig.speakers,
+                  stylePrompt: stylePrompt || undefined,
+                },
+                onProgress,
+                labels,
+                effectiveBackend
+              );
+              voiceConfig = speakerConfig;
+            } else {
+              generatedAudio = await generateSingleSpeakerAudio(
+                effectiveModelId,
+                content,
+                {
+                  voiceId,
+                  stylePrompt: stylePrompt || undefined,
+                },
+                onProgress,
+                labels,
+                effectiveBackend
+              );
+              voiceConfig = { voiceId };
+            }
+
+            // Convertir audio PCM al formato solicitado
+            sendEvent({
+              type: "progress",
+              status: "processing",
+              message: outputFormat === "mp3" ? "Convirtiendo a MP3..." : "Procesando audio...",
+            });
+
+            if (outputFormat === "mp3") {
+              finalAudioBuffer = await convertPcmToMp3(generatedAudio.data);
+              mimeType = "audio/mpeg";
+              fileExtension = "mp3";
+            } else {
+              finalAudioBuffer = convertPcmToWav(generatedAudio.data);
+              mimeType = "audio/wav";
+              fileExtension = "wav";
+            }
           }
 
           // Guardar audio en S3

@@ -12,12 +12,16 @@ interface GenerationConfigRow extends RowDataPacket {
   is_enabled: number;
   model_normal_id: number | null;
   model_hq_id: number | null;
+  model_chirp_id: number | null;
   // Model normal info
   model_normal_model_id: string | null;
   model_normal_display_name: string | null;
   // Model HQ info
   model_hq_model_id: string | null;
   model_hq_display_name: string | null;
+  // Model Chirp info
+  model_chirp_model_id: string | null;
+  model_chirp_display_name: string | null;
 }
 
 interface GenerationConfigResponse {
@@ -31,6 +35,7 @@ interface TypeConfig {
   enabled: boolean;
   model_normal: ModelInfo | null;
   model_hq: ModelInfo | null;
+  model_chirp: ModelInfo | null;
 }
 
 interface ModelInfo {
@@ -72,22 +77,26 @@ export async function GET(
         pgc.is_enabled,
         pgc.model_normal_id,
         pgc.model_hq_id,
+        pgc.model_chirp_id,
         mn.model_id as model_normal_model_id,
         mn.display_name as model_normal_display_name,
         mh.model_id as model_hq_model_id,
-        mh.display_name as model_hq_display_name
+        mh.display_name as model_hq_display_name,
+        mc.model_id as model_chirp_model_id,
+        mc.display_name as model_chirp_display_name
       FROM project_generation_config pgc
       LEFT JOIN models mn ON pgc.model_normal_id = mn.id
       LEFT JOIN models mh ON pgc.model_hq_id = mh.id
+      LEFT JOIN models mc ON pgc.model_chirp_id = mc.id
       WHERE pgc.project_id = ?
     `, [id]);
 
     // Construir respuesta estructurada
     const config: GenerationConfigResponse = {
-      text: { enabled: false, model_normal: null, model_hq: null },
-      image: { enabled: false, model_normal: null, model_hq: null },
-      video: { enabled: false, model_normal: null, model_hq: null },
-      audio: { enabled: false, model_normal: null, model_hq: null },
+      text: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
+      image: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
+      video: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
+      audio: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
     };
 
     for (const row of rows) {
@@ -103,6 +112,11 @@ export async function GET(
           id: row.model_hq_id,
           model_id: row.model_hq_model_id!,
           display_name: row.model_hq_display_name!,
+        } : null,
+        model_chirp: row.model_chirp_id ? {
+          id: row.model_chirp_id,
+          model_id: row.model_chirp_model_id!,
+          display_name: row.model_chirp_display_name!,
         } : null,
       };
     }
@@ -135,7 +149,8 @@ export async function PUT(
       generation_type,
       is_enabled,
       model_normal_id,
-      model_hq_id
+      model_hq_id,
+      model_chirp_id,
     } = body;
 
     if (!generation_type || !["text", "image", "video", "audio"].includes(generation_type)) {
@@ -175,9 +190,19 @@ export async function PUT(
       }
     }
 
+    if (model_chirp_id) {
+      const [model] = await pool.execute<RowDataPacket[]>(
+        "SELECT id FROM models WHERE id = ? AND is_active = 1",
+        [model_chirp_id]
+      );
+      if (model.length === 0) {
+        return NextResponse.json({ error: "Modelo Chirp no encontrado o inactivo" }, { status: 400 });
+      }
+    }
+
     // Check if config exists for this type
     const [existing] = await pool.execute<RowDataPacket[]>(
-      "SELECT id, is_enabled, model_normal_id, model_hq_id FROM project_generation_config WHERE project_id = ? AND generation_type = ?",
+      "SELECT id, is_enabled, model_normal_id, model_hq_id, model_chirp_id FROM project_generation_config WHERE project_id = ? AND generation_type = ?",
       [id, generation_type]
     );
 
@@ -185,14 +210,15 @@ export async function PUT(
       // Insert new config
       await pool.execute<ResultSetHeader>(`
         INSERT INTO project_generation_config
-          (project_id, generation_type, is_enabled, model_normal_id, model_hq_id)
-        VALUES (?, ?, ?, ?, ?)
+          (project_id, generation_type, is_enabled, model_normal_id, model_hq_id, model_chirp_id)
+        VALUES (?, ?, ?, ?, ?, ?)
       `, [
         id,
         generation_type,
         is_enabled !== undefined ? (is_enabled ? 1 : 0) : 1,
         model_normal_id !== undefined ? (model_normal_id || null) : null,
         model_hq_id !== undefined ? (model_hq_id || null) : null,
+        model_chirp_id !== undefined ? (model_chirp_id || null) : null,
       ]);
     } else {
       // Partial update - only update provided fields
@@ -210,6 +236,10 @@ export async function PUT(
       if (model_hq_id !== undefined) {
         updates.push("model_hq_id = ?");
         values.push(model_hq_id || null);
+      }
+      if (model_chirp_id !== undefined) {
+        updates.push("model_chirp_id = ?");
+        values.push(model_chirp_id || null);
       }
 
       if (updates.length > 0) {
@@ -229,6 +259,7 @@ export async function PUT(
       is_enabled: is_enabled !== undefined ? is_enabled : true,
       model_normal_id: model_normal_id || null,
       model_hq_id: model_hq_id || null,
+      model_chirp_id: model_chirp_id || null,
     });
   } catch (error) {
     console.error("Error actualizando configuracion de generacion:", error);
@@ -258,6 +289,7 @@ export async function POST(
       is_enabled: boolean;
       model_normal_id?: number;
       model_hq_id?: number;
+      model_chirp_id?: number;
     }> = body.configs || [];
 
     // Verificar que el proyecto existe
@@ -277,12 +309,13 @@ export async function POST(
 
       await pool.execute<ResultSetHeader>(`
         INSERT INTO project_generation_config
-          (project_id, generation_type, is_enabled, model_normal_id, model_hq_id)
-        VALUES (?, ?, ?, ?, ?)
+          (project_id, generation_type, is_enabled, model_normal_id, model_hq_id, model_chirp_id)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
           is_enabled = VALUES(is_enabled),
           model_normal_id = VALUES(model_normal_id),
           model_hq_id = VALUES(model_hq_id),
+          model_chirp_id = VALUES(model_chirp_id),
           updated_at = CURRENT_TIMESTAMP
       `, [
         id,
@@ -290,6 +323,7 @@ export async function POST(
         config.is_enabled ? 1 : 0,
         config.model_normal_id || null,
         config.model_hq_id || null,
+        config.model_chirp_id || null,
       ]);
     }
 

@@ -1,19 +1,21 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { ChevronDown, Play, Square, Check, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { AUDIO_VOICES, getVoiceById, AudioVoiceId } from "@/types/audio";
+import { AUDIO_VOICES, CHIRP_VOICES, getVoiceById, AudioVoiceId, AudioTTSEngine } from "@/types/audio";
 
 // Group voices by style
-const voiceGroups = {
-  "Brillantes / Animadas": AUDIO_VOICES.filter(v => ["bright", "upbeat", "lively"].includes(v.style)),
-  "Informativas / Claras": AUDIO_VOICES.filter(v => ["informative", "clear"].includes(v.style)),
-  "Firmes / Suaves": AUDIO_VOICES.filter(v => ["firm", "smooth", "even"].includes(v.style)),
-  "Expresivas / Casuales": AUDIO_VOICES.filter(v => ["excitable", "breezy", "easygoing", "casual", "friendly"].includes(v.style)),
-  "Distintivas": AUDIO_VOICES.filter(v => ["breathy", "gravelly", "soft", "mature", "forward", "gentle", "warm"].includes(v.style)),
-};
+function buildVoiceGroups(voices: readonly { id: string; name: string; gender: string; style: string; description: string; engine: string }[]) {
+  return {
+    "Brillantes / Animadas": voices.filter(v => ["bright", "upbeat", "lively"].includes(v.style)),
+    "Informativas / Claras": voices.filter(v => ["informative", "clear"].includes(v.style)),
+    "Firmes / Suaves": voices.filter(v => ["firm", "smooth", "even"].includes(v.style)),
+    "Expresivas / Casuales": voices.filter(v => ["excitable", "breezy", "easygoing", "casual", "friendly"].includes(v.style)),
+    "Distintivas": voices.filter(v => ["breathy", "gravelly", "soft", "mature", "forward", "gentle", "warm"].includes(v.style)),
+  };
+}
 
 interface VoiceSelectorProps {
   value: string;
@@ -21,6 +23,7 @@ interface VoiceSelectorProps {
   disabled?: boolean;
   compact?: boolean;
   className?: string;
+  ttsEngine?: AudioTTSEngine;
 }
 
 export function VoiceSelector({
@@ -29,13 +32,19 @@ export function VoiceSelector({
   disabled = false,
   compact = false,
   className,
+  ttsEngine = "gemini",
 }: VoiceSelectorProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const selectedVoice = getVoiceById(value);
+
+  const voices = ttsEngine === "chirp" ? CHIRP_VOICES : AUDIO_VOICES;
+  const voiceGroups = useMemo(() => buildVoiceGroups(voices), [voices]);
+  const isChirp = ttsEngine === "chirp";
+
+  const selectedVoice = getVoiceById(value, ttsEngine);
 
   // Close on click outside
   useEffect(() => {
@@ -62,7 +71,7 @@ export function VoiceSelector({
   }, [open]);
 
   // Filter voices by search
-  const filterVoices = (voices: typeof AUDIO_VOICES[number][]) => {
+  const filterVoices = (voices: readonly { id: string; name: string; description: string }[]) => {
     if (!search) return voices;
     const searchLower = search.toLowerCase();
     return voices.filter(
@@ -82,8 +91,12 @@ export function VoiceSelector({
     // Detener cualquier reproducción anterior
     audioRef.current?.pause();
 
-    // Crear nuevo audio y reproducir
-    const audio = new Audio(`https://www.gstatic.com/aistudio/voices/samples/${voiceId}.wav`);
+    // URL de preview según el motor TTS
+    const previewUrl = isChirp
+      ? `https://docs.cloud.google.com/text-to-speech/docs/audio/chirp3-hd-${voiceId.toLowerCase()}.wav`
+      : `https://www.gstatic.com/aistudio/voices/samples/${voiceId}.wav`;
+
+    const audio = new Audio(previewUrl);
     audioRef.current = audio;
     setPlayingVoice(voiceId);
 
@@ -116,6 +129,9 @@ export function VoiceSelector({
         {selectedVoice ? (
           <div className="flex items-center gap-2 truncate">
             <span className={compact ? "" : "font-medium"}>{selectedVoice.name}</span>
+            {isChirp && !compact && (
+              <span className="text-[10px] bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 px-1 rounded font-medium">HD</span>
+            )}
             {!compact && (
               <span className="text-muted-foreground">
                 - {selectedVoice.description}
@@ -141,12 +157,17 @@ export function VoiceSelector({
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               autoFocus
             />
+            {isChirp && (
+              <span className="text-[10px] bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 px-1.5 py-0.5 rounded font-medium ml-2">
+                Chirp HD
+              </span>
+            )}
           </div>
 
           {/* Voice list */}
           <div className="max-h-[300px] overflow-y-auto p-1">
-            {Object.entries(voiceGroups).map(([groupName, voices]) => {
-              const filteredVoices = filterVoices(voices);
+            {Object.entries(voiceGroups).map(([groupName, groupVoices]) => {
+              const filteredVoices = filterVoices(groupVoices);
               if (filteredVoices.length === 0) return null;
 
               return (
@@ -204,7 +225,7 @@ export function VoiceSelector({
             })}
 
             {/* No results */}
-            {Object.values(voiceGroups).every(voices => filterVoices(voices).length === 0) && (
+            {Object.values(voiceGroups).every(groupVoices => filterVoices(groupVoices).length === 0) && (
               <div className="py-6 text-center text-sm text-muted-foreground">
                 No se encontró ninguna voz.
               </div>
