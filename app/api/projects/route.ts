@@ -13,6 +13,8 @@ interface ProjectRow extends RowDataPacket {
   status: string;
   created_at: Date;
   generation_count: number;
+  user_count: number;
+  estimated_cost: number;
   last_message_at: Date | null;
 }
 
@@ -32,6 +34,8 @@ export async function GET() {
           p.id, p.title, p.description, p.client_id, p.status, p.created_at,
           c.name as client_name, c.logo as client_logo,
           COALESCE(gen.generation_count, 0) as generation_count,
+          COALESCE(gen.estimated_cost, 0) as estimated_cost,
+          COALESCE(uc.user_count, 0) as user_count,
           gen.last_message_at
         FROM projects p
         LEFT JOIN clients c ON p.client_id = c.id
@@ -39,14 +43,20 @@ export async function GET() {
           SELECT
             conv.project_id,
             COUNT(msg.id) as generation_count,
+            SUM(msg.estimated_cost) as estimated_cost,
             MAX(msg.created_at) as last_message_at
           FROM conversations conv
           JOIN messages msg ON conv.id = msg.conversation_id
           WHERE msg.role = 'model'
-            AND (msg.image_url IS NOT NULL OR msg.video_url IS NOT NULL)
+            AND (msg.image_url IS NOT NULL OR msg.video_url IS NOT NULL OR msg.audio_url IS NOT NULL)
             AND msg.deleted_at IS NULL
           GROUP BY conv.project_id
         ) gen ON p.id = gen.project_id
+        LEFT JOIN (
+          SELECT project_id, COUNT(*) as user_count
+          FROM project_users
+          GROUP BY project_id
+        ) uc ON p.id = uc.project_id
         ORDER BY gen.last_message_at DESC, p.created_at DESC
       `);
       return NextResponse.json(rows);
@@ -58,6 +68,8 @@ export async function GET() {
         p.id, p.title, p.description, p.client_id, p.status, p.created_at,
         c.name as client_name, c.logo as client_logo,
         COALESCE(gen.generation_count, 0) as generation_count,
+        COALESCE(gen.estimated_cost, 0) as estimated_cost,
+        COALESCE(uc.user_count, 0) as user_count,
         gen.last_message_at
       FROM projects p
       INNER JOIN project_users pu ON p.id = pu.project_id
@@ -66,14 +78,20 @@ export async function GET() {
         SELECT
           conv.project_id,
           COUNT(msg.id) as generation_count,
+          SUM(msg.estimated_cost) as estimated_cost,
           MAX(msg.created_at) as last_message_at
         FROM conversations conv
         JOIN messages msg ON conv.id = msg.conversation_id
         WHERE msg.role = 'model'
-          AND (msg.image_url IS NOT NULL OR msg.video_url IS NOT NULL)
+          AND (msg.image_url IS NOT NULL OR msg.video_url IS NOT NULL OR msg.audio_url IS NOT NULL)
           AND msg.deleted_at IS NULL
         GROUP BY conv.project_id
       ) gen ON p.id = gen.project_id
+      LEFT JOIN (
+        SELECT project_id, COUNT(*) as user_count
+        FROM project_users
+        GROUP BY project_id
+      ) uc ON p.id = uc.project_id
       WHERE pu.user_id = ?
       ORDER BY gen.last_message_at DESC, p.created_at DESC
     `, [session.user.id]);

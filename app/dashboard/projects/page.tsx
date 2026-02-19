@@ -45,6 +45,9 @@ interface Project {
   client_name: string | null;
   client_logo: string | null;
   status: string;
+  generation_count: number;
+  user_count: number;
+  estimated_cost: number;
   created_at: string;
 }
 
@@ -197,6 +200,9 @@ export default function ProjectsPage() {
               <TableHead className="text-muted-foreground">Proyecto</TableHead>
               <TableHead className="text-muted-foreground">Cliente</TableHead>
               <TableHead className="text-muted-foreground">Estado</TableHead>
+              <TableHead className="text-muted-foreground text-right">Usuarios</TableHead>
+              <TableHead className="text-muted-foreground text-right">Generaciones</TableHead>
+              <TableHead className="text-muted-foreground text-right">Costo aprox</TableHead>
               <TableHead className="text-muted-foreground">Fecha</TableHead>
               <TableHead className="w-[100px] text-muted-foreground">Acciones</TableHead>
             </TableRow>
@@ -204,7 +210,7 @@ export default function ProjectsPage() {
           <TableBody>
             {projects.length === 0 ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
                   No hay proyectos registrados
                 </TableCell>
               </TableRow>
@@ -247,6 +253,27 @@ export default function ProjectsPage() {
                     <Badge className={statusColors[project.status]}>
                       {statusLabels[project.status]}
                     </Badge>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {project.user_count > 0 ? (
+                      <span className="text-foreground font-medium">{project.user_count}</span>
+                    ) : (
+                      <span className="text-muted-foreground">0</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {project.generation_count > 0 ? (
+                      <span className="text-foreground font-medium">{project.generation_count.toLocaleString()}</span>
+                    ) : (
+                      <span className="text-muted-foreground">0</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {Number(project.estimated_cost) > 0 ? (
+                      <span className="text-foreground font-medium">${Number(project.estimated_cost).toFixed(2)}</span>
+                    ) : (
+                      <span className="text-muted-foreground">$0.00</span>
+                    )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {formatDateLocal(project.created_at)}
