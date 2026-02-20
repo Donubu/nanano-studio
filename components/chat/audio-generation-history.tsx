@@ -1,6 +1,6 @@
 "use client";
 
-import { Volume2, Clock, Loader2 } from "lucide-react";
+import { Volume2, Clock, Loader2, Star } from "lucide-react";
 import { AudioPlayer } from "./audio-player";
 import { AudioVoiceConfig, AudioSpeakerConfig } from "@/types/audio";
 
@@ -12,6 +12,7 @@ interface AudioMessage {
   audio_duration?: number | null;
   audio_mime_type?: string | null;
   audio_voice_config?: AudioVoiceConfig | AudioSpeakerConfig | null;
+  is_favorite?: boolean;
   created_at: string;
   isAudioGenerating?: boolean;
   audioProgress?: { status: string; message: string };
@@ -27,6 +28,7 @@ export interface AudioRestoreData {
 interface AudioGenerationHistoryProps {
   messages: AudioMessage[];
   onRestore?: (data: AudioRestoreData) => void;
+  onToggleFavorite?: (messageId: number) => void;
 }
 
 function parseVoiceConfig(config: AudioVoiceConfig | AudioSpeakerConfig | string | null | undefined): AudioVoiceConfig | AudioSpeakerConfig | null {
@@ -41,7 +43,7 @@ function parseVoiceConfig(config: AudioVoiceConfig | AudioSpeakerConfig | string
   return config;
 }
 
-export function AudioGenerationHistory({ messages, onRestore }: AudioGenerationHistoryProps) {
+export function AudioGenerationHistory({ messages, onRestore, onToggleFavorite }: AudioGenerationHistoryProps) {
   // Filter messages that have audio or are generating audio, most recent first
   const audioMessages = messages
     .filter((msg) => msg.role === "model" && (msg.audio_url || msg.isAudioGenerating))
@@ -76,7 +78,7 @@ export function AudioGenerationHistory({ messages, onRestore }: AudioGenerationH
 
       <div className="space-y-3">
         {audioMessages.map((msg) => (
-          <AudioHistoryItem key={msg.id} message={msg} />
+          <AudioHistoryItem key={msg.id} message={msg} onToggleFavorite={onToggleFavorite} />
         ))}
       </div>
     </div>
@@ -85,8 +87,10 @@ export function AudioGenerationHistory({ messages, onRestore }: AudioGenerationH
 
 function AudioHistoryItem({
   message,
+  onToggleFavorite,
 }: {
   message: AudioMessage;
+  onToggleFavorite?: (messageId: number) => void;
 }) {
   // Parse voice config (might be JSON string from DB)
   const voiceConfig = parseVoiceConfig(message.audio_voice_config);
@@ -119,6 +123,19 @@ function AudioHistoryItem({
 
   return (
     <div className="group relative">
+      {onToggleFavorite && (
+        <button
+          onClick={() => onToggleFavorite(message.id)}
+          className={`absolute -top-2 -right-2 p-1 rounded-full transition-all z-10 ${
+            message.is_favorite
+              ? "bg-yellow-500/20 text-yellow-400"
+              : "bg-card border border-border/50 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-yellow-400"
+          }`}
+          title={message.is_favorite ? "Quitar de favoritos" : "Agregar a favoritos"}
+        >
+          <Star className={`h-4 w-4 ${message.is_favorite ? "fill-yellow-400" : ""}`} />
+        </button>
+      )}
       <AudioPlayer
         audioUrl={message.audio_url}
         duration={message.audio_duration ?? undefined}

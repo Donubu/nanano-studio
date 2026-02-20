@@ -2169,7 +2169,7 @@ export function ChatInterface() {
     };
 
     // Send audio generation message
-    const sendAudioMessage = async (content: string, qualityTier: "normal" | "hq" | "chirp" = "normal") => {
+    const sendAudioMessage = async (content: string, qualityTier: "normal" | "hq" | "chirp" = "normal", overrideSpeakerConfig?: AudioSpeakerConfig) => {
         if (!activeTabId || !content.trim()) return;
 
         let tabId = activeTabId;
@@ -2245,7 +2245,7 @@ export function ChatInterface() {
                         voiceId: audioVoiceId,
                         stylePrompt: audioStylePrompt || undefined,
                         multiSpeaker: audioTTSEngine === "chirp" ? false : audioMultiSpeaker,
-                        speakerConfig: audioMultiSpeaker && audioTTSEngine !== "chirp" ? audioSpeakerConfig : undefined,
+                        speakerConfig: audioMultiSpeaker && audioTTSEngine !== "chirp" ? (overrideSpeakerConfig || audioSpeakerConfig) : undefined,
                         outputFormat: audioOutputFormat,
                         ttsEngine: audioTTSEngine,
                         speakingRate: audioTTSEngine === "chirp" ? audioSpeakingRate : undefined,
@@ -2890,7 +2890,7 @@ export function ChatInterface() {
                                     qualityTier={audioQualityTier}
                                     ttsEngine={audioTTSEngine}
                                     lockedEngine={currentConversation?.generation_type === "audio_hd"}
-                                    chirpAvailable={!!generationConfig.find(c => c.generation_type === "audio" && c.model_chirp_id)}
+                                    chirpAvailable={false}
                                     normalModelName={currentTypeConfig?.model_normal_name}
                                     hqModelName={currentTypeConfig?.model_hq_name}
                                     speakingRate={audioSpeakingRate}
@@ -2912,7 +2912,7 @@ export function ChatInterface() {
                                             setAudioSpeakerConfig(speakers);
                                             setAudioMultiSpeaker(true);
                                         }
-                                        sendAudioMessage(text, qualityTier || audioQualityTier);
+                                        sendAudioMessage(text, qualityTier || audioQualityTier, speakers || undefined);
                                     }}
                                     onSettingsChange={(settings) => {
                                         if (settings.voiceId !== undefined) {
@@ -2959,6 +2959,7 @@ export function ChatInterface() {
                                 <AudioGenerationHistory
                                     messages={tabMessages[activeTabId] || []}
                                     onRestore={(data) => setAudioRestoreData(data)}
+                                    onToggleFavorite={handleToggleFavorite}
                                 />
                             </div>
                         </div>
