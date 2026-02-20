@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Play, Pause, Volume2, VolumeX, Download, RotateCcw, Mic } from "lucide-react";
+import { Play, Pause, Volume2, VolumeX, Download, Mic } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { AudioVoiceConfig, AudioSpeakerConfig, getVoiceById } from "@/types/audio";
@@ -85,14 +85,6 @@ export function AudioPlayer({
       audioRef.current.currentTime = 0;
     }
     setCurrentTime(0);
-  };
-
-  const handleRestart = () => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = 0;
-      audioRef.current.play();
-      setIsPlaying(true);
-    }
   };
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -211,16 +203,6 @@ export function AudioPlayer({
         {/* Bottom controls */}
         <div className="flex items-center justify-between mt-3">
           <div className="flex items-center gap-1">
-            {/* Restart */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-muted-foreground hover:text-foreground"
-              onClick={handleRestart}
-            >
-              <RotateCcw className="h-4 w-4" />
-            </Button>
-
             {/* Volume */}
             <div className="flex items-center gap-1">
               <Button

@@ -88,13 +88,34 @@ export async function GET(
       [id]
     );
 
+    // Obtener todas las imágenes de referencia de message_images para esta conversación
+    const messageIds = messages.map(m => m.id);
+    let messageImagesMap: Record<number, { url: string; mime_type: string | null }[]> = {};
+    if (messageIds.length > 0) {
+      const [messageImages] = await pool.execute<RowDataPacket[]>(
+        `SELECT message_id, image_url, mime_type FROM message_images WHERE message_id IN (${messageIds.map(() => '?').join(',')}) ORDER BY sort_order ASC`,
+        messageIds
+      );
+      for (const img of messageImages) {
+        if (!messageImagesMap[img.message_id]) {
+          messageImagesMap[img.message_id] = [];
+        }
+        messageImagesMap[img.message_id].push({ url: img.image_url, mime_type: img.mime_type });
+      }
+    }
+
     // Convert MySQL TINYINT to boolean for video_has_audio, is_favorite, and ignore_in_context in messages
-    const messagesWithBooleans = messages.map(msg => ({
-      ...msg,
-      video_has_audio: Boolean(msg.video_has_audio),
-      is_favorite: Boolean(msg.is_favorite),
-      ignore_in_context: Boolean(msg.ignore_in_context),
-    }));
+    const messagesWithBooleans = messages.map(msg => {
+      // Determinar images: usar message_images si hay, sino fallback a image_url
+      const images = messageImagesMap[msg.id] || (msg.image_url ? [{ url: msg.image_url, mime_type: msg.image_mime_type }] : []);
+      return {
+        ...msg,
+        video_has_audio: Boolean(msg.video_has_audio),
+        is_favorite: Boolean(msg.is_favorite),
+        ignore_in_context: Boolean(msg.ignore_in_context),
+        images: msg.role === "user" ? images : undefined,
+      };
+    });
 
     const conv = conversations[0];
     return NextResponse.json({

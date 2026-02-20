@@ -125,6 +125,7 @@ interface Message {
     content: string;
     content_type?: "text" | "image" | "video" | "audio" | "mixed" | "error";
     image_url?: string | null;
+    images?: { url: string; mime_type: string | null }[];
     is_favorite?: boolean;
     ignore_in_context?: boolean;
     generation_seed?: number | null;
@@ -295,6 +296,7 @@ export function ChatInterface() {
     const [selectedSeed, setSelectedSeed] = useState<number | null>(null);
     const [seedPrompt, setSeedPrompt] = useState<string | null>(null);
     const [reusePrompt, setReusePrompt] = useState<string | null>(null);
+    const [reuseImages, setReuseImages] = useState<string[]>([]);
 
     // Generation config per type (from project)
     interface GenerationConfigItem {
@@ -1508,12 +1510,14 @@ export function ChatInterface() {
         const firstImage = files?.find(f => f.type === "image");
 
         // Add optimistic user message
+        const imageFiles = files?.filter(f => f.type === "image") || [];
         const tempUserMessage: Message = {
             id: Date.now(),
             role: "user",
             content,
             content_type: hasFiles ? "mixed" : "text",
             image_url: firstImage?.dataUrl, // Mostrar primera imagen como preview
+            images: imageFiles.length > 0 ? imageFiles.map(f => ({ url: f.dataUrl, mime_type: f.mimeType })) : undefined,
             created_at: new Date().toISOString(),
         };
 
@@ -2878,9 +2882,23 @@ export function ChatInterface() {
                                 projectId={selectedProjectId!}
                                 currentUserId={Number(session?.user?.id) || 0}
                                 onOpenConversation={handleOpenConversationFromGallery}
-                                onReusePrompt={(prompt, type) => {
+                                onReusePrompt={async (prompt, type, modelMessageId) => {
                                     setReusePrompt(prompt);
                                     setNewConversationType(type);
+                                    // Fetch reference images from the model message
+                                    if (modelMessageId) {
+                                        try {
+                                            const res = await fetch(`/api/messages/${modelMessageId}/reference-images`);
+                                            if (res.ok) {
+                                                const data = await res.json();
+                                                if (data.images && data.images.length > 0) {
+                                                    setReuseImages(data.images.map((img: { url: string }) => img.url));
+                                                }
+                                            }
+                                        } catch (err) {
+                                            console.error("Error fetching reference images:", err);
+                                        }
+                                    }
                                     handleNewTab(undefined, type);
                                 }}
                             />
@@ -3165,6 +3183,15 @@ export function ChatInterface() {
                                                                 for (let i = msgIndex - 1; i >= 0; i--) {
                                                                     if (currentMessages[i].role === "user" && currentMessages[i].content) {
                                                                         setReusePrompt(currentMessages[i].content);
+                                                                        // Restaurar imágenes de referencia del mensaje usuario
+                                                                        const userMsg = currentMessages[i];
+                                                                        if (userMsg.images && userMsg.images.length > 0) {
+                                                                            setReuseImages(userMsg.images.map((img: { url: string }) => img.url));
+                                                                        } else if (userMsg.image_url) {
+                                                                            setReuseImages([userMsg.image_url]);
+                                                                        } else {
+                                                                            setReuseImages([]);
+                                                                        }
                                                                         break;
                                                                     }
                                                                 }
@@ -3341,11 +3368,18 @@ export function ChatInterface() {
                                         }
                                         // Clear selected images after sending
                                         setSelectedConversationImages([]);
+                                        setReuseImages([]);
                                     }}
                                     disabled={isSending || !currentModelInfo?.id}
                                     supportsFiles={isTextConversation || isImageConversation || (isVideoConversation && generationMode === "image")}
-                                    preselectedImages={selectedConversationImages.map(url => ({ url }))}
-                                    onRemovePreselectedImage={(url) => setSelectedConversationImages(prev => prev.filter(u => u !== url))}
+                                    preselectedImages={[
+                                        ...reuseImages.map(url => ({ url })),
+                                        ...selectedConversationImages.map(url => ({ url })),
+                                    ]}
+                                    onRemovePreselectedImage={(url) => {
+                                        setSelectedConversationImages(prev => prev.filter(u => u !== url));
+                                        setReuseImages(prev => prev.filter(u => u !== url));
+                                    }}
                                     initialValue={seedPrompt || reusePrompt || undefined}
                                     onInitialValueUsed={() => { setSeedPrompt(null); setReusePrompt(null); }}
                                     showNoContextOption={true}

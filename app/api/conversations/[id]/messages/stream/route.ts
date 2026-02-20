@@ -385,6 +385,26 @@ export async function POST(
 
     const userMessageId = userMessageResult.insertId;
 
+    // Guardar todas las imágenes adjuntas en message_images
+    if (hasFiles && files) {
+      const imageFiles = files.filter(f => f.type === "image");
+      for (let i = 0; i < imageFiles.length; i++) {
+        const imgFile = imageFiles[i];
+        try {
+          // La primera imagen ya fue guardada como savedImageUrl
+          const imgUrl = i === 0 && savedImageUrl ? savedImageUrl : await saveUploadedFile(imgFile, id);
+          const base64Data = imgFile.dataUrl.split(",")[1];
+          const fileSize = Buffer.from(base64Data, "base64").length;
+          await pool.execute(
+            `INSERT INTO message_images (message_id, image_url, mime_type, file_size, sort_order) VALUES (?, ?, ?, ?, ?)`,
+            [userMessageId, imgUrl, imgFile.mimeType, fileSize, i]
+          );
+        } catch (err) {
+          console.error(`Error guardando imagen ${i} en message_images:`, err);
+        }
+      }
+    }
+
     // Obtener historial de mensajes para contexto (excluir errores)
     // Si no_context es true, o es generación de imagen/video, solo obtenemos el mensaje actual
     const skipHistoryQuery = no_context || generationType === "image" || generationType === "video";

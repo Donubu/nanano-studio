@@ -92,7 +92,7 @@ interface GenerationsGalleryProps {
   projectId: number;
   currentUserId: number;
   onOpenConversation: (conversationId: number) => void;
-  onReusePrompt?: (prompt: string, type: "image" | "video") => void;
+  onReusePrompt?: (prompt: string, type: "image" | "video", modelMessageId?: number) => void;
 }
 
 export function GenerationsGallery({ projectId, currentUserId, onOpenConversation, onReusePrompt }: GenerationsGalleryProps) {
@@ -1283,7 +1283,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
 
                 {/* Reuse prompt - only for generated images/videos with content */}
                 {onReusePrompt && selectedItem.content && selectedItem.source !== "upload" && (selectedItem.type === "image" || selectedItem.type === "video") && (
-                  <Button onClick={() => { handleCloseModal(); onReusePrompt(selectedItem.content!, selectedItem.type as "image" | "video"); }} className="flex-1 gap-2 text-blue-400 border-blue-500/30 hover:bg-blue-500/10" variant="outline">
+                  <Button onClick={() => { handleCloseModal(); onReusePrompt(selectedItem.content!, selectedItem.type as "image" | "video", selectedItem.id); }} className="flex-1 gap-2 text-blue-400 border-blue-500/30 hover:bg-blue-500/10" variant="outline">
                     <RotateCcw className="h-4 w-4" /> Reusar prompt
                   </Button>
                 )}
