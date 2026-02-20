@@ -1,6 +1,6 @@
 -- Agregar system_instruction a nivel de modelo (se aplica siempre que se use este modelo)
 ALTER TABLE models
-ADD COLUMN system_instruction TEXT DEFAULT NULL AFTER description;
+ADD COLUMN IF NOT EXISTS system_instruction TEXT DEFAULT NULL AFTER description;
 
 -- Configurar instrucción para Nano Banana Pro (gemini-3-pro-image-preview)
 UPDATE models

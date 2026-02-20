@@ -48,6 +48,7 @@ import {
     Calculator,
     AudioLines,
 } from "lucide-react";
+import {ChangelogModal} from "@/components/chat/changelog-modal";
 import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
 import {
     Dialog,
@@ -272,6 +273,9 @@ export function ChatInterface() {
     // Calculator access
     const [hasCalculatorAccess, setHasCalculatorAccess] = useState(false);
 
+    // Changelog
+    const [pendingChangelog, setPendingChangelog] = useState<{id: number; version: string; title: string; content: string; image_url: string | null} | null>(null);
+
     // Usage tracking (new format with quality tiers)
     const [projectUsage, setProjectUsage] = useState<{
         text: { normal: { used: number; limit: number; unlimited: boolean }; hq: { used: number; limit: number; unlimited: boolean } };
@@ -371,6 +375,16 @@ export function ChatInterface() {
     // Mark component as mounted for hydration
     useEffect(() => {
         setMounted(true);
+    }, []);
+
+    // Fetch pending changelog on mount
+    useEffect(() => {
+        fetch("/api/changelog/latest")
+            .then(res => res.ok ? res.json() : null)
+            .then(data => {
+                if (data?.changelog) setPendingChangelog(data.changelog);
+            })
+            .catch(() => {});
     }, []);
 
     // Load from localStorage on mount (only if URL has a project slug to restore)
@@ -4054,6 +4068,14 @@ export function ChatInterface() {
                         duration: viewingVideoMessage.video_duration || 0,
                     }}
                     onClose={() => setShowTopazVideoStudio(false)}
+                />
+            )}
+
+            {/* Changelog Modal */}
+            {pendingChangelog && (
+                <ChangelogModal
+                    changelog={pendingChangelog}
+                    onClose={() => setPendingChangelog(null)}
                 />
             )}
         </div>
