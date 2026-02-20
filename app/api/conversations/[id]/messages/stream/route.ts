@@ -76,6 +76,7 @@ interface ConversationRow extends RowDataPacket {
   cost_image_4k: number;
   cost_video_per_second: number;
   model_api_backend: string | null;
+  model_system_instruction: string | null;
 }
 
 interface GenerationConfigRow extends RowDataPacket {
@@ -156,7 +157,7 @@ export async function POST(
     // Obtener conversación con configuración, nombre del proyecto y costos del modelo
     const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, c.generation_type, m.model_id as model_model_id, m.supports_image_generation, m.api_backend as model_api_backend, p.title as project_name,
+      `SELECT c.*, c.generation_type, m.model_id as model_model_id, m.supports_image_generation, m.api_backend as model_api_backend, m.system_instruction as model_system_instruction, p.title as project_name,
               m.cost_input_per_million, m.cost_output_per_million,
               m.cost_image_1k, m.cost_image_2k, m.cost_image_4k, m.cost_video_per_second
        FROM conversations c
@@ -352,15 +353,12 @@ export async function POST(
       }
     }
 
-    // Concatenar system instructions
-    let finalSystemInstruction: string | null = null;
-    if (projectSystemInstruction && conversation.system_instruction) {
-      finalSystemInstruction = `${projectSystemInstruction}\n\n${conversation.system_instruction}`;
-    } else if (projectSystemInstruction) {
-      finalSystemInstruction = projectSystemInstruction;
-    } else {
-      finalSystemInstruction = conversation.system_instruction;
-    }
+    // Concatenar system instructions: modelo + proyecto + conversación
+    const systemParts: string[] = [];
+    if (conversation.model_system_instruction) systemParts.push(conversation.model_system_instruction);
+    if (projectSystemInstruction) systemParts.push(projectSystemInstruction);
+    if (conversation.system_instruction) systemParts.push(conversation.system_instruction);
+    const finalSystemInstruction: string | null = systemParts.length > 0 ? systemParts.join("\n\n") : null;
 
 
     // Determinar tipo de contenido
@@ -527,12 +525,14 @@ export async function POST(
           [JSON.stringify(requestData), userMessageId]
         );
 
-        // Variables para trackear imagen guardada durante streaming
-        let savedImageUrl: string | null = null;
-        let savedImageFileSize: number | null = null;
-        let savedImageMimeType: string | null = null;
-        let imageUploadStarted = false; // Flag síncrono para evitar race condition
-        let imageUploadPromise: Promise<void> | null = null; // Promise para esperar upload
+        // Variables para trackear múltiples imágenes generadas durante streaming
+        interface SavedImage {
+          url: string;
+          fileSize: number;
+          mimeType: string;
+        }
+        let savedImages: SavedImage[] = [];
+        let imageUploadPromises: Promise<void>[] = [];
 
         try {
           await sendMessageStream(
@@ -552,11 +552,8 @@ export async function POST(
               onRetry: (info) => {
                 // Resetear estado acumulado para que el reintento empiece limpio
                 fullResponse = "";
-                imageUploadStarted = false;
-                imageUploadPromise = null;
-                savedImageUrl = null;
-                savedImageFileSize = null;
-                savedImageMimeType = null;
+                savedImages = [];
+                imageUploadPromises = [];
 
                 if (!controllerClosed) {
                   controller.enqueue(
@@ -571,82 +568,140 @@ export async function POST(
                 }
               },
               onImage: async (image: GeneratedImage) => {
-                // Guardar imagen en S3 solo una vez (flag síncrono para evitar race condition)
-                if (imageUploadStarted) return;
-                imageUploadStarted = true;
+                const imageIndex = imageUploadPromises.length;
 
-                // Guardar la promesa para que onComplete pueda esperarla
-                imageUploadPromise = (async () => {
+                // Guardar la promesa para que onComplete pueda esperarlas todas
+                const uploadPromise = (async () => {
                   try {
                     const savedImage = await saveGeneratedImage(image, id);
-                    savedImageUrl = savedImage.url;
-                    savedImageFileSize = savedImage.fileSize;
-                    savedImageMimeType = image.mimeType;
-                    // Solo enviar si el controller no está cerrado
+                    savedImages[imageIndex] = {
+                      url: savedImage.url,
+                      fileSize: savedImage.fileSize,
+                      mimeType: image.mimeType,
+                    };
+                    // Enviar evento SSE por cada imagen
                     if (!controllerClosed) {
                       controller.enqueue(
-                        encoder.encode(`data: ${JSON.stringify({ type: "image", imageUrl: savedImage.url, mimeType: image.mimeType })}\n\n`)
+                        encoder.encode(`data: ${JSON.stringify({ type: "image", imageUrl: savedImage.url, mimeType: image.mimeType, imageIndex })}\n\n`)
                       );
                     }
                   } catch (err) {
-                    console.error("Error guardando imagen:", err);
+                    console.error(`Error guardando imagen ${imageIndex}:`, err);
                   }
                 })();
+                imageUploadPromises.push(uploadPromise);
               },
               onComplete: async (text, tokenCount, images) => {
-                // Esperar a que termine el upload de imagen si está en progreso
-                if (imageUploadPromise) {
-                  await imageUploadPromise;
+                // Esperar a que terminen todos los uploads de imagen
+                if (imageUploadPromises.length > 0) {
+                  await Promise.all(imageUploadPromises);
                 }
 
-                // Determinar tipo de contenido
-                let contentType: "text" | "image" | "mixed" = "text";
-                let imageUrl: string | null = savedImageUrl;
-                let imageMimeType: string | null = savedImageMimeType;
-                let imageFileSize: number | null = savedImageFileSize;
-
-                // Si hay imagen guardada durante streaming, usar esa
-                if (imageUploadStarted && savedImageUrl) {
-                  contentType = text ? "mixed" : "image";
-                }
-                // Si no se inició upload durante streaming pero llegó imagen en onComplete, guardarla ahora
-                else if (!imageUploadStarted && images && images.length > 0) {
-                  imageUploadStarted = true;
-                  const firstImage = images[0];
-                  try {
-                    const savedImage = await saveGeneratedImage(firstImage, id);
-                    imageUrl = savedImage.url;
-                    imageFileSize = savedImage.fileSize;
-                    imageMimeType = firstImage.mimeType;
-                    contentType = text ? "mixed" : "image";
-                  } catch (err) {
-                    console.error("Error guardando imagen final:", err);
+                // Si no hubo uploads durante streaming pero llegaron imágenes en onComplete, guardarlas ahora
+                if (imageUploadPromises.length === 0 && images && images.length > 0) {
+                  for (const img of images) {
+                    try {
+                      const saved = await saveGeneratedImage(img, id);
+                      savedImages.push({
+                        url: saved.url,
+                        fileSize: saved.fileSize,
+                        mimeType: img.mimeType,
+                      });
+                    } catch (err) {
+                      console.error("Error guardando imagen final:", err);
+                    }
                   }
                 }
 
-                // Guardar respuesta del modelo en la base de datos
-                // Si hay imagen, guardar también los settings usados para generarla
-                const imageAspectRatioToSave = imageUrl ? effectiveImageAspectRatio : null;
-                const imageSizeToSave = imageUrl ? effectiveImageSize : null;
+                // Filtrar imágenes que se guardaron exitosamente
+                const validImages = savedImages.filter(img => img.url);
+                const hasImages = validImages.length > 0;
+                const hasText = !!text;
 
-                // Calculate estimated cost using effective model costs
-                const estimatedCost = calculateEstimatedCost(
-                  effectiveCosts,
-                  {
-                    tokensInput: tokenCount.input,
-                    tokensOutput: tokenCount.output,
-                    imageGenerated: !!imageUrl,
-                    imageSize: imageSizeToSave,
-                    videoSeconds: null,
+                const imageAspectRatioToSave = hasImages ? effectiveImageAspectRatio : null;
+                const imageSizeToSave = hasImages ? effectiveImageSize : null;
+
+                let totalEstimatedCost = 0;
+                const imageMessages: Array<{ id: number; imageUrl: string }> = [];
+
+                // --- Guardar mensaje de texto (si hay texto, o texto+primera imagen si solo 1 imagen) ---
+                if (hasText) {
+                  // Texto puro: tokens van aquí, sin imagen
+                  const textCost = calculateEstimatedCost(
+                    effectiveCosts,
+                    {
+                      tokensInput: tokenCount.input,
+                      tokensOutput: tokenCount.output,
+                      imageGenerated: false,
+                      imageSize: null,
+                      videoSeconds: null,
+                    }
+                  );
+                  totalEstimatedCost += textCost;
+
+                  const [modelResult] = await pool.execute<ResultSetHeader>(
+                    `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, tokens_input, tokens_output, estimated_cost)
+                     VALUES (?, 'model', 'text', ?, ?, ?, ?, ?)`,
+                    [id, effectiveQualityTier, text, tokenCount.input, tokenCount.output, textCost]
+                  );
+                  modelMessageId = modelResult.insertId;
+                }
+
+                // --- Guardar cada imagen como mensaje separado ---
+                for (let i = 0; i < validImages.length; i++) {
+                  const img = validImages[i];
+                  const isFirstMessage = !hasText && i === 0;
+
+                  const imageCost = calculateEstimatedCost(
+                    effectiveCosts,
+                    {
+                      tokensInput: isFirstMessage ? tokenCount.input : 0,
+                      tokensOutput: isFirstMessage ? tokenCount.output : 0,
+                      imageGenerated: true,
+                      imageSize: imageSizeToSave,
+                      videoSeconds: null,
+                    }
+                  );
+                  totalEstimatedCost += imageCost;
+
+                  const [imgResult] = await pool.execute<ResultSetHeader>(
+                    `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost)
+                     VALUES (?, 'model', 'image', ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [id, effectiveQualityTier, img.url, img.mimeType, img.fileSize, imageAspectRatioToSave, imageSizeToSave,
+                     isFirstMessage ? tokenCount.input : 0,
+                     isFirstMessage ? tokenCount.output : 0,
+                     imageCost]
+                  );
+
+                  imageMessages.push({ id: imgResult.insertId, imageUrl: img.url });
+
+                  // Si no hay texto, el primer mensaje de imagen es el modelMessageId principal
+                  if (isFirstMessage) {
+                    modelMessageId = imgResult.insertId;
                   }
-                );
+                }
 
-                const [modelResult] = await pool.execute<ResultSetHeader>(
-                  `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost)
-                   VALUES (?, 'model', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                  [id, contentType, effectiveQualityTier, text || "", imageUrl, imageMimeType, imageFileSize, imageAspectRatioToSave, imageSizeToSave, tokenCount.input, tokenCount.output, estimatedCost]
-                );
-                modelMessageId = modelResult.insertId;
+                // --- Si no hay texto ni imágenes, guardar mensaje vacío ---
+                if (!hasText && validImages.length === 0) {
+                  const textCost = calculateEstimatedCost(
+                    effectiveCosts,
+                    {
+                      tokensInput: tokenCount.input,
+                      tokensOutput: tokenCount.output,
+                      imageGenerated: false,
+                      imageSize: null,
+                      videoSeconds: null,
+                    }
+                  );
+                  totalEstimatedCost += textCost;
+
+                  const [modelResult] = await pool.execute<ResultSetHeader>(
+                    `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, tokens_input, tokens_output, estimated_cost)
+                     VALUES (?, 'model', 'text', ?, '', ?, ?, ?)`,
+                    [id, effectiveQualityTier, tokenCount.input, tokenCount.output, textCost]
+                  );
+                  modelMessageId = modelResult.insertId;
+                }
 
                 // Acumular tokens y costo en la conversación
                 await pool.execute(
@@ -655,7 +710,7 @@ export async function POST(
                        total_tokens_output = total_tokens_output + ?,
                        total_estimated_cost = total_estimated_cost + ?
                    WHERE id = ?`,
-                  [tokenCount.input, tokenCount.output, estimatedCost, id]
+                  [tokenCount.input, tokenCount.output, totalEstimatedCost, id]
                 );
 
                 // Obtener totales actualizados
@@ -671,7 +726,7 @@ export async function POST(
 
                 const totalCost = Number(totalsResult[0]?.total_estimated_cost) || 0;
 
-                // Enviar evento de finalización con tokens, costo del mensaje y totales de conversación
+                // Enviar evento de finalización
                 if (!controllerClosed) {
                   controller.enqueue(
                     encoder.encode(
@@ -680,9 +735,10 @@ export async function POST(
                         id: modelMessageId,
                         tokens: tokenCount,
                         totalTokens,
-                        estimatedCost,
+                        estimatedCost: totalEstimatedCost,
                         totalCost,
-                        imageUrl: imageUrl,
+                        imageUrl: validImages.length === 1 ? validImages[0].url : null,
+                        imageMessages: imageMessages.length > 0 ? imageMessages : undefined,
                       })}\n\n`
                     )
                   );

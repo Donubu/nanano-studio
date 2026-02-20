@@ -1599,9 +1599,10 @@ export function ChatInterface() {
             const reader = response.body?.getReader();
             const decoder = new TextDecoder();
             let fullContent = "";
-            let imageUrl: string | null = null;
             let realUserMessageId: number | null = null;
             let realModelMessageId: number | null = null;
+            // Multi-image support: track temporary image message IDs
+            const tempImageMessageIds: number[] = [];
 
             if (reader) {
                 let sseBuffer = "";
@@ -1651,35 +1652,89 @@ export function ChatInterface() {
                                             ),
                                         }));
                                     } else if (data.type === "image") {
-                                        // Imagen recibida del modelo
-                                        imageUrl = data.imageUrl;
+                                        // Cada imagen genera un mensaje visual separado
+                                        const tempImgId = Date.now() + 100 + (data.imageIndex || tempImageMessageIds.length);
+                                        tempImageMessageIds.push(tempImgId);
+                                        const imgMessage: Message = {
+                                            id: tempImgId,
+                                            role: "model",
+                                            content: "",
+                                            content_type: "image",
+                                            image_url: data.imageUrl,
+                                            created_at: new Date().toISOString(),
+                                            isStreaming: true,
+                                        };
                                         setTabMessages((prev) => ({
                                             ...prev,
-                                            [tabId]: prev[tabId].map((m) =>
-                                                m.id === streamingMessageId
-                                                    ? {...m, image_url: imageUrl, generation_seed: data.seed}
-                                                    : m
-                                            ),
+                                            [tabId]: [...prev[tabId], imgMessage],
                                         }));
                                     } else if (data.type === "complete") {
                                         realModelMessageId = data.id;
-                                        // Finalize message with image if present
-                                        const finalImageUrl = data.imageUrl || imageUrl;
-                                        setTabMessages((prev) => ({
-                                            ...prev,
-                                            [tabId]: prev[tabId].map((m) =>
-                                                m.id === streamingMessageId
-                                                    ? {
-                                                        ...m,
-                                                        id: realModelMessageId!,
-                                                        content: fullContent,
-                                                        image_url: finalImageUrl,
-                                                        generation_seed: data.seed,
-                                                        isStreaming: false
+                                        const imageMessagesFromServer: Array<{ id: number; imageUrl: string }> = data.imageMessages || [];
+
+                                        setTabMessages((prev) => {
+                                            let msgs = prev[tabId];
+
+                                            // Si hay imágenes con IDs reales del server, actualizar los temporales
+                                            if (imageMessagesFromServer.length > 0) {
+                                                for (let i = 0; i < imageMessagesFromServer.length; i++) {
+                                                    const serverImg = imageMessagesFromServer[i];
+                                                    const tempId = tempImageMessageIds[i];
+                                                    if (tempId) {
+                                                        msgs = msgs.map((m) =>
+                                                            m.id === tempId
+                                                                ? { ...m, id: serverImg.id, image_url: serverImg.imageUrl, isStreaming: false }
+                                                                : m
+                                                        );
+                                                    } else {
+                                                        // Imagen que no llegó por SSE (fallback onComplete), agregar
+                                                        msgs = [...msgs, {
+                                                            id: serverImg.id,
+                                                            role: "model" as const,
+                                                            content: "",
+                                                            content_type: "image" as const,
+                                                            image_url: serverImg.imageUrl,
+                                                            created_at: new Date().toISOString(),
+                                                            isStreaming: false,
+                                                        }];
                                                     }
-                                                    : m
-                                            ),
-                                        }));
+                                                }
+                                            }
+
+                                            // Finalizar el mensaje de texto (streaming placeholder)
+                                            if (fullContent) {
+                                                // Hay texto: actualizar el streaming message con contenido y ID real
+                                                msgs = msgs.map((m) =>
+                                                    m.id === streamingMessageId
+                                                        ? {
+                                                            ...m,
+                                                            id: realModelMessageId!,
+                                                            content: fullContent,
+                                                            isStreaming: false,
+                                                        }
+                                                        : m
+                                                );
+                                            } else if (imageMessagesFromServer.length > 0) {
+                                                // Solo imágenes, sin texto: eliminar el placeholder de streaming
+                                                msgs = msgs.filter((m) => m.id !== streamingMessageId);
+                                            } else {
+                                                // Sin texto ni imágenes (edge case): finalizar con contenido vacío
+                                                const finalImageUrl = data.imageUrl || null;
+                                                msgs = msgs.map((m) =>
+                                                    m.id === streamingMessageId
+                                                        ? {
+                                                            ...m,
+                                                            id: realModelMessageId!,
+                                                            content: fullContent,
+                                                            image_url: finalImageUrl,
+                                                            isStreaming: false,
+                                                        }
+                                                        : m
+                                                );
+                                            }
+
+                                            return { ...prev, [tabId]: msgs };
+                                        });
                                     } else if (data.type === "title") {
                                         // Actualizar título de la conversación
                                         const newTitle = data.title;
