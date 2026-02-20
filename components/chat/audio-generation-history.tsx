@@ -1,6 +1,6 @@
 "use client";
 
-import { Volume2, Clock, Loader2, Star } from "lucide-react";
+import { Volume2, Clock, Loader2, Star, RotateCcw } from "lucide-react";
 import { AudioPlayer } from "./audio-player";
 import { AudioVoiceConfig, AudioSpeakerConfig } from "@/types/audio";
 
@@ -78,7 +78,7 @@ export function AudioGenerationHistory({ messages, onRestore, onToggleFavorite }
 
       <div className="space-y-3">
         {audioMessages.map((msg) => (
-          <AudioHistoryItem key={msg.id} message={msg} onToggleFavorite={onToggleFavorite} />
+          <AudioHistoryItem key={msg.id} message={msg} onToggleFavorite={onToggleFavorite} onRestore={onRestore} />
         ))}
       </div>
     </div>
@@ -88,12 +88,15 @@ export function AudioGenerationHistory({ messages, onRestore, onToggleFavorite }
 function AudioHistoryItem({
   message,
   onToggleFavorite,
+  onRestore,
 }: {
   message: AudioMessage;
   onToggleFavorite?: (messageId: number) => void;
+  onRestore?: (data: AudioRestoreData) => void;
 }) {
   // Parse voice config (might be JSON string from DB)
   const voiceConfig = parseVoiceConfig(message.audio_voice_config);
+  const isMultiSpeaker = voiceConfig !== null && "speakers" in voiceConfig;
 
   // If generating, show progress
   if (message.isAudioGenerating) {
@@ -121,21 +124,42 @@ function AudioHistoryItem({
     return null;
   }
 
+  const handleRestore = () => {
+    if (!onRestore || !message.content) return;
+    onRestore({
+      content: message.content,
+      voiceConfig,
+      isMultiSpeaker,
+    });
+  };
+
   return (
     <div className="group relative">
-      {onToggleFavorite && (
-        <button
-          onClick={() => onToggleFavorite(message.id)}
-          className={`absolute -top-2 -right-2 p-1 rounded-full transition-all z-10 ${
-            message.is_favorite
-              ? "bg-yellow-500/20 text-yellow-400"
-              : "bg-card border border-border/50 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-yellow-400"
-          }`}
-          title={message.is_favorite ? "Quitar de favoritos" : "Agregar a favoritos"}
-        >
-          <Star className={`h-4 w-4 ${message.is_favorite ? "fill-yellow-400" : ""}`} />
-        </button>
-      )}
+      {/* Action buttons - top right */}
+      <div className="absolute -top-2 -right-2 flex items-center gap-1 z-10">
+        {onRestore && message.content && (
+          <button
+            onClick={handleRestore}
+            className="p-1 rounded-full transition-all bg-card border border-border/50 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-primary hover:border-primary/50"
+            title="Restaurar configuración"
+          >
+            <RotateCcw className="h-4 w-4" />
+          </button>
+        )}
+        {onToggleFavorite && (
+          <button
+            onClick={() => onToggleFavorite(message.id)}
+            className={`p-1 rounded-full transition-all ${
+              message.is_favorite
+                ? "bg-yellow-500/20 text-yellow-400"
+                : "bg-card border border-border/50 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-yellow-400"
+            }`}
+            title={message.is_favorite ? "Quitar de favoritos" : "Agregar a favoritos"}
+          >
+            <Star className={`h-4 w-4 ${message.is_favorite ? "fill-yellow-400" : ""}`} />
+          </button>
+        )}
+      </div>
       <AudioPlayer
         audioUrl={message.audio_url}
         duration={message.audio_duration ?? undefined}

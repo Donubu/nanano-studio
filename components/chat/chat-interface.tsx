@@ -47,6 +47,7 @@ import {
     EyeOff,
     Calculator,
     AudioLines,
+    RotateCcw,
 } from "lucide-react";
 import {ChangelogModal} from "@/components/chat/changelog-modal";
 import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
@@ -293,6 +294,7 @@ export function ChatInterface() {
     // Selected seed for next generation (reuse from previous generation)
     const [selectedSeed, setSelectedSeed] = useState<number | null>(null);
     const [seedPrompt, setSeedPrompt] = useState<string | null>(null);
+    const [reusePrompt, setReusePrompt] = useState<string | null>(null);
 
     // Generation config per type (from project)
     interface GenerationConfigItem {
@@ -1226,20 +1228,22 @@ export function ChatInterface() {
         });
     };
 
-    const handleNewTab = async (overrideModelId?: number) => {
+    const handleNewTab = async (overrideModelId?: number, overrideType?: GenerationType) => {
         if (!selectedProjectId) return;
 
+        const effectiveType = overrideType || newConversationType;
+
         // Get model from generation config for the selected type
-        const typeConfig = generationConfig.find(c => c.generation_type === newConversationType && c.is_enabled);
+        const typeConfig = generationConfig.find(c => c.generation_type === effectiveType && c.is_enabled);
         if (!typeConfig && !overrideModelId) {
-            console.error("No hay configuración habilitada para el tipo:", newConversationType);
+            console.error("No hay configuración habilitada para el tipo:", effectiveType);
             return;
         }
 
         // Use override, or normal model, or HQ model as fallback
         const modelIdToUse = overrideModelId || typeConfig?.model_normal_id || typeConfig?.model_hq_id;
         if (!modelIdToUse) {
-            console.error("No hay modelo configurado para el tipo:", newConversationType);
+            console.error("No hay modelo configurado para el tipo:", effectiveType);
             return;
         }
 
@@ -1255,7 +1259,7 @@ export function ChatInterface() {
         };
 
         // Reset or force engine based on conversation type
-        const isAudioHD = newConversationType === "audio_hd";
+        const isAudioHD = effectiveType === "audio_hd";
         if (isAudioHD) {
             setAudioTTSEngine("chirp");
             setAudioMultiSpeaker(false);
@@ -1269,9 +1273,9 @@ export function ChatInterface() {
             title: "Nueva conversación",
             model_id: modelIdToUse,
             model_display_name: modelName,
-            model_supports_image_generation: newConversationType === "image",
-            model_supports_video_generation: newConversationType === "video",
-            generation_type: newConversationType,
+            model_supports_image_generation: effectiveType === "image",
+            model_supports_video_generation: effectiveType === "video",
+            generation_type: effectiveType,
             project_id: selectedProjectId,
             project_title: null,
             last_message: null,
@@ -2874,6 +2878,11 @@ export function ChatInterface() {
                                 projectId={selectedProjectId!}
                                 currentUserId={Number(session?.user?.id) || 0}
                                 onOpenConversation={handleOpenConversationFromGallery}
+                                onReusePrompt={(prompt, type) => {
+                                    setReusePrompt(prompt);
+                                    setNewConversationType(type);
+                                    handleNewTab(undefined, type);
+                                }}
                             />
                         </div>
                     ) : isAudioConversation && activeTabId !== null ? (
@@ -3146,6 +3155,27 @@ export function ChatInterface() {
                                                         <Dices className={`h-4 w-4 ${selectedSeed === msg.generation_seed ? "fill-purple-400" : ""}`} />
                                                     </button>
                                                 )}
+                                                {/* Reuse prompt button for model messages with image/video */}
+                                                {msg.role === "model" && (msg.image_url || msg.video_url) && !msg.audio_url && (
+                                                    <button
+                                                        onClick={() => {
+                                                            const currentMessages = tabMessages[activeTabId!] || [];
+                                                            const msgIndex = currentMessages.findIndex(m => m.id === msg.id);
+                                                            if (msgIndex > 0) {
+                                                                for (let i = msgIndex - 1; i >= 0; i--) {
+                                                                    if (currentMessages[i].role === "user" && currentMessages[i].content) {
+                                                                        setReusePrompt(currentMessages[i].content);
+                                                                        break;
+                                                                    }
+                                                                }
+                                                            }
+                                                        }}
+                                                        className={`absolute ${msg.generation_seed ? "top-12" : "top-5"} -right-2 p-1 rounded-full transition-all z-10 bg-card border border-border/50 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-blue-400`}
+                                                        title="Reusar prompt"
+                                                    >
+                                                        <RotateCcw className="h-4 w-4" />
+                                                    </button>
+                                                )}
                                                 {/* Ignore in context button - only for user messages */}
                                                 {!activeTab?.isArchived && msg.role === "user" && (
                                                     <button
@@ -3316,8 +3346,8 @@ export function ChatInterface() {
                                     supportsFiles={isTextConversation || isImageConversation || (isVideoConversation && generationMode === "image")}
                                     preselectedImages={selectedConversationImages.map(url => ({ url }))}
                                     onRemovePreselectedImage={(url) => setSelectedConversationImages(prev => prev.filter(u => u !== url))}
-                                    initialValue={seedPrompt || undefined}
-                                    onInitialValueUsed={() => setSeedPrompt(null)}
+                                    initialValue={seedPrompt || reusePrompt || undefined}
+                                    onInitialValueUsed={() => { setSeedPrompt(null); setReusePrompt(null); }}
                                     showNoContextOption={true}
                                 />
                             </div>

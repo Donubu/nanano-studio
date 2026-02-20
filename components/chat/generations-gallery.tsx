@@ -7,7 +7,7 @@ import {
   X, Loader2, ExternalLink, Image as ImageIcon, Video, Calendar, FileType,
   Maximize2, RatioIcon, Ruler, Download, HardDrive, Volume2, VolumeX, Clock,
   ChevronLeft, ChevronRight, LayoutGrid, Search, Tag, Plus, Trash2, Upload, Music, User, Users,
-  Sparkles, Copy, Check, Star, CalendarDays, Wand2
+  Sparkles, Copy, Check, Star, CalendarDays, Wand2, RotateCcw
 } from "lucide-react";
 import { TopazStudio } from "./topaz-studio";
 import { TopazStudioVideo } from "./topaz-studio-video";
@@ -92,9 +92,10 @@ interface GenerationsGalleryProps {
   projectId: number;
   currentUserId: number;
   onOpenConversation: (conversationId: number) => void;
+  onReusePrompt?: (prompt: string, type: "image" | "video") => void;
 }
 
-export function GenerationsGallery({ projectId, currentUserId, onOpenConversation }: GenerationsGalleryProps) {
+export function GenerationsGallery({ projectId, currentUserId, onOpenConversation, onReusePrompt }: GenerationsGalleryProps) {
   const navigation = useNavigation();
 
   // Filter states
@@ -1277,6 +1278,13 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                 ) : (
                   <Button onClick={() => handleDownload(selectedItem)} className="flex-1 gap-2" variant="outline">
                     <Download className="h-4 w-4" /> Descargar audio
+                  </Button>
+                )}
+
+                {/* Reuse prompt - only for generated images/videos with content */}
+                {onReusePrompt && selectedItem.content && selectedItem.source !== "upload" && (selectedItem.type === "image" || selectedItem.type === "video") && (
+                  <Button onClick={() => { handleCloseModal(); onReusePrompt(selectedItem.content!, selectedItem.type as "image" | "video"); }} className="flex-1 gap-2 text-blue-400 border-blue-500/30 hover:bg-blue-500/10" variant="outline">
+                    <RotateCcw className="h-4 w-4" /> Reusar prompt
                   </Button>
                 )}
 
