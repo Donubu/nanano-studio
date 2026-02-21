@@ -373,22 +373,22 @@ export function MessageInput({
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
               disabled={disabled}
-              rows={1}
+              rows={3}
               className={cn(
                 "w-full bg-card border border-border/50 rounded-lg px-4 py-2.5 text-sm resize-none",
                 "focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50",
                 "placeholder:text-muted-foreground",
-                "min-h-[44px] max-h-[200px]",
+                "min-h-[132px] max-h-[300px]",
                 disabled && "opacity-50 cursor-not-allowed"
               )}
               style={{
                 height: "auto",
-                minHeight: "44px",
+                minHeight: "132px",
               }}
               onInput={(e) => {
                 const target = e.target as HTMLTextAreaElement;
                 target.style.height = "auto";
-                target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
+                target.style.height = `${Math.min(target.scrollHeight, 300)}px`;
               }}
             />
           </div>
