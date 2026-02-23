@@ -88,7 +88,7 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
-    const { title, description, client_id, status } = body;
+    const { title, description, client_id, status, hidden } = body;
 
     const [existing] = await pool.execute<ProjectRow[]>(
       "SELECT id FROM projects WHERE id = ?",
@@ -107,9 +107,10 @@ export async function PUT(
         title = COALESCE(?, title),
         description = ?,
         client_id = ?,
-        status = COALESCE(?, status)
+        status = COALESCE(?, status),
+        hidden = COALESCE(?, hidden)
       WHERE id = ?`,
-      [title || null, description !== undefined ? description : null, client_id !== undefined ? client_id : null, status || null, id]
+      [title || null, description !== undefined ? description : null, client_id !== undefined ? client_id : null, status || null, hidden !== undefined ? (hidden ? 1 : 0) : null, id]
     );
 
     return NextResponse.json({ success: true });

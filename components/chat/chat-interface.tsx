@@ -117,6 +117,7 @@ interface Project {
     client_logo: string | null;
     generation_count: number;
     last_message_at: string | null;
+    has_access?: number;
 }
 
 interface Message {
@@ -3405,38 +3406,53 @@ export function ChatInterface() {
                             </div>
                         ) : (
                             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                                {projects.map((project) => (
-                                    <button
-                                        key={project.id}
-                                        onClick={() => setSelectedProjectId(project.id)}
-                                        className="group flex flex-col items-center p-4 rounded-xl border border-border/50 bg-card hover:bg-accent hover:border-primary/50 transition-all text-left"
-                                    >
-                                        {/* Brand logo or folder icon */}
-                                        <div className="relative mb-3">
-                                            {project.client_logo ? (
-                                                <img
-                                                    src={project.client_logo}
-                                                    alt={project.client_name || ""}
-                                                    className="w-[200px] border rounded-md border-[#999] object-contain  transition-opacity"
-                                                />
-                                            ) : (
-                                                <Folder className="h-16 w-16 text-primary/70 group-hover:text-primary transition-colors fill-primary/10 group-hover:fill-primary/20" />
+                                {projects.map((project) => {
+                                    const hasAccess = project.has_access === undefined || project.has_access === 1;
+                                    const Wrapper = hasAccess ? "button" : "div";
+                                    return (
+                                        <Wrapper
+                                            key={project.id}
+                                            {...(hasAccess ? { onClick: () => setSelectedProjectId(project.id) } : {})}
+                                            className={cn(
+                                                "group flex flex-col items-center p-2 rounded-xl border border-border/50 bg-card transition-all text-left",
+                                                hasAccess
+                                                    ? "hover:bg-accent hover:border-primary/50 cursor-pointer"
+                                                    : "opacity-50 cursor-not-allowed"
                                             )}
-                                            {project.generation_count > 0 && (
-                                                <div className="absolute -top-5 -right-5 bg-primary text-primary-foreground text-[12px] font-bold rounded-full h-[40px] w-[40px] flex items-center justify-center px-1">
-                                                    {project.generation_count > 999 ? "999+" : project.generation_count}
-                                                </div>
-                                            )}
-                                        </div>
+                                        >
+                                            {/* Brand logo or folder icon */}
+                                            <div className="relative mb-3">
+                                                {project.client_logo ? (
+                                                    <img
+                                                        src={project.client_logo}
+                                                        alt={project.client_name || ""}
+                                                        className="w-[100px] border rounded-md border-[#999] object-contain transition-opacity"
+                                                    />
+                                                ) : (
+                                                    <Folder className="h-16 w-16 text-primary/70 group-hover:text-primary transition-colors fill-primary/10 group-hover:fill-primary/20" />
+                                                )}
+                                                {hasAccess && project.generation_count > 0 && (
+                                                    <div className="absolute -top-5 -right-5 bg-primary text-primary-foreground text-[12px] font-bold rounded-full h-[40px] w-[40px] flex items-center justify-center px-1">
+                                                        {project.generation_count > 999 ? "999+" : project.generation_count}
+                                                    </div>
+                                                )}
+                                                {!hasAccess && (
+                                                    <div className="absolute -top-3 -right-3 bg-muted text-muted-foreground rounded-full h-[28px] w-[28px] flex items-center justify-center">
+                                                        <Lock className="h-3.5 w-3.5" />
+                                                    </div>
+                                                )}
+                                            </div>
 
-                                        {/* Project name */}
-                                        <h3 className="font-medium text-md text-center truncate w-full group-hover:text-primary transition-colors">
-                                            {project.title}
-                                        </h3>
-
-
-                                    </button>
-                                ))}
+                                            {/* Project name */}
+                                            <h3 className={cn(
+                                                "font-medium text-md text-center truncate w-full transition-colors",
+                                                hasAccess ? "group-hover:text-primary" : "text-muted-foreground"
+                                            )}>
+                                                {project.title}
+                                            </h3>
+                                        </Wrapper>
+                                    );
+                                })}
                             </div>
                         )}
 

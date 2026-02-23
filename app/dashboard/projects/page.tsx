@@ -27,6 +27,7 @@ import {
   Loader2,
   Building2,
   Eye,
+  EyeOff,
 } from "lucide-react";
 import Image from "next/image";
 import { formatDateLocal } from "@/lib/utils";
@@ -45,6 +46,7 @@ interface Project {
   client_name: string | null;
   client_logo: string | null;
   status: string;
+  hidden: boolean;
   generation_count: number;
   user_count: number;
   estimated_cost: number;
@@ -77,6 +79,7 @@ export default function ProjectsPage() {
     description: "",
     client_id: "",
     status: "active",
+    hidden: false,
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -114,7 +117,7 @@ export default function ProjectsPage() {
 
   const openCreateDialog = () => {
     setEditingProject(null);
-    setFormData({ title: "", description: "", client_id: "", status: "active" });
+    setFormData({ title: "", description: "", client_id: "", status: "active", hidden: false });
     setError("");
     setIsDialogOpen(true);
   };
@@ -126,6 +129,7 @@ export default function ProjectsPage() {
       description: project.description || "",
       client_id: project.client_id?.toString() || "",
       status: project.status,
+      hidden: !!project.hidden,
     });
     setError("");
     setIsDialogOpen(true);
@@ -222,7 +226,12 @@ export default function ProjectsPage() {
                       onClick={() => router.push(`/dashboard/projects/${project.id}`)}
                       className="text-left hover:text-primary transition-colors"
                     >
-                      <div className="font-medium">{project.title}</div>
+                      <div className="font-medium flex items-center gap-1.5">
+                        {project.title}
+                        {project.hidden && (
+                          <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
+                        )}
+                      </div>
                       {project.description && (
                         <div className="text-sm text-muted-foreground truncate max-w-[300px]">
                           {project.description}
@@ -383,6 +392,23 @@ export default function ProjectsPage() {
                   <option value="completed">Completado</option>
                   <option value="cancelled">Cancelado</option>
                 </select>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="hidden"
+                  checked={formData.hidden}
+                  onChange={(e) =>
+                    setFormData({ ...formData, hidden: e.target.checked })
+                  }
+                  className="h-4 w-4 rounded border-border/50"
+                />
+                <label htmlFor="hidden" className="text-sm">
+                  <span className="font-medium">Ocultar proyecto</span>
+                  <span className="block text-muted-foreground text-xs">
+                    No se mostrara a usuarios sin permisos
+                  </span>
+                </label>
               </div>
             </div>
             <DialogFooter>

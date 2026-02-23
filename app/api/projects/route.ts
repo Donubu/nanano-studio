@@ -11,11 +11,13 @@ interface ProjectRow extends RowDataPacket {
   client_name: string | null;
   client_logo: string | null;
   status: string;
+  hidden: boolean;
   created_at: Date;
   generation_count: number;
   user_count: number;
   estimated_cost: number;
   last_message_at: Date | null;
+  has_access?: number;
 }
 
 // GET - Listar proyectos
@@ -31,7 +33,7 @@ export async function GET() {
     if (session.user.role === "admin") {
       const [rows] = await pool.execute<ProjectRow[]>(`
         SELECT
-          p.id, p.title, p.description, p.client_id, p.status, p.created_at,
+          p.id, p.title, p.description, p.client_id, p.status, p.hidden, p.created_at,
           c.name as client_name, c.logo as client_logo,
           COALESCE(gen.generation_count, 0) as generation_count,
           COALESCE(gen.estimated_cost, 0) as estimated_cost,
@@ -62,17 +64,18 @@ export async function GET() {
       return NextResponse.json(rows);
     }
 
-    // Usuario normal: solo proyectos asignados
+    // Usuario normal: todos los proyectos visibles, con indicador de acceso
     const [rows] = await pool.execute<ProjectRow[]>(`
       SELECT
-        p.id, p.title, p.description, p.client_id, p.status, p.created_at,
+        p.id, p.title, p.description, p.client_id, p.status, p.hidden, p.created_at,
         c.name as client_name, c.logo as client_logo,
         COALESCE(gen.generation_count, 0) as generation_count,
         COALESCE(gen.estimated_cost, 0) as estimated_cost,
         COALESCE(uc.user_count, 0) as user_count,
-        gen.last_message_at
+        gen.last_message_at,
+        CASE WHEN pu.user_id IS NOT NULL THEN 1 ELSE 0 END as has_access
       FROM projects p
-      INNER JOIN project_users pu ON p.id = pu.project_id
+      LEFT JOIN project_users pu ON p.id = pu.project_id AND pu.user_id = ?
       LEFT JOIN clients c ON p.client_id = c.id
       LEFT JOIN (
         SELECT
@@ -92,8 +95,8 @@ export async function GET() {
         FROM project_users
         GROUP BY project_id
       ) uc ON p.id = uc.project_id
-      WHERE pu.user_id = ?
-      ORDER BY gen.last_message_at DESC, p.created_at DESC
+      WHERE (p.hidden = 0 OR pu.user_id IS NOT NULL)
+      ORDER BY has_access DESC, gen.last_message_at DESC, p.created_at DESC
     `, [session.user.id]);
 
     return NextResponse.json(rows);
@@ -116,7 +119,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { title, description, client_id, status = "active" } = body;
+    const { title, description, client_id, status = "active", hidden = false } = body;
 
     if (!title) {
       return NextResponse.json(
@@ -126,12 +129,12 @@ export async function POST(request: NextRequest) {
     }
 
     const [result] = await pool.execute<ResultSetHeader>(
-      "INSERT INTO projects (title, description, client_id, status) VALUES (?, ?, ?, ?)",
-      [title, description || null, client_id || null, status]
+      "INSERT INTO projects (title, description, client_id, status, hidden) VALUES (?, ?, ?, ?, ?)",
+      [title, description || null, client_id || null, status, hidden ? 1 : 0]
     );
 
     return NextResponse.json(
-      { id: result.insertId, title, description, client_id, status },
+      { id: result.insertId, title, description, client_id, status, hidden },
       { status: 201 }
     );
   } catch (error) {
