@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -64,6 +65,7 @@ interface Project {
   client_name: string | null;
   client_logo: string | null;
   status: string;
+  hidden: boolean;
   created_at: string;
 }
 
@@ -240,6 +242,7 @@ export default function ProjectDetailPage() {
     description: "",
     client_id: "",
     status: "active",
+    hidden: false,
   });
 
   const [saving, setSaving] = useState(false);
@@ -259,6 +262,7 @@ export default function ProjectDetailPage() {
           description: data.description || "",
           client_id: data.client_id?.toString() || "",
           status: data.status,
+          hidden: !!data.hidden,
         });
       } else if (res.status === 404) {
         router.push("/dashboard/projects");
@@ -1503,6 +1507,16 @@ export default function ProjectDetailPage() {
                   <option value="completed">Completado</option>
                   <option value="cancelled">Cancelado</option>
                 </select>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-sm font-medium">Oculto</label>
+                  <p className="text-xs text-muted-foreground">No aparece en la lista de proyectos para usuarios no asignados</p>
+                </div>
+                <Switch
+                  checked={formData.hidden}
+                  onCheckedChange={(checked) => setFormData({ ...formData, hidden: checked })}
+                />
               </div>
             </div>
             <DialogFooter>

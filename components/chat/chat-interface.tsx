@@ -226,6 +226,7 @@ export function ChatInterface() {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const prevMessageCountRef = useRef<number>(0);
     const nextTabId = useRef(1);
+    const settingsDebounceTimers = useRef<Record<string, NodeJS.Timeout>>({});
 
     // Settings state
     const [temperature, setTemperature] = useState(1.0);
@@ -1092,7 +1093,18 @@ export function ChatInterface() {
 
         // Si hay conversación activa, guardar en DB
         if (currentConversation) {
-            await updateConversationSettings(currentConversation.id, {[setting]: value});
+            // Debounce para campos de texto libre (evitar un PUT por cada keystroke)
+            const textSettings = ["system_instruction", "audio_style_prompt", "video_negative_prompt"];
+            if (textSettings.includes(setting)) {
+                if (settingsDebounceTimers.current[setting]) {
+                    clearTimeout(settingsDebounceTimers.current[setting]);
+                }
+                settingsDebounceTimers.current[setting] = setTimeout(() => {
+                    updateConversationSettings(currentConversation.id, {[setting]: value});
+                }, 500);
+            } else {
+                await updateConversationSettings(currentConversation.id, {[setting]: value});
+            }
         }
     };
 
