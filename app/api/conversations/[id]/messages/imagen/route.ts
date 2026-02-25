@@ -67,6 +67,7 @@ export async function POST(
         resolution?: ImagenResolution;
         negativePrompt?: string;
         seed?: number;
+        numberOfImages?: number;
       };
       quality_tier?: QualityTier;
       generation_type_override?: "text" | "image" | "video" | "audio";
@@ -155,45 +156,6 @@ export async function POST(
       return NextResponse.json({ error: "El modelo seleccionado no es Imagen 4" }, { status: 400 });
     }
 
-    // Verificar limite de generaciones de imagen mensuales (por calidad)
-    if (conversation.project_id && session.user.role !== "admin") {
-      const limitColumn = effectiveQualityTier === "hq"
-        ? "max_monthly_image_hq"
-        : "max_monthly_image_normal";
-
-      const [limitRows] = await pool.execute<RowDataPacket[]>(`
-        SELECT
-          COALESCE(pu.${limitColumn}, 0) as max_limit,
-          (
-            SELECT COUNT(*)
-            FROM messages m
-            JOIN conversations c ON m.conversation_id = c.id
-            WHERE c.project_id = ?
-              AND c.user_id = ?
-              AND m.role = 'model'
-              AND m.image_url IS NOT NULL
-              AND m.quality_tier = ?
-              AND m.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01')
-          ) as current_count
-        FROM project_users pu
-        WHERE pu.project_id = ? AND pu.user_id = ?
-      `, [conversation.project_id, session.user.id, effectiveQualityTier, conversation.project_id, session.user.id]);
-
-      if (limitRows.length > 0) {
-        const maxLimit = limitRows[0].max_limit;
-        const currentCount = limitRows[0].current_count;
-        if (maxLimit > 0 && currentCount >= maxLimit) {
-          return NextResponse.json({
-            error: `Has alcanzado el limite de generaciones de imagen ${effectiveQualityTier === 'hq' ? 'HQ' : 'normales'} mensuales para este proyecto`,
-            type: "image_limit",
-            limit: maxLimit,
-            used: currentCount,
-            quality_tier: effectiveQualityTier
-          }, { status: 429 });
-        }
-      }
-    }
-
     // Guardar mensaje del usuario (con quality_tier)
     const [userMessageResult] = await pool.execute<ResultSetHeader>(
       `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)
@@ -224,12 +186,16 @@ export async function POST(
     const resolution: ImagenResolution = (imageSettings?.resolution ||
       conversation.image_size || "1K") as ImagenResolution;
 
+    // Number of images to generate (clamp 1-4)
+    const numberOfImages = Math.min(4, Math.max(1, imageSettings?.numberOfImages || 1));
+
     const backendLabel = effectiveBackend === 'vertex' ? 'Vertex AI' : effectiveBackend === 'gemini' ? 'Gemini API' : (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API");
     console.log(`\n========== [IMAGEN 4 GENERATION REQUEST] (${backendLabel}) ==========`);
     console.log("Model:", effectiveModelId);
     console.log("Quality tier:", effectiveQualityTier);
     console.log("Aspect Ratio:", aspectRatio);
     console.log("Resolution:", resolution);
+    console.log("Number of images:", numberOfImages);
     console.log("Prompt:", content);
     if (imageSettings?.negativePrompt) {
       console.log("Negative Prompt:", imageSettings.negativePrompt);
@@ -280,7 +246,7 @@ export async function POST(
               aspectRatio,
               resolution,
               negativePrompt: imageSettings?.negativePrompt,
-              numberOfImages: 1,
+              numberOfImages,
               seed: imageSettings?.seed,
             },
             onProgress,
@@ -292,20 +258,8 @@ export async function POST(
             throw new Error("No se genero ninguna imagen");
           }
 
-          const generatedImage = generatedImages[0];
-
-          // Guardar imagen en S3
-          const extension = generatedImage.mimeType.split("/")[1] || "png";
-          const fileName = generateFileName(id, extension);
-          const uploadResult = await uploadToS3(
-            generatedImage.data,
-            fileName,
-            generatedImage.mimeType,
-            "generated"
-          );
-
-          // Calculate estimated cost for image generation using effective model cost
-          const estimatedCost = calculateEstimatedCost(
+          // Calculate per-image cost
+          const costPerImage = calculateEstimatedCost(
             {
               cost_input_per_million: 0,
               cost_output_per_million: 0,
@@ -323,46 +277,67 @@ export async function POST(
             }
           );
 
-          // Guardar respuesta del modelo en la base de datos (con quality_tier y seed)
-          const [modelResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, quality_tier, generation_seed, content, image_url, image_mime_type, estimated_cost)
-             VALUES (?, 'model', 'image', ?, ?, '', ?, ?, ?)`,
-            [
-              id,
-              effectiveQualityTier,
-              generatedImage.seed,
-              uploadResult.url,
+          const imageMessages: Array<{ id: number; imageUrl: string }> = [];
+          let totalCost = 0;
+
+          // Process each generated image
+          for (let i = 0; i < generatedImages.length; i++) {
+            const generatedImage = generatedImages[i];
+
+            // Upload to S3
+            const extension = generatedImage.mimeType.split("/")[1] || "png";
+            const fileName = generateFileName(id, extension);
+            const uploadResult = await uploadToS3(
+              generatedImage.data,
+              fileName,
               generatedImage.mimeType,
-              estimatedCost,
-            ]
-          );
+              "generated"
+            );
 
-          const modelMessageId = modelResult.insertId;
+            // Save to DB
+            const [modelResult] = await pool.execute<ResultSetHeader>(
+              `INSERT INTO messages (conversation_id, role, content_type, quality_tier, generation_seed, content, image_url, image_mime_type, estimated_cost)
+               VALUES (?, 'model', 'image', ?, ?, '', ?, ?, ?)`,
+              [
+                id,
+                effectiveQualityTier,
+                generatedImage.seed,
+                uploadResult.url,
+                generatedImage.mimeType,
+                costPerImage,
+              ]
+            );
 
-          // Actualizar costo total en la conversacion
+            totalCost += costPerImage;
+            imageMessages.push({ id: modelResult.insertId, imageUrl: uploadResult.url });
+
+            // Send SSE event for this image
+            sendEvent({
+              type: "image",
+              imageUrl: uploadResult.url,
+              mimeType: generatedImage.mimeType,
+              seed: generatedImage.seed,
+              estimatedCost: costPerImage,
+              imageIndex: i,
+            });
+          }
+
+          // Update total cost on conversation
           await pool.execute(
             `UPDATE conversations
              SET total_estimated_cost = total_estimated_cost + ?
              WHERE id = ?`,
-            [estimatedCost, id]
+            [totalCost, id]
           );
 
-          // Enviar evento de imagen generada
-          sendEvent({
-            type: "image",
-            imageUrl: uploadResult.url,
-            mimeType: generatedImage.mimeType,
-            seed: generatedImage.seed,
-            estimatedCost,
-          });
-
-          // Enviar evento de finalizacion
+          // Send completion event with all image messages
           sendEvent({
             type: "complete",
-            id: modelMessageId,
-            imageUrl: uploadResult.url,
-            seed: generatedImage.seed,
-            estimatedCost,
+            id: imageMessages[0].id,
+            imageUrl: imageMessages[0].imageUrl,
+            seed: generatedImages[0].seed,
+            estimatedCost: totalCost,
+            imageMessages,
           });
 
           controllerClosed = true;

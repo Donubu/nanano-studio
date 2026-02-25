@@ -20,7 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, Loader2, Upload, Building2, Eye } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Upload, Building2, Eye, EyeOff, Star } from "lucide-react";
 import Image from "next/image";
 import { formatDateLocal } from "@/lib/utils";
 
@@ -28,9 +28,15 @@ interface Client {
   id: number;
   name: string;
   logo: string | null;
+  hidden: boolean;
+  default_project_id: number | null;
   created_at: string;
   project_count: number;
-  user_count: number;
+}
+
+interface ProjectOption {
+  id: number;
+  title: string;
 }
 
 export default function ClientsPage() {
@@ -41,7 +47,8 @@ export default function ClientsPage() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [deletingClient, setDeletingClient] = useState<Client | null>(null);
-  const [formData, setFormData] = useState({ name: "", logo: "" });
+  const [formData, setFormData] = useState({ name: "", logo: "", hidden: false, default_project_id: null as number | null });
+  const [clientProjects, setClientProjects] = useState<ProjectOption[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -65,9 +72,22 @@ export default function ClientsPage() {
     fetchClients();
   }, [fetchClients]);
 
+  const fetchClientProjects = useCallback(async (clientId: number) => {
+    try {
+      const res = await fetch(`/api/projects?client_id=${clientId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setClientProjects(data.map((p: { id: number; title: string }) => ({ id: p.id, title: p.title })));
+      }
+    } catch (err) {
+      console.error("Error fetching projects:", err);
+    }
+  }, []);
+
   const openCreateDialog = () => {
     setEditingClient(null);
-    setFormData({ name: "", logo: "" });
+    setFormData({ name: "", logo: "", hidden: false, default_project_id: null });
+    setClientProjects([]);
     setError("");
     setIsDialogOpen(true);
   };
@@ -75,8 +95,9 @@ export default function ClientsPage() {
   const openEditDialog = (e: React.MouseEvent, client: Client) => {
     e.stopPropagation();
     setEditingClient(client);
-    setFormData({ name: client.name, logo: client.logo || "" });
+    setFormData({ name: client.name, logo: client.logo || "", hidden: !!client.hidden, default_project_id: client.default_project_id });
     setError("");
+    fetchClientProjects(client.id);
     setIsDialogOpen(true);
   };
 
@@ -203,7 +224,6 @@ export default function ClientsPage() {
               <TableHead className="text-muted-foreground w-[80px]">Logo</TableHead>
               <TableHead className="text-muted-foreground">Nombre</TableHead>
               <TableHead className="text-muted-foreground text-center">Proyectos</TableHead>
-              <TableHead className="text-muted-foreground text-center">Usuarios</TableHead>
               <TableHead className="text-muted-foreground">Fecha de registro</TableHead>
               <TableHead className="w-[100px] text-muted-foreground">Acciones</TableHead>
             </TableRow>
@@ -236,9 +256,15 @@ export default function ClientsPage() {
                       </div>
                     )}
                   </TableCell>
-                  <TableCell className="font-medium">{client.name}</TableCell>
+                  <TableCell className="font-medium">
+                    <span className="flex items-center gap-2">
+                      {client.name}
+                      {!!client.hidden && (
+                        <span title="Oculto"><EyeOff className="h-4 w-4 text-orange-400" /></span>
+                      )}
+                    </span>
+                  </TableCell>
                   <TableCell className="text-center">{client.project_count}</TableCell>
-                  <TableCell className="text-center">{client.user_count}</TableCell>
                   <TableCell className="text-muted-foreground">
                     {formatDateLocal(client.created_at)}
                   </TableCell>
@@ -355,6 +381,51 @@ export default function ClientsPage() {
                   className="bg-muted border-border/50"
                 />
               </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="client-hidden"
+                  checked={formData.hidden}
+                  onChange={(e) =>
+                    setFormData({ ...formData, hidden: e.target.checked })
+                  }
+                  className="rounded border-border/50"
+                />
+                <label htmlFor="client-hidden" className="text-sm font-medium flex items-center gap-1.5">
+                  <EyeOff className="h-3.5 w-3.5 text-orange-400" />
+                  Oculto
+                </label>
+                <span className="text-xs text-muted-foreground">
+                  (Solo visible para administradores)
+                </span>
+              </div>
+
+              {editingClient && clientProjects.length > 0 && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium flex items-center gap-1.5">
+                    <Star className="h-3.5 w-3.5 text-yellow-500" />
+                    Proyecto día a día
+                  </label>
+                  <select
+                    className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
+                    value={formData.default_project_id ?? ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, default_project_id: e.target.value ? Number(e.target.value) : null })
+                    }
+                  >
+                    <option value="">Ninguno</option>
+                    {clientProjects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.title}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Aparecerá destacado y primero en la lista de proyectos
+                  </p>
+                </div>
+              )}
             </div>
             <DialogFooter>
               <Button

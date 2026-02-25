@@ -48,7 +48,6 @@ interface Project {
   status: string;
   hidden: boolean;
   generation_count: number;
-  user_count: number;
   estimated_cost: number;
   created_at: string;
 }
@@ -204,7 +203,6 @@ export default function ProjectsPage() {
               <TableHead className="text-muted-foreground">Proyecto</TableHead>
               <TableHead className="text-muted-foreground">Cliente</TableHead>
               <TableHead className="text-muted-foreground">Estado</TableHead>
-              <TableHead className="text-muted-foreground text-right">Usuarios</TableHead>
               <TableHead className="text-muted-foreground text-right">Generaciones</TableHead>
               <TableHead className="text-muted-foreground text-right">Costo aprox</TableHead>
               <TableHead className="text-muted-foreground">Fecha</TableHead>
@@ -262,13 +260,6 @@ export default function ProjectsPage() {
                     <Badge className={statusColors[project.status]}>
                       {statusLabels[project.status]}
                     </Badge>
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {project.user_count > 0 ? (
-                      <span className="text-foreground font-medium">{project.user_count}</span>
-                    ) : (
-                      <span className="text-muted-foreground">0</span>
-                    )}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {project.generation_count > 0 ? (

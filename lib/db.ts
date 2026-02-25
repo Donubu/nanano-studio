@@ -9,7 +9,7 @@ const basePool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  timezone: "+00:00", // Interpretar fechas como UTC
+  timezone: "-03:00", // Chile (America/Santiago)
   dateStrings: true, // Devolver fechas como strings para mejor control
   // Producción: manejar conexiones perdidas
   enableKeepAlive: true,
@@ -19,9 +19,9 @@ const basePool = mysql.createPool({
   // idleTimeout: 60000, // No disponible en mysql2, se maneja automáticamente
 });
 
-// Configurar timezone UTC en cada conexión nueva
+// Configurar timezone Chile en cada conexión nueva
 basePool.on("connection", (connection) => {
-  connection.query("SET time_zone = '+00:00'");
+  connection.query("SET time_zone = 'America/Santiago'");
 });
 
 const pool = basePool;

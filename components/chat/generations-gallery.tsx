@@ -302,8 +302,8 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
     if (!selectedItem) return;
     setShowTopazStudio(true);
     // Update URL to include /topaz
-    if (navigation.projectSlug) {
-      navigation.replace(`/${navigation.projectSlug}/gallery/${selectedItem.id}/topaz`);
+    if (navigation.clientSlug && navigation.projectSlug) {
+      navigation.replace(`/${navigation.clientSlug}/${navigation.projectSlug}/gallery/${selectedItem.id}/topaz`);
     }
   }, [selectedItem, navigation]);
 
@@ -311,8 +311,8 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
   const closeTopazStudio = useCallback(() => {
     setShowTopazStudio(false);
     // Update URL back to generation
-    if (selectedItem && navigation.projectSlug) {
-      navigation.replace(`/${navigation.projectSlug}/gallery/${selectedItem.id}`);
+    if (selectedItem && navigation.clientSlug && navigation.projectSlug) {
+      navigation.replace(`/${navigation.clientSlug}/${navigation.projectSlug}/gallery/${selectedItem.id}`);
     }
   }, [selectedItem, navigation]);
 
@@ -321,8 +321,8 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
     if (!selectedItem) return;
     setShowTopazVideoStudio(true);
     // Update URL to include /topaz-video
-    if (navigation.projectSlug) {
-      navigation.replace(`/${navigation.projectSlug}/gallery/${selectedItem.id}/topaz-video`);
+    if (navigation.clientSlug && navigation.projectSlug) {
+      navigation.replace(`/${navigation.clientSlug}/${navigation.projectSlug}/gallery/${selectedItem.id}/topaz-video`);
     }
   }, [selectedItem, navigation]);
 
@@ -330,8 +330,8 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
   const closeTopazVideoStudio = useCallback(() => {
     setShowTopazVideoStudio(false);
     // Update URL back to generation
-    if (selectedItem && navigation.projectSlug) {
-      navigation.replace(`/${navigation.projectSlug}/gallery/${selectedItem.id}`);
+    if (selectedItem && navigation.clientSlug && navigation.projectSlug) {
+      navigation.replace(`/${navigation.clientSlug}/${navigation.projectSlug}/gallery/${selectedItem.id}`);
     }
   }, [selectedItem, navigation]);
 
@@ -341,8 +341,8 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
       const newGen = filteredGenerations[newIndex];
       setSelectedIndex(newIndex);
       // Update URL without pushing new history entry
-      if (newGen && navigation.projectSlug) {
-        navigation.replace(`/${navigation.projectSlug}/gallery/${newGen.id}`);
+      if (newGen && navigation.clientSlug && navigation.projectSlug) {
+        navigation.replace(`/${navigation.clientSlug}/${navigation.projectSlug}/gallery/${newGen.id}`);
       }
     }
   }, [canGoPrev, selectedIndex, filteredGenerations, navigation]);
@@ -353,8 +353,8 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
       const newGen = filteredGenerations[newIndex];
       setSelectedIndex(newIndex);
       // Update URL without pushing new history entry
-      if (newGen && navigation.projectSlug) {
-        navigation.replace(`/${navigation.projectSlug}/gallery/${newGen.id}`);
+      if (newGen && navigation.clientSlug && navigation.projectSlug) {
+        navigation.replace(`/${navigation.clientSlug}/${navigation.projectSlug}/gallery/${newGen.id}`);
       }
     }
   }, [canGoNext, selectedIndex, filteredGenerations, navigation]);

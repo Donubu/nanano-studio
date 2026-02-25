@@ -16,11 +16,13 @@ export type ImagenResolution = "1K" | "2K" | "4K";
 interface ImageSettingsProps {
   aspectRatio: ImagenAspectRatio;
   resolution: ImagenResolution;
+  numberOfImages: number;
   negativePrompt?: string;
   disabled?: boolean;
   onChange: (settings: {
     aspectRatio?: ImagenAspectRatio;
     resolution?: ImagenResolution;
+    numberOfImages?: number;
     negativePrompt?: string;
   }) => void;
 }
@@ -28,6 +30,7 @@ interface ImageSettingsProps {
 export function ImageSettings({
   aspectRatio,
   resolution,
+  numberOfImages,
   negativePrompt = "",
   disabled = false,
   onChange,
@@ -113,6 +116,27 @@ export function ImageSettings({
               <div className={`text-xs ${resolution === r.value ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
                 {r.description}
               </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Number of Images */}
+      <div className="space-y-2">
+        <Label className="text-xs text-muted-foreground">Cantidad de imagenes</Label>
+        <div className="flex gap-2">
+          {([1, 2, 3, 4] as const).map((n) => (
+            <button
+              key={n}
+              disabled={disabled}
+              onClick={() => onChange({ numberOfImages: n })}
+              className={`flex-1 py-2 px-3 text-sm rounded-md border transition-colors ${
+                numberOfImages === n
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-background border-border hover:bg-muted"
+              } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+            >
+              {n}
             </button>
           ))}
         </div>

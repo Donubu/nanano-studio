@@ -133,7 +133,7 @@ export async function POST(
       files?: AttachedFile[];
       useProjectSystemInstruction?: boolean;
       modelIdOverride?: number;
-      imageSettings?: { aspectRatio: string; size: string };
+      imageSettings?: { aspectRatio: string; size: string; numberOfImages?: number };
       quality_tier?: QualityTier;
       generation_type_override?: GenerationType;
       no_context?: boolean;
@@ -287,57 +287,6 @@ export async function POST(
       effectiveImageAspectRatio = imageSettings.aspectRatio;
       effectiveImageSize = imageSettings.size;
       console.log(`[Stream] Using image settings override: ${effectiveImageAspectRatio}, ${effectiveImageSize}`);
-    }
-
-    // Verificar límite de generaciones según tipo de conversación y calidad
-    if (conversation.project_id && session.user.role !== "admin") {
-      // Determinar qué límite verificar según el tipo de generación
-      const limitColumn = effectiveQualityTier === "hq"
-        ? `max_monthly_${generationType}_hq`
-        : `max_monthly_${generationType}_normal`;
-
-      // Determinar qué URL verificar para contar generaciones
-      const urlColumn = generationType === "image" ? "image_url"
-        : generationType === "video" ? "video_url"
-        : generationType === "audio" ? "audio_url"
-        : null; // texto no tiene URL específica
-
-      const [limitRows] = await pool.execute<RowDataPacket[]>(`
-        SELECT
-          COALESCE(pu.${limitColumn}, 0) as max_limit,
-          (
-            SELECT COUNT(*)
-            FROM messages m
-            JOIN conversations c ON m.conversation_id = c.id
-            WHERE c.project_id = ?
-              AND c.user_id = ?
-              AND c.generation_type = ?
-              AND m.role = 'model'
-              AND m.quality_tier = ?
-              ${urlColumn ? `AND m.${urlColumn} IS NOT NULL` : "AND m.content IS NOT NULL AND m.image_url IS NULL AND m.video_url IS NULL AND m.audio_url IS NULL"}
-              AND m.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01')
-          ) as current_count
-        FROM project_users pu
-        WHERE pu.project_id = ? AND pu.user_id = ?
-      `, [conversation.project_id, session.user.id, generationType, effectiveQualityTier, conversation.project_id, session.user.id]);
-
-      if (limitRows.length > 0) {
-        const maxLimit = limitRows[0].max_limit;
-        const currentCount = limitRows[0].current_count;
-        // 0 = sin límite, mayor a 0 = límite activo
-        if (maxLimit > 0 && currentCount >= maxLimit) {
-          return new Response(JSON.stringify({
-            error: `Has alcanzado el límite de generaciones de ${generationType} ${effectiveQualityTier === 'hq' ? 'HQ' : 'normales'} mensuales para este proyecto`,
-            type: `${generationType}_limit`,
-            limit: maxLimit,
-            used: currentCount,
-            quality_tier: effectiveQualityTier
-          }), {
-            status: 429,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-      }
     }
 
     // Obtener system instruction del proyecto-modelo si existe

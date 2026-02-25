@@ -46,16 +46,15 @@ export async function GET(
       return NextResponse.json(rows[0]);
     }
 
-    // Usuario normal: solo si está asignado al proyecto
+    // Usuario normal: acceso si proyecto no es hidden
     const [rows] = await pool.execute<ProjectRow[]>(`
       SELECT
         p.id, p.title, p.description, p.client_id, p.status, p.created_at,
         c.name as client_name, c.logo as client_logo
       FROM projects p
-      INNER JOIN project_users pu ON p.id = pu.project_id
       LEFT JOIN clients c ON p.client_id = c.id
-      WHERE p.id = ? AND pu.user_id = ?
-    `, [id, session.user.id]);
+      WHERE p.id = ? AND p.hidden = 0
+    `, [id]);
 
     if (rows.length === 0) {
       return NextResponse.json(

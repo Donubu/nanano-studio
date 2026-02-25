@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useCallback, useEffect, useRef, useState, ReactNode } from 'react';
 
-// Generate slug from project title
+// Generate slug from any title/name
 export function generateSlug(title: string): string {
   return title
     .toLowerCase()
@@ -10,7 +10,7 @@ export function generateSlug(title: string): string {
     .replace(/[\u0300-\u036f]/g, '') // Remove accents
     .replace(/[^a-z0-9]+/g, '-')     // Replace non-alphanumeric with dashes
     .replace(/^-+|-+$/g, '')         // Remove leading/trailing dashes
-    || 'project';
+    || 'item';
 }
 
 export type NavigationType = 'base' | 'gallery' | 'generation' | 'topaz' | 'conversation' | 'chat-image';
@@ -18,6 +18,7 @@ export type NavigationType = 'base' | 'gallery' | 'generation' | 'topaz' | 'conv
 export interface NavigationState {
   path: string;
   type: NavigationType;
+  clientSlug?: string;
   projectSlug?: string;
   id?: number;
 }
@@ -30,13 +31,16 @@ interface NavigationLayer {
 
 interface NavigationContextType {
   currentPath: string;
+  clientSlug: string | null;
   projectSlug: string | null;
   initialState: NavigationState | null; // State parsed from initial URL for deep linking
+  setClientSlug: (slug: string | null, useReplace?: boolean) => void;
   setProjectSlug: (slug: string | null, useReplace?: boolean) => void;
   push: (path: string, onClose: () => void) => void;
   replace: (path: string) => void;
   back: () => void;
-  onProjectChange: (callback: (slug: string | null) => void) => () => void; // Subscribe to project changes from popstate
+  onClientChange: (callback: (slug: string | null) => void) => () => void;
+  onProjectChange: (callback: (slug: string | null) => void) => () => void;
   // Register a close callback without pushing to history (for deep linking)
   registerLayer: (onClose: () => void) => void;
   // Helper methods for common routes
@@ -57,52 +61,71 @@ function parsePath(path: string): NavigationState {
     return { path, type: 'base' };
   }
 
-  const projectSlug = parts[0];
+  // First part is always clientSlug
+  const clientSlug = parts[0];
 
-  // /{project}/gallery/{id}/topaz
-  if (parts.length >= 4 && parts[1] === 'gallery' && parts[3] === 'topaz') {
-    const id = parseInt(parts[2]);
-    return { path, type: 'topaz', projectSlug, id };
+  if (parts.length === 1) {
+    // /{client}/ - client selected, no project yet
+    return { path, type: 'base', clientSlug };
   }
 
-  // /{project}/gallery/{id}
-  if (parts.length >= 3 && parts[1] === 'gallery') {
-    const id = parseInt(parts[2]);
-    return { path, type: 'generation', projectSlug, id };
+  // Second part is projectSlug
+  const projectSlug = parts[1];
+
+  // /{client}/{project}/gallery/{id}/topaz
+  if (parts.length >= 5 && parts[2] === 'gallery' && parts[4] === 'topaz') {
+    const id = parseInt(parts[3]);
+    return { path, type: 'topaz', clientSlug, projectSlug, id };
   }
 
-  // /{project}/gallery
-  if (parts.length >= 2 && parts[1] === 'gallery') {
-    return { path, type: 'gallery', projectSlug };
+  // /{client}/{project}/gallery/{id}
+  if (parts.length >= 4 && parts[2] === 'gallery') {
+    const id = parseInt(parts[3]);
+    return { path, type: 'generation', clientSlug, projectSlug, id };
   }
 
-  // /{project}/conversation/{id}
-  if (parts.length >= 3 && parts[1] === 'conversation') {
-    const id = parseInt(parts[2]);
-    return { path, type: 'conversation', projectSlug, id };
+  // /{client}/{project}/gallery
+  if (parts.length >= 3 && parts[2] === 'gallery') {
+    return { path, type: 'gallery', clientSlug, projectSlug };
   }
 
-  // /{project}/chat/{id}
-  if (parts.length >= 3 && parts[1] === 'chat') {
-    const id = parseInt(parts[2]);
-    return { path, type: 'chat-image', projectSlug, id };
+  // /{client}/{project}/conversation/{id}
+  if (parts.length >= 4 && parts[2] === 'conversation') {
+    const id = parseInt(parts[3]);
+    return { path, type: 'conversation', clientSlug, projectSlug, id };
   }
 
-  // /{project}/ - base view for project
-  return { path, type: 'base', projectSlug };
+  // /{client}/{project}/chat/{id}
+  if (parts.length >= 4 && parts[2] === 'chat') {
+    const id = parseInt(parts[3]);
+    return { path, type: 'chat-image', clientSlug, projectSlug, id };
+  }
+
+  // /{client}/{project}/ - base view for project
+  return { path, type: 'base', clientSlug, projectSlug };
 }
 
 export function NavigationProvider({ children }: { children: ReactNode }) {
   const layersRef = useRef<NavigationLayer[]>([]);
   const [currentPath, setCurrentPath] = useState('/');
+  const [clientSlug, setClientSlugState] = useState<string | null>(null);
   const [projectSlug, setProjectSlugState] = useState<string | null>(null);
   const [initialState, setInitialState] = useState<NavigationState | null>(null);
   const isHandlingPopState = useRef(false);
+  const clientSlugRef = useRef<string | null>(null);
   const projectSlugRef = useRef<string | null>(null);
+  const clientChangeCallbacksRef = useRef<Set<(slug: string | null) => void>>(new Set());
   const projectChangeCallbacksRef = useRef<Set<(slug: string | null) => void>>(new Set());
 
   const clearInitialState = useCallback(() => {
     setInitialState(null);
+  }, []);
+
+  const onClientChange = useCallback((callback: (slug: string | null) => void) => {
+    clientChangeCallbacksRef.current.add(callback);
+    return () => {
+      clientChangeCallbacksRef.current.delete(callback);
+    };
   }, []);
 
   const onProjectChange = useCallback((callback: (slug: string | null) => void) => {
@@ -112,8 +135,33 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const setClientSlug = useCallback((slug: string | null, useReplace: boolean = false) => {
+    if (clientSlugRef.current === slug) return;
+
+    clientSlugRef.current = slug;
+    setClientSlugState(slug);
+
+    // When client changes, clear project
+    projectSlugRef.current = null;
+    setProjectSlugState(null);
+
+    if (typeof window !== 'undefined') {
+      const historyMethod = useReplace ? history.replaceState.bind(history) : history.pushState.bind(history);
+
+      if (!slug) {
+        historyMethod({ path: '/', type: 'base' }, '', '/');
+        setCurrentPath('/');
+        return;
+      }
+
+      const newPath = `/${slug}`;
+      const state = parsePath(newPath);
+      historyMethod(state, '', newPath);
+      setCurrentPath(newPath);
+    }
+  }, []);
+
   const setProjectSlug = useCallback((slug: string | null, useReplace: boolean = false) => {
-    // Avoid unnecessary state updates that cause infinite loops
     if (projectSlugRef.current === slug) return;
 
     projectSlugRef.current = slug;
@@ -122,28 +170,32 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
     if (typeof window !== 'undefined') {
       const historyMethod = useReplace ? history.replaceState.bind(history) : history.pushState.bind(history);
 
-      // Handle clearing the project (deselection)
       if (!slug) {
-        historyMethod({ path: '/', type: 'base' }, '', '/');
-        setCurrentPath('/');
+        // Go back to client level
+        if (clientSlugRef.current) {
+          const newPath = `/${clientSlugRef.current}`;
+          const state = parsePath(newPath);
+          historyMethod(state, '', newPath);
+          setCurrentPath(newPath);
+        } else {
+          historyMethod({ path: '/', type: 'base' }, '', '/');
+          setCurrentPath('/');
+        }
         return;
       }
 
-      const currentPathname = window.location.pathname;
-      const currentState = parsePath(currentPathname);
+      if (clientSlugRef.current) {
+        const currentPathname = window.location.pathname;
+        const currentState = parsePath(currentPathname);
 
-      // Only update URL if we're at root OR the current path has a different project slug
-      if (currentPathname === '/' || (currentState.projectSlug && currentState.projectSlug !== slug)) {
-        const state = parsePath(`/${slug}`);
-        historyMethod(state, '', `/${slug}`);
-        setCurrentPath(`/${slug}`);
-      } else if (!currentState.projectSlug) {
-        // We're at root, set the project URL
-        const state = parsePath(`/${slug}`);
-        historyMethod(state, '', `/${slug}`);
-        setCurrentPath(`/${slug}`);
+        // Only update URL if needed
+        if (!currentState.projectSlug || currentState.projectSlug !== slug) {
+          const newPath = `/${clientSlugRef.current}/${slug}`;
+          const state = parsePath(newPath);
+          historyMethod(state, '', newPath);
+          setCurrentPath(newPath);
+        }
       }
-      // If we're already on a path with the same project slug, don't change the URL
     }
   }, []);
 
@@ -176,31 +228,31 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
     history.back();
   }, []);
 
-  // Helper methods
+  // Helper methods - now prefix with /{clientSlug}/{projectSlug}/...
   const openGallery = useCallback((onClose: () => void) => {
-    if (!projectSlug) return;
-    push(`/${projectSlug}/gallery`, onClose);
-  }, [projectSlug, push]);
+    if (!clientSlug || !projectSlug) return;
+    push(`/${clientSlug}/${projectSlug}/gallery`, onClose);
+  }, [clientSlug, projectSlug, push]);
 
   const openGeneration = useCallback((generationId: number, onClose: () => void) => {
-    if (!projectSlug) return;
-    push(`/${projectSlug}/gallery/${generationId}`, onClose);
-  }, [projectSlug, push]);
+    if (!clientSlug || !projectSlug) return;
+    push(`/${clientSlug}/${projectSlug}/gallery/${generationId}`, onClose);
+  }, [clientSlug, projectSlug, push]);
 
   const openTopaz = useCallback((generationId: number, onClose: () => void) => {
-    if (!projectSlug) return;
-    push(`/${projectSlug}/gallery/${generationId}/topaz`, onClose);
-  }, [projectSlug, push]);
+    if (!clientSlug || !projectSlug) return;
+    push(`/${clientSlug}/${projectSlug}/gallery/${generationId}/topaz`, onClose);
+  }, [clientSlug, projectSlug, push]);
 
   const openConversation = useCallback((conversationId: number, onClose: () => void) => {
-    if (!projectSlug) return;
-    push(`/${projectSlug}/conversation/${conversationId}`, onClose);
-  }, [projectSlug, push]);
+    if (!clientSlug || !projectSlug) return;
+    push(`/${clientSlug}/${projectSlug}/conversation/${conversationId}`, onClose);
+  }, [clientSlug, projectSlug, push]);
 
   const openChatImage = useCallback((messageId: number, onClose: () => void) => {
-    if (!projectSlug) return;
-    push(`/${projectSlug}/chat/${messageId}`, onClose);
-  }, [projectSlug, push]);
+    if (!clientSlug || !projectSlug) return;
+    push(`/${clientSlug}/${projectSlug}/chat/${messageId}`, onClose);
+  }, [clientSlug, projectSlug, push]);
 
   // Handle browser back/forward and Escape key
   useEffect(() => {
@@ -211,13 +263,20 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
 
       const newPath = window.location.pathname;
       const newState = parsePath(newPath);
+      const newClientSlug = newState.clientSlug || null;
       const newProjectSlug = newState.projectSlug || null;
+
+      // Check if client changed
+      if (clientSlugRef.current !== newClientSlug) {
+        clientSlugRef.current = newClientSlug;
+        setClientSlugState(newClientSlug);
+        clientChangeCallbacksRef.current.forEach(callback => callback(newClientSlug));
+      }
 
       // Check if project changed
       if (projectSlugRef.current !== newProjectSlug) {
         projectSlugRef.current = newProjectSlug;
         setProjectSlugState(newProjectSlug);
-        // Notify subscribers about project change
         projectChangeCallbacksRef.current.forEach(callback => callback(newProjectSlug));
       }
 
@@ -274,14 +333,20 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
     const state = parsePath(path);
     history.replaceState(state, '', path);
 
+    // Extract client slug if present
+    if (state.clientSlug) {
+      clientSlugRef.current = state.clientSlug;
+      setClientSlugState(state.clientSlug);
+    }
+
     // Extract project slug if present
     if (state.projectSlug) {
       projectSlugRef.current = state.projectSlug;
       setProjectSlugState(state.projectSlug);
     }
 
-    // Set initial state for deep linking (only if not base type)
-    if (state.type !== 'base') {
+    // Set initial state for deep linking (only if beyond just client level)
+    if (state.projectSlug || state.type !== 'base') {
       setInitialState(state);
     }
   }, []);
@@ -289,12 +354,15 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
   return (
     <NavigationContext.Provider value={{
       currentPath,
+      clientSlug,
       projectSlug,
       initialState,
+      setClientSlug,
       setProjectSlug,
       push,
       replace,
       back,
+      onClientChange,
       onProjectChange,
       registerLayer,
       openGallery,

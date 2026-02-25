@@ -189,48 +189,6 @@ export async function POST(
       });
     }
 
-    // Verificar límite de generaciones de video mensuales (por calidad)
-    if (conversation.project_id && session.user.role !== "admin") {
-      const limitColumn = effectiveQualityTier === "hq"
-        ? "max_monthly_video_hq"
-        : "max_monthly_video_normal";
-
-      const [limitRows] = await pool.execute<RowDataPacket[]>(`
-        SELECT
-          COALESCE(pu.${limitColumn}, 0) as max_limit,
-          (
-            SELECT COUNT(*)
-            FROM messages m
-            JOIN conversations c ON m.conversation_id = c.id
-            WHERE c.project_id = ?
-              AND c.user_id = ?
-              AND m.role = 'model'
-              AND m.video_url IS NOT NULL
-              AND m.quality_tier = ?
-              AND m.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01')
-          ) as current_count
-        FROM project_users pu
-        WHERE pu.project_id = ? AND pu.user_id = ?
-      `, [conversation.project_id, session.user.id, effectiveQualityTier, conversation.project_id, session.user.id]);
-
-      if (limitRows.length > 0) {
-        const maxLimit = limitRows[0].max_limit;
-        const currentCount = limitRows[0].current_count;
-        if (maxLimit > 0 && currentCount >= maxLimit) {
-          return new Response(JSON.stringify({
-            error: `Has alcanzado el límite de generaciones de video ${effectiveQualityTier === 'hq' ? 'HQ' : 'normales'} mensuales para este proyecto`,
-            type: "video_limit",
-            limit: maxLimit,
-            used: currentCount,
-            quality_tier: effectiveQualityTier
-          }), {
-            status: 429,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-      }
-    }
-
     // Guardar mensaje del usuario (con quality_tier)
     const [userMessageResult] = await pool.execute<ResultSetHeader>(
       `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)

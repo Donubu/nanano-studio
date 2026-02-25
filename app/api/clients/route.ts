@@ -7,6 +7,7 @@ interface ClientRow extends RowDataPacket {
   id: number;
   name: string;
   logo: string | null;
+  hidden: boolean;
   created_at: Date;
 }
 
@@ -15,15 +16,29 @@ export async function GET() {
   try {
     const session = await auth();
 
-    if (!session?.user || session.user.role !== "admin") {
+    if (!session?.user) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 
+    const isAdmin = session.user.role === "admin";
+
+    if (isAdmin) {
+      // Admin ve todos los clientes incluyendo hidden
+      const [rows] = await pool.execute<ClientRow[]>(
+        `SELECT c.id, c.name, c.logo, c.hidden, c.default_project_id, c.created_at,
+          (SELECT COUNT(*) FROM projects WHERE client_id = c.id) as project_count
+         FROM clients c
+         ORDER BY c.name ASC`
+      );
+      return NextResponse.json(rows);
+    }
+
+    // Usuario normal: ve todos los clientes no-hidden
     const [rows] = await pool.execute<ClientRow[]>(
-      `SELECT c.id, c.name, c.logo, c.created_at,
-        (SELECT COUNT(*) FROM budgets WHERE client_id = c.id AND deleted_at IS NULL) as project_count,
-        (SELECT COUNT(*) FROM client_users WHERE client_id = c.id) as user_count
+      `SELECT c.id, c.name, c.logo, c.hidden, c.default_project_id, c.created_at,
+        (SELECT COUNT(*) FROM projects WHERE client_id = c.id AND hidden = 0) as project_count
        FROM clients c
+       WHERE c.hidden = 0
        ORDER BY c.name ASC`
     );
 
@@ -47,7 +62,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, logo } = body;
+    const { name, logo, hidden = false } = body;
 
     if (!name) {
       return NextResponse.json(
@@ -57,12 +72,12 @@ export async function POST(request: NextRequest) {
     }
 
     const [result] = await pool.execute<ResultSetHeader>(
-      "INSERT INTO clients (name, logo) VALUES (?, ?)",
-      [name, logo || null]
+      "INSERT INTO clients (name, logo, hidden) VALUES (?, ?, ?)",
+      [name, logo || null, hidden ? 1 : 0]
     );
 
     return NextResponse.json(
-      { id: result.insertId, name, logo },
+      { id: result.insertId, name, logo, hidden },
       { status: 201 }
     );
   } catch (error) {

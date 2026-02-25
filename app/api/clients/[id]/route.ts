@@ -24,7 +24,7 @@ export async function GET(
     const { id } = await params;
 
     const [rows] = await pool.execute<ClientRow[]>(
-      "SELECT id, name, logo, created_at FROM clients WHERE id = ?",
+      "SELECT id, name, logo, hidden, default_project_id, created_at FROM clients WHERE id = ?",
       [id]
     );
 
@@ -59,7 +59,7 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
-    const { name, logo } = body;
+    const { name, logo, hidden, default_project_id } = body;
 
     const [existing] = await pool.execute<ClientRow[]>(
       "SELECT id FROM clients WHERE id = ?",
@@ -73,10 +73,33 @@ export async function PUT(
       );
     }
 
-    await pool.execute<ResultSetHeader>(
-      "UPDATE clients SET name = COALESCE(?, name), logo = ? WHERE id = ?",
-      [name || null, logo !== undefined ? logo : null, id]
-    );
+    const updates: string[] = [];
+    const values: (string | number | null)[] = [];
+
+    if (name !== undefined) {
+      updates.push("name = ?");
+      values.push(name);
+    }
+    if (logo !== undefined) {
+      updates.push("logo = ?");
+      values.push(logo || null);
+    }
+    if (hidden !== undefined) {
+      updates.push("hidden = ?");
+      values.push(hidden ? 1 : 0);
+    }
+    if (default_project_id !== undefined) {
+      updates.push("default_project_id = ?");
+      values.push(default_project_id || null);
+    }
+
+    if (updates.length > 0) {
+      values.push(id);
+      await pool.execute<ResultSetHeader>(
+        `UPDATE clients SET ${updates.join(", ")} WHERE id = ?`,
+        values
+      );
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

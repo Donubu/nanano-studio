@@ -3,7 +3,7 @@
 import {useState, useEffect, useRef, useCallback} from "react";
 import {useSession, signOut} from "next-auth/react";
 import {useTheme} from "next-themes";
-import {cn} from "@/lib/utils";
+import {cn, formatDateLocal, formatDateTimeLocal} from "@/lib/utils";
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
 import {Avatar, AvatarFallback, AvatarImage} from "@/components/ui/avatar";
@@ -48,6 +48,8 @@ import {
     Calculator,
     AudioLines,
     RotateCcw,
+    Building2,
+    ChevronLeft,
 } from "lucide-react";
 import {ChangelogModal} from "@/components/chat/changelog-modal";
 import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
@@ -110,14 +112,24 @@ interface ProjectModel {
     system_instruction: string | null;
 }
 
+interface ClientItem {
+    id: number;
+    name: string;
+    logo: string | null;
+    hidden: boolean;
+    default_project_id: number | null;
+    project_count: number;
+}
+
 interface Project {
     id: number;
     title: string;
+    client_id: number | null;
     client_name: string | null;
     client_logo: string | null;
     generation_count: number;
     last_message_at: string | null;
-    has_access?: number;
+    created_at: string;
 }
 
 interface Message {
@@ -195,6 +207,7 @@ interface Conversation {
 // LocalStorage keys
 const STORAGE_KEY_TABS = "nanano_open_tabs";
 const STORAGE_KEY_ACTIVE_TAB = "nanano_active_tab";
+const STORAGE_KEY_CLIENT = "nanano_selected_client";
 const STORAGE_KEY_PROJECT = "nanano_selected_project";
 
 export function ChatInterface() {
@@ -202,6 +215,8 @@ export function ChatInterface() {
     const {theme, setTheme} = useTheme();
     const navigation = useNavigation();
     const [mounted, setMounted] = useState(false);
+    const [clients, setClients] = useState<ClientItem[]>([]);
+    const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
     const [projectModels, setProjectModels] = useState<ProjectModel[]>([]);
     const [projects, setProjects] = useState<Project[]>([]);
     const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -239,6 +254,7 @@ export function ChatInterface() {
     const [imageAspectRatio, setImageAspectRatio] = useState<string>("16:9");
     const [imageSize, setImageSize] = useState<string>("1K");
     const [imageNegativePrompt, setImageNegativePrompt] = useState("");
+    const [numberOfImages, setNumberOfImages] = useState(1);
 
     // Video generation settings
     const [videoDuration, setVideoDuration] = useState<VideoDuration>(8);
@@ -393,35 +409,59 @@ export function ChatInterface() {
             .catch(() => {});
     }, []);
 
-    // Load from localStorage on mount (only if URL has a project slug to restore)
+    // Load from localStorage on mount (only if URL has a slug to restore)
     useEffect(() => {
-        // If URL is root "/", don't auto-load from localStorage - show project selection
+        // If URL is root "/", don't auto-load from localStorage - show client selection
         if (typeof window !== 'undefined' && window.location.pathname === '/') return;
 
-        // If URL has a project slug, that will be handled by the next effect
-        if (navigation.initialState?.projectSlug) return;
+        // If URL has slugs, those will be handled by the next effect
+        if (navigation.initialState?.clientSlug) return;
 
+        const savedClient = localStorage.getItem(STORAGE_KEY_CLIENT);
+        if (savedClient) {
+            setSelectedClientId(Number(savedClient));
+        }
         const savedProject = localStorage.getItem(STORAGE_KEY_PROJECT);
         if (savedProject) {
             setSelectedProjectId(Number(savedProject));
         }
     }, [navigation.initialState]);
 
-    // Select project from URL slug for deep linking
-    const projectFromUrlHandled = useRef(false);
+    // Select client+project from URL slugs for deep linking
+    const fromUrlHandled = useRef(false);
     useEffect(() => {
-        if (projectFromUrlHandled.current) return;
-        if (!navigation.initialState?.projectSlug || projects.length === 0) return;
+        if (fromUrlHandled.current) return;
+        if (!navigation.initialState?.clientSlug || clients.length === 0) return;
 
-        // Find project with matching slug
-        const urlSlug = navigation.initialState.projectSlug;
-        const matchingProject = projects.find(p => generateSlug(p.title) === urlSlug);
+        // Find client with matching slug
+        const clientSlug = navigation.initialState.clientSlug;
+        const matchingClient = clients.find(c => generateSlug(c.name) === clientSlug);
 
-        if (matchingProject) {
-            projectFromUrlHandled.current = true;
-            setSelectedProjectId(matchingProject.id);
+        if (matchingClient) {
+            setSelectedClientId(matchingClient.id);
+
+            // If also has project slug, wait for projects to load
+            if (navigation.initialState.projectSlug && projects.length > 0) {
+                const projectSlug = navigation.initialState.projectSlug;
+                const matchingProject = projects.find(p => generateSlug(p.title) === projectSlug);
+                if (matchingProject) {
+                    fromUrlHandled.current = true;
+                    setSelectedProjectId(matchingProject.id);
+                }
+            } else if (!navigation.initialState.projectSlug) {
+                fromUrlHandled.current = true;
+            }
         }
-    }, [navigation.initialState, projects]);
+    }, [navigation.initialState, clients, projects]);
+
+    // Save client to localStorage
+    useEffect(() => {
+        if (selectedClientId) {
+            localStorage.setItem(STORAGE_KEY_CLIENT, String(selectedClientId));
+        } else {
+            localStorage.removeItem(STORAGE_KEY_CLIENT);
+        }
+    }, [selectedClientId]);
 
     // Save project to localStorage
     useEffect(() => {
@@ -432,31 +472,58 @@ export function ChatInterface() {
         }
     }, [selectedProjectId]);
 
-    // Update navigation slug when project changes
+    // Update navigation clientSlug when client changes
+    useEffect(() => {
+        if (selectedClientId && clients.length > 0) {
+            const client = clients.find(c => c.id === selectedClientId);
+            if (client) {
+                const newSlug = generateSlug(client.name);
+                if (navigation.clientSlug !== newSlug) {
+                    navigation.setClientSlug(newSlug);
+                }
+            }
+        } else if (!selectedClientId && navigation.clientSlug) {
+            navigation.setClientSlug(null);
+        }
+    }, [selectedClientId, clients, navigation.clientSlug, navigation.setClientSlug]);
+
+    // Update navigation projectSlug when project changes
     useEffect(() => {
         if (selectedProjectId && projects.length > 0) {
             const project = projects.find(p => p.id === selectedProjectId);
             if (project) {
                 const newSlug = generateSlug(project.title);
-                // Only update if slug is different to avoid infinite loop
                 if (navigation.projectSlug !== newSlug) {
                     navigation.setProjectSlug(newSlug);
                 }
             }
         } else if (!selectedProjectId && navigation.projectSlug) {
-            // Clear URL when no project is selected
             navigation.setProjectSlug(null);
         }
     }, [selectedProjectId, projects, navigation.projectSlug, navigation.setProjectSlug]);
+
+    // Handle browser back/forward navigation for client changes
+    useEffect(() => {
+        const unsubscribe = navigation.onClientChange((newSlug) => {
+            if (newSlug === null) {
+                setSelectedClientId(null);
+                setSelectedProjectId(null);
+            } else {
+                const matchingClient = clients.find(c => generateSlug(c.name) === newSlug);
+                if (matchingClient) {
+                    setSelectedClientId(matchingClient.id);
+                }
+            }
+        });
+        return unsubscribe;
+    }, [clients, navigation.onClientChange]);
 
     // Handle browser back/forward navigation for project changes
     useEffect(() => {
         const unsubscribe = navigation.onProjectChange((newSlug) => {
             if (newSlug === null) {
-                // User navigated back to home
                 setSelectedProjectId(null);
             } else {
-                // User navigated to a project - find matching project
                 const matchingProject = projects.find(p => generateSlug(p.title) === newSlug);
                 if (matchingProject) {
                     setSelectedProjectId(matchingProject.id);
@@ -626,9 +693,26 @@ export function ChatInterface() {
         }
     }, []);
 
-    const fetchProjects = useCallback(async () => {
+    const fetchClients = useCallback(async () => {
         try {
-            const res = await fetch("/api/projects");
+            const res = await fetch("/api/clients");
+            if (res.ok) {
+                const data = await res.json();
+                setClients(data);
+            }
+        } catch (err) {
+            console.error("Error fetching clients:", err);
+        }
+    }, []);
+
+    const fetchProjects = useCallback(async (clientId?: number) => {
+        try {
+            const cid = clientId || selectedClientId;
+            if (!cid) {
+                setProjects([]);
+                return;
+            }
+            const res = await fetch(`/api/projects?client_id=${cid}`);
             if (res.ok) {
                 const data = await res.json();
                 setProjects(data);
@@ -636,7 +720,7 @@ export function ChatInterface() {
         } catch (err) {
             console.error("Error fetching projects:", err);
         }
-    }, []);
+    }, [selectedClientId]);
 
     const fetchProjectUsage = useCallback(async (projectId: number) => {
         try {
@@ -808,8 +892,17 @@ export function ChatInterface() {
     };
 
     useEffect(() => {
-        fetchProjects();
-    }, [fetchProjects]);
+        fetchClients();
+    }, [fetchClients]);
+
+    // Fetch projects when client changes
+    useEffect(() => {
+        if (selectedClientId) {
+            fetchProjects(selectedClientId);
+        } else {
+            setProjects([]);
+        }
+    }, [selectedClientId]);
 
     // Check calculator access
     useEffect(() => {
@@ -827,10 +920,20 @@ export function ChatInterface() {
         checkCalculatorAccess();
     }, []);
 
-    // Select project from URL slug (takes precedence over localStorage for deep linking)
+    // Select client/project from URL slugs (takes precedence over localStorage)
+    useEffect(() => {
+        if (clients.length > 0 && navigation.clientSlug) {
+            const matchingClient = clients.find(c =>
+                generateSlug(c.name) === navigation.clientSlug
+            );
+            if (matchingClient && matchingClient.id !== selectedClientId) {
+                setSelectedClientId(matchingClient.id);
+            }
+        }
+    }, [clients, navigation.clientSlug]);
+
     useEffect(() => {
         if (projects.length > 0 && navigation.projectSlug) {
-            // Find project that matches the URL slug
             const matchingProject = projects.find(p =>
                 generateSlug(p.title) === navigation.projectSlug
             );
@@ -1491,7 +1594,7 @@ export function ChatInterface() {
         content: string,
         files?: AttachedFile[],
         modelIdOverride?: number | null,
-        imageSettings?: { aspectRatio: string; size: string; negativePrompt?: string; isImagen4?: boolean; seed?: number },
+        imageSettings?: { aspectRatio: string; size: string; negativePrompt?: string; isImagen4?: boolean; seed?: number; numberOfImages?: number },
         generationTypeOverride?: "text" | "image" | "video" | "audio",
         noContext?: boolean
     ) => {
@@ -1580,6 +1683,7 @@ export function ChatInterface() {
                         resolution: imageSettings?.size,
                         negativePrompt: imageSettings?.negativePrompt,
                         seed: imageSettings?.seed,
+                        numberOfImages: imageSettings?.numberOfImages,
                     },
                     ...(generationTypeOverride && { generation_type_override: generationTypeOverride }),
                 }
@@ -2489,7 +2593,7 @@ export function ChatInterface() {
                     {/* Header - Logo always visible */}
                     <div className={`p-3 ${selectedProjectId ? 'border-b border-border/50' : ''}`}>
                         <button
-                            onClick={() => setSelectedProjectId(null)}
+                            onClick={() => { setSelectedProjectId(null); setSelectedClientId(null); }}
                             className={`flex items-center gap-2 ${selectedProjectId ? 'mb-3' : ''}`}
                         >
                             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-yellow-400 to-yellow-500 flex items-center justify-center text-black font-bold text-sm">
@@ -2512,9 +2616,32 @@ export function ChatInterface() {
                         )}
                     </div>
 
-                    {/* Project Selector - Only when project is selected */}
+                    {/* Client + Project Selector - Only when project is selected */}
                     {selectedProjectId && (
                     <div className="p-3 border-b border-border/50">
+                        {/* Client info + back button */}
+                        {(() => {
+                            const selectedClient = clients.find(c => c.id === selectedClientId);
+                            return selectedClient ? (
+                                <button
+                                    onClick={() => { setSelectedProjectId(null); }}
+                                    className="flex items-center gap-2 mb-2 text-sm text-muted-foreground hover:text-foreground transition-colors w-full"
+                                >
+                                    <ChevronLeft className="h-3.5 w-3.5 shrink-0" />
+                                    {selectedClient.logo ? (
+                                        <img
+                                            src={selectedClient.logo}
+                                            alt={selectedClient.name}
+                                            className="w-5 h-5 rounded border border-border/50 object-contain shrink-0"
+                                        />
+                                    ) : (
+                                        <Building2 className="h-4 w-4 shrink-0" />
+                                    )}
+                                    <span className="truncate">{selectedClient.name}</span>
+                                </button>
+                            ) : null;
+                        })()}
+
                         <label className="text-xs text-muted-foreground mb-1 block">Proyecto</label>
                         <select
                             className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
@@ -2526,7 +2653,7 @@ export function ChatInterface() {
                             <option value="">Selecciona un proyecto</option>
                             {projects.map((p) => (
                                 <option key={p.id} value={p.id}>
-                                    {p.client_name} - {p.title}
+                                    {p.title}
                                 </option>
                             ))}
                         </select>
@@ -3109,7 +3236,7 @@ export function ChatInterface() {
                                         >
                                             {msg.role === "model" && (
                                                 <div
-                                                    title={msg.created_at ? new Date(msg.created_at).toLocaleString() : undefined}
+                                                    title={msg.created_at ? formatDateTimeLocal(msg.created_at) : undefined}
                                                     className={`w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0 ${isIgnored ? "opacity-40" : ""}`}
                                                 >
                                                     {msg.isStreaming ? (
@@ -3260,7 +3387,7 @@ export function ChatInterface() {
                                             </div>
                                             {msg.role === "user" && (
                                                 <Avatar
-                                                    title={msg.created_at ? new Date(msg.created_at).toLocaleString() : undefined}
+                                                    title={msg.created_at ? formatDateTimeLocal(msg.created_at) : undefined}
                                                     className="h-8 w-8 shrink-0"
                                                 >
                                                     <AvatarImage src={session?.user?.image || undefined}/>
@@ -3366,6 +3493,7 @@ export function ChatInterface() {
                                                 negativePrompt: imageNegativePrompt || undefined,
                                                 isImagen4: isImagen4Model,
                                                 seed: selectedSeed || undefined,
+                                                numberOfImages: isImagen4Model ? numberOfImages : undefined,
                                             };
                                             // Pass generation_type_override when in video conversation with image mode
                                             const typeOverride = isVideoConversation && generationMode === "image" ? "image" as const : undefined;
@@ -3403,85 +3531,200 @@ export function ChatInterface() {
                     </div>
                 </div>
             ) : (
-                /* Welcome Screen - Project Grid */
-                <div className="flex-1 overflow-y-auto p-8">
+                /* Welcome Screen - Client > Project Grid */
+                <div className="flex-1 overflow-y-auto p-8 relative">
+                    {/* Floating toggle for left sidebar when closed */}
+                    {!leftSidebarOpen && (
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setLeftSidebarOpen(true)}
+                            className="absolute top-2 left-2 z-20 h-8 w-8 bg-background/80 backdrop-blur-sm border border-border/50 shadow-sm"
+                            title="Abrir panel izquierdo"
+                        >
+                            <PanelLeft className="h-4 w-4"/>
+                        </Button>
+                    )}
                     <div className="max-w-5xl mx-auto">
-                        <h2 className="text-2xl font-bold mb-2">Selecciona un proyecto</h2>
-                        <p className="text-muted-foreground mb-8">
-                            Elige un proyecto para comenzar a generar contenido
-                        </p>
+                        {!selectedClientId ? (
+                            /* Client Selection Grid */
+                            <>
+                                <h2 className="text-2xl font-bold mb-2">Selecciona un cliente</h2>
+                                <p className="text-muted-foreground mb-8">
+                                    Elige un cliente para ver sus proyectos
+                                </p>
 
-                        {projects.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center py-16">
-                                <FolderKanban className="h-16 w-16 text-muted-foreground/30 mb-4"/>
-                                <p className="text-muted-foreground">No tienes proyectos asignados</p>
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                                {projects.map((project) => {
-                                    const hasAccess = project.has_access === undefined || project.has_access === 1;
-                                    const Wrapper = hasAccess ? "button" : "div";
-                                    return (
-                                        <Wrapper
-                                            key={project.id}
-                                            {...(hasAccess ? { onClick: () => setSelectedProjectId(project.id) } : {})}
-                                            className={cn(
-                                                "group flex flex-col items-center p-2 rounded-xl border border-border/50 bg-card transition-all text-left",
-                                                hasAccess
-                                                    ? "hover:bg-accent hover:border-primary/50 cursor-pointer"
-                                                    : "opacity-50 cursor-not-allowed"
-                                            )}
-                                        >
-                                            {/* Brand logo or folder icon */}
-                                            <div className="relative mb-3">
-                                                {project.client_logo ? (
-                                                    <img
-                                                        src={project.client_logo}
-                                                        alt={project.client_name || ""}
-                                                        className="w-[100px] border rounded-md border-[#999] object-contain transition-opacity"
-                                                    />
-                                                ) : (
-                                                    <Folder className="h-16 w-16 text-primary/70 group-hover:text-primary transition-colors fill-primary/10 group-hover:fill-primary/20" />
-                                                )}
-                                                {hasAccess && project.generation_count > 0 && (
-                                                    <div className="absolute -top-5 -right-5 bg-primary text-primary-foreground text-[12px] font-bold rounded-full h-[40px] w-[40px] flex items-center justify-center px-1">
-                                                        {project.generation_count > 999 ? "999+" : project.generation_count}
-                                                    </div>
-                                                )}
-                                                {!hasAccess && (
-                                                    <div className="absolute -top-3 -right-3 bg-muted text-muted-foreground rounded-full h-[28px] w-[28px] flex items-center justify-center">
-                                                        <Lock className="h-3.5 w-3.5" />
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Project name */}
-                                            <h3 className={cn(
-                                                "font-medium text-md text-center truncate w-full transition-colors",
-                                                hasAccess ? "group-hover:text-primary" : "text-muted-foreground"
-                                            )}>
-                                                {project.title}
-                                            </h3>
-                                        </Wrapper>
-                                    );
-                                })}
-                            </div>
-                        )}
-
-                        {/* Calculator Button */}
-                        {hasCalculatorAccess && (
-                            <div className="mt-8">
-                                <Link
-                                    href="/calculadora"
-                                    className="inline-flex items-center gap-3 px-6 py-4 rounded-xl border border-border/50 bg-card hover:bg-accent hover:border-primary/50 transition-all"
-                                >
-                                    <Calculator className="h-6 w-6 text-primary" />
-                                    <div>
-                                        <h3 className="font-medium text-md">Calculadora IA</h3>
-                                        <p className="text-sm text-muted-foreground">Presupuestos y cotizaciones</p>
+                                {clients.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center py-16">
+                                        <Building2 className="h-16 w-16 text-muted-foreground/30 mb-4"/>
+                                        <p className="text-muted-foreground">No hay clientes disponibles</p>
                                     </div>
-                                </Link>
-                            </div>
+                                ) : (
+                                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                                        {clients.map((client) => {
+                                            const isAdmin = session?.user?.role === "admin";
+                                            const hasProjects = client.project_count > 0;
+                                            const canClick = hasProjects;
+                                            const Wrapper = canClick ? "button" : "div";
+                                            return (
+                                                <Wrapper
+                                                    key={client.id}
+                                                    {...(canClick ? { onClick: () => setSelectedClientId(client.id) } : {})}
+                                                    className={cn(
+                                                        "group flex flex-col items-center p-2 rounded-xl border border-border/50 bg-card transition-all text-left",
+                                                        canClick
+                                                            ? "hover:bg-accent hover:border-primary/50 cursor-pointer"
+                                                            : "opacity-50 cursor-not-allowed"
+                                                    )}
+                                                >
+                                                    <div className="relative mb-3">
+                                                        {client.logo ? (
+                                                            <img
+                                                                src={client.logo}
+                                                                alt={client.name}
+                                                                className="w-[100px] border rounded-md border-[#999] object-contain transition-opacity"
+                                                            />
+                                                        ) : (
+                                                            <Building2 className="h-16 w-16 text-primary/70 group-hover:text-primary transition-colors" />
+                                                        )}
+                                                        {!!client.hidden && isAdmin && (
+                                                            <div className="absolute -top-3 -left-3 bg-orange-500/20 text-orange-400 rounded-full h-[28px] w-[28px] flex items-center justify-center">
+                                                                <EyeOff className="h-3.5 w-3.5" />
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    <h3 className={cn(
+                                                        "font-medium text-md text-center truncate w-full transition-colors",
+                                                        canClick ? "group-hover:text-primary" : "text-muted-foreground"
+                                                    )}>
+                                                        {client.name}
+                                                    </h3>
+                                                </Wrapper>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+
+                                {/* Calculator Button */}
+                                {hasCalculatorAccess && (
+                                    <div className="mt-8">
+                                        <Link
+                                            href="/calculadora"
+                                            className="inline-flex items-center gap-3 px-6 py-4 rounded-xl border border-border/50 bg-card hover:bg-accent hover:border-primary/50 transition-all"
+                                        >
+                                            <Calculator className="h-6 w-6 text-primary" />
+                                            <div>
+                                                <h3 className="font-medium text-md">Calculadora IA</h3>
+                                                <p className="text-sm text-muted-foreground">Presupuestos y cotizaciones</p>
+                                            </div>
+                                        </Link>
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            /* Project Selection Grid (filtered by client) */
+                            <>
+                                <button
+                                    onClick={() => { setSelectedClientId(null); setSelectedProjectId(null); }}
+                                    className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors mb-4"
+                                >
+                                    <ChevronLeft className="h-4 w-4" />
+                                    <span className="text-sm">Volver a clientes</span>
+                                </button>
+
+                                {(() => {
+                                    const selectedClient = clients.find(c => c.id === selectedClientId);
+                                    return selectedClient ? (
+                                        <div className="flex items-center gap-3 mb-6">
+                                            {selectedClient.logo ? (
+                                                <img
+                                                    src={selectedClient.logo}
+                                                    alt={selectedClient.name}
+                                                    className="w-10 h-10 rounded-lg border border-border/50 object-contain"
+                                                />
+                                            ) : (
+                                                <div className="w-10 h-10 rounded-lg bg-accent flex items-center justify-center">
+                                                    <Building2 className="h-5 w-5 text-muted-foreground" />
+                                                </div>
+                                            )}
+                                            <h2 className="text-2xl font-bold">{selectedClient.name}</h2>
+                                            {!!selectedClient.hidden && session?.user?.role === "admin" && (
+                                                <EyeOff className="h-4 w-4 text-orange-400" />
+                                            )}
+                                        </div>
+                                    ) : null;
+                                })()}
+
+                                <p className="text-muted-foreground mb-8">
+                                    Elige un proyecto para comenzar a generar contenido
+                                </p>
+
+                                {projects.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center py-16">
+                                        <FolderKanban className="h-16 w-16 text-muted-foreground/30 mb-4"/>
+                                        <p className="text-muted-foreground">No hay proyectos en este cliente</p>
+                                    </div>
+                                ) : (
+                                    <div className="bg-card rounded-xl border border-border/50 overflow-hidden">
+                                        <table className="w-full">
+                                            <thead>
+                                                <tr className="border-b border-border/50 text-left">
+                                                    <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Nombre</th>
+                                                    <th className="px-4 py-3 text-xs font-medium text-muted-foreground text-center">Generaciones</th>
+                                                    <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Fecha creación</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {(() => {
+                                                    const selectedClient = clients.find(c => c.id === selectedClientId);
+                                                    const defaultProjId = selectedClient?.default_project_id;
+                                                    return [...projects]
+                                                        .sort((a, b) => {
+                                                            // Default project always first
+                                                            if (defaultProjId) {
+                                                                if (a.id === defaultProjId) return -1;
+                                                                if (b.id === defaultProjId) return 1;
+                                                            }
+                                                            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+                                                        })
+                                                        .map((project) => {
+                                                        const isDefault = project.id === defaultProjId;
+                                                        return (
+                                                            <tr
+                                                                key={project.id}
+                                                                onClick={() => setSelectedProjectId(project.id)}
+                                                                className={cn(
+                                                                    "border-b border-border/30 last:border-0 transition-colors",
+                                                                    "hover:bg-accent/50 cursor-pointer",
+                                                                    isDefault && "bg-yellow-500/5"
+                                                                )}
+                                                            >
+                                                                <td className="px-4 py-3">
+                                                                    <div className="flex items-center gap-2">
+                                                                        {isDefault ? (
+                                                                            <Star className="h-4 w-4 text-yellow-500 fill-yellow-500 shrink-0" />
+                                                                        ) : (
+                                                                            <Folder className="h-4 w-4 text-primary/70 shrink-0" />
+                                                                        )}
+                                                                        <span className={cn("font-medium", isDefault && "text-yellow-500")}>{project.title}</span>
+                                                                    </div>
+                                                                </td>
+                                                                <td className="px-4 py-3 text-center text-sm text-muted-foreground">
+                                                                    {project.generation_count}
+                                                                </td>
+                                                                <td className="px-4 py-3 text-sm text-muted-foreground">
+                                                                    {formatDateLocal(project.created_at)}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    });
+                                                })()}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
                 </div>
@@ -3594,6 +3837,7 @@ export function ChatInterface() {
                                     <ImageSettings
                                         aspectRatio={imageAspectRatio as ImagenAspectRatio}
                                         resolution={imageSize as ImagenResolution}
+                                        numberOfImages={numberOfImages}
                                         negativePrompt={imageNegativePrompt}
                                         disabled={isSending}
                                         onChange={(settings) => {
@@ -3604,6 +3848,9 @@ export function ChatInterface() {
                                             if (settings.resolution !== undefined) {
                                                 setImageSize(settings.resolution);
                                                 handleSettingChange("image_size", settings.resolution);
+                                            }
+                                            if (settings.numberOfImages !== undefined) {
+                                                setNumberOfImages(settings.numberOfImages);
                                             }
                                             if (settings.negativePrompt !== undefined) {
                                                 setImageNegativePrompt(settings.negativePrompt);
@@ -3725,6 +3972,7 @@ export function ChatInterface() {
                                     <ImageSettings
                                         aspectRatio={imageAspectRatio as ImagenAspectRatio}
                                         resolution={imageSize as ImagenResolution}
+                                        numberOfImages={numberOfImages}
                                         negativePrompt={imageNegativePrompt}
                                         disabled={isSending}
                                         onChange={(settings) => {
@@ -3733,6 +3981,9 @@ export function ChatInterface() {
                                             }
                                             if (settings.resolution !== undefined) {
                                                 setImageSize(settings.resolution);
+                                            }
+                                            if (settings.numberOfImages !== undefined) {
+                                                setNumberOfImages(settings.numberOfImages);
                                             }
                                             if (settings.negativePrompt !== undefined) {
                                                 setImageNegativePrompt(settings.negativePrompt);

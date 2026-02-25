@@ -17,17 +17,22 @@ interface ProjectRow extends RowDataPacket {
   user_count: number;
   estimated_cost: number;
   last_message_at: Date | null;
-  has_access?: number;
 }
 
 // GET - Listar proyectos
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const session = await auth();
 
     if (!session?.user) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
+
+    const { searchParams } = new URL(request.url);
+    const clientId = searchParams.get("client_id");
+
+    const clientFilter = clientId ? "AND p.client_id = ?" : "";
+    const clientParams = clientId ? [clientId] : [];
 
     // Admin ve todos los proyectos, usuarios normales solo los asignados
     if (session.user.role === "admin") {
@@ -59,12 +64,13 @@ export async function GET() {
           FROM project_users
           GROUP BY project_id
         ) uc ON p.id = uc.project_id
+        WHERE 1=1 ${clientFilter}
         ORDER BY gen.last_message_at DESC, p.created_at DESC
-      `);
+      `, [...clientParams]);
       return NextResponse.json(rows);
     }
 
-    // Usuario normal: todos los proyectos visibles, con indicador de acceso
+    // Usuario normal: todos los proyectos no-hidden
     const [rows] = await pool.execute<ProjectRow[]>(`
       SELECT
         p.id, p.title, p.description, p.client_id, p.status, p.hidden, p.created_at,
@@ -72,10 +78,8 @@ export async function GET() {
         COALESCE(gen.generation_count, 0) as generation_count,
         COALESCE(gen.estimated_cost, 0) as estimated_cost,
         COALESCE(uc.user_count, 0) as user_count,
-        gen.last_message_at,
-        CASE WHEN pu.user_id IS NOT NULL THEN 1 ELSE 0 END as has_access
+        gen.last_message_at
       FROM projects p
-      LEFT JOIN project_users pu ON p.id = pu.project_id AND pu.user_id = ?
       LEFT JOIN clients c ON p.client_id = c.id
       LEFT JOIN (
         SELECT
@@ -95,9 +99,9 @@ export async function GET() {
         FROM project_users
         GROUP BY project_id
       ) uc ON p.id = uc.project_id
-      WHERE (p.hidden = 0 OR pu.user_id IS NOT NULL)
-      ORDER BY has_access DESC, gen.last_message_at DESC, p.created_at DESC
-    `, [session.user.id]);
+      WHERE p.hidden = 0 ${clientFilter}
+      ORDER BY gen.last_message_at DESC, p.created_at DESC
+    `, [...clientParams]);
 
     return NextResponse.json(rows);
   } catch (error) {
