@@ -99,11 +99,16 @@ interface CalcConfig {
 interface HourEntry { user_id: number; hours: number; }
 interface ExternalCost { name: string; amount: number; }
 
+interface ReductionEntry {
+  durRed: number; red169: number; red916: number; red11: number; red45: number;
+  redOtroLabel: string; redOtro: number;
+}
+
 interface VideoData {
   planos: number; complejos: number; lipSync: boolean; training: boolean;
   durMaster: number; ratio: string; ratioCustom: string;
-  ad169: number; ad916: number; ad11: number;
-  durRed: number; red169: number; red916: number; red11: number;
+  ad169: number; ad916: number; ad11: number; ad45: number;
+  reductions: ReductionEntry[];
 }
 
 interface PhotoData {
@@ -124,7 +129,8 @@ function formatCurrency(n: number): string { return "$" + Math.round(n).toLocale
 const DEFAULT_VIDEO_DATA: VideoData = {
   planos: 0, complejos: 0, lipSync: false, training: false,
   durMaster: 0, ratio: "16:9 (Horizontal)", ratioCustom: "",
-  ad169: 0, ad916: 0, ad11: 0, durRed: 0, red169: 0, red916: 0, red11: 0,
+  ad169: 0, ad916: 0, ad11: 0, ad45: 0,
+  reductions: [],
 };
 
 const DEFAULT_PHOTO_DATA: PhotoData = {
@@ -145,6 +151,7 @@ function getRatioKey(ratio: string): string | null {
   if (ratio.startsWith("16:9")) return "169";
   if (ratio.startsWith("9:16")) return "916";
   if (ratio.startsWith("1:1")) return "11";
+  if (ratio.startsWith("4:5")) return "45";
   return null;
 }
 
@@ -155,8 +162,8 @@ function calcVideoSubtotal(data: VideoData, config: CalcConfig["video"]): number
   const cTr = data.training ? base * config.training : 0;
   const cComp = (base * config.complejo) * data.complejos;
   const subM = base + cLip + cTr + cComp;
-  const adT = data.ad169 + data.ad916 + data.ad11;
-  const reT = data.red169 + data.red916 + data.red11;
+  const adT = data.ad169 + data.ad916 + data.ad11 + (data.ad45 || 0);
+  const reT = (data.reductions || []).reduce((sum, r) => sum + r.red169 + r.red916 + r.red11 + (r.red45 || 0) + (r.redOtro || 0), 0);
   const cAd = (base * config.adaptacion) * adT;
   const cRe = (base * config.reduccion) * reT;
   return subM + cAd + cRe;
@@ -181,12 +188,14 @@ function calcItemSubtotal(item: BudgetItem, config: CalcConfig): number {
   return typeSubtotal + extTotal;
 }
 
-export function BudgetForm() {
+export function BudgetForm({ budgetId }: { budgetId?: string }) {
   const router = useRouter();
+  const isEdit = !!budgetId;
   const [clients, setClients] = useState<Client[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
   const [config, setConfig] = useState<CalcConfig | null>(null);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   // Form state
   const [clientId, setClientId] = useState<number | null>(null);
@@ -200,14 +209,112 @@ export function BudgetForm() {
   const [techFeeEnabled, setTechFeeEnabled] = useState(true);
 
   useEffect(() => {
-    Promise.all([
+    const fetches: Promise<unknown>[] = [
       fetch("/api/calculadora/clients").then(r => r.json()),
       fetch("/api/calculadora/users").then(r => r.json()),
       fetch("/api/calculadora/config").then(r => r.json()),
-    ]).then(([c, u, cfg]) => {
-      setClients(c);
-      setUsers(u);
-      setConfig(cfg);
+    ];
+    if (isEdit) {
+      fetches.push(fetch(`/api/calculadora/${budgetId}`).then(r => r.json()));
+    }
+
+    Promise.all(fetches).then(([c, u, cfg, budgetData]) => {
+      setClients(c as Client[]);
+      setUsers(u as UserOption[]);
+      setConfig(cfg as CalcConfig);
+
+      if (isEdit && budgetData) {
+        const b = budgetData as Record<string, unknown>;
+        setClientId(b.client_id as number | null);
+        setProjectName((b.project_name as string) || "");
+        setDetail((b.detail as string) || "");
+        setDiscountAmount((b.discount_amount as number) || 0);
+        setDiscountType((b.discount_type as "amount" | "percent") || "amount");
+        setDiscountReason((b.discount_reason as string) || "");
+        setTechFeeEnabled((b.tech_fee_percent as number) > 0);
+
+        // Map items
+        const apiItems = (b.items as Record<string, unknown>[]) || [];
+        const mappedItems: BudgetItem[] = apiItems.map((apiItem) => {
+          const itemData = apiItem.item_data as Record<string, unknown> || {};
+          const type = apiItem.type as "video" | "photo";
+
+          let videoData: VideoData = { ...DEFAULT_VIDEO_DATA };
+          let photoData: PhotoData = { ...DEFAULT_PHOTO_DATA };
+
+          if (type === "video") {
+            videoData = {
+              planos: (itemData.planos as number) || 0,
+              complejos: (itemData.complejos as number) || 0,
+              lipSync: !!itemData.lipSync,
+              training: !!itemData.training,
+              durMaster: (itemData.durMaster as number) || 0,
+              ratio: (itemData.ratio as string) || "16:9 (Horizontal)",
+              ratioCustom: (itemData.ratioCustom as string) || "",
+              ad169: (itemData.ad169 as number) || 0,
+              ad916: (itemData.ad916 as number) || 0,
+              ad11: (itemData.ad11 as number) || 0,
+              ad45: (itemData.ad45 as number) || 0,
+              reductions: ((itemData.reductions as ReductionEntry[]) || []).map(r => ({
+                durRed: r.durRed || 0,
+                red169: r.red169 || 0,
+                red916: r.red916 || 0,
+                red11: r.red11 || 0,
+                red45: r.red45 || 0,
+                redOtroLabel: r.redOtroLabel || "",
+                redOtro: r.redOtro || 0,
+              })),
+            };
+          } else {
+            photoData = {
+              imagenes: (itemData.imagenes as number) || 0,
+              training: !!itemData.training,
+              upscale: !!itemData.upscale,
+              capas: !!itemData.capas,
+              retQty: (itemData.retQty as number) || 0,
+              retLevel: (itemData.retLevel as string) || "b",
+              retLevelValue: (itemData.retLevelValue as number) || 0,
+            };
+          }
+
+          // Map hours
+          const apiHours = (apiItem.hours as Record<string, unknown>[]) || [];
+          const hours: HourEntry[] = apiHours.map(h => ({
+            user_id: (h.user_id as number) || 0,
+            hours: (h.hours as number) || 0,
+          }));
+
+          // Map item externals
+          const apiExternals = (apiItem.externals as Record<string, unknown>[]) || [];
+          const externals: ExternalCost[] = apiExternals.map(e => ({
+            name: (e.name as string) || "",
+            amount: (e.amount as number) || 0,
+          }));
+
+          return {
+            id: generateId(),
+            type,
+            diasHabiles: (apiItem.dias_habiles as number) || 0,
+            hours,
+            videoData,
+            photoData,
+            externals,
+            expanded: true,
+            subtotal: (apiItem.subtotal as number) || 0,
+          };
+        });
+
+        setItems(mappedItems);
+
+        // Map global externals
+        const apiGlobalExts = (b.externals as Record<string, unknown>[]) || [];
+        setGlobalExternals(apiGlobalExts.map(e => ({
+          name: (e.name as string) || "",
+          amount: (e.amount as number) || 0,
+        })));
+      }
+
+      setLoading(false);
     });
   }, []);
 
@@ -276,8 +383,11 @@ export function BudgetForm() {
         externals: globalExternals.filter(e => e.name && e.amount > 0),
       };
 
-      const res = await fetch("/api/calculadora", {
-        method: "POST",
+      const url = isEdit ? `/api/calculadora/${budgetId}` : "/api/calculadora";
+      const method = isEdit ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
@@ -293,7 +403,7 @@ export function BudgetForm() {
     finally { setSaving(false); }
   };
 
-  if (!config) {
+  if (!config || loading) {
     return <div className="flex items-center justify-center min-h-screen"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
   }
 
@@ -302,10 +412,10 @@ export function BudgetForm() {
       <div className="max-w-4xl mx-auto p-6">
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
-          <Link href="/calculadora"><Button variant="ghost" size="icon"><ArrowLeft className="h-5 w-5" /></Button></Link>
+          <Link href={isEdit ? `/calculadora/${budgetId}` : "/calculadora"}><Button variant="ghost" size="icon"><ArrowLeft className="h-5 w-5" /></Button></Link>
           <div className="flex items-center gap-3">
             <Calculator className="h-7 w-7 text-primary" />
-            <h1 className="text-2xl font-bold">Nuevo Presupuesto</h1>
+            <h1 className="text-2xl font-bold">{isEdit ? `Editar Presupuesto #${budgetId}` : "Nuevo Presupuesto"}</h1>
           </div>
         </div>
 
@@ -451,10 +561,10 @@ export function BudgetForm() {
 
         {/* Actions */}
         <div className="flex gap-3 justify-end">
-          <Link href="/calculadora"><Button variant="outline">Cancelar</Button></Link>
+          <Link href={isEdit ? `/calculadora/${budgetId}` : "/calculadora"}><Button variant="outline">Cancelar</Button></Link>
           <Button onClick={handleSave} disabled={saving}>
             {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            Guardar Presupuesto
+            {isEdit ? "Actualizar Presupuesto" : "Guardar Presupuesto"}
           </Button>
         </div>
       </div>
@@ -572,6 +682,7 @@ function VideoFields({
               <option value="16:9 (Horizontal)">16:9 (Horizontal)</option>
               <option value="9:16 (Vertical)">9:16 (Vertical)</option>
               <option value="1:1 (Cuadrado)">1:1 (Cuadrado)</option>
+              <option value="4:5 (Vertical)">4:5 (Vertical)</option>
               <option value="Otro">Otro...</option>
             </select>
             {data.ratio === "Otro" && (
@@ -584,7 +695,7 @@ function VideoFields({
       {/* Adaptations — hide the ratio that matches master */}
       <div>
         <Label className="text-sm">Adaptaciones Máster</Label>
-        <div className="grid grid-cols-3 gap-3 mt-2">
+        <div className="grid grid-cols-4 gap-3 mt-2">
           {masterKey !== "169" && (
             <div><Label>16:9</Label><NumInput value={data.ad169} onChange={v => onChange({ ad169: v })} min={0} placeholder="0" /></div>
           )}
@@ -594,27 +705,76 @@ function VideoFields({
           {masterKey !== "11" && (
             <div><Label>1:1</Label><NumInput value={data.ad11} onChange={v => onChange({ ad11: v })} min={0} placeholder="0" /></div>
           )}
-          {masterKey === null && (
-            <>
-              <div><Label>16:9</Label><NumInput value={data.ad169} onChange={v => onChange({ ad169: v })} min={0} placeholder="0" /></div>
-              <div><Label>9:16</Label><NumInput value={data.ad916} onChange={v => onChange({ ad916: v })} min={0} placeholder="0" /></div>
-              <div><Label>1:1</Label><NumInput value={data.ad11} onChange={v => onChange({ ad11: v })} min={0} placeholder="0" /></div>
-            </>
+          {masterKey !== "45" && (
+            <div><Label>4:5</Label><NumInput value={data.ad45} onChange={v => onChange({ ad45: v })} min={0} placeholder="0" /></div>
           )}
         </div>
       </div>
 
-      {/* Reductions — show all ratios (shorter duration can repeat master ratio) */}
+      {/* Reductions — multiple entries */}
       <div>
         <Label className="text-primary text-sm">Reducciones</Label>
-        <div className="mt-2">
-          <Label>Duración Reducción (seg)</Label>
-          <NumInput value={data.durRed} onChange={v => onChange({ durRed: v })} min={0} placeholder="0" className="max-w-[200px] mb-3" />
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <div><Label>16:9</Label><NumInput value={data.red169} onChange={v => onChange({ red169: v })} min={0} placeholder="0" /></div>
-          <div><Label>9:16</Label><NumInput value={data.red916} onChange={v => onChange({ red916: v })} min={0} placeholder="0" /></div>
-          <div><Label>1:1</Label><NumInput value={data.red11} onChange={v => onChange({ red11: v })} min={0} placeholder="0" /></div>
+        <div className="space-y-3 mt-2">
+          {(data.reductions || []).map((red, idx) => (
+            <div key={idx} className="border rounded-md p-3 space-y-2 bg-muted/30">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-muted-foreground">Reducción {idx + 1}</Label>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => {
+                  const next = [...data.reductions];
+                  next.splice(idx, 1);
+                  onChange({ reductions: next });
+                }}>
+                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                </Button>
+              </div>
+              <div className="grid grid-cols-5 gap-3">
+                <div><Label>Duración (seg)</Label><NumInput value={red.durRed} onChange={v => {
+                  const next = [...data.reductions];
+                  next[idx] = { ...next[idx], durRed: v };
+                  onChange({ reductions: next });
+                }} min={0} placeholder="0" /></div>
+                <div><Label>16:9</Label><NumInput value={red.red169} onChange={v => {
+                  const next = [...data.reductions];
+                  next[idx] = { ...next[idx], red169: v };
+                  onChange({ reductions: next });
+                }} min={0} placeholder="0" /></div>
+                <div><Label>9:16</Label><NumInput value={red.red916} onChange={v => {
+                  const next = [...data.reductions];
+                  next[idx] = { ...next[idx], red916: v };
+                  onChange({ reductions: next });
+                }} min={0} placeholder="0" /></div>
+                <div><Label>1:1</Label><NumInput value={red.red11} onChange={v => {
+                  const next = [...data.reductions];
+                  next[idx] = { ...next[idx], red11: v };
+                  onChange({ reductions: next });
+                }} min={0} placeholder="0" /></div>
+                <div><Label>4:5</Label><NumInput value={red.red45} onChange={v => {
+                  const next = [...data.reductions];
+                  next[idx] = { ...next[idx], red45: v };
+                  onChange({ reductions: next });
+                }} min={0} placeholder="0" /></div>
+              </div>
+              <div className="grid grid-cols-5 gap-3">
+                <div className="col-span-2 flex gap-2 items-end rounded-md bg-muted/50 p-2">
+                  <div className="flex-1"><Label>Otro aspecto</Label><Input placeholder="21:9" value={red.redOtroLabel || ""} onChange={e => {
+                    const next = [...data.reductions];
+                    next[idx] = { ...next[idx], redOtroLabel: e.target.value };
+                    onChange({ reductions: next });
+                  }} /></div>
+                  <div className="w-16"><Label>Cant.</Label><NumInput value={red.redOtro || 0} onChange={v => {
+                    const next = [...data.reductions];
+                    next[idx] = { ...next[idx], redOtro: v };
+                    onChange({ reductions: next });
+                  }} min={0} placeholder="0" /></div>
+                </div>
+              </div>
+            </div>
+          ))}
+          <Button variant="outline" size="sm" onClick={() => {
+            onChange({ reductions: [...(data.reductions || []), { durRed: 0, red169: 0, red916: 0, red11: 0, red45: 0, redOtroLabel: "", redOtro: 0 }] });
+          }}>
+            <Plus className="h-4 w-4 mr-1" /> Agregar Reducción
+          </Button>
         </div>
       </div>
     </div>

@@ -495,12 +495,29 @@ function ItemRow({ item, index }: { item: BudgetItem; index: number }) {
     if (Number(d.ad169) > 0) ads.push(`${d.ad169}x 16:9`);
     if (Number(d.ad916) > 0) ads.push(`${d.ad916}x 9:16`);
     if (Number(d.ad11) > 0) ads.push(`${d.ad11}x 1:1`);
+    if (Number(d.ad45) > 0) ads.push(`${d.ad45}x 4:5`);
     if (ads.length) details.push(`Adapt: ${ads.join(", ")}`);
-    const reds: string[] = [];
-    if (Number(d.red169) > 0) reds.push(`${d.red169}x 16:9`);
-    if (Number(d.red916) > 0) reds.push(`${d.red916}x 9:16`);
-    if (Number(d.red11) > 0) reds.push(`${d.red11}x 1:1`);
-    if (reds.length) details.push(`Red ${d.durRed}s: ${reds.join(", ")}`);
+    // Reductions — support both new array format and legacy flat fields
+    const reductionsArr = Array.isArray(d.reductions) ? d.reductions as Record<string, unknown>[] : [];
+    if (reductionsArr.length > 0) {
+      for (const r of reductionsArr) {
+        const reds: string[] = [];
+        if (Number(r.red169) > 0) reds.push(`${r.red169}x 16:9`);
+        if (Number(r.red916) > 0) reds.push(`${r.red916}x 9:16`);
+        if (Number(r.red11) > 0) reds.push(`${r.red11}x 1:1`);
+        if (Number(r.red45) > 0) reds.push(`${r.red45}x 4:5`);
+        if (Number(r.redOtro) > 0 && r.redOtroLabel) reds.push(`${r.redOtro}x ${r.redOtroLabel}`);
+        if (reds.length) details.push(`Red ${r.durRed}s: ${reds.join(", ")}`);
+      }
+    } else {
+      // Legacy flat format
+      const reds: string[] = [];
+      if (Number(d.red169) > 0) reds.push(`${d.red169}x 16:9`);
+      if (Number(d.red916) > 0) reds.push(`${d.red916}x 9:16`);
+      if (Number(d.red11) > 0) reds.push(`${d.red11}x 1:1`);
+      if (Number(d.red45) > 0) reds.push(`${d.red45}x 4:5`);
+      if (reds.length) details.push(`Red ${d.durRed}s: ${reds.join(", ")}`);
+    }
   } else {
     details.push(`${d.imagenes} imágenes`);
     if (d.training) details.push("Entrenamiento IA");
@@ -567,19 +584,37 @@ function ItemBreakdown({ item, index }: { item: BudgetItem; index: number }) {
     if (cb.complejos) lines.push([`Planos complejos (${d.complejos})`, cb.complejos]);
     // Show each adaptation ratio as a separate line
     if (cb.adaptaciones) {
-      const adTotal = (Number(d.ad169) || 0) + (Number(d.ad916) || 0) + (Number(d.ad11) || 0);
+      const adTotal = (Number(d.ad169) || 0) + (Number(d.ad916) || 0) + (Number(d.ad11) || 0) + (Number(d.ad45) || 0);
       const costPerAd = adTotal > 0 ? cb.adaptaciones / adTotal : 0;
       if (Number(d.ad169) > 0) lines.push([`Adaptación 16:9 (×${d.ad169})`, costPerAd * Number(d.ad169)]);
       if (Number(d.ad916) > 0) lines.push([`Adaptación 9:16 (×${d.ad916})`, costPerAd * Number(d.ad916)]);
       if (Number(d.ad11) > 0) lines.push([`Adaptación 1:1 (×${d.ad11})`, costPerAd * Number(d.ad11)]);
+      if (Number(d.ad45) > 0) lines.push([`Adaptación 4:5 (×${d.ad45})`, costPerAd * Number(d.ad45)]);
     }
-    // Show each reduction ratio as a separate line
+    // Show each reduction ratio as a separate line — support both formats
     if (cb.reducciones) {
-      const reTotal = (Number(d.red169) || 0) + (Number(d.red916) || 0) + (Number(d.red11) || 0);
-      const costPerRe = reTotal > 0 ? cb.reducciones / reTotal : 0;
-      if (Number(d.red169) > 0) lines.push([`Reducción 16:9 ${d.durRed}s (×${d.red169})`, costPerRe * Number(d.red169)]);
-      if (Number(d.red916) > 0) lines.push([`Reducción 9:16 ${d.durRed}s (×${d.red916})`, costPerRe * Number(d.red916)]);
-      if (Number(d.red11) > 0) lines.push([`Reducción 1:1 ${d.durRed}s (×${d.red11})`, costPerRe * Number(d.red11)]);
+      const reductionsArr = Array.isArray(d.reductions) ? d.reductions as Record<string, unknown>[] : [];
+      if (reductionsArr.length > 0) {
+        // New array format: distribute cost proportionally across all reduction units
+        const totalUnits = reductionsArr.reduce((sum: number, r: Record<string, unknown>) =>
+          sum + (Number(r.red169) || 0) + (Number(r.red916) || 0) + (Number(r.red11) || 0) + (Number(r.red45) || 0) + (Number(r.redOtro) || 0), 0);
+        const costPerUnit = totalUnits > 0 ? cb.reducciones / totalUnits : 0;
+        for (const r of reductionsArr) {
+          if (Number(r.red169) > 0) lines.push([`Reducción 16:9 ${r.durRed}s (×${r.red169})`, costPerUnit * Number(r.red169)]);
+          if (Number(r.red916) > 0) lines.push([`Reducción 9:16 ${r.durRed}s (×${r.red916})`, costPerUnit * Number(r.red916)]);
+          if (Number(r.red11) > 0) lines.push([`Reducción 1:1 ${r.durRed}s (×${r.red11})`, costPerUnit * Number(r.red11)]);
+          if (Number(r.red45) > 0) lines.push([`Reducción 4:5 ${r.durRed}s (×${r.red45})`, costPerUnit * Number(r.red45)]);
+          if (Number(r.redOtro) > 0 && r.redOtroLabel) lines.push([`Reducción ${r.redOtroLabel} ${r.durRed}s (×${r.redOtro})`, costPerUnit * Number(r.redOtro)]);
+        }
+      } else {
+        // Legacy flat format
+        const reTotal = (Number(d.red169) || 0) + (Number(d.red916) || 0) + (Number(d.red11) || 0) + (Number(d.red45) || 0);
+        const costPerRe = reTotal > 0 ? cb.reducciones / reTotal : 0;
+        if (Number(d.red169) > 0) lines.push([`Reducción 16:9 ${d.durRed}s (×${d.red169})`, costPerRe * Number(d.red169)]);
+        if (Number(d.red916) > 0) lines.push([`Reducción 9:16 ${d.durRed}s (×${d.red916})`, costPerRe * Number(d.red916)]);
+        if (Number(d.red11) > 0) lines.push([`Reducción 1:1 ${d.durRed}s (×${d.red11})`, costPerRe * Number(d.red11)]);
+        if (Number(d.red45) > 0) lines.push([`Reducción 4:5 ${d.durRed}s (×${d.red45})`, costPerRe * Number(d.red45)]);
+      }
     }
 
     return (

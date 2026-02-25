@@ -38,13 +38,28 @@ function buildPrompt(budget: RowDataPacket, items: RowDataPacket[], globalExtern
         if (ad11) parts.push(`${ad11}x 1:1`);
         lines.push(`  - Adaptaciones (${parts.join(", ")}): ${fmt(cb.adaptaciones || 0)}`);
       }
-      const red169 = Number(d.red169) || 0, red916 = Number(d.red916) || 0, red11 = Number(d.red11) || 0;
-      if (red169 + red916 + red11 > 0) {
-        const parts = [];
-        if (red169) parts.push(`${red169}x 16:9`);
-        if (red916) parts.push(`${red916}x 9:16`);
-        if (red11) parts.push(`${red11}x 1:1`);
-        lines.push(`  - Reducciones ${d.durRed}s (${parts.join(", ")}): ${fmt(cb.reducciones || 0)}`);
+      // Reductions — support both new array format and legacy flat fields
+      const reductionsArr = Array.isArray(d.reductions) ? d.reductions : [];
+      if (reductionsArr.length > 0) {
+        for (const r of reductionsArr) {
+          const parts = [];
+          if (Number(r.red169)) parts.push(`${r.red169}x 16:9`);
+          if (Number(r.red916)) parts.push(`${r.red916}x 9:16`);
+          if (Number(r.red11)) parts.push(`${r.red11}x 1:1`);
+          if (Number(r.red45)) parts.push(`${r.red45}x 4:5`);
+          if (Number(r.redOtro) && r.redOtroLabel) parts.push(`${r.redOtro}x ${r.redOtroLabel}`);
+          if (parts.length) lines.push(`  - Reducción ${r.durRed}s (${parts.join(", ")})`);
+        }
+        if (cb.reducciones) lines.push(`  - Total reducciones: ${fmt(cb.reducciones)}`);
+      } else {
+        const red169 = Number(d.red169) || 0, red916 = Number(d.red916) || 0, red11 = Number(d.red11) || 0;
+        if (red169 + red916 + red11 > 0) {
+          const parts = [];
+          if (red169) parts.push(`${red169}x 16:9`);
+          if (red916) parts.push(`${red916}x 9:16`);
+          if (red11) parts.push(`${red11}x 1:1`);
+          lines.push(`  - Reducciones ${d.durRed}s (${parts.join(", ")}): ${fmt(cb.reducciones || 0)}`);
+        }
       }
     } else {
       lines.push(`Ítem ${i + 1}: Fotografía`);

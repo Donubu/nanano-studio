@@ -177,8 +177,10 @@ export async function POST(request: NextRequest) {
         const cLip = d.lipSync ? base * videoConfig.lipSync : 0;
         const cTr = d.training ? base * videoConfig.training : 0;
         const cComp = (base * videoConfig.complejo) * (Number(d.complejos) || 0);
-        const adT = (Number(d.ad169) || 0) + (Number(d.ad916) || 0) + (Number(d.ad11) || 0);
-        const reT = (Number(d.red169) || 0) + (Number(d.red916) || 0) + (Number(d.red11) || 0);
+        const adT = (Number(d.ad169) || 0) + (Number(d.ad916) || 0) + (Number(d.ad11) || 0) + (Number(d.ad45) || 0);
+        const reductions = Array.isArray(d.reductions) ? d.reductions : [];
+        const reT = reductions.reduce((sum: number, r: Record<string, number>) =>
+          sum + (Number(r.red169) || 0) + (Number(r.red916) || 0) + (Number(r.red11) || 0) + (Number(r.red45) || 0) + (Number(r.redOtro) || 0), 0);
         const cAd = (base * videoConfig.adaptacion) * adT;
         const cRe = (base * videoConfig.reduccion) * reT;
         costBreakdown = { base, lipSync: cLip, training: cTr, complejos: cComp, adaptaciones: cAd, reducciones: cRe };
