@@ -41,6 +41,7 @@ import {
     HelpCircle,
     Mic,
     Star,
+    Pin,
     Dices,
     X,
     Download,
@@ -129,6 +130,16 @@ interface Project {
     client_logo: string | null;
     generation_count: number;
     last_message_at: string | null;
+    created_at: string;
+}
+
+interface FavoriteProject {
+    id: number;
+    title: string;
+    client_id: number | null;
+    client_name: string | null;
+    client_logo: string | null;
+    generation_count: number;
     created_at: string;
 }
 
@@ -221,6 +232,8 @@ export function ChatInterface() {
     const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
     const [projectModels, setProjectModels] = useState<ProjectModel[]>([]);
     const [projects, setProjects] = useState<Project[]>([]);
+    const [favoriteProjects, setFavoriteProjects] = useState<FavoriteProject[]>([]);
+    const [favoriteProjectIds, setFavoriteProjectIds] = useState<Set<number>>(new Set());
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [archivedConversations, setArchivedConversations] = useState<Conversation[]>([]);
     const [showArchived, setShowArchived] = useState(false);
@@ -700,12 +713,47 @@ export function ChatInterface() {
             const res = await fetch("/api/clients");
             if (res.ok) {
                 const data = await res.json();
-                setClients(data);
+                setClients(data.sort((a: ClientItem, b: ClientItem) => a.name.localeCompare(b.name)));
             }
         } catch (err) {
             console.error("Error fetching clients:", err);
         }
     }, []);
+
+    const fetchFavoriteProjects = useCallback(async () => {
+        try {
+            const res = await fetch("/api/projects/favorites");
+            if (res.ok) {
+                const data: FavoriteProject[] = await res.json();
+                setFavoriteProjects(data);
+                setFavoriteProjectIds(new Set(data.map(p => p.id)));
+            }
+        } catch (err) {
+            console.error("Error fetching favorite projects:", err);
+        }
+    }, []);
+
+    const toggleProjectFavorite = useCallback(async (projectId: number) => {
+        try {
+            const res = await fetch(`/api/projects/${projectId}/favorite`, { method: "POST" });
+            if (res.ok) {
+                const data = await res.json();
+                setFavoriteProjectIds(prev => {
+                    const next = new Set(prev);
+                    if (data.is_favorite) {
+                        next.add(projectId);
+                    } else {
+                        next.delete(projectId);
+                    }
+                    return next;
+                });
+                // Refresh full favorite projects list
+                fetchFavoriteProjects();
+            }
+        } catch (err) {
+            console.error("Error toggling project favorite:", err);
+        }
+    }, [fetchFavoriteProjects]);
 
     const fetchProjects = useCallback(async (clientId?: number) => {
         try {
@@ -897,7 +945,8 @@ export function ChatInterface() {
 
     useEffect(() => {
         fetchClients();
-    }, [fetchClients]);
+        fetchFavoriteProjects();
+    }, [fetchClients, fetchFavoriteProjects]);
 
     // Fetch projects when client changes
     useEffect(() => {
@@ -3662,7 +3711,7 @@ export function ChatInterface() {
                                         <p className="text-muted-foreground">No hay clientes disponibles</p>
                                     </div>
                                 ) : (
-                                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                                    <div className="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 gap-3">
                                         {clients.map((client) => {
                                             const isAdmin = session?.user?.role === "admin";
                                             const hasProjects = client.project_count > 0;
@@ -3673,18 +3722,18 @@ export function ChatInterface() {
                                                     key={client.id}
                                                     {...(canClick ? { onClick: () => setSelectedClientId(client.id) } : {})}
                                                     className={cn(
-                                                        "group flex flex-col items-center p-2 rounded-xl border border-border/50 bg-card transition-all text-left",
+                                                        "group flex items-center justify-center p-2 rounded-xl border border-border/50 bg-card transition-all text-left",
                                                         canClick
                                                             ? "hover:bg-accent hover:border-primary/50 cursor-pointer"
                                                             : "opacity-50 cursor-not-allowed"
                                                     )}
                                                 >
-                                                    <div className="relative mb-3">
+                                                    <div className="relative">
                                                         {client.logo ? (
                                                             <img
                                                                 src={client.logo}
                                                                 alt={client.name}
-                                                                className="w-[100px] border rounded-md border-[#999] object-contain transition-opacity"
+                                                                className="w-[100px] h-[100px] border rounded-md border-[#999] object-contain transition-opacity"
                                                             />
                                                         ) : (
                                                             <Building2 className="h-16 w-16 text-primary/70 group-hover:text-primary transition-colors" />
@@ -3695,16 +3744,72 @@ export function ChatInterface() {
                                                             </div>
                                                         )}
                                                     </div>
-
-                                                    <h3 className={cn(
-                                                        "font-medium text-md text-center truncate w-full transition-colors",
-                                                        canClick ? "group-hover:text-primary" : "text-muted-foreground"
-                                                    )}>
-                                                        {client.name}
-                                                    </h3>
                                                 </Wrapper>
                                             );
                                         })}
+                                    </div>
+                                )}
+
+                                {/* Favorite Projects Section */}
+                                {favoriteProjects.length > 0 && (
+                                    <div className="mt-8">
+                                        <h3 className="flex items-center gap-2 text-lg font-semibold mb-4">
+                                            <Star className="h-5 w-5 fill-yellow-400 text-yellow-400" />
+                                            Favoritos
+                                        </h3>
+                                        <div className="bg-card rounded-xl border border-border/50 overflow-hidden">
+                                            <table className="w-full">
+                                                <thead>
+                                                    <tr className="border-b border-border/50 text-left">
+                                                        <th className="w-10"></th>
+                                                        <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Proyecto</th>
+                                                        <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Cliente</th>
+                                                        <th className="px-4 py-3 text-xs font-medium text-muted-foreground text-center">Generaciones</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {favoriteProjects.map((fp) => (
+                                                        <tr
+                                                            key={fp.id}
+                                                            onClick={() => {
+                                                                if (fp.client_id) setSelectedClientId(fp.client_id);
+                                                                setSelectedProjectId(fp.id);
+                                                            }}
+                                                            className="border-b border-border/30 last:border-0 hover:bg-accent/50 cursor-pointer transition-colors"
+                                                        >
+                                                            <td className="pl-3 pr-0 py-3 w-10">
+                                                                <button
+                                                                    onClick={(e) => { e.stopPropagation(); toggleProjectFavorite(fp.id); }}
+                                                                    className="shrink-0 text-yellow-400 hover:text-muted-foreground transition-colors"
+                                                                    title="Quitar de favoritos"
+                                                                >
+                                                                    <Star className="h-4 w-4 fill-yellow-400" />
+                                                                </button>
+                                                            </td>
+                                                            <td className="px-4 py-3">
+                                                                <div className="flex items-center gap-2">
+                                                                    <Folder className="h-4 w-4 text-primary/70 shrink-0" />
+                                                                    <span className="font-medium">{fp.title}</span>
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-4 py-3">
+                                                                <div className="flex items-center gap-2">
+                                                                    {fp.client_logo ? (
+                                                                        <img src={fp.client_logo} alt={fp.client_name || ""} className="w-5 h-5 rounded object-contain" />
+                                                                    ) : (
+                                                                        <Building2 className="h-4 w-4 text-muted-foreground" />
+                                                                    )}
+                                                                    <span className="text-sm text-muted-foreground">{fp.client_name || "Sin cliente"}</span>
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-4 py-3 text-center text-sm text-muted-foreground">
+                                                                {fp.generation_count}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     </div>
                                 )}
 
@@ -3772,6 +3877,7 @@ export function ChatInterface() {
                                         <table className="w-full">
                                             <thead>
                                                 <tr className="border-b border-border/50 text-left">
+                                                    <th className="w-10"></th>
                                                     <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Nombre</th>
                                                     <th className="px-4 py-3 text-xs font-medium text-muted-foreground text-center">Generaciones</th>
                                                     <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Fecha creación</th>
@@ -3792,6 +3898,7 @@ export function ChatInterface() {
                                                         })
                                                         .map((project) => {
                                                         const isDefault = project.id === defaultProjId;
+                                                        const isFav = favoriteProjectIds.has(project.id);
                                                         return (
                                                             <tr
                                                                 key={project.id}
@@ -3802,10 +3909,19 @@ export function ChatInterface() {
                                                                     isDefault && "bg-yellow-500/5"
                                                                 )}
                                                             >
+                                                                <td className="pl-3 pr-0 py-3 w-10">
+                                                                    <button
+                                                                        onClick={(e) => { e.stopPropagation(); toggleProjectFavorite(project.id); }}
+                                                                        className="shrink-0 text-muted-foreground hover:text-yellow-500 transition-colors"
+                                                                        title={isFav ? "Quitar de favoritos" : "Agregar a favoritos"}
+                                                                    >
+                                                                        <Star className={cn("h-4 w-4", isFav && "fill-yellow-400 text-yellow-400")} />
+                                                                    </button>
+                                                                </td>
                                                                 <td className="px-4 py-3">
                                                                     <div className="flex items-center gap-2">
                                                                         {isDefault ? (
-                                                                            <Star className="h-4 w-4 text-yellow-500 fill-yellow-500 shrink-0" />
+                                                                            <Pin className="h-4 w-4 text-yellow-500 fill-yellow-500 shrink-0" />
                                                                         ) : (
                                                                             <Folder className="h-4 w-4 text-primary/70 shrink-0" />
                                                                         )}
