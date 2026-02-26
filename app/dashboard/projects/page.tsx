@@ -226,7 +226,7 @@ export default function ProjectsPage() {
                     >
                       <div className="font-medium flex items-center gap-1.5">
                         {project.title}
-                        {project.hidden && (
+                        {!!project.hidden && (
                           <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
                         )}
                       </div>

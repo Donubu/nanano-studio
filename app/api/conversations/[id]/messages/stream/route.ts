@@ -128,7 +128,7 @@ export async function POST(
 
     const { id } = await params;
     const body = await request.json();
-    const { content, files, useProjectSystemInstruction = true, modelIdOverride, imageSettings, quality_tier = "normal", generation_type_override, no_context = false } = body as {
+    const { content, files, useProjectSystemInstruction = true, modelIdOverride, imageSettings, quality_tier = "normal", generation_type_override, no_context = false, skip_user_message = false } = body as {
       content: string;
       files?: AttachedFile[];
       useProjectSystemInstruction?: boolean;
@@ -137,6 +137,7 @@ export async function POST(
       quality_tier?: QualityTier;
       generation_type_override?: GenerationType;
       no_context?: boolean;
+      skip_user_message?: boolean;
     };
 
     // Validate quality_tier
@@ -315,62 +316,70 @@ export async function POST(
     const firstImage = files?.find(f => f.type === "image");
     const contentType = hasFiles ? "mixed" : "text";
 
-    // Guardar primera imagen en disco si existe (para preview en historial)
+    // When skip_user_message is true, we skip creating the user message (used for parallel multi-image generation)
     let savedImageUrl: string | null = null;
-    if (firstImage) {
-      try {
-        savedImageUrl = await saveUploadedFile(firstImage, id);
-      } catch (err) {
-        console.error("Error guardando imagen del usuario:", err);
-      }
-    }
+    let userMessageId: number = 0;
 
-    // Guardar mensaje del usuario (con URL de imagen guardada, no base64)
-    const [userMessageResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, image_url, image_mime_type)
-       VALUES (?, 'user', ?, ?, ?, ?, ?)`,
-      [id, contentType, effectiveQualityTier, content, savedImageUrl, firstImage?.mimeType || null]
-    );
-
-    const userMessageId = userMessageResult.insertId;
-
-    // Guardar todas las imágenes adjuntas en message_images
-    if (hasFiles && files) {
-      const imageFiles = files.filter(f => f.type === "image");
-      for (let i = 0; i < imageFiles.length; i++) {
-        const imgFile = imageFiles[i];
+    if (!skip_user_message) {
+      // Guardar primera imagen en disco si existe (para preview en historial)
+      if (firstImage) {
         try {
-          // La primera imagen ya fue guardada como savedImageUrl
-          const imgUrl = i === 0 && savedImageUrl ? savedImageUrl : await saveUploadedFile(imgFile, id);
-          const base64Data = imgFile.dataUrl.split(",")[1];
-          const fileSize = Buffer.from(base64Data, "base64").length;
-          await pool.execute(
-            `INSERT INTO message_images (message_id, image_url, mime_type, file_size, sort_order) VALUES (?, ?, ?, ?, ?)`,
-            [userMessageId, imgUrl, imgFile.mimeType, fileSize, i]
-          );
+          savedImageUrl = await saveUploadedFile(firstImage, id);
         } catch (err) {
-          console.error(`Error guardando imagen ${i} en message_images:`, err);
+          console.error("Error guardando imagen del usuario:", err);
+        }
+      }
+
+      // Guardar mensaje del usuario (con URL de imagen guardada, no base64)
+      const [userMessageResult] = await pool.execute<ResultSetHeader>(
+        `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, image_url, image_mime_type)
+         VALUES (?, 'user', ?, ?, ?, ?, ?)`,
+        [id, contentType, effectiveQualityTier, content, savedImageUrl, firstImage?.mimeType || null]
+      );
+
+      userMessageId = userMessageResult.insertId;
+
+      // Guardar todas las imágenes adjuntas en message_images
+      if (hasFiles && files) {
+        const imageFiles = files.filter(f => f.type === "image");
+        for (let i = 0; i < imageFiles.length; i++) {
+          const imgFile = imageFiles[i];
+          try {
+            // La primera imagen ya fue guardada como savedImageUrl
+            const imgUrl = i === 0 && savedImageUrl ? savedImageUrl : await saveUploadedFile(imgFile, id);
+            const base64Data = imgFile.dataUrl.split(",")[1];
+            const fileSize = Buffer.from(base64Data, "base64").length;
+            await pool.execute(
+              `INSERT INTO message_images (message_id, image_url, mime_type, file_size, sort_order) VALUES (?, ?, ?, ?, ?)`,
+              [userMessageId, imgUrl, imgFile.mimeType, fileSize, i]
+            );
+          } catch (err) {
+            console.error(`Error guardando imagen ${i} en message_images:`, err);
+          }
         }
       }
     }
 
     // Obtener historial de mensajes para contexto (excluir errores)
     // Si no_context es true, o es generación de imagen/video, solo obtenemos el mensaje actual
+    // Si skip_user_message, no hay mensaje en BD — usamos el content del request directamente
     const skipHistoryQuery = no_context || generationType === "image" || generationType === "video";
-    const [historyRows] = skipHistoryQuery
-      ? await pool.execute<MessageRow[]>(
-          `SELECT role, content, image_url, image_mime_type, ignore_in_context
-           FROM messages
-           WHERE id = ?`,
-          [userMessageId]
-        )
-      : await pool.execute<MessageRow[]>(
-          `SELECT role, content, image_url, image_mime_type, ignore_in_context
-           FROM messages
-           WHERE conversation_id = ? AND content_type != 'error'
-           ORDER BY created_at ASC`,
-          [id]
-        );
+    const [historyRows] = skip_user_message
+      ? [[] as MessageRow[]]
+      : skipHistoryQuery
+        ? await pool.execute<MessageRow[]>(
+            `SELECT role, content, image_url, image_mime_type, ignore_in_context
+             FROM messages
+             WHERE id = ?`,
+            [userMessageId]
+          )
+        : await pool.execute<MessageRow[]>(
+            `SELECT role, content, image_url, image_mime_type, ignore_in_context
+             FROM messages
+             WHERE conversation_id = ? AND content_type != 'error'
+             ORDER BY created_at ASC`,
+            [id]
+          );
 
     // Filter out ignored messages:
     // - User messages with ignore_in_context = 1
@@ -420,6 +429,12 @@ export async function POST(
     // Los modelos de generación visual no usan contexto conversacional.
     // También aplica cuando hay model override (ej: generando imagen desde conversación de video).
     const skipHistory = modelIdOverride || generationType === "image" || generationType === "video";
+
+    // When skip_user_message, inject user message from request body (not from DB)
+    if (skip_user_message && messages.length === 0) {
+      messages.push({ role: "user", content });
+    }
+
     const messagesToSend = skipHistory
       ? messages.slice(-1) // Solo el último mensaje (el actual)
       : messages;
@@ -449,10 +464,12 @@ export async function POST(
 
     const stream = new ReadableStream({
       async start(controller) {
-        // Enviar el ID del mensaje del usuario primero
-        controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ type: "user_message", id: userMessageId })}\n\n`)
-        );
+        // Enviar el ID del mensaje del usuario primero (skip for parallel image requests)
+        if (!skip_user_message) {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: "user_message", id: userMessageId })}\n\n`)
+          );
+        }
 
         // Construir configuración de generación
         const generationConfig = {
@@ -489,10 +506,12 @@ export async function POST(
         console.log("==========================================\n");
 
         // Guardar request_data en el mensaje del usuario
-        await pool.execute(
-          "UPDATE messages SET request_data = ? WHERE id = ?",
-          [JSON.stringify(requestData), userMessageId]
-        );
+        if (!skip_user_message) {
+          await pool.execute(
+            "UPDATE messages SET request_data = ? WHERE id = ?",
+            [JSON.stringify(requestData), userMessageId]
+          );
+        }
 
         // Variables para trackear múltiples imágenes generadas durante streaming
         interface SavedImage {
@@ -717,7 +736,7 @@ export async function POST(
 
                 // Generar título después de completar exitosamente (fire-and-forget)
                 // Se genera aquí para no competir por cuota API con la llamada principal
-                if (needsTitle) {
+                if (needsTitle && !skip_user_message) {
                   generateConversationTitle(content, labels)
                     .then(async (title) => {
                       await pool.execute(
@@ -745,10 +764,12 @@ export async function POST(
                    VALUES (?, 'model', 'error', ?)`,
                   [id, errorMessage]
                 );
-                await pool.execute(
-                  `UPDATE messages SET ignore_in_context = 1 WHERE id = ?`,
-                  [userMessageId]
-                );
+                if (!skip_user_message && userMessageId) {
+                  await pool.execute(
+                    `UPDATE messages SET ignore_in_context = 1 WHERE id = ?`,
+                    [userMessageId]
+                  );
+                }
 
                 if (!controllerClosed) {
                   controller.enqueue(

@@ -67,10 +67,13 @@ export async function GET(
         m.supports_image_generation as model_supports_image_generation,
         m.supports_video_generation as model_supports_video_generation,
         m.supports_audio_generation as model_supports_audio_generation,
-        p.title as project_title
+        p.title as project_title,
+        u.name as owner_name,
+        u.image as owner_image
       FROM conversations c
       JOIN models m ON c.model_id = m.id
       LEFT JOIN projects p ON c.project_id = p.id
+      LEFT JOIN users u ON c.user_id = u.id
       WHERE c.id = ? ${isAdmin ? "" : "AND c.user_id = ?"} ${includeArchived ? "" : "AND c.deleted_at IS NULL"}`,
       isAdmin ? [id] : [id, session.user.id]
     );

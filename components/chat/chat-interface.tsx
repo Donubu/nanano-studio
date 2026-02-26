@@ -202,6 +202,8 @@ interface Conversation {
     audio_speaker_config?: AudioSpeakerConfig | null;
     audio_output_format?: AudioOutputFormat;
     isArchived?: boolean;
+    owner_name?: string | null;
+    owner_image?: string | null;
 }
 
 // LocalStorage keys
@@ -1743,6 +1745,97 @@ export function ChatInterface() {
             // Multi-image support: track temporary image message IDs
             const tempImageMessageIds: number[] = [];
 
+            // Fire N-1 additional parallel requests for non-Imagen4 multi-image generation
+            const extraImageCount = (!useImagenEndpoint && imageSettings?.numberOfImages && imageSettings.numberOfImages > 1)
+                ? imageSettings.numberOfImages - 1
+                : 0;
+
+            if (extraImageCount > 0) {
+                const extraRequestBody = {
+                    ...requestBody,
+                    skip_user_message: true,
+                };
+                for (let i = 0; i < extraImageCount; i++) {
+                    // Fire-and-forget: each extra request processes its own SSE and adds images
+                    (async () => {
+                        try {
+                            const extraResponse = await fetch(endpoint, {
+                                method: "POST",
+                                headers: {"Content-Type": "application/json"},
+                                body: JSON.stringify(extraRequestBody),
+                            });
+                            if (!extraResponse.ok) return;
+
+                            const extraReader = extraResponse.body?.getReader();
+                            if (!extraReader) return;
+                            const extraDecoder = new TextDecoder();
+                            let extraSseBuffer = "";
+
+                            while (true) {
+                                const {done, value} = await extraReader.read();
+                                if (done) break;
+                                extraSseBuffer += extraDecoder.decode(value, { stream: true });
+                                const lines = extraSseBuffer.split("\n");
+                                extraSseBuffer = lines.pop() || "";
+
+                                for (const line of lines) {
+                                    if (!line.startsWith("data: ")) continue;
+                                    try {
+                                        const data = JSON.parse(line.slice(6));
+                                        if (data.type === "image") {
+                                            const tempImgId = Date.now() + 200 + i * 10 + (data.imageIndex || 0);
+                                            tempImageMessageIds.push(tempImgId);
+                                            setTabMessages((prev) => ({
+                                                ...prev,
+                                                [tabId]: [...prev[tabId], {
+                                                    id: tempImgId,
+                                                    role: "model" as const,
+                                                    content: "",
+                                                    content_type: "image" as const,
+                                                    image_url: data.imageUrl,
+                                                    created_at: new Date().toISOString(),
+                                                    isStreaming: true,
+                                                }],
+                                            }));
+                                        } else if (data.type === "complete") {
+                                            const serverImgs: Array<{ id: number; imageUrl: string }> = data.imageMessages || [];
+                                            if (serverImgs.length > 0) {
+                                                setTabMessages((prev) => {
+                                                    let msgs = prev[tabId];
+                                                    for (const serverImg of serverImgs) {
+                                                        // Find a temp image message matching this URL and finalize it
+                                                        const tempMsg = msgs.find(m => m.isStreaming && m.image_url === serverImg.imageUrl);
+                                                        if (tempMsg) {
+                                                            msgs = msgs.map(m => m.id === tempMsg.id
+                                                                ? { ...m, id: serverImg.id, isStreaming: false }
+                                                                : m
+                                                            );
+                                                        } else {
+                                                            msgs = [...msgs, {
+                                                                id: serverImg.id,
+                                                                role: "model" as const,
+                                                                content: "",
+                                                                content_type: "image" as const,
+                                                                image_url: serverImg.imageUrl,
+                                                                created_at: new Date().toISOString(),
+                                                                isStreaming: false,
+                                                            }];
+                                                        }
+                                                    }
+                                                    return { ...prev, [tabId]: msgs };
+                                                });
+                                            }
+                                        }
+                                    } catch { /* ignore parse errors */ }
+                                }
+                            }
+                        } catch (err) {
+                            console.error("[Extra image request] Error:", err);
+                        }
+                    })();
+                }
+            }
+
             if (reader) {
                 let sseBuffer = "";
                 while (true) {
@@ -2592,9 +2685,9 @@ export function ChatInterface() {
 
                     {/* Header - Logo always visible */}
                     <div className={`p-3 ${selectedProjectId ? 'border-b border-border/50' : ''}`}>
-                        <button
-                            onClick={() => { setSelectedProjectId(null); setSelectedClientId(null); }}
-                            className={`flex items-center gap-2 ${selectedProjectId ? 'mb-3' : ''}`}
+                        <a
+                            href="/"
+                            className={`flex items-center gap-2 hover:opacity-80 transition-opacity ${selectedProjectId ? 'mb-3' : ''}`}
                         >
                             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-yellow-400 to-yellow-500 flex items-center justify-center text-black font-bold text-sm">
                                 PS
@@ -2602,7 +2695,7 @@ export function ChatInterface() {
                             <span className="text-lg font-semibold tracking-tight">
                                 Puerto <span className="text-yellow-400">Studio</span>
                             </span>
-                        </button>
+                        </a>
                         {selectedProjectId && (
                             <Button
                                 onClick={() => setShowNewConversationModal(true)}
@@ -3385,17 +3478,22 @@ export function ChatInterface() {
                                                     onViewVideo={msg.role === "model" && msg.video_url ? () => setViewingVideoMessage(msg) : undefined}
                                                 />
                                             </div>
-                                            {msg.role === "user" && (
-                                                <Avatar
-                                                    title={msg.created_at ? formatDateTimeLocal(msg.created_at) : undefined}
-                                                    className="h-8 w-8 shrink-0"
-                                                >
-                                                    <AvatarImage src={session?.user?.image || undefined}/>
-                                                    <AvatarFallback className="bg-accent text-xs">
-                                                        {getInitials(session?.user?.name)}
-                                                    </AvatarFallback>
-                                                </Avatar>
-                                            )}
+                                            {msg.role === "user" && (() => {
+                                                const ownerName = currentConversation?.owner_name || session?.user?.name;
+                                                const ownerImage = currentConversation?.owner_image || session?.user?.image;
+                                                const tooltipParts = [ownerName, msg.created_at ? formatDateTimeLocal(msg.created_at) : null].filter(Boolean);
+                                                return (
+                                                    <Avatar
+                                                        title={tooltipParts.join('\n') || undefined}
+                                                        className="h-8 w-8 shrink-0"
+                                                    >
+                                                        <AvatarImage src={ownerImage || undefined}/>
+                                                        <AvatarFallback className="bg-accent text-xs">
+                                                            {getInitials(ownerName)}
+                                                        </AvatarFallback>
+                                                    </Avatar>
+                                                );
+                                            })()}
                                         </div>
                                         );
                                     })}
@@ -3493,7 +3591,7 @@ export function ChatInterface() {
                                                 negativePrompt: imageNegativePrompt || undefined,
                                                 isImagen4: isImagen4Model,
                                                 seed: selectedSeed || undefined,
-                                                numberOfImages: isImagen4Model ? numberOfImages : undefined,
+                                                numberOfImages,
                                             };
                                             // Pass generation_type_override when in video conversation with image mode
                                             const typeOverride = isVideoConversation && generationMode === "image" ? "image" as const : undefined;
@@ -3903,6 +4001,8 @@ export function ChatInterface() {
                                                 <option value="4K">4K (Ultra alta definicion)</option>
                                             </select>
                                         </div>
+
+                                        {/* Number of Images - hidden: Gemini native rate-limits parallel requests */}
                                     </>
                                 )}
                             </div>
@@ -4036,6 +4136,8 @@ export function ChatInterface() {
                                                 <option value="4K">4K (Ultra alta definicion)</option>
                                             </select>
                                         </div>
+
+                                        {/* Number of Images - hidden: Gemini native rate-limits parallel requests */}
                                     </>
                                 )}
                             </div>

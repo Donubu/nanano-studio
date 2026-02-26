@@ -14,6 +14,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { LogOut, ChevronDown, Sun, Moon, Monitor } from "lucide-react";
 import { cn } from "@/lib/utils";
+import Link from "next/link";
 
 export function Header() {
   const { data: session } = useSession();
@@ -37,14 +38,14 @@ export function Header() {
   return (
     <header className="h-14 border-b border-border/50 bg-sidebar flex items-center justify-between px-6">
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2">
+        <Link href="/dashboard" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-yellow-400 to-yellow-500 flex items-center justify-center text-black font-bold text-sm">
             PS
           </div>
           <span className="text-lg font-semibold tracking-tight">
             Puerto <span className="text-yellow-400">Studio</span>
           </span>
-        </div>
+        </Link>
       </div>
 
       {mounted ? (
