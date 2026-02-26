@@ -461,9 +461,19 @@ export async function POST(
     let modelMessageId: number | null = null;
     let fullResponse = "";
     let controllerClosed = false; // Hoisted para que cancel() pueda accederlo
+    let heartbeat: ReturnType<typeof setInterval>;
 
     const stream = new ReadableStream({
       async start(controller) {
+        // Heartbeat cada 10s para mantener la conexión viva durante generaciones largas
+        heartbeat = setInterval(() => {
+          if (!controllerClosed) {
+            controller.enqueue(encoder.encode(`: ping\n\n`));
+          } else {
+            clearInterval(heartbeat);
+          }
+        }, 10000);
+
         // Enviar el ID del mensaje del usuario primero (skip for parallel image requests)
         if (!skip_user_message) {
           controller.enqueue(
@@ -730,6 +740,7 @@ export async function POST(
                       })}\n\n`
                     )
                   );
+                  clearInterval(heartbeat);
                   controllerClosed = true;
                   controller.close();
                 }
@@ -781,6 +792,7 @@ export async function POST(
                       })}\n\n`
                     )
                   );
+                  clearInterval(heartbeat);
                   controllerClosed = true;
                   controller.close();
                 }
@@ -814,6 +826,7 @@ export async function POST(
                 })}\n\n`
               )
             );
+            clearInterval(heartbeat);
             controllerClosed = true;
             controller.close();
           }
@@ -821,6 +834,7 @@ export async function POST(
       },
       cancel() {
         // Cliente se desconectó (navegó, abortó fetch, reintentó)
+        clearInterval(heartbeat);
         controllerClosed = true;
       },
     });

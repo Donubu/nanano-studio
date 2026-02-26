@@ -1104,6 +1104,14 @@ export function ChatInterface() {
             video_aspect_ratio?: string;
             video_audio_enabled?: boolean;
             video_negative_prompt?: string;
+            audio_voice_id?: string;
+            audio_style_prompt?: string;
+            audio_multi_speaker?: boolean;
+            audio_speaker_config?: unknown;
+            audio_output_format?: string;
+            audio_tts_engine?: string;
+            audio_speaking_rate?: number;
+            audio_locale?: string;
         }
     ) => {
         try {
@@ -1247,20 +1255,17 @@ export function ChatInterface() {
                 break;
         }
 
-        // Si hay conversación activa, guardar en DB
+        // Si hay conversación activa, guardar en DB (con debounce para evitar PUTs excesivos)
         if (currentConversation) {
-            // Debounce para campos de texto libre (evitar un PUT por cada keystroke)
-            const textSettings = ["system_instruction", "audio_style_prompt", "video_negative_prompt"];
-            if (textSettings.includes(setting)) {
-                if (settingsDebounceTimers.current[setting]) {
-                    clearTimeout(settingsDebounceTimers.current[setting]);
-                }
-                settingsDebounceTimers.current[setting] = setTimeout(() => {
-                    updateConversationSettings(currentConversation.id, {[setting]: value});
-                }, 500);
-            } else {
-                await updateConversationSettings(currentConversation.id, {[setting]: value});
+            if (settingsDebounceTimers.current[setting]) {
+                clearTimeout(settingsDebounceTimers.current[setting]);
             }
+            // Texto libre: debounce largo (500ms). Toggles/selects: debounce corto (100ms)
+            const textSettings = ["system_instruction", "audio_style_prompt", "video_negative_prompt"];
+            const delay = textSettings.includes(setting) ? 500 : 100;
+            settingsDebounceTimers.current[setting] = setTimeout(() => {
+                updateConversationSettings(currentConversation.id, {[setting]: value});
+            }, delay);
         }
     };
 

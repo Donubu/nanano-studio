@@ -208,6 +208,7 @@ export async function POST(
     // Crear el stream SSE para enviar retry/progress al usuario
     const encoder = new TextEncoder();
     let controllerClosed = false;
+    let heartbeat: ReturnType<typeof setInterval>;
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -219,6 +220,15 @@ export async function POST(
             );
           }
         };
+
+        // Heartbeat cada 10s para mantener la conexión viva
+        heartbeat = setInterval(() => {
+          if (!controllerClosed) {
+            controller.enqueue(encoder.encode(`: ping\n\n`));
+          } else {
+            clearInterval(heartbeat);
+          }
+        }, 10000);
 
         try {
           // Enviar el ID del mensaje del usuario
@@ -340,6 +350,7 @@ export async function POST(
             imageMessages,
           });
 
+          clearInterval(heartbeat);
           controllerClosed = true;
           controller.close();
 
@@ -381,11 +392,13 @@ export async function POST(
             id: modelResult.insertId,
           });
 
+          clearInterval(heartbeat);
           controllerClosed = true;
           controller.close();
         }
       },
       cancel() {
+        clearInterval(heartbeat);
         controllerClosed = true;
       },
     });

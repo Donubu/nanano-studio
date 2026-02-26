@@ -182,10 +182,6 @@ export async function PUT(
       audio_locale,
     } = body;
 
-    // Debug: log received body
-    console.log("[PUT /conversations] Received body:", body);
-    console.log("[PUT /conversations] Extracted image_aspect_ratio:", image_aspect_ratio);
-
     // Verificar que la conversación pertenece al usuario y no está eliminada
     const isAdmin = session.user.role === "admin";
     const [existing] = await pool.execute<ConversationRow[]>(
