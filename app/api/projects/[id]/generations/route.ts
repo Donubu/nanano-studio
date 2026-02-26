@@ -161,6 +161,8 @@ export async function GET(
         c.id as conversation_id,
         c.user_id as conversation_user_id,
         c.title as conversation_title,
+        u.name as user_name,
+        u.image as user_image,
         m.content,
         m.quality_tier,
         m.generation_seed,
@@ -192,6 +194,7 @@ export async function GET(
         ) as tags
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
+      LEFT JOIN users u ON c.user_id = u.id
       ${tagJoin}
       WHERE ${conditions.join(" AND ")}
       ORDER BY m.created_at DESC

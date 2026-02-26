@@ -36,6 +36,8 @@ interface Generation {
   conversation_id: number;
   conversation_user_id: number;
   conversation_title: string;
+  user_name: string | null;
+  user_image: string | null;
   content: string | null;
   quality_tier: "normal" | "hq" | null;
   generation_seed: number | null;
@@ -180,6 +182,8 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
             conversation_id: 0,
             conversation_user_id: currentUserId,
             conversation_title: u.original_filename || "Imagen subida",
+            user_name: null,
+            user_image: null,
             content: u.original_filename || null,
             quality_tier: null,
             generation_seed: null,
@@ -1210,6 +1214,12 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                       </div>
                     )}
                   </>
+                )}
+                {selectedItem.user_name && (
+                  <div className="flex items-center gap-1.5">
+                    <User className="h-4 w-4" />
+                    <span>{selectedItem.user_name}</span>
+                  </div>
                 )}
                 <div className="flex items-center gap-1.5">
                   <Calendar className="h-4 w-4" />
