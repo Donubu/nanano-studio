@@ -340,6 +340,7 @@ export async function sendMessage(
     topP: settings.topP ?? 0.95,
     topK: settings.topK ?? 40,
     maxOutputTokens: settings.maxOutputTokens ?? 8192,
+
     ...(systemInstruction && { systemInstruction }),
     labels: buildLabels(labels, backend),
     // Configuración para generación de imágenes
@@ -361,10 +362,18 @@ export async function sendMessage(
     "generateContent"
   );
 
-  // Extraer partes del primer candidato
-  const parts = response.candidates?.[0]?.content?.parts;
+  // Extraer partes — si hay múltiples candidatos, extraer imágenes de todos
+  const candidates = response.candidates || [];
+  const parts = candidates[0]?.content?.parts;
   const text = extractTextFromParts(parts);
-  const images = extractImagesFromParts(parts);
+  let images: GeneratedImage[] = [];
+  if (candidates.length > 1) {
+    for (const candidate of candidates) {
+      images.push(...extractImagesFromParts(candidate.content?.parts));
+    }
+  } else {
+    images = extractImagesFromParts(parts);
+  }
 
   return {
     text,
@@ -398,6 +407,7 @@ export async function sendMessageStream(
       topP: settings.topP ?? 0.95,
       topK: settings.topK ?? 40,
       maxOutputTokens: settings.maxOutputTokens ?? 8192,
+  
       ...(systemInstruction && { systemInstruction }),
       labels: buildLabels(labels, backend),
       // Configuración para generación de imágenes
@@ -428,7 +438,7 @@ export async function sendMessageStream(
         let usageMetadata: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined;
 
         for await (const chunk of responseStream) {
-          // Extraer texto del chunk
+          // Extraer texto del primer candidato
           const parts = chunk.candidates?.[0]?.content?.parts;
           const chunkText = extractTextFromParts(parts);
 
@@ -437,13 +447,16 @@ export async function sendMessageStream(
             callbacks.onChunk(chunkText);
           }
 
-          // Extraer imágenes del chunk
-          const chunkImages = extractImagesFromParts(parts);
-          if (chunkImages.length > 0) {
-            allImages.push(...chunkImages);
-            if (callbacks.onImage) {
-              for (const img of chunkImages) {
-                callbacks.onImage(img);
+          // Extraer imágenes de todos los candidatos (para candidateCount > 1)
+          const candidates = chunk.candidates || [];
+          for (const candidate of candidates) {
+            const chunkImages = extractImagesFromParts(candidate.content?.parts);
+            if (chunkImages.length > 0) {
+              allImages.push(...chunkImages);
+              if (callbacks.onImage) {
+                for (const img of chunkImages) {
+                  callbacks.onImage(img);
+                }
               }
             }
           }

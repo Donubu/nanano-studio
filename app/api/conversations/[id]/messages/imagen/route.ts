@@ -98,128 +98,13 @@ export async function POST(
 
     const conversation = conversations[0];
 
-    // Get the correct model from project_generation_config based on quality_tier
-    // Use generation_type_override if provided (e.g., when video conversation is in image mode)
-    let effectiveModelId = conversation.model_model_id;
-    let effectiveBackend = conversation.model_api_backend || undefined;
-    let effectiveCostImage1k = Number(conversation.cost_image_1k) || 0;
-    let effectiveCostImage2k = Number(conversation.cost_image_2k) || 0;
-    let effectiveCostImage4k = Number(conversation.cost_image_4k) || 0;
-    const generationType = generation_type_override || conversation.generation_type || "image";
-    if (generation_type_override) {
-      console.log(`[Imagen] Using generation_type_override: ${generation_type_override} (conversation type: ${conversation.generation_type})`);
-    }
-
-    if (conversation.project_id) {
-      const [configRows] = await pool.execute<RowDataPacket[]>(`
-        SELECT
-          pgc.model_normal_id,
-          pgc.model_hq_id,
-          mn.model_id as model_normal_model_id,
-          mn.api_backend as mn_api_backend,
-          mn.cost_image_1k as mn_cost_1k,
-          mn.cost_image_2k as mn_cost_2k,
-          mn.cost_image_4k as mn_cost_4k,
-          mh.model_id as model_hq_model_id,
-          mh.api_backend as mh_api_backend,
-          mh.cost_image_1k as mh_cost_1k,
-          mh.cost_image_2k as mh_cost_2k,
-          mh.cost_image_4k as mh_cost_4k
-        FROM project_generation_config pgc
-        LEFT JOIN models mn ON pgc.model_normal_id = mn.id
-        LEFT JOIN models mh ON pgc.model_hq_id = mh.id
-        WHERE pgc.project_id = ? AND pgc.generation_type = ? AND pgc.is_enabled = 1
-      `, [conversation.project_id, generationType]);
-
-      if (configRows.length > 0) {
-        const config = configRows[0];
-        if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
-          effectiveModelId = config.model_hq_model_id;
-          effectiveBackend = config.mh_api_backend || undefined;
-          effectiveCostImage1k = Number(config.mh_cost_1k) || 0;
-          effectiveCostImage2k = Number(config.mh_cost_2k) || 0;
-          effectiveCostImage4k = Number(config.mh_cost_4k) || 0;
-          console.log(`[Imagen] Using HQ model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
-        } else if (config.model_normal_model_id) {
-          effectiveModelId = config.model_normal_model_id;
-          effectiveBackend = config.mn_api_backend || undefined;
-          effectiveCostImage1k = Number(config.mn_cost_1k) || 0;
-          effectiveCostImage2k = Number(config.mn_cost_2k) || 0;
-          effectiveCostImage4k = Number(config.mn_cost_4k) || 0;
-          console.log(`[Imagen] Using Normal model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
-        }
-      }
-    }
-
-    // Verificar que el modelo es Imagen 4
-    if (!effectiveModelId.includes("imagen-4")) {
-      return NextResponse.json({ error: "El modelo seleccionado no es Imagen 4" }, { status: 400 });
-    }
-
-    // Guardar mensaje del usuario (con quality_tier)
-    const [userMessageResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)
-       VALUES (?, 'user', 'text', ?, ?)`,
-      [id, effectiveQualityTier, content]
-    );
-    const userMessageId = userMessageResult.insertId;
-
-    // Verificar si necesita generar titulo (aún tiene el titulo por defecto)
-    const needsTitle = conversation.title === "Nueva conversación" || !conversation.title;
-
-    // Actualizar timestamp de la conversacion
-    await pool.execute(
-      "UPDATE conversations SET updated_at = NOW() WHERE id = ?",
-      [id]
-    );
-
-    // Preparar labels para tracking
-    const userIdentifier = session.user.email?.split("@")[0] || "unknown";
-    const labels: Labels = {
-      project_name: conversation.project_name || "sin_proyecto",
-      user_name: userIdentifier,
-    };
-
-    // Configuracion de generacion de imagen (usa request settings, fallback a conversation settings)
-    const aspectRatio: ImagenAspectRatio = (imageSettings?.aspectRatio ||
-      conversation.image_aspect_ratio || "16:9") as ImagenAspectRatio;
-    const resolution: ImagenResolution = (imageSettings?.resolution ||
-      conversation.image_size || "1K") as ImagenResolution;
-
-    // Number of images to generate (clamp 1-4)
-    const numberOfImages = Math.min(4, Math.max(1, imageSettings?.numberOfImages || 1));
-
-    const backendLabel = effectiveBackend === 'vertex' ? 'Vertex AI' : effectiveBackend === 'gemini' ? 'Gemini API' : (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API");
-    console.log(`\n========== [IMAGEN 4 GENERATION REQUEST] (${backendLabel}) ==========`);
-    console.log("Model:", effectiveModelId);
-    console.log("Quality tier:", effectiveQualityTier);
-    console.log("Aspect Ratio:", aspectRatio);
-    console.log("Resolution:", resolution);
-    console.log("Number of images:", numberOfImages);
-    console.log("Prompt:", content);
-    if (imageSettings?.negativePrompt) {
-      console.log("Negative Prompt:", imageSettings.negativePrompt);
-    }
-    if (imageSettings?.seed) {
-      console.log("User-provided Seed:", imageSettings.seed);
-    }
-    console.log("====================================================\n");
-
-    // Crear el stream SSE para enviar retry/progress al usuario
+    // Crear el stream SSE inmediatamente para enviar headers rápido
     const encoder = new TextEncoder();
     let controllerClosed = false;
     let heartbeat: ReturnType<typeof setInterval>;
 
     const stream = new ReadableStream({
       async start(controller) {
-
-        const sendEvent = (data: Record<string, unknown>) => {
-          if (!controllerClosed) {
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
-            );
-          }
-        };
 
         // Heartbeat cada 10s para mantener la conexión viva
         heartbeat = setInterval(() => {
@@ -230,7 +115,125 @@ export async function POST(
           }
         }, 10000);
 
+        const sendEvent = (data: Record<string, unknown>) => {
+          if (!controllerClosed) {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
+            );
+          }
+        };
+
         try {
+          // Get the correct model from project_generation_config based on quality_tier
+          let effectiveModelId = conversation.model_model_id;
+          let effectiveBackend = conversation.model_api_backend || undefined;
+          let effectiveCostImage1k = Number(conversation.cost_image_1k) || 0;
+          let effectiveCostImage2k = Number(conversation.cost_image_2k) || 0;
+          let effectiveCostImage4k = Number(conversation.cost_image_4k) || 0;
+          const generationType = generation_type_override || conversation.generation_type || "image";
+          if (generation_type_override) {
+            console.log(`[Imagen] Using generation_type_override: ${generation_type_override} (conversation type: ${conversation.generation_type})`);
+          }
+
+          if (conversation.project_id) {
+            const [configRows] = await pool.execute<RowDataPacket[]>(`
+              SELECT
+                pgc.model_normal_id,
+                pgc.model_hq_id,
+                mn.model_id as model_normal_model_id,
+                mn.api_backend as mn_api_backend,
+                mn.cost_image_1k as mn_cost_1k,
+                mn.cost_image_2k as mn_cost_2k,
+                mn.cost_image_4k as mn_cost_4k,
+                mh.model_id as model_hq_model_id,
+                mh.api_backend as mh_api_backend,
+                mh.cost_image_1k as mh_cost_1k,
+                mh.cost_image_2k as mh_cost_2k,
+                mh.cost_image_4k as mh_cost_4k
+              FROM project_generation_config pgc
+              LEFT JOIN models mn ON pgc.model_normal_id = mn.id
+              LEFT JOIN models mh ON pgc.model_hq_id = mh.id
+              WHERE pgc.project_id = ? AND pgc.generation_type = ? AND pgc.is_enabled = 1
+            `, [conversation.project_id, generationType]);
+
+            if (configRows.length > 0) {
+              const config = configRows[0];
+              if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
+                effectiveModelId = config.model_hq_model_id;
+                effectiveBackend = config.mh_api_backend || undefined;
+                effectiveCostImage1k = Number(config.mh_cost_1k) || 0;
+                effectiveCostImage2k = Number(config.mh_cost_2k) || 0;
+                effectiveCostImage4k = Number(config.mh_cost_4k) || 0;
+                console.log(`[Imagen] Using HQ model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
+              } else if (config.model_normal_model_id) {
+                effectiveModelId = config.model_normal_model_id;
+                effectiveBackend = config.mn_api_backend || undefined;
+                effectiveCostImage1k = Number(config.mn_cost_1k) || 0;
+                effectiveCostImage2k = Number(config.mn_cost_2k) || 0;
+                effectiveCostImage4k = Number(config.mn_cost_4k) || 0;
+                console.log(`[Imagen] Using Normal model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
+              }
+            }
+          }
+
+          // Verificar que el modelo es Imagen 4
+          if (!effectiveModelId.includes("imagen-4")) {
+            sendEvent({ type: "error", message: "El modelo seleccionado no es Imagen 4" });
+            clearInterval(heartbeat);
+            controllerClosed = true;
+            controller.close();
+            return;
+          }
+
+          // Guardar mensaje del usuario (con quality_tier)
+          const [userMessageResult] = await pool.execute<ResultSetHeader>(
+            `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)
+             VALUES (?, 'user', 'text', ?, ?)`,
+            [id, effectiveQualityTier, content]
+          );
+          const userMessageId = userMessageResult.insertId;
+
+          // Verificar si necesita generar titulo (aún tiene el titulo por defecto)
+          const needsTitle = conversation.title === "Nueva conversación" || !conversation.title;
+
+          // Actualizar timestamp de la conversacion
+          await pool.execute(
+            "UPDATE conversations SET updated_at = NOW() WHERE id = ?",
+            [id]
+          );
+
+          // Preparar labels para tracking
+          const userIdentifier = session.user.email?.split("@")[0] || "unknown";
+          const labels: Labels = {
+            project_name: conversation.project_name || "sin_proyecto",
+            user_name: userIdentifier,
+          };
+
+          // Configuracion de generacion de imagen (usa request settings, fallback a conversation settings)
+          const aspectRatio: ImagenAspectRatio = (imageSettings?.aspectRatio ||
+            conversation.image_aspect_ratio || "16:9") as ImagenAspectRatio;
+          const resolution: ImagenResolution = (imageSettings?.resolution ||
+            conversation.image_size || "1K") as ImagenResolution;
+
+          // Number of images to generate (clamp 1-4)
+          const numberOfImages = Math.min(4, Math.max(1, imageSettings?.numberOfImages || 1));
+
+          const backendLabel = effectiveBackend === 'vertex' ? 'Vertex AI' : effectiveBackend === 'gemini' ? 'Gemini API' : (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API");
+          console.log(`\n========== [IMAGEN 4 GENERATION REQUEST] (${backendLabel}) ==========`);
+          console.log("Model:", effectiveModelId);
+          console.log("Quality tier:", effectiveQualityTier);
+          console.log("Aspect Ratio:", aspectRatio);
+          console.log("Resolution:", resolution);
+          console.log("Number of images:", numberOfImages);
+          console.log("Prompt:", content);
+          if (imageSettings?.negativePrompt) {
+            console.log("Negative Prompt:", imageSettings.negativePrompt);
+          }
+          if (imageSettings?.seed) {
+            console.log("User-provided Seed:", imageSettings.seed);
+          }
+          console.log("====================================================\n");
+
           // Enviar el ID del mensaje del usuario
           sendEvent({ type: "user_message", id: userMessageId });
 
@@ -375,22 +378,25 @@ export async function POST(
           const errorMessage = error instanceof Error ? error.message : "Error desconocido";
 
           // Guardar mensaje de error (con content_type 'error' para excluirlo del historial)
-          // También marcar el mensaje del usuario con ignore_in_context para no enviarlo como contexto
-          const [modelResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, content)
-             VALUES (?, 'model', 'error', ?)`,
-            [id, `Error generando imagen: ${errorMessage}`]
-          );
-          await pool.execute(
-            `UPDATE messages SET ignore_in_context = 1 WHERE id = ?`,
-            [userMessageId]
-          );
+          try {
+            const [modelResult] = await pool.execute<ResultSetHeader>(
+              `INSERT INTO messages (conversation_id, role, content_type, content)
+               VALUES (?, 'model', 'error', ?)`,
+              [id, `Error generando imagen: ${errorMessage}`]
+            );
 
-          sendEvent({
-            type: "error",
-            message: errorMessage,
-            id: modelResult.insertId,
-          });
+            sendEvent({
+              type: "error",
+              message: errorMessage,
+              id: modelResult.insertId,
+            });
+          } catch (dbError) {
+            console.error("[Imagen] Error saving error message:", dbError);
+            sendEvent({
+              type: "error",
+              message: errorMessage,
+            });
+          }
 
           clearInterval(heartbeat);
           controllerClosed = true;

@@ -409,6 +409,15 @@ export function ChatInterface() {
         return modelId?.includes("imagen-4") ?? false;
     })();
 
+    // Gemini native models that support multi-image via parallel requests
+    const supportsMultiImage = (() => {
+        if (!imageTypeConfig) return false;
+        const modelId = selectedQualityTier === "hq"
+            ? imageTypeConfig.model_hq_model_id
+            : imageTypeConfig.model_normal_model_id;
+        return modelId === "gemini-3.1-flash-image-preview";
+    })();
+
     // Mark component as mounted for hydration
     useEffect(() => {
         setMounted(true);
@@ -1654,7 +1663,7 @@ export function ChatInterface() {
         content: string,
         files?: AttachedFile[],
         modelIdOverride?: number | null,
-        imageSettings?: { aspectRatio: string; size: string; negativePrompt?: string; isImagen4?: boolean; seed?: number; numberOfImages?: number },
+        imageSettings?: { aspectRatio: string; size: string; negativePrompt?: string; isImagen4?: boolean; seed?: number; numberOfImages?: number; supportsMultiImage?: boolean },
         generationTypeOverride?: "text" | "image" | "video" | "audio",
         noContext?: boolean
     ) => {
@@ -1753,7 +1762,7 @@ export function ChatInterface() {
                     useProjectSystemInstruction,
                     quality_tier: selectedQualityTier,
                     ...(modelIdOverride && { modelIdOverride }),
-                    ...(imageSettings && { imageSettings: { aspectRatio: imageSettings.aspectRatio, size: imageSettings.size } }),
+                    ...(imageSettings && { imageSettings: { aspectRatio: imageSettings.aspectRatio, size: imageSettings.size, numberOfImages: imageSettings.numberOfImages } }),
                     ...(generationTypeOverride && { generation_type_override: generationTypeOverride }),
                     ...(noContext && { no_context: noContext }),
                 };
@@ -3650,6 +3659,7 @@ export function ChatInterface() {
                                                 isImagen4: isImagen4Model,
                                                 seed: selectedSeed || undefined,
                                                 numberOfImages,
+                                                supportsMultiImage,
                                             };
                                             // Pass generation_type_override when in video conversation with image mode
                                             const typeOverride = isVideoConversation && generationMode === "image" ? "image" as const : undefined;
@@ -4127,7 +4137,31 @@ export function ChatInterface() {
                                             </select>
                                         </div>
 
-                                        {/* Number of Images - hidden: Gemini native rate-limits parallel requests */}
+                                        {/* Number of Images */}
+                                        {supportsMultiImage && (
+                                            <div>
+                                                <label className="text-xs text-muted-foreground mb-2 block">
+                                                    Cantidad de imagenes
+                                                </label>
+                                                <div className="flex gap-1">
+                                                    {[1, 2, 3, 4].map((n) => (
+                                                        <button
+                                                            key={n}
+                                                            onClick={() => setNumberOfImages(n)}
+                                                            disabled={isSending}
+                                                            className={cn(
+                                                                "flex-1 px-3 py-1.5 text-sm rounded-lg border transition-colors",
+                                                                numberOfImages === n
+                                                                    ? "bg-primary text-primary-foreground border-primary"
+                                                                    : "bg-muted border-border/50 hover:border-primary/50"
+                                                            )}
+                                                        >
+                                                            {n}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
                                     </>
                                 )}
                             </div>

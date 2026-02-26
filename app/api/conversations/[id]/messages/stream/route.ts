@@ -177,290 +177,11 @@ export async function POST(
 
     const conversation = conversations[0];
 
-    // Handle model override if provided
-    let effectiveModelId = conversation.model_model_id;
-    let effectiveSupportsImageGeneration = conversation.supports_image_generation;
-    let effectiveImageAspectRatio = conversation.image_aspect_ratio;
-    let effectiveImageSize = conversation.image_size;
-    let effectiveModelDbId = conversation.model_id; // Track the DB id for cost lookup
-    let effectiveBackend = conversation.model_api_backend || undefined;
-
-    // Get the correct model from project_generation_config based on quality_tier
-    // Use generation_type_override if provided (e.g., when video conversation is in image mode)
-    const generationType = generation_type_override || conversation.generation_type || "text";
-    if (generation_type_override) {
-      console.log(`[Stream] Using generation_type_override: ${generation_type_override} (conversation type: ${conversation.generation_type})`);
-    }
-    // Track effective costs (will be updated if we get model from config)
-    let effectiveCosts = {
-      cost_input_per_million: Number(conversation.cost_input_per_million) || 0,
-      cost_output_per_million: Number(conversation.cost_output_per_million) || 0,
-      cost_image_1k: Number(conversation.cost_image_1k) || 0,
-      cost_image_2k: Number(conversation.cost_image_2k) || 0,
-      cost_image_4k: Number(conversation.cost_image_4k) || 0,
-      cost_video_per_second: Number(conversation.cost_video_per_second) || 0,
-    };
-
-    if (conversation.project_id && !modelIdOverride) {
-      const [configRows] = await pool.execute<RowDataPacket[]>(`
-        SELECT
-          pgc.model_normal_id,
-          pgc.model_hq_id,
-          mn.model_id as model_normal_model_id,
-          mn.supports_image_generation as model_normal_supports_image,
-          mn.api_backend as mn_api_backend,
-          mn.cost_input_per_million as mn_cost_input,
-          mn.cost_output_per_million as mn_cost_output,
-          mn.cost_image_1k as mn_cost_image_1k,
-          mn.cost_image_2k as mn_cost_image_2k,
-          mn.cost_image_4k as mn_cost_image_4k,
-          mn.cost_video_per_second as mn_cost_video,
-          mh.model_id as model_hq_model_id,
-          mh.supports_image_generation as model_hq_supports_image,
-          mh.api_backend as mh_api_backend,
-          mh.cost_input_per_million as mh_cost_input,
-          mh.cost_output_per_million as mh_cost_output,
-          mh.cost_image_1k as mh_cost_image_1k,
-          mh.cost_image_2k as mh_cost_image_2k,
-          mh.cost_image_4k as mh_cost_image_4k,
-          mh.cost_video_per_second as mh_cost_video
-        FROM project_generation_config pgc
-        LEFT JOIN models mn ON pgc.model_normal_id = mn.id
-        LEFT JOIN models mh ON pgc.model_hq_id = mh.id
-        WHERE pgc.project_id = ? AND pgc.generation_type = ? AND pgc.is_enabled = 1
-      `, [conversation.project_id, generationType]);
-
-      if (configRows.length > 0) {
-        const config = configRows[0];
-        if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
-          effectiveModelId = config.model_hq_model_id;
-          effectiveSupportsImageGeneration = config.model_hq_supports_image;
-          effectiveModelDbId = config.model_hq_id;
-          effectiveBackend = config.mh_api_backend || undefined;
-          effectiveCosts = {
-            cost_input_per_million: Number(config.mh_cost_input) || 0,
-            cost_output_per_million: Number(config.mh_cost_output) || 0,
-            cost_image_1k: Number(config.mh_cost_image_1k) || 0,
-            cost_image_2k: Number(config.mh_cost_image_2k) || 0,
-            cost_image_4k: Number(config.mh_cost_image_4k) || 0,
-            cost_video_per_second: Number(config.mh_cost_video) || 0,
-          };
-          console.log(`[Stream] Using HQ model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
-        } else if (config.model_normal_model_id) {
-          effectiveModelId = config.model_normal_model_id;
-          effectiveSupportsImageGeneration = config.model_normal_supports_image;
-          effectiveModelDbId = config.model_normal_id;
-          effectiveBackend = config.mn_api_backend || undefined;
-          effectiveCosts = {
-            cost_input_per_million: Number(config.mn_cost_input) || 0,
-            cost_output_per_million: Number(config.mn_cost_output) || 0,
-            cost_image_1k: Number(config.mn_cost_image_1k) || 0,
-            cost_image_2k: Number(config.mn_cost_image_2k) || 0,
-            cost_image_4k: Number(config.mn_cost_image_4k) || 0,
-            cost_video_per_second: Number(config.mn_cost_video) || 0,
-          };
-          console.log(`[Stream] Using Normal model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
-        }
-      }
-    }
-
-    if (modelIdOverride && conversation.project_id) {
-      // Verify the override model belongs to the same project
-      const [overrideRows] = await pool.execute<ModelRow[]>(
-        `SELECT m.id, m.model_id, m.supports_image_generation
-         FROM models m
-         JOIN project_models pm ON m.id = pm.model_id
-         WHERE pm.project_id = ? AND m.id = ?`,
-        [conversation.project_id, modelIdOverride]
-      );
-
-      if (overrideRows.length > 0) {
-        effectiveModelId = overrideRows[0].model_id;
-        effectiveSupportsImageGeneration = overrideRows[0].supports_image_generation;
-        console.log(`[Stream] Using model override: ${effectiveModelId}`);
-      } else {
-        console.warn(`[Stream] Model override ${modelIdOverride} not found in project ${conversation.project_id}, using default`);
-      }
-    }
-
-    // Apply image settings override if provided
-    if (imageSettings) {
-      effectiveImageAspectRatio = imageSettings.aspectRatio;
-      effectiveImageSize = imageSettings.size;
-      console.log(`[Stream] Using image settings override: ${effectiveImageAspectRatio}, ${effectiveImageSize}`);
-    }
-
-    // Obtener system instruction del proyecto-modelo si existe
-    let projectSystemInstruction: string | null = null;
-    if (conversation.project_id && useProjectSystemInstruction) {
-      const [projectModels] = await pool.execute<ProjectModelRow[]>(
-        `SELECT system_instruction FROM project_models
-         WHERE project_id = ? AND model_id = ?`,
-        [conversation.project_id, conversation.model_id]
-      );
-      if (projectModels.length > 0) {
-        projectSystemInstruction = projectModels[0].system_instruction;
-      }
-    }
-
-    // Concatenar system instructions: modelo + proyecto + conversación
-    const systemParts: string[] = [];
-    if (conversation.model_system_instruction) systemParts.push(conversation.model_system_instruction);
-    if (projectSystemInstruction) systemParts.push(projectSystemInstruction);
-    if (conversation.system_instruction) systemParts.push(conversation.system_instruction);
-    const finalSystemInstruction: string | null = systemParts.length > 0 ? systemParts.join("\n\n") : null;
-
-
-    // Determinar tipo de contenido
-    const hasFiles = files && files.length > 0;
-    const firstImage = files?.find(f => f.type === "image");
-    const contentType = hasFiles ? "mixed" : "text";
-
-    // When skip_user_message is true, we skip creating the user message (used for parallel multi-image generation)
-    let savedImageUrl: string | null = null;
-    let userMessageId: number = 0;
-
-    if (!skip_user_message) {
-      // Guardar primera imagen en disco si existe (para preview en historial)
-      if (firstImage) {
-        try {
-          savedImageUrl = await saveUploadedFile(firstImage, id);
-        } catch (err) {
-          console.error("Error guardando imagen del usuario:", err);
-        }
-      }
-
-      // Guardar mensaje del usuario (con URL de imagen guardada, no base64)
-      const [userMessageResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, image_url, image_mime_type)
-         VALUES (?, 'user', ?, ?, ?, ?, ?)`,
-        [id, contentType, effectiveQualityTier, content, savedImageUrl, firstImage?.mimeType || null]
-      );
-
-      userMessageId = userMessageResult.insertId;
-
-      // Guardar todas las imágenes adjuntas en message_images
-      if (hasFiles && files) {
-        const imageFiles = files.filter(f => f.type === "image");
-        for (let i = 0; i < imageFiles.length; i++) {
-          const imgFile = imageFiles[i];
-          try {
-            // La primera imagen ya fue guardada como savedImageUrl
-            const imgUrl = i === 0 && savedImageUrl ? savedImageUrl : await saveUploadedFile(imgFile, id);
-            const base64Data = imgFile.dataUrl.split(",")[1];
-            const fileSize = Buffer.from(base64Data, "base64").length;
-            await pool.execute(
-              `INSERT INTO message_images (message_id, image_url, mime_type, file_size, sort_order) VALUES (?, ?, ?, ?, ?)`,
-              [userMessageId, imgUrl, imgFile.mimeType, fileSize, i]
-            );
-          } catch (err) {
-            console.error(`Error guardando imagen ${i} en message_images:`, err);
-          }
-        }
-      }
-    }
-
-    // Obtener historial de mensajes para contexto (excluir errores)
-    // Si no_context es true, o es generación de imagen/video, solo obtenemos el mensaje actual
-    // Si skip_user_message, no hay mensaje en BD — usamos el content del request directamente
-    const skipHistoryQuery = no_context || generationType === "image" || generationType === "video";
-    const [historyRows] = skip_user_message
-      ? [[] as MessageRow[]]
-      : skipHistoryQuery
-        ? await pool.execute<MessageRow[]>(
-            `SELECT role, content, image_url, image_mime_type, ignore_in_context
-             FROM messages
-             WHERE id = ?`,
-            [userMessageId]
-          )
-        : await pool.execute<MessageRow[]>(
-            `SELECT role, content, image_url, image_mime_type, ignore_in_context
-             FROM messages
-             WHERE conversation_id = ? AND content_type != 'error'
-             ORDER BY created_at ASC`,
-            [id]
-          );
-
-    // Filter out ignored messages:
-    // - User messages with ignore_in_context = 1
-    // - Model messages that follow an ignored user message
-    const filteredHistory: MessageRow[] = [];
-    let lastUserIgnored = false;
-    for (const msg of historyRows) {
-      if (msg.role === "user") {
-        lastUserIgnored = msg.ignore_in_context === 1;
-        if (!lastUserIgnored) {
-          filteredHistory.push(msg);
-        }
-      } else {
-        // Model message: include only if previous user message was not ignored
-        if (!lastUserIgnored) {
-          filteredHistory.push(msg);
-        }
-      }
-    }
-
-    // Convertir historial al formato de ChatMessage
-    const messages: ChatMessage[] = filteredHistory
-      .map((msg, index) => {
-        const isLastMessage = index === filteredHistory.length - 1;
-
-        // Para el último mensaje (el actual del usuario), incluir todos los archivos
-        if (isLastMessage && hasFiles && files) {
-          return {
-            role: msg.role,
-            content: msg.content,
-            files: files, // Incluir todos los archivos en el mensaje actual
-          };
-        }
-
-        // Para mensajes históricos, usar el formato legacy (solo una imagen)
-        return {
-          role: msg.role,
-          content: msg.content,
-          imageUrl: msg.image_url,
-          imageMimeType: msg.image_mime_type,
-        };
-      })
-      // Filter out messages with empty content (can happen from error responses)
-      .filter((msg) => msg.content && msg.content.trim() !== "");
-
-    // Para imagen/video, solo enviar el mensaje actual (sin historial).
-    // Los modelos de generación visual no usan contexto conversacional.
-    // También aplica cuando hay model override (ej: generando imagen desde conversación de video).
-    const skipHistory = modelIdOverride || generationType === "image" || generationType === "video";
-
-    // When skip_user_message, inject user message from request body (not from DB)
-    if (skip_user_message && messages.length === 0) {
-      messages.push({ role: "user", content });
-    }
-
-    const messagesToSend = skipHistory
-      ? messages.slice(-1) // Solo el último mensaje (el actual)
-      : messages;
-
-    // Verificar si necesita generar titulo (aún tiene el titulo por defecto)
-    const needsTitle = conversation.title === "Nueva conversación" || !conversation.title;
-
-    // Actualizar timestamp de la conversación
-    await pool.execute(
-      "UPDATE conversations SET updated_at = NOW() WHERE id = ?",
-      [id]
-    );
-
-    // Preparar labels para tracking en Vertex AI
-    // Usar solo la parte inicial del email para no exponer datos sensibles
-    const userIdentifier = session.user.email?.split("@")[0] || "unknown";
-    const labels: Labels = {
-      project_name: conversation.project_name || "sin_proyecto",
-      user_name: userIdentifier,
-    };
-
-    // Crear el stream de respuesta
+    // Crear el stream de respuesta inmediatamente para enviar headers rápido
     const encoder = new TextEncoder();
     let modelMessageId: number | null = null;
     let fullResponse = "";
-    let controllerClosed = false; // Hoisted para que cancel() pueda accederlo
+    let controllerClosed = false;
     let heartbeat: ReturnType<typeof setInterval>;
 
     const stream = new ReadableStream({
@@ -474,65 +195,344 @@ export async function POST(
           }
         }, 10000);
 
-        // Enviar el ID del mensaje del usuario primero (skip for parallel image requests)
-        if (!skip_user_message) {
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: "user_message", id: userMessageId })}\n\n`)
-          );
-        }
-
-        // Construir configuración de generación
-        const generationConfig = {
-          temperature: Number(conversation.temperature),
-          topP: Number(conversation.top_p),
-          topK: conversation.top_k,
-          maxOutputTokens: conversation.max_output_tokens,
-          ...(effectiveSupportsImageGeneration && {
-            imageConfig: {
-              aspectRatio: effectiveImageAspectRatio as "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9",
-              imageSize: effectiveImageSize as "1K" | "2K" | "4K",
-            },
-          }),
-        };
-
-        // Construir objeto de request para debug y almacenamiento
-        const requestData = {
-          model: effectiveModelId,
-          systemInstruction: finalSystemInstruction,
-          generationConfig,
-          labels,
-          messages: messagesToSend.map(m => ({
-            role: m.role,
-            content: m.content,
-            files: m.files?.map(f => ({ name: f.name, type: f.type, mimeType: f.mimeType })),
-            imageUrl: m.imageUrl || undefined,
-          })),
-        };
-
-        // Debug: log completo de la solicitud al modelo
-        const backendLabel = effectiveBackend === 'vertex' ? 'Vertex AI' : effectiveBackend === 'gemini' ? 'Gemini API' : (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API");
-        console.log(`\n========== [GOOGLE AI REQUEST] (${backendLabel}) ==========`);
-        console.log(JSON.stringify(requestData, null, 2));
-        console.log("==========================================\n");
-
-        // Guardar request_data en el mensaje del usuario
-        if (!skip_user_message) {
-          await pool.execute(
-            "UPDATE messages SET request_data = ? WHERE id = ?",
-            [JSON.stringify(requestData), userMessageId]
-          );
-        }
-
-        // Variables para trackear múltiples imágenes generadas durante streaming
-        interface SavedImage {
-          url: string;
-          fileSize: number;
-          mimeType: string;
-        }
-        let savedImages: SavedImage[] = [];
-        let imageUploadPromises: Promise<void>[] = [];
-
         try {
+          // Handle model override if provided
+          let effectiveModelId = conversation.model_model_id;
+          let effectiveSupportsImageGeneration = conversation.supports_image_generation;
+          let effectiveImageAspectRatio = conversation.image_aspect_ratio;
+          let effectiveImageSize = conversation.image_size;
+          let effectiveModelDbId = conversation.model_id; // Track the DB id for cost lookup
+          let effectiveBackend = conversation.model_api_backend || undefined;
+
+          // Get the correct model from project_generation_config based on quality_tier
+          // Use generation_type_override if provided (e.g., when video conversation is in image mode)
+          const generationType = generation_type_override || conversation.generation_type || "text";
+          if (generation_type_override) {
+            console.log(`[Stream] Using generation_type_override: ${generation_type_override} (conversation type: ${conversation.generation_type})`);
+          }
+          // Track effective costs (will be updated if we get model from config)
+          let effectiveCosts = {
+            cost_input_per_million: Number(conversation.cost_input_per_million) || 0,
+            cost_output_per_million: Number(conversation.cost_output_per_million) || 0,
+            cost_image_1k: Number(conversation.cost_image_1k) || 0,
+            cost_image_2k: Number(conversation.cost_image_2k) || 0,
+            cost_image_4k: Number(conversation.cost_image_4k) || 0,
+            cost_video_per_second: Number(conversation.cost_video_per_second) || 0,
+          };
+
+          if (conversation.project_id && !modelIdOverride) {
+            const [configRows] = await pool.execute<RowDataPacket[]>(`
+              SELECT
+                pgc.model_normal_id,
+                pgc.model_hq_id,
+                mn.model_id as model_normal_model_id,
+                mn.supports_image_generation as model_normal_supports_image,
+                mn.api_backend as mn_api_backend,
+                mn.cost_input_per_million as mn_cost_input,
+                mn.cost_output_per_million as mn_cost_output,
+                mn.cost_image_1k as mn_cost_image_1k,
+                mn.cost_image_2k as mn_cost_image_2k,
+                mn.cost_image_4k as mn_cost_image_4k,
+                mn.cost_video_per_second as mn_cost_video,
+                mh.model_id as model_hq_model_id,
+                mh.supports_image_generation as model_hq_supports_image,
+                mh.api_backend as mh_api_backend,
+                mh.cost_input_per_million as mh_cost_input,
+                mh.cost_output_per_million as mh_cost_output,
+                mh.cost_image_1k as mh_cost_image_1k,
+                mh.cost_image_2k as mh_cost_image_2k,
+                mh.cost_image_4k as mh_cost_image_4k,
+                mh.cost_video_per_second as mh_cost_video
+              FROM project_generation_config pgc
+              LEFT JOIN models mn ON pgc.model_normal_id = mn.id
+              LEFT JOIN models mh ON pgc.model_hq_id = mh.id
+              WHERE pgc.project_id = ? AND pgc.generation_type = ? AND pgc.is_enabled = 1
+            `, [conversation.project_id, generationType]);
+
+            if (configRows.length > 0) {
+              const config = configRows[0];
+              if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
+                effectiveModelId = config.model_hq_model_id;
+                effectiveSupportsImageGeneration = config.model_hq_supports_image;
+                effectiveModelDbId = config.model_hq_id;
+                effectiveBackend = config.mh_api_backend || undefined;
+                effectiveCosts = {
+                  cost_input_per_million: Number(config.mh_cost_input) || 0,
+                  cost_output_per_million: Number(config.mh_cost_output) || 0,
+                  cost_image_1k: Number(config.mh_cost_image_1k) || 0,
+                  cost_image_2k: Number(config.mh_cost_image_2k) || 0,
+                  cost_image_4k: Number(config.mh_cost_image_4k) || 0,
+                  cost_video_per_second: Number(config.mh_cost_video) || 0,
+                };
+                console.log(`[Stream] Using HQ model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
+              } else if (config.model_normal_model_id) {
+                effectiveModelId = config.model_normal_model_id;
+                effectiveSupportsImageGeneration = config.model_normal_supports_image;
+                effectiveModelDbId = config.model_normal_id;
+                effectiveBackend = config.mn_api_backend || undefined;
+                effectiveCosts = {
+                  cost_input_per_million: Number(config.mn_cost_input) || 0,
+                  cost_output_per_million: Number(config.mn_cost_output) || 0,
+                  cost_image_1k: Number(config.mn_cost_image_1k) || 0,
+                  cost_image_2k: Number(config.mn_cost_image_2k) || 0,
+                  cost_image_4k: Number(config.mn_cost_image_4k) || 0,
+                  cost_video_per_second: Number(config.mn_cost_video) || 0,
+                };
+                console.log(`[Stream] Using Normal model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
+              }
+            }
+          }
+
+          if (modelIdOverride && conversation.project_id) {
+            // Verify the override model belongs to the same project
+            const [overrideRows] = await pool.execute<ModelRow[]>(
+              `SELECT m.id, m.model_id, m.supports_image_generation
+               FROM models m
+               JOIN project_models pm ON m.id = pm.model_id
+               WHERE pm.project_id = ? AND m.id = ?`,
+              [conversation.project_id, modelIdOverride]
+            );
+
+            if (overrideRows.length > 0) {
+              effectiveModelId = overrideRows[0].model_id;
+              effectiveSupportsImageGeneration = overrideRows[0].supports_image_generation;
+              console.log(`[Stream] Using model override: ${effectiveModelId}`);
+            } else {
+              console.warn(`[Stream] Model override ${modelIdOverride} not found in project ${conversation.project_id}, using default`);
+            }
+          }
+
+          // Apply image settings override if provided
+          if (imageSettings) {
+            effectiveImageAspectRatio = imageSettings.aspectRatio;
+            effectiveImageSize = imageSettings.size;
+            console.log(`[Stream] Using image settings override: ${effectiveImageAspectRatio}, ${effectiveImageSize}`);
+          }
+
+          // Obtener system instruction del proyecto-modelo si existe
+          let projectSystemInstruction: string | null = null;
+          if (conversation.project_id && useProjectSystemInstruction) {
+            const [projectModels] = await pool.execute<ProjectModelRow[]>(
+              `SELECT system_instruction FROM project_models
+               WHERE project_id = ? AND model_id = ?`,
+              [conversation.project_id, conversation.model_id]
+            );
+            if (projectModels.length > 0) {
+              projectSystemInstruction = projectModels[0].system_instruction;
+            }
+          }
+
+          // Concatenar system instructions: modelo + proyecto + conversación
+          const systemParts: string[] = [];
+          if (conversation.model_system_instruction) systemParts.push(conversation.model_system_instruction);
+          if (projectSystemInstruction) systemParts.push(projectSystemInstruction);
+          if (conversation.system_instruction) systemParts.push(conversation.system_instruction);
+          const finalSystemInstruction: string | null = systemParts.length > 0 ? systemParts.join("\n\n") : null;
+
+
+          // Determinar tipo de contenido
+          const hasFiles = files && files.length > 0;
+          const firstImage = files?.find(f => f.type === "image");
+          const contentType = hasFiles ? "mixed" : "text";
+
+          // When skip_user_message is true, we skip creating the user message (used for parallel multi-image generation)
+          let savedImageUrl: string | null = null;
+          let userMessageId: number = 0;
+
+          if (!skip_user_message) {
+            // Guardar primera imagen en disco si existe (para preview en historial)
+            if (firstImage) {
+              try {
+                savedImageUrl = await saveUploadedFile(firstImage, id);
+              } catch (err) {
+                console.error("Error guardando imagen del usuario:", err);
+              }
+            }
+
+            // Guardar mensaje del usuario (con URL de imagen guardada, no base64)
+            const [userMessageResult] = await pool.execute<ResultSetHeader>(
+              `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, image_url, image_mime_type)
+               VALUES (?, 'user', ?, ?, ?, ?, ?)`,
+              [id, contentType, effectiveQualityTier, content, savedImageUrl, firstImage?.mimeType || null]
+            );
+
+            userMessageId = userMessageResult.insertId;
+
+            // Guardar todas las imágenes adjuntas en message_images
+            if (hasFiles && files) {
+              const imageFiles = files.filter(f => f.type === "image");
+              for (let i = 0; i < imageFiles.length; i++) {
+                const imgFile = imageFiles[i];
+                try {
+                  // La primera imagen ya fue guardada como savedImageUrl
+                  const imgUrl = i === 0 && savedImageUrl ? savedImageUrl : await saveUploadedFile(imgFile, id);
+                  const base64Data = imgFile.dataUrl.split(",")[1];
+                  const fileSize = Buffer.from(base64Data, "base64").length;
+                  await pool.execute(
+                    `INSERT INTO message_images (message_id, image_url, mime_type, file_size, sort_order) VALUES (?, ?, ?, ?, ?)`,
+                    [userMessageId, imgUrl, imgFile.mimeType, fileSize, i]
+                  );
+                } catch (err) {
+                  console.error(`Error guardando imagen ${i} en message_images:`, err);
+                }
+              }
+            }
+          }
+
+          // Obtener historial de mensajes para contexto (excluir errores)
+          // Si no_context es true, o es generación de imagen/video, solo obtenemos el mensaje actual
+          // Si skip_user_message, no hay mensaje en BD — usamos el content del request directamente
+          const skipHistoryQuery = no_context || generationType === "image" || generationType === "video";
+          const [historyRows] = skip_user_message
+            ? [[] as MessageRow[]]
+            : skipHistoryQuery
+              ? await pool.execute<MessageRow[]>(
+                  `SELECT role, content, image_url, image_mime_type, ignore_in_context
+                   FROM messages
+                   WHERE id = ?`,
+                  [userMessageId]
+                )
+              : await pool.execute<MessageRow[]>(
+                  `SELECT role, content, image_url, image_mime_type, ignore_in_context
+                   FROM messages
+                   WHERE conversation_id = ? AND content_type != 'error'
+                   ORDER BY created_at ASC`,
+                  [id]
+                );
+
+          // Filter out ignored messages:
+          // - User messages with ignore_in_context = 1
+          // - Model messages that follow an ignored user message
+          const filteredHistory: MessageRow[] = [];
+          let lastUserIgnored = false;
+          for (const msg of historyRows) {
+            if (msg.role === "user") {
+              lastUserIgnored = msg.ignore_in_context === 1;
+              if (!lastUserIgnored) {
+                filteredHistory.push(msg);
+              }
+            } else {
+              // Model message: include only if previous user message was not ignored
+              if (!lastUserIgnored) {
+                filteredHistory.push(msg);
+              }
+            }
+          }
+
+          // Convertir historial al formato de ChatMessage
+          const messages: ChatMessage[] = filteredHistory
+            .map((msg, index) => {
+              const isLastMessage = index === filteredHistory.length - 1;
+
+              // Para el último mensaje (el actual del usuario), incluir todos los archivos
+              if (isLastMessage && hasFiles && files) {
+                return {
+                  role: msg.role,
+                  content: msg.content,
+                  files: files, // Incluir todos los archivos en el mensaje actual
+                };
+              }
+
+              // Para mensajes históricos, usar el formato legacy (solo una imagen)
+              return {
+                role: msg.role,
+                content: msg.content,
+                imageUrl: msg.image_url,
+                imageMimeType: msg.image_mime_type,
+              };
+            })
+            // Filter out messages with empty content (can happen from error responses)
+            .filter((msg) => msg.content && msg.content.trim() !== "");
+
+          // Para imagen/video, solo enviar el mensaje actual (sin historial).
+          // Los modelos de generación visual no usan contexto conversacional.
+          // También aplica cuando hay model override (ej: generando imagen desde conversación de video).
+          const skipHistory = modelIdOverride || generationType === "image" || generationType === "video";
+
+          // When skip_user_message, inject user message from request body (not from DB)
+          if (skip_user_message && messages.length === 0) {
+            messages.push({ role: "user", content });
+          }
+
+          const messagesToSend = skipHistory
+            ? messages.slice(-1) // Solo el último mensaje (el actual)
+            : messages;
+
+          // Verificar si necesita generar titulo (aún tiene el titulo por defecto)
+          const needsTitle = conversation.title === "Nueva conversación" || !conversation.title;
+
+          // Actualizar timestamp de la conversación
+          await pool.execute(
+            "UPDATE conversations SET updated_at = NOW() WHERE id = ?",
+            [id]
+          );
+
+          // Preparar labels para tracking en Vertex AI
+          // Usar solo la parte inicial del email para no exponer datos sensibles
+          const userIdentifier = session.user.email?.split("@")[0] || "unknown";
+          const labels: Labels = {
+            project_name: conversation.project_name || "sin_proyecto",
+            user_name: userIdentifier,
+          };
+
+          // Enviar el ID del mensaje del usuario primero (skip for parallel image requests)
+          if (!skip_user_message) {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ type: "user_message", id: userMessageId })}\n\n`)
+            );
+          }
+
+          // Construir configuración de generación
+          const generationConfig = {
+            temperature: Number(conversation.temperature),
+            topP: Number(conversation.top_p),
+            topK: conversation.top_k,
+            maxOutputTokens: conversation.max_output_tokens,
+            ...(effectiveSupportsImageGeneration && {
+              imageConfig: {
+                aspectRatio: effectiveImageAspectRatio as "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9",
+                imageSize: effectiveImageSize as "1K" | "2K" | "4K",
+              },
+            }),
+          };
+
+          // Construir objeto de request para debug y almacenamiento
+          const requestData = {
+            model: effectiveModelId,
+            systemInstruction: finalSystemInstruction,
+            generationConfig,
+            labels,
+            messages: messagesToSend.map(m => ({
+              role: m.role,
+              content: m.content,
+              files: m.files?.map(f => ({ name: f.name, type: f.type, mimeType: f.mimeType })),
+              imageUrl: m.imageUrl || undefined,
+            })),
+          };
+
+          // Debug: log completo de la solicitud al modelo
+          const backendLabel = effectiveBackend === 'vertex' ? 'Vertex AI' : effectiveBackend === 'gemini' ? 'Gemini API' : (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API");
+          console.log(`\n========== [GOOGLE AI REQUEST] (${backendLabel}) ==========`);
+          console.log(JSON.stringify(requestData, null, 2));
+          console.log("==========================================\n");
+
+          // Guardar request_data en el mensaje del usuario
+          if (!skip_user_message) {
+            await pool.execute(
+              "UPDATE messages SET request_data = ? WHERE id = ?",
+              [JSON.stringify(requestData), userMessageId]
+            );
+          }
+
+          // Variables para trackear múltiples imágenes generadas durante streaming
+          interface SavedImage {
+            url: string;
+            fileSize: number;
+            mimeType: string;
+          }
+          let savedImages: SavedImage[] = [];
+          let imageUploadPromises: Promise<void>[] = [];
+
           await sendMessageStream(
             effectiveModelId,
             messagesToSend,
@@ -810,26 +810,41 @@ export async function POST(
           const errorMessage = error instanceof Error ? error.message : "Error desconocido";
 
           // Guardar mensaje de error
-          const [modelResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, content)
-             VALUES (?, 'model', 'text', ?)`,
-            [id, `Error: ${errorMessage}`]
-          );
-
-          if (!controllerClosed) {
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({
-                  type: "error",
-                  message: errorMessage,
-                  id: modelResult.insertId,
-                })}\n\n`
-              )
+          try {
+            const [modelResult] = await pool.execute<ResultSetHeader>(
+              `INSERT INTO messages (conversation_id, role, content_type, content)
+               VALUES (?, 'model', 'text', ?)`,
+              [id, `Error: ${errorMessage}`]
             );
-            clearInterval(heartbeat);
-            controllerClosed = true;
-            controller.close();
+
+            if (!controllerClosed) {
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    type: "error",
+                    message: errorMessage,
+                    id: modelResult.insertId,
+                  })}\n\n`
+                )
+              );
+            }
+          } catch (dbError) {
+            console.error("Error saving error message:", dbError);
+            if (!controllerClosed) {
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    type: "error",
+                    message: errorMessage,
+                  })}\n\n`
+                )
+              );
+            }
           }
+
+          clearInterval(heartbeat);
+          controllerClosed = true;
+          controller.close();
         }
       },
       cancel() {

@@ -142,45 +142,6 @@ export async function POST(
 
     const conversation = conversations[0];
 
-    // Get the correct model from project_generation_config based on quality_tier
-    let effectiveModelId = conversation.model_model_id;
-    let effectiveBackend = conversation.model_api_backend || undefined;
-    let effectiveCostVideoPerSecond = Number(conversation.cost_video_per_second) || 0;
-    const generationType = conversation.generation_type || "video";
-
-    if (conversation.project_id) {
-      const [configRows] = await pool.execute<RowDataPacket[]>(`
-        SELECT
-          pgc.model_normal_id,
-          pgc.model_hq_id,
-          mn.model_id as model_normal_model_id,
-          mn.api_backend as mn_api_backend,
-          mn.cost_video_per_second as mn_cost_video,
-          mh.model_id as model_hq_model_id,
-          mh.api_backend as mh_api_backend,
-          mh.cost_video_per_second as mh_cost_video
-        FROM project_generation_config pgc
-        LEFT JOIN models mn ON pgc.model_normal_id = mn.id
-        LEFT JOIN models mh ON pgc.model_hq_id = mh.id
-        WHERE pgc.project_id = ? AND pgc.generation_type = ? AND pgc.is_enabled = 1
-      `, [conversation.project_id, generationType]);
-
-      if (configRows.length > 0) {
-        const config = configRows[0];
-        if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
-          effectiveModelId = config.model_hq_model_id;
-          effectiveBackend = config.mh_api_backend || undefined;
-          effectiveCostVideoPerSecond = Number(config.mh_cost_video) || 0;
-          console.log(`[Video] Using HQ model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
-        } else if (config.model_normal_model_id) {
-          effectiveModelId = config.model_normal_model_id;
-          effectiveBackend = config.mn_api_backend || undefined;
-          effectiveCostVideoPerSecond = Number(config.mn_cost_video) || 0;
-          console.log(`[Video] Using Normal model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
-        }
-      }
-    }
-
     // Verificar que el modelo soporta video
     if (!conversation.supports_video_generation) {
       return new Response(JSON.stringify({ error: "El modelo seleccionado no soporta generación de video" }), {
@@ -189,36 +150,22 @@ export async function POST(
       });
     }
 
-    // Guardar mensaje del usuario (con quality_tier)
-    const [userMessageResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)
-       VALUES (?, 'user', 'text', ?, ?)`,
-      [id, effectiveQualityTier, content]
-    );
-    const userMessageId = userMessageResult.insertId;
-
-    // Verificar si necesita generar titulo (aún tiene el titulo por defecto)
-    const needsTitle = conversation.title === "Nueva conversación" || !conversation.title;
-
-    // Actualizar timestamp de la conversación
-    await pool.execute(
-      "UPDATE conversations SET updated_at = NOW() WHERE id = ?",
-      [id]
-    );
-
-    // Preparar labels para tracking
-    const userIdentifier = session.user.email?.split("@")[0] || "unknown";
-    const labels: Labels = {
-      project_name: conversation.project_name || "sin_proyecto",
-      user_name: userIdentifier,
-    };
-
-    // Crear el stream de respuesta SSE
+    // Crear el stream de respuesta SSE inmediatamente para enviar headers rápido
     const encoder = new TextEncoder();
     let controllerClosed = false;
+    let heartbeat: ReturnType<typeof setInterval>;
 
     const stream = new ReadableStream({
       async start(controller) {
+
+        // Heartbeat cada 10s para mantener la conexión viva durante generaciones largas
+        heartbeat = setInterval(() => {
+          if (!controllerClosed) {
+            controller.enqueue(encoder.encode(`: ping\n\n`));
+          } else {
+            clearInterval(heartbeat);
+          }
+        }, 10000);
 
         const sendEvent = (data: Record<string, unknown>) => {
           if (!controllerClosed) {
@@ -229,6 +176,69 @@ export async function POST(
         };
 
         try {
+          // Get the correct model from project_generation_config based on quality_tier
+          let effectiveModelId = conversation.model_model_id;
+          let effectiveBackend = conversation.model_api_backend || undefined;
+          let effectiveCostVideoPerSecond = Number(conversation.cost_video_per_second) || 0;
+          const generationType = conversation.generation_type || "video";
+
+          if (conversation.project_id) {
+            const [configRows] = await pool.execute<RowDataPacket[]>(`
+              SELECT
+                pgc.model_normal_id,
+                pgc.model_hq_id,
+                mn.model_id as model_normal_model_id,
+                mn.api_backend as mn_api_backend,
+                mn.cost_video_per_second as mn_cost_video,
+                mh.model_id as model_hq_model_id,
+                mh.api_backend as mh_api_backend,
+                mh.cost_video_per_second as mh_cost_video
+              FROM project_generation_config pgc
+              LEFT JOIN models mn ON pgc.model_normal_id = mn.id
+              LEFT JOIN models mh ON pgc.model_hq_id = mh.id
+              WHERE pgc.project_id = ? AND pgc.generation_type = ? AND pgc.is_enabled = 1
+            `, [conversation.project_id, generationType]);
+
+            if (configRows.length > 0) {
+              const config = configRows[0];
+              if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
+                effectiveModelId = config.model_hq_model_id;
+                effectiveBackend = config.mh_api_backend || undefined;
+                effectiveCostVideoPerSecond = Number(config.mh_cost_video) || 0;
+                console.log(`[Video] Using HQ model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
+              } else if (config.model_normal_model_id) {
+                effectiveModelId = config.model_normal_model_id;
+                effectiveBackend = config.mn_api_backend || undefined;
+                effectiveCostVideoPerSecond = Number(config.mn_cost_video) || 0;
+                console.log(`[Video] Using Normal model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
+              }
+            }
+          }
+
+          // Guardar mensaje del usuario (con quality_tier)
+          const [userMessageResult] = await pool.execute<ResultSetHeader>(
+            `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)
+             VALUES (?, 'user', 'text', ?, ?)`,
+            [id, effectiveQualityTier, content]
+          );
+          const userMessageId = userMessageResult.insertId;
+
+          // Verificar si necesita generar titulo (aún tiene el titulo por defecto)
+          const needsTitle = conversation.title === "Nueva conversación" || !conversation.title;
+
+          // Actualizar timestamp de la conversación
+          await pool.execute(
+            "UPDATE conversations SET updated_at = NOW() WHERE id = ?",
+            [id]
+          );
+
+          // Preparar labels para tracking
+          const userIdentifier = session.user.email?.split("@")[0] || "unknown";
+          const labels: Labels = {
+            project_name: conversation.project_name || "sin_proyecto",
+            user_name: userIdentifier,
+          };
+
           // Enviar el ID del mensaje del usuario
           sendEvent({ type: "user_message", id: userMessageId });
 
@@ -386,6 +396,7 @@ export async function POST(
             seed: generatedSeed,
           });
 
+          clearInterval(heartbeat);
           controllerClosed = true;
           controller.close();
 
@@ -410,28 +421,33 @@ export async function POST(
           const errorMessage = error instanceof Error ? error.message : "Error desconocido";
 
           // Guardar mensaje de error (con content_type 'error' para excluirlo del historial)
-          // También marcar el mensaje del usuario con ignore_in_context para no enviarlo como contexto
-          const [modelResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, content)
-             VALUES (?, 'model', 'error', ?)`,
-            [id, `Error generando video: ${errorMessage}`]
-          );
-          await pool.execute(
-            `UPDATE messages SET ignore_in_context = 1 WHERE id = ?`,
-            [userMessageId]
-          );
+          try {
+            const [modelResult] = await pool.execute<ResultSetHeader>(
+              `INSERT INTO messages (conversation_id, role, content_type, content)
+               VALUES (?, 'model', 'error', ?)`,
+              [id, `Error generando video: ${errorMessage}`]
+            );
 
-          sendEvent({
-            type: "error",
-            message: errorMessage,
-            id: modelResult.insertId,
-          });
+            sendEvent({
+              type: "error",
+              message: errorMessage,
+              id: modelResult.insertId,
+            });
+          } catch (dbError) {
+            console.error("[Video] Error saving error message:", dbError);
+            sendEvent({
+              type: "error",
+              message: errorMessage,
+            });
+          }
 
+          clearInterval(heartbeat);
           controllerClosed = true;
           controller.close();
         }
       },
       cancel() {
+        clearInterval(heartbeat);
         controllerClosed = true;
       },
     });
