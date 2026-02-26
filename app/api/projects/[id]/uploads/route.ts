@@ -4,10 +4,6 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { uploadImageToS3, generateUploadFileName, isS3Configured } from "@/lib/s3";
 
-interface ProjectAccessRow extends RowDataPacket {
-  id: number;
-}
-
 interface UploadRow extends RowDataPacket {
   id: number;
   image_url: string;
@@ -31,23 +27,7 @@ export async function GET(
 
     const { id: projectId } = await params;
 
-    // Verificar que el usuario tiene acceso al proyecto
-    const isAdmin = session.user.role === "admin";
 
-    if (!isAdmin) {
-      const [projectAccess] = await pool.execute<ProjectAccessRow[]>(
-        `SELECT pu.id FROM project_users pu
-         WHERE pu.project_id = ? AND pu.user_id = ?`,
-        [projectId, session.user.id]
-      );
-
-      if (projectAccess.length === 0) {
-        return NextResponse.json(
-          { error: "Proyecto no encontrado o sin acceso" },
-          { status: 404 }
-        );
-      }
-    }
 
     const [uploads] = await pool.execute<UploadRow[]>(
       `SELECT id, image_url, original_filename, file_size, mime_type, created_at
@@ -88,23 +68,7 @@ export async function POST(
 
     const { id: projectId } = await params;
 
-    // Verificar que el usuario tiene acceso al proyecto
-    const isAdmin = session.user.role === "admin";
 
-    if (!isAdmin) {
-      const [projectAccess] = await pool.execute<ProjectAccessRow[]>(
-        `SELECT pu.id FROM project_users pu
-         WHERE pu.project_id = ? AND pu.user_id = ?`,
-        [projectId, session.user.id]
-      );
-
-      if (projectAccess.length === 0) {
-        return NextResponse.json(
-          { error: "Proyecto no encontrado o sin acceso" },
-          { status: 404 }
-        );
-      }
-    }
 
     // Obtener la imagen del body
     const body = await request.json();

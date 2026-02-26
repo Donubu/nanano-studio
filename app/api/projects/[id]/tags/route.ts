@@ -26,17 +26,6 @@ export async function GET(
 
     const { id } = await params;
 
-    // Verify user has access to project (admin or project member)
-    if (session.user.role !== "admin") {
-      const [access] = await pool.execute<RowDataPacket[]>(
-        "SELECT id FROM project_users WHERE project_id = ? AND user_id = ?",
-        [id, session.user.id]
-      );
-      if (access.length === 0) {
-        return NextResponse.json({ error: "No tienes acceso a este proyecto" }, { status: 403 });
-      }
-    }
-
     // Get tags with usage count
     const [tags] = await pool.execute<TagRow[]>(`
       SELECT
@@ -93,16 +82,6 @@ export async function POST(
       );
     }
 
-    // Verify user has access to project
-    if (session.user.role !== "admin") {
-      const [access] = await pool.execute<RowDataPacket[]>(
-        "SELECT id FROM project_users WHERE project_id = ? AND user_id = ?",
-        [id, session.user.id]
-      );
-      if (access.length === 0) {
-        return NextResponse.json({ error: "No tienes acceso a este proyecto" }, { status: 403 });
-      }
-    }
 
     // Check if tag already exists
     const [existing] = await pool.execute<RowDataPacket[]>(
@@ -164,16 +143,6 @@ export async function PUT(
       );
     }
 
-    // Verify user has access to project
-    if (session.user.role !== "admin") {
-      const [access] = await pool.execute<RowDataPacket[]>(
-        "SELECT id FROM project_users WHERE project_id = ? AND user_id = ?",
-        [id, session.user.id]
-      );
-      if (access.length === 0) {
-        return NextResponse.json({ error: "No tienes acceso a este proyecto" }, { status: 403 });
-      }
-    }
 
     // Verify tag belongs to project
     const [tagCheck] = await pool.execute<RowDataPacket[]>(
@@ -271,16 +240,6 @@ export async function DELETE(
       );
     }
 
-    // Verify user has access to project
-    if (session.user.role !== "admin") {
-      const [access] = await pool.execute<RowDataPacket[]>(
-        "SELECT id FROM project_users WHERE project_id = ? AND user_id = ?",
-        [id, session.user.id]
-      );
-      if (access.length === 0) {
-        return NextResponse.json({ error: "No tienes acceso a este proyecto" }, { status: 403 });
-      }
-    }
 
     const [result] = await pool.execute<ResultSetHeader>(
       "DELETE FROM tags WHERE id = ? AND project_id = ?",

@@ -39,21 +39,6 @@ export async function POST(
 
     const message = messages[0];
 
-    // Check access (admin, owner, or project member)
-    if (session.user.role !== "admin" && message.user_id !== session.user.id) {
-      if (message.project_id) {
-        const [access] = await pool.execute<RowDataPacket[]>(
-          "SELECT id FROM project_users WHERE project_id = ? AND user_id = ?",
-          [message.project_id, session.user.id]
-        );
-        if (access.length === 0) {
-          return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-        }
-      } else {
-        return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-      }
-    }
-
     // Toggle favorite status
     const newFavoriteStatus = message.is_favorite ? 0 : 1;
 
@@ -102,21 +87,6 @@ export async function GET(
     }
 
     const message = messages[0];
-
-    // Check access (admin, owner, or project member)
-    if (session.user.role !== "admin" && message.user_id !== session.user.id) {
-      if (message.project_id) {
-        const [access] = await pool.execute<RowDataPacket[]>(
-          "SELECT id FROM project_users WHERE project_id = ? AND user_id = ?",
-          [message.project_id, session.user.id]
-        );
-        if (access.length === 0) {
-          return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-        }
-      } else {
-        return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-      }
-    }
 
     return NextResponse.json({
       id: Number(id),

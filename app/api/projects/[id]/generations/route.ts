@@ -65,23 +65,7 @@ export async function GET(
     const limit = Math.min(Number(searchParams.get("limit")) || 100, 500);
     const offset = Number(searchParams.get("offset")) || 0;
 
-    // Verificar que el usuario tiene acceso al proyecto (admin o asignado)
     const isAdmin = session.user.role === "admin";
-
-    if (!isAdmin) {
-      const [projectAccess] = await pool.execute<RowDataPacket[]>(
-        `SELECT pu.id FROM project_users pu
-         WHERE pu.project_id = ? AND pu.user_id = ?`,
-        [projectId, session.user.id]
-      );
-
-      if (projectAccess.length === 0) {
-        return NextResponse.json(
-          { error: "Proyecto no encontrado o sin acceso" },
-          { status: 404 }
-        );
-      }
-    }
 
     // Build WHERE conditions
     const conditions: string[] = [
@@ -220,8 +204,8 @@ export async function GET(
         ...gen,
         is_favorite: Boolean(gen.is_favorite),
         has_2x: Boolean(gen.has_2x),
-        tags: gen.tags ? JSON.parse(gen.tags) as TagInfo[] : [],
-        audio_voice_config: gen.audio_voice_config ? JSON.parse(gen.audio_voice_config) : null,
+        tags: gen.tags ? (typeof gen.tags === "string" ? JSON.parse(gen.tags) : gen.tags) as TagInfo[] : [],
+        audio_voice_config: gen.audio_voice_config ? (typeof gen.audio_voice_config === "string" ? JSON.parse(gen.audio_voice_config) : gen.audio_voice_config) : null,
         type,
       };
     });

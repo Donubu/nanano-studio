@@ -31,24 +31,6 @@ export async function GET(
 
     const { id: projectId } = await params;
 
-    // Verificar que el usuario tiene acceso al proyecto (admin o asignado)
-    const isAdmin = session.user.role === "admin";
-
-    if (!isAdmin) {
-      const [projectAccess] = await pool.execute<RowDataPacket[]>(
-        `SELECT pu.id FROM project_users pu
-         WHERE pu.project_id = ? AND pu.user_id = ?`,
-        [projectId, session.user.id]
-      );
-
-      if (projectAccess.length === 0) {
-        return NextResponse.json(
-          { error: "Proyecto no encontrado o sin acceso" },
-          { status: 404 }
-        );
-      }
-    }
-
     // Obtener todos los videos generados del proyecto (compartidos entre usuarios del proyecto)
     const [generations] = await pool.execute<VideoGenerationRow[]>(
       `SELECT

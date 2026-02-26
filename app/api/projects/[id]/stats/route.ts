@@ -28,17 +28,6 @@ export async function GET(
 
     const { id: projectId } = await params;
 
-    // Verify access
-    if (session.user.role !== "admin") {
-      const [access] = await pool.execute<RowDataPacket[]>(
-        "SELECT id FROM project_users WHERE project_id = ? AND user_id = ?",
-        [projectId, session.user.id]
-      );
-      if (access.length === 0) {
-        return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-      }
-    }
-
     // Cost correction multiplier from environment
     const costMultiplier = getCostMultiplier();
 
