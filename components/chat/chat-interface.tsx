@@ -868,6 +868,8 @@ export function ChatInterface() {
                         video_aspect_ratio: data.video_aspect_ratio || "16:9",
                         video_audio_enabled: data.video_audio_enabled !== false,
                         video_negative_prompt: data.video_negative_prompt || null,
+                        owner_name: data.owner_name || null,
+                        owner_image: data.owner_image || null,
                     },
                 }));
                 // If this is the active tab, update settings
@@ -1497,6 +1499,8 @@ export function ChatInterface() {
                             video_audio_enabled: data.video_audio_enabled !== false,
                             video_negative_prompt: data.video_negative_prompt || null,
                             isArchived: data.deleted_at !== null,
+                            owner_name: data.owner_name || null,
+                            owner_image: data.owner_image || null,
                         };
                         openConversationInTab(conversation);
                     }

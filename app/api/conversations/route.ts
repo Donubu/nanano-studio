@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
         c.*,
         m.display_name as model_display_name,
         p.title as project_title,
-        ${isAdmin ? "u.name as user_name, u.email as user_email," : ""}
+        ${isAdmin ? "u.name as user_name, u.email as user_email, u.name as owner_name, u.image as owner_image," : ""}
         (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message,
         (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id) as message_count
       FROM conversations c
