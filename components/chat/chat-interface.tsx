@@ -51,6 +51,8 @@ import {
     RotateCcw,
     Building2,
     ChevronLeft,
+    Globe,
+    ExternalLink,
 } from "lucide-react";
 import {ChangelogModal} from "@/components/chat/changelog-modal";
 import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
@@ -174,6 +176,13 @@ interface Message {
         status: AudioGenerationStatus;
         message: string;
     };
+    // Grounding data from Google Search
+    grounding_data?: {
+        sources: Array<{ title?: string; uri?: string; domain?: string; imageUri?: string }>;
+        searchEntryPointHtml?: string;
+        webSearchQueries?: string[];
+        imageSearchQueries?: string[];
+    } | null;
     created_at: string;
     isStreaming?: boolean;
     isRetrying?: boolean;
@@ -187,6 +196,7 @@ interface Conversation {
     model_supports_image_generation?: boolean;
     model_supports_video_generation?: boolean;
     model_supports_audio_generation?: boolean;
+    model_supports_google_search?: boolean;
     generation_type?: GenerationType;
     project_id: number | null;
     project_title: string | null;
@@ -305,6 +315,10 @@ export function ChatInterface() {
     // Project system instruction
     const [useProjectSystemInstruction, setUseProjectSystemInstruction] = useState(true);
 
+    // Google Search grounding
+    const [googleSearchEnabled, setGoogleSearchEnabled] = useState(false);
+    const [googleImageSearchEnabled, setGoogleImageSearchEnabled] = useState(false);
+
     // Calculator access
     const [hasCalculatorAccess, setHasCalculatorAccess] = useState(false);
 
@@ -344,6 +358,8 @@ export function ChatInterface() {
         model_normal_model_id: string | null;
         model_hq_model_id: string | null;
         model_chirp_model_id: string | null;
+        model_normal_supports_google_search: boolean;
+        model_hq_supports_google_search: boolean;
     }
     const [generationConfig, setGenerationConfig] = useState<GenerationConfigItem[]>([]);
 
@@ -416,6 +432,21 @@ export function ChatInterface() {
             ? imageTypeConfig.model_hq_model_id
             : imageTypeConfig.model_normal_model_id;
         return modelId === "gemini-3.1-flash-image-preview";
+    })();
+
+    // Check if the current model supports Google Search grounding
+    const supportsGoogleSearch = (() => {
+        // Check generation config for the current conversation type
+        const convType = currentConversation?.generation_type || "text";
+        const config = generationConfig.find(c => c.generation_type === convType)
+            || generationConfig.find(c => c.generation_type === "text");
+        if (config) {
+            return selectedQualityTier === "hq"
+                ? config.model_hq_supports_google_search
+                : config.model_normal_supports_google_search;
+        }
+        // Fallback to conversation-level model info
+        return currentConversation?.model_supports_google_search ?? false;
     })();
 
     // Mark component as mounted for hydration
@@ -833,6 +864,8 @@ export function ChatInterface() {
                     model_normal_model_id: data[type]?.model_normal?.model_id ?? null,
                     model_hq_model_id: data[type]?.model_hq?.model_id ?? null,
                     model_chirp_model_id: data[type]?.model_chirp?.model_id ?? null,
+                    model_normal_supports_google_search: data[type]?.model_normal?.supports_google_search ?? false,
+                    model_hq_supports_google_search: data[type]?.model_hq?.supports_google_search ?? false,
                 }));
 
                 // If audio has a chirp model configured, add "audio_hd" as a virtual generation type
@@ -849,6 +882,8 @@ export function ChatInterface() {
                         model_chirp_name: audioConfig.model_chirp.display_name,
                         model_normal_model_id: audioConfig.model_chirp.model_id,
                         model_hq_model_id: audioConfig.model_chirp.model_id,
+                        model_normal_supports_google_search: false,
+                        model_hq_supports_google_search: false,
                         model_chirp_model_id: audioConfig.model_chirp.model_id,
                     });
                 }
@@ -1077,6 +1112,9 @@ export function ChatInterface() {
             } else if (conv.generation_type === "audio") {
                 setAudioTTSEngine("gemini");
             }
+            // Google Search - reset to off for each conversation (per-message now)
+            setGoogleSearchEnabled(false);
+            setGoogleImageSearchEnabled(false);
             // Auto-select quality tier based on available models
             const typeConf = generationConfig.find(c => c.generation_type === conv.generation_type);
             if (typeConf) {
@@ -1761,6 +1799,8 @@ export function ChatInterface() {
                     files: filesToSend,
                     useProjectSystemInstruction,
                     quality_tier: selectedQualityTier,
+                    google_search_enabled: googleSearchEnabled,
+                    google_image_search_enabled: googleImageSearchEnabled,
                     ...(modelIdOverride && { modelIdOverride }),
                     ...(imageSettings && { imageSettings: { aspectRatio: imageSettings.aspectRatio, size: imageSettings.size, numberOfImages: imageSettings.numberOfImages } }),
                     ...(generationTypeOverride && { generation_type_override: generationTypeOverride }),
@@ -1966,6 +2006,24 @@ export function ChatInterface() {
                                         setTabMessages((prev) => ({
                                             ...prev,
                                             [tabId]: [...prev[tabId], imgMessage],
+                                        }));
+                                    } else if (data.type === "grounding") {
+                                        // Attach grounding data to the streaming message
+                                        setTabMessages((prev) => ({
+                                            ...prev,
+                                            [tabId]: prev[tabId].map((m) =>
+                                                m.id === streamingMessageId
+                                                    ? {
+                                                        ...m,
+                                                        grounding_data: {
+                                                            sources: data.sources || [],
+                                                            searchEntryPointHtml: data.searchEntryPointHtml,
+                                                            webSearchQueries: data.webSearchQueries,
+                                                            imageSearchQueries: data.imageSearchQueries,
+                                                        },
+                                                    }
+                                                    : m
+                                            ),
                                         }));
                                     } else if (data.type === "complete") {
                                         realModelMessageId = data.id;
@@ -3544,6 +3602,38 @@ export function ChatInterface() {
                                                     onViewImage={msg.role === "model" && msg.image_url ? () => setViewingImageMessage(msg) : undefined}
                                                     onViewVideo={msg.role === "model" && msg.video_url ? () => setViewingVideoMessage(msg) : undefined}
                                                 />
+                                                {/* Grounding Sources */}
+                                                {msg.role === "model" && msg.grounding_data && msg.grounding_data.sources?.length > 0 && !msg.isStreaming && (
+                                                    <div className="mt-3 pt-3 border-t border-border/30">
+                                                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
+                                                            <Globe className="h-3 w-3" />
+                                                            <span>Fuentes</span>
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {msg.grounding_data.sources
+                                                                .filter((s, i, arr) => arr.findIndex(x => x.uri === s.uri) === i)
+                                                                .map((source, idx) => (
+                                                                <a
+                                                                    key={idx}
+                                                                    href={source.uri}
+                                                                    target="_blank"
+                                                                    rel="noopener noreferrer"
+                                                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-muted/50 border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                                                    title={source.uri}
+                                                                >
+                                                                    <span className="truncate max-w-[200px]">{source.title || source.domain || 'Fuente'}</span>
+                                                                    <ExternalLink className="h-3 w-3 shrink-0 opacity-50" />
+                                                                </a>
+                                                            ))}
+                                                        </div>
+                                                        {msg.grounding_data.searchEntryPointHtml && (
+                                                            <div
+                                                                className="mt-2"
+                                                                dangerouslySetInnerHTML={{ __html: msg.grounding_data.searchEntryPointHtml }}
+                                                            />
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                             {msg.role === "user" && (() => {
                                                 const ownerName = currentConversation?.owner_name || session?.user?.name;
@@ -3619,6 +3709,43 @@ export function ChatInterface() {
                                             normalModelName={currentTypeConfig?.model_normal_name}
                                             hqModelName={currentTypeConfig?.model_hq_name}
                                         />
+                                    </div>
+                                )}
+                                {/* Google Search Grounding - For text or gemini-3.1-flash-image-preview image conversations */}
+                                {(isTextConversation || (isImageConversation && supportsMultiImage)) && supportsGoogleSearch && (
+                                    <div className="flex justify-center gap-2 py-2 border-t border-border/50">
+                                        <button
+                                            onClick={() => setGoogleSearchEnabled(!googleSearchEnabled)}
+                                            disabled={isSending}
+                                            className={cn(
+                                                "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-all",
+                                                googleSearchEnabled
+                                                    ? "bg-blue-500/15 text-blue-400 border border-blue-500/30"
+                                                    : "bg-muted/50 text-muted-foreground border border-border/50 hover:bg-muted hover:text-foreground",
+                                                isSending && "opacity-50 cursor-not-allowed"
+                                            )}
+                                            title={googleSearchEnabled ? "Desactivar búsqueda web" : "Buscar información web actual (clima, eventos, datos) para la generación"}
+                                        >
+                                            <Globe className="h-4 w-4" />
+                                            <span>Web Search</span>
+                                        </button>
+                                        {isImageConversation && supportsMultiImage && (
+                                            <button
+                                                onClick={() => setGoogleImageSearchEnabled(!googleImageSearchEnabled)}
+                                                disabled={isSending}
+                                                className={cn(
+                                                    "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-all",
+                                                    googleImageSearchEnabled
+                                                        ? "bg-purple-500/15 text-purple-400 border border-purple-500/30"
+                                                        : "bg-muted/50 text-muted-foreground border border-border/50 hover:bg-muted hover:text-foreground",
+                                                    isSending && "opacity-50 cursor-not-allowed"
+                                                )}
+                                                title={googleImageSearchEnabled ? "Desactivar búsqueda de imágenes" : "Buscar imágenes reales como referencia visual para la generación"}
+                                            >
+                                                <ImageIcon className="h-4 w-4" />
+                                                <span>Image Search</span>
+                                            </button>
+                                        )}
                                     </div>
                                 )}
                                 {/* Selected Seed Indicator */}

@@ -13,6 +13,7 @@ interface ConversationRow extends RowDataPacket {
   model_supports_image_generation: boolean;
   model_supports_video_generation: boolean;
   model_supports_audio_generation: boolean;
+  model_supports_google_search: boolean;
   project_title: string | null;
   title: string;
   system_instruction: string | null;
@@ -67,6 +68,7 @@ export async function GET(
         m.supports_image_generation as model_supports_image_generation,
         m.supports_video_generation as model_supports_video_generation,
         m.supports_audio_generation as model_supports_audio_generation,
+        m.supports_google_search as model_supports_google_search,
         p.title as project_title,
         u.name as owner_name,
         u.image as owner_image
@@ -111,12 +113,22 @@ export async function GET(
     const messagesWithBooleans = messages.map(msg => {
       // Determinar images: usar message_images si hay, sino fallback a image_url
       const images = messageImagesMap[msg.id] || (msg.image_url ? [{ url: msg.image_url, mime_type: msg.image_mime_type }] : []);
+      // Parse grounding_data JSON
+      let grounding_data = null;
+      if (msg.grounding_data) {
+        try {
+          grounding_data = typeof msg.grounding_data === 'string'
+            ? JSON.parse(msg.grounding_data)
+            : msg.grounding_data;
+        } catch {}
+      }
       return {
         ...msg,
         video_has_audio: Boolean(msg.video_has_audio),
         is_favorite: Boolean(msg.is_favorite),
         ignore_in_context: Boolean(msg.ignore_in_context),
         images: msg.role === "user" ? images : undefined,
+        grounding_data,
       };
     });
 
@@ -128,6 +140,7 @@ export async function GET(
       model_supports_image_generation: Boolean(conv.model_supports_image_generation),
       model_supports_video_generation: Boolean(conv.model_supports_video_generation),
       model_supports_audio_generation: Boolean(conv.model_supports_audio_generation),
+      model_supports_google_search: Boolean(conv.model_supports_google_search),
       audio_multi_speaker: Boolean(conv.audio_multi_speaker),
       audio_speaker_config: conv.audio_speaker_config ? JSON.parse(conv.audio_speaker_config) : null,
       messages: messagesWithBooleans,

@@ -42,6 +42,7 @@ interface ModelInfo {
   id: number;
   model_id: string;
   display_name: string;
+  supports_google_search: boolean;
 }
 
 // GET - Obtener configuracion de tipos de generacion del proyecto
@@ -72,7 +73,9 @@ export async function GET(
         mh.model_id as model_hq_model_id,
         mh.display_name as model_hq_display_name,
         mc.model_id as model_chirp_model_id,
-        mc.display_name as model_chirp_display_name
+        mc.display_name as model_chirp_display_name,
+        mn.supports_google_search as model_normal_supports_google_search,
+        mh.supports_google_search as model_hq_supports_google_search
       FROM project_generation_config pgc
       LEFT JOIN models mn ON pgc.model_normal_id = mn.id
       LEFT JOIN models mh ON pgc.model_hq_id = mh.id
@@ -96,16 +99,19 @@ export async function GET(
           id: row.model_normal_id,
           model_id: row.model_normal_model_id!,
           display_name: row.model_normal_display_name!,
+          supports_google_search: Boolean((row as Record<string, unknown>).model_normal_supports_google_search),
         } : null,
         model_hq: row.model_hq_id ? {
           id: row.model_hq_id,
           model_id: row.model_hq_model_id!,
           display_name: row.model_hq_display_name!,
+          supports_google_search: Boolean((row as Record<string, unknown>).model_hq_supports_google_search),
         } : null,
         model_chirp: row.model_chirp_id ? {
           id: row.model_chirp_id,
           model_id: row.model_chirp_model_id!,
           display_name: row.model_chirp_display_name!,
+          supports_google_search: false,
         } : null,
       };
     }

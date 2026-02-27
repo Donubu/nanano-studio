@@ -137,7 +137,8 @@ function getClient(backend?: string): GoogleGenAI {
   }
   if (!geminiClient) {
     geminiClient = new GoogleGenAI({
-      apiKey: process.env.GOOGLE_API_KEY,
+      apiKey: process.env.GEMINI_API_KEY,
+      vertexai: false,
     });
   }
   return geminiClient;
@@ -345,7 +346,7 @@ export function isImagen4Model(modelId: string): boolean {
  */
 export function isImagenConfigured(): boolean {
   const vertexConfigured = !!process.env.GOOGLE_CLOUD_PROJECT && !!process.env.GOOGLE_CLOUD_LOCATION;
-  const geminiConfigured = !!process.env.GOOGLE_API_KEY;
+  const geminiConfigured = !!process.env.GEMINI_API_KEY;
   return vertexConfigured || geminiConfigured;
 }
 

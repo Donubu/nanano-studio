@@ -64,14 +64,28 @@ export async function GET(
 
     const [messages] = await pool.execute<MessageRow[]>(
       `SELECT id, conversation_id, role, content_type, content, image_url, image_mime_type,
-              tokens_input, tokens_output, created_at
+              tokens_input, tokens_output, grounding_data, created_at
        FROM messages
        WHERE conversation_id = ?
        ORDER BY created_at ASC`,
       [id]
     );
 
-    return NextResponse.json(messages);
+    // Parse grounding_data JSON for messages that have it
+    const messagesWithParsedGrounding = messages.map(msg => {
+      const raw = msg as Record<string, unknown>;
+      let grounding_data = null;
+      if (raw.grounding_data) {
+        try {
+          grounding_data = typeof raw.grounding_data === 'string'
+            ? JSON.parse(raw.grounding_data)
+            : raw.grounding_data;
+        } catch {}
+      }
+      return { ...msg, grounding_data };
+    });
+
+    return NextResponse.json(messagesWithParsedGrounding);
   } catch (error) {
     console.error("Error obteniendo mensajes:", error);
     return NextResponse.json(

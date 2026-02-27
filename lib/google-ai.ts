@@ -147,9 +147,11 @@ function getClient(backend?: string): GoogleGenAI {
     return vertexClient;
   }
   if (!geminiClient) {
-    geminiClient = new GoogleGenAI({
-      apiKey: process.env.GOOGLE_API_KEY,
-    });
+    // Use GEMINI_API_KEY (AI Studio key) explicitly to avoid SDK auto-detecting
+    // GOOGLE_API_KEY which may be a Vertex AI token, not a standard Gemini API key
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error("No Gemini API key configured (GEMINI_API_KEY)");
+    geminiClient = new GoogleGenAI({ apiKey, vertexai: false });
   }
   return geminiClient;
 }
@@ -182,6 +184,8 @@ export interface GenerationSettings {
   topK?: number;
   maxOutputTokens?: number;
   imageConfig?: ImageGenerationConfig;
+  googleSearchEnabled?: boolean;
+  googleImageSearchEnabled?: boolean;
 }
 
 export interface Labels {
@@ -196,9 +200,18 @@ export interface GeneratedImage {
   mimeType: string;
 }
 
+// Grounding metadata from Google Search
+export interface GroundingData {
+  sources: Array<{ title?: string; uri?: string; domain?: string; imageUri?: string }>;
+  searchEntryPointHtml?: string;
+  webSearchQueries?: string[];
+  imageSearchQueries?: string[];
+}
+
 export interface StreamCallbacks {
   onChunk: (text: string) => void;
   onImage?: (image: GeneratedImage) => void;
+  onGrounding?: (data: GroundingData) => void;
   onRetry?: (info: RetryInfo) => void;
   onComplete: (
     fullText: string,
@@ -331,6 +344,7 @@ export async function sendMessage(
   text: string;
   images: GeneratedImage[];
   tokenCount: { input: number; output: number };
+  groundingData?: GroundingData;
 }> {
   const contents = convertToGoogleFormat(messages);
   const client = getClient(backend);
@@ -351,6 +365,15 @@ export async function sendMessage(
         imageSize: settings.imageConfig.imageSize,
       },
     }),
+    // Google Search grounding
+    ...((settings.googleSearchEnabled || settings.googleImageSearchEnabled) && (() => {
+      if (settings.googleImageSearchEnabled) {
+        const searchTypes: Record<string, object> = { imageSearch: {} };
+        if (settings.googleSearchEnabled) searchTypes.webSearch = {};
+        return { tools: [{ googleSearch: { searchTypes } }] };
+      }
+      return { tools: [{ googleSearch: {} }] };
+    })()),
   };
 
   const response = await withRetry(
@@ -375,6 +398,38 @@ export async function sendMessage(
     images = extractImagesFromParts(parts);
   }
 
+  // Extract grounding metadata
+  let groundingData: GroundingData | undefined;
+  for (const candidate of candidates) {
+    const gm = (candidate as Record<string, unknown>).groundingMetadata as Record<string, unknown> | undefined;
+    if (settings.googleSearchEnabled || settings.googleImageSearchEnabled) {
+      console.log("[Google AI] Grounding metadata:", JSON.stringify(gm || "none", null, 2));
+      console.log("[Google AI] Candidate keys:", Object.keys(candidate as Record<string, unknown>));
+    }
+    if (gm) {
+      const sources: GroundingData["sources"] = [];
+      const groundingChunks = gm.groundingChunks as Array<{ web?: { uri?: string; title?: string }; image_uri?: string }> | undefined;
+      if (groundingChunks) {
+        for (const gc of groundingChunks) {
+          if (gc.web || gc.image_uri) {
+            let domain: string | undefined;
+            try { domain = gc.web?.uri ? new URL(gc.web.uri).hostname : undefined; } catch {}
+            sources.push({ title: gc.web?.title, uri: gc.web?.uri, domain, imageUri: gc.image_uri });
+          }
+        }
+      }
+      const sep = gm.searchEntryPoint as { renderedContent?: string } | undefined;
+      const webSearchQueries = gm.webSearchQueries as string[] | undefined;
+      const imageSearchQueries = gm.imageSearchQueries as string[] | undefined;
+      groundingData = {
+        sources,
+        searchEntryPointHtml: sep?.renderedContent,
+        webSearchQueries,
+        imageSearchQueries,
+      };
+    }
+  }
+
   return {
     text,
     images,
@@ -382,6 +437,7 @@ export async function sendMessage(
       input: response.usageMetadata?.promptTokenCount || 0,
       output: response.usageMetadata?.candidatesTokenCount || 0,
     },
+    groundingData,
   };
 }
 
@@ -407,7 +463,7 @@ export async function sendMessageStream(
       topP: settings.topP ?? 0.95,
       topK: settings.topK ?? 40,
       maxOutputTokens: settings.maxOutputTokens ?? 8192,
-  
+
       ...(systemInstruction && { systemInstruction }),
       labels: buildLabels(labels, backend),
       // Configuración para generación de imágenes
@@ -418,6 +474,15 @@ export async function sendMessageStream(
           imageSize: settings.imageConfig.imageSize,
         },
       }),
+      // Google Search grounding
+      ...((settings.googleSearchEnabled || settings.googleImageSearchEnabled) && (() => {
+        if (settings.googleImageSearchEnabled) {
+          const searchTypes: Record<string, object> = { imageSearch: {} };
+          if (settings.googleSearchEnabled) searchTypes.webSearch = {};
+          return { tools: [{ googleSearch: { searchTypes } }] };
+        }
+        return { tools: [{ googleSearch: {} }] };
+      })()),
     };
 
     // Nota: Gemini 2.5 Flash Image tiene un bug conocido donde ignora aspectRatio
@@ -436,6 +501,7 @@ export async function sendMessageStream(
         let fullText = "";
         const allImages: GeneratedImage[] = [];
         let usageMetadata: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined;
+        let groundingData: GroundingData | undefined;
 
         for await (const chunk of responseStream) {
           // Extraer texto del primer candidato
@@ -459,11 +525,41 @@ export async function sendMessageStream(
                 }
               }
             }
+
+            // Extract grounding metadata from the candidate
+            const gm = (candidate as Record<string, unknown>).groundingMetadata as Record<string, unknown> | undefined;
+            if (gm) {
+              const sources: GroundingData["sources"] = [];
+              const groundingChunks = gm.groundingChunks as Array<{ web?: { uri?: string; title?: string }; image_uri?: string }> | undefined;
+              if (groundingChunks) {
+                for (const gc of groundingChunks) {
+                  if (gc.web || gc.image_uri) {
+                    let domain: string | undefined;
+                    try { domain = gc.web?.uri ? new URL(gc.web.uri).hostname : undefined; } catch {}
+                    sources.push({ title: gc.web?.title, uri: gc.web?.uri, domain, imageUri: gc.image_uri });
+                  }
+                }
+              }
+              const sep = gm.searchEntryPoint as { renderedContent?: string } | undefined;
+              const webSearchQueries = gm.webSearchQueries as string[] | undefined;
+              const imageSearchQueries = gm.imageSearchQueries as string[] | undefined;
+              groundingData = {
+                sources,
+                searchEntryPointHtml: sep?.renderedContent,
+                webSearchQueries,
+                imageSearchQueries,
+              };
+            }
           }
 
           if (chunk.usageMetadata) {
             usageMetadata = chunk.usageMetadata;
           }
+        }
+
+        // Dispatch grounding callback after stream completes
+        if (groundingData && callbacks.onGrounding) {
+          callbacks.onGrounding(groundingData);
         }
 
         return { fullText, allImages, usageMetadata };
@@ -510,12 +606,12 @@ Reglas:
       topK: 40,
       maxOutputTokens: 100,
       systemInstruction: SYSTEM_INSTRUCTION,
-      labels: buildLabels(labels),
+      labels: buildLabels(labels, 'gemini'),
     };
 
     const response = await withRetry(
-      () => getClient().models.generateContent({
-        model: normalizeModelId(TITLE_MODEL),
+      () => getClient('gemini').models.generateContent({
+        model: normalizeModelId(TITLE_MODEL, 'gemini'),
         contents: [
           {
             role: "user",
@@ -548,7 +644,7 @@ Reglas:
 // Validar que la API está configurada (checks both backends since models may use either)
 export function isConfigured(): boolean {
   const vertexConfigured = !!process.env.GOOGLE_CLOUD_PROJECT && !!process.env.GOOGLE_CLOUD_LOCATION;
-  const geminiConfigured = !!process.env.GOOGLE_API_KEY;
+  const geminiConfigured = !!process.env.GEMINI_API_KEY;
   // At least one backend must be configured
   return vertexConfigured || geminiConfigured;
 }

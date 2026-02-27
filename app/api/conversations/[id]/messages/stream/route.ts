@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
-import { sendMessageStream, ChatMessage, isConfigured, Labels, GeneratedImage, generateConversationTitle, AttachedFile } from "@/lib/google-ai";
+import { sendMessageStream, sendMessage, ChatMessage, isConfigured, Labels, GeneratedImage, GroundingData, generateConversationTitle, AttachedFile } from "@/lib/google-ai";
 import { uploadToS3, generateFileName, isS3Configured } from "@/lib/s3";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
 
@@ -77,6 +77,7 @@ interface ConversationRow extends RowDataPacket {
   cost_video_per_second: number;
   model_api_backend: string | null;
   model_system_instruction: string | null;
+  model_supports_google_search: number;
 }
 
 interface GenerationConfigRow extends RowDataPacket {
@@ -128,7 +129,7 @@ export async function POST(
 
     const { id } = await params;
     const body = await request.json();
-    const { content, files, useProjectSystemInstruction = true, modelIdOverride, imageSettings, quality_tier = "normal", generation_type_override, no_context = false, skip_user_message = false } = body as {
+    const { content, files, useProjectSystemInstruction = true, modelIdOverride, imageSettings, quality_tier = "normal", generation_type_override, no_context = false, skip_user_message = false, google_search_enabled: reqGoogleSearchEnabled, google_image_search_enabled: reqGoogleImageSearchEnabled } = body as {
       content: string;
       files?: AttachedFile[];
       useProjectSystemInstruction?: boolean;
@@ -138,6 +139,8 @@ export async function POST(
       generation_type_override?: GenerationType;
       no_context?: boolean;
       skip_user_message?: boolean;
+      google_search_enabled?: boolean;
+      google_image_search_enabled?: boolean;
     };
 
     // Validate quality_tier
@@ -158,7 +161,7 @@ export async function POST(
     // Obtener conversación con configuración, nombre del proyecto y costos del modelo
     const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, c.generation_type, m.model_id as model_model_id, m.supports_image_generation, m.api_backend as model_api_backend, m.system_instruction as model_system_instruction, p.title as project_name,
+      `SELECT c.*, c.generation_type, m.model_id as model_model_id, m.supports_image_generation, m.supports_google_search as model_supports_google_search, m.api_backend as model_api_backend, m.system_instruction as model_system_instruction, p.title as project_name,
               m.cost_input_per_million, m.cost_output_per_million,
               m.cost_image_1k, m.cost_image_2k, m.cost_image_4k, m.cost_video_per_second
        FROM conversations c
@@ -199,6 +202,7 @@ export async function POST(
           // Handle model override if provided
           let effectiveModelId = conversation.model_model_id;
           let effectiveSupportsImageGeneration = conversation.supports_image_generation;
+          let effectiveSupportsGoogleSearch = Boolean(conversation.model_supports_google_search);
           let effectiveImageAspectRatio = conversation.image_aspect_ratio;
           let effectiveImageSize = conversation.image_size;
           let effectiveModelDbId = conversation.model_id; // Track the DB id for cost lookup
@@ -234,9 +238,11 @@ export async function POST(
                 mn.cost_image_2k as mn_cost_image_2k,
                 mn.cost_image_4k as mn_cost_image_4k,
                 mn.cost_video_per_second as mn_cost_video,
+                mn.supports_google_search as mn_supports_google_search,
                 mh.model_id as model_hq_model_id,
                 mh.supports_image_generation as model_hq_supports_image,
                 mh.api_backend as mh_api_backend,
+                mh.supports_google_search as mh_supports_google_search,
                 mh.cost_input_per_million as mh_cost_input,
                 mh.cost_output_per_million as mh_cost_output,
                 mh.cost_image_1k as mh_cost_image_1k,
@@ -254,6 +260,7 @@ export async function POST(
               if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
                 effectiveModelId = config.model_hq_model_id;
                 effectiveSupportsImageGeneration = config.model_hq_supports_image;
+                effectiveSupportsGoogleSearch = Boolean(config.mh_supports_google_search);
                 effectiveModelDbId = config.model_hq_id;
                 effectiveBackend = config.mh_api_backend || undefined;
                 effectiveCosts = {
@@ -268,6 +275,7 @@ export async function POST(
               } else if (config.model_normal_model_id) {
                 effectiveModelId = config.model_normal_model_id;
                 effectiveSupportsImageGeneration = config.model_normal_supports_image;
+                effectiveSupportsGoogleSearch = Boolean(config.mn_supports_google_search);
                 effectiveModelDbId = config.model_normal_id;
                 effectiveBackend = config.mn_api_backend || undefined;
                 effectiveCosts = {
@@ -483,6 +491,9 @@ export async function POST(
           }
 
           // Construir configuración de generación
+          const googleSearchEnabled = Boolean(reqGoogleSearchEnabled) && effectiveSupportsGoogleSearch;
+          const googleImageSearchEnabled = Boolean(reqGoogleImageSearchEnabled) && effectiveSupportsGoogleSearch;
+          console.log(`[Stream] Google Search: web=${googleSearchEnabled}, image=${googleImageSearchEnabled}, modelSupports=${effectiveSupportsGoogleSearch}`);
           const generationConfig = {
             temperature: Number(conversation.temperature),
             topP: Number(conversation.top_p),
@@ -494,6 +505,8 @@ export async function POST(
                 imageSize: effectiveImageSize as "1K" | "2K" | "4K",
               },
             }),
+            ...(googleSearchEnabled && { googleSearchEnabled: true }),
+            ...(googleImageSearchEnabled && { googleImageSearchEnabled: true }),
           };
 
           // Construir objeto de request para debug y almacenamiento
@@ -532,6 +545,180 @@ export async function POST(
           }
           let savedImages: SavedImage[] = [];
           let imageUploadPromises: Promise<void>[] = [];
+          let groundingData: GroundingData | null = null;
+
+          // Image Search requires non-streaming generateContent (not supported in streaming API)
+          if (googleImageSearchEnabled) {
+            try {
+              const result = await sendMessage(
+                effectiveModelId,
+                messagesToSend,
+                finalSystemInstruction,
+                generationConfig,
+                labels,
+                effectiveBackend
+              );
+
+              fullResponse = result.text;
+              const tokenCount = result.tokenCount;
+              groundingData = result.groundingData || null;
+
+              // Emit text as a single chunk
+              if (result.text && !controllerClosed) {
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({ type: "chunk", text: result.text })}\n\n`)
+                );
+              }
+
+              // Emit grounding data
+              if (groundingData && !controllerClosed) {
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({
+                    type: "grounding",
+                    sources: groundingData.sources,
+                    searchEntryPointHtml: groundingData.searchEntryPointHtml,
+                    webSearchQueries: groundingData.webSearchQueries,
+                    imageSearchQueries: groundingData.imageSearchQueries,
+                  })}\n\n`)
+                );
+              }
+
+              // Save and emit images
+              for (const img of result.images) {
+                try {
+                  const saved = await saveGeneratedImage(img, id);
+                  savedImages.push({ url: saved.url, fileSize: saved.fileSize, mimeType: img.mimeType });
+                  if (!controllerClosed) {
+                    controller.enqueue(
+                      encoder.encode(`data: ${JSON.stringify({ type: "image", imageUrl: saved.url, mimeType: img.mimeType, imageIndex: savedImages.length - 1 })}\n\n`)
+                    );
+                  }
+                } catch (err) {
+                  console.error("Error guardando imagen (non-stream):", err);
+                }
+              }
+
+              // --- Save to DB (same logic as streaming onComplete) ---
+              const validImages = savedImages.filter(img => img.url);
+              const hasImages = validImages.length > 0;
+              const hasText = !!fullResponse;
+              const imageAspectRatioToSave = hasImages ? effectiveImageAspectRatio : null;
+              const imageSizeToSave = hasImages ? effectiveImageSize : null;
+              let totalEstimatedCost = 0;
+              const imageMessages: Array<{ id: number; imageUrl: string }> = [];
+
+              if (hasText) {
+                const textCost = calculateEstimatedCost(effectiveCosts, {
+                  tokensInput: tokenCount.input, tokensOutput: tokenCount.output,
+                  imageGenerated: false, imageSize: null, videoSeconds: null,
+                });
+                totalEstimatedCost += textCost;
+                const [modelResult] = await pool.execute<ResultSetHeader>(
+                  `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, tokens_input, tokens_output, estimated_cost, grounding_data)
+                   VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?)`,
+                  [id, effectiveQualityTier, fullResponse, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
+                );
+                modelMessageId = modelResult.insertId;
+              }
+
+              for (let i = 0; i < validImages.length; i++) {
+                const img = validImages[i];
+                const isFirstMessage = !hasText && i === 0;
+                const imageCost = calculateEstimatedCost(effectiveCosts, {
+                  tokensInput: isFirstMessage ? tokenCount.input : 0,
+                  tokensOutput: isFirstMessage ? tokenCount.output : 0,
+                  imageGenerated: true, imageSize: imageSizeToSave, videoSeconds: null,
+                });
+                totalEstimatedCost += imageCost;
+                const [imgResult] = await pool.execute<ResultSetHeader>(
+                  `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost)
+                   VALUES (?, 'model', 'image', ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  [id, effectiveQualityTier, img.url, img.mimeType, img.fileSize, imageAspectRatioToSave, imageSizeToSave,
+                   isFirstMessage ? tokenCount.input : 0, isFirstMessage ? tokenCount.output : 0, imageCost]
+                );
+                imageMessages.push({ id: imgResult.insertId, imageUrl: img.url });
+                if (isFirstMessage) modelMessageId = imgResult.insertId;
+              }
+
+              if (!hasText && validImages.length === 0) {
+                const textCost = calculateEstimatedCost(effectiveCosts, {
+                  tokensInput: tokenCount.input, tokensOutput: tokenCount.output,
+                  imageGenerated: false, imageSize: null, videoSeconds: null,
+                });
+                totalEstimatedCost += textCost;
+                const [modelResult] = await pool.execute<ResultSetHeader>(
+                  `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, tokens_input, tokens_output, estimated_cost)
+                   VALUES (?, 'model', 'text', ?, '', ?, ?, ?)`,
+                  [id, effectiveQualityTier, tokenCount.input, tokenCount.output, textCost]
+                );
+                modelMessageId = modelResult.insertId;
+              }
+
+              await pool.execute(
+                `UPDATE conversations SET total_tokens_input = total_tokens_input + ?, total_tokens_output = total_tokens_output + ?, total_estimated_cost = total_estimated_cost + ? WHERE id = ?`,
+                [tokenCount.input, tokenCount.output, totalEstimatedCost, id]
+              );
+
+              const [totalsResult] = await pool.execute<RowDataPacket[]>(
+                `SELECT total_tokens_input, total_tokens_output, total_estimated_cost FROM conversations WHERE id = ?`,
+                [id]
+              );
+
+              if (!controllerClosed) {
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({
+                    type: "complete",
+                    id: modelMessageId,
+                    tokens: tokenCount,
+                    totalTokens: { input: totalsResult[0]?.total_tokens_input || 0, output: totalsResult[0]?.total_tokens_output || 0 },
+                    estimatedCost: totalEstimatedCost,
+                    totalCost: Number(totalsResult[0]?.total_estimated_cost) || 0,
+                    imageUrl: validImages.length === 1 ? validImages[0].url : null,
+                    imageMessages: imageMessages.length > 0 ? imageMessages : undefined,
+                  })}\n\n`)
+                );
+                clearInterval(heartbeat);
+                controllerClosed = true;
+                controller.close();
+              }
+
+              if (needsTitle && !skip_user_message) {
+                generateConversationTitle(content, labels)
+                  .then(async (title) => {
+                    await pool.execute("UPDATE conversations SET title = ? WHERE id = ?", [title, id]);
+                  })
+                  .catch((err) => console.error("[Stream] Error generating title:", err));
+              }
+            } catch (error) {
+              if (controllerClosed) return;
+              console.error("Error en non-streaming (image search):", error);
+              const errorMessage = error instanceof Error ? error.message : "Error desconocido";
+              try {
+                const [modelResult] = await pool.execute<ResultSetHeader>(
+                  `INSERT INTO messages (conversation_id, role, content_type, content) VALUES (?, 'model', 'error', ?)`,
+                  [id, `Error: ${errorMessage}`]
+                );
+                if (!skip_user_message && userMessageId) {
+                  await pool.execute(`UPDATE messages SET ignore_in_context = 1 WHERE id = ?`, [userMessageId]);
+                }
+                if (!controllerClosed) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", message: errorMessage, id: modelResult.insertId })}\n\n`));
+                  clearInterval(heartbeat);
+                  controllerClosed = true;
+                  controller.close();
+                }
+              } catch (dbErr) {
+                console.error("Error guardando error:", dbErr);
+                if (!controllerClosed) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", message: errorMessage })}\n\n`));
+                  clearInterval(heartbeat);
+                  controllerClosed = true;
+                  controller.close();
+                }
+              }
+            }
+            return; // Skip streaming path
+          }
 
           await sendMessageStream(
             effectiveModelId,
@@ -552,6 +739,7 @@ export async function POST(
                 fullResponse = "";
                 savedImages = [];
                 imageUploadPromises = [];
+                groundingData = null;
 
                 if (!controllerClosed) {
                   controller.enqueue(
@@ -561,6 +749,20 @@ export async function POST(
                       maxAttempts: info.maxAttempts,
                       delaySeconds: Math.round(info.delayMs / 1000),
                       error: info.error.substring(0, 200), // Truncar mensaje largo
+                    })}\n\n`)
+                  );
+                }
+              },
+              onGrounding: (data: GroundingData) => {
+                groundingData = data;
+                if (!controllerClosed) {
+                  controller.enqueue(
+                    encoder.encode(`data: ${JSON.stringify({
+                      type: "grounding",
+                      sources: data.sources,
+                      searchEntryPointHtml: data.searchEntryPointHtml,
+                      webSearchQueries: data.webSearchQueries,
+                      imageSearchQueries: data.imageSearchQueries,
                     })}\n\n`)
                   );
                 }
@@ -638,9 +840,9 @@ export async function POST(
                   totalEstimatedCost += textCost;
 
                   const [modelResult] = await pool.execute<ResultSetHeader>(
-                    `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, tokens_input, tokens_output, estimated_cost)
-                     VALUES (?, 'model', 'text', ?, ?, ?, ?, ?)`,
-                    [id, effectiveQualityTier, text, tokenCount.input, tokenCount.output, textCost]
+                    `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, tokens_input, tokens_output, estimated_cost, grounding_data)
+                     VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?)`,
+                    [id, effectiveQualityTier, text, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
                   );
                   modelMessageId = modelResult.insertId;
                 }
