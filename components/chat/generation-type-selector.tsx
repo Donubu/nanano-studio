@@ -1,13 +1,13 @@
 "use client";
 
-import { MessageSquare, ImageIcon, Video, Mic, AudioLines } from "lucide-react";
+import { MessageSquare, ImageIcon, Video, Mic, AudioLines, Music } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-export type GenerationType = "text" | "image" | "video" | "audio" | "audio_hd";
+export type GenerationType = "text" | "image" | "video" | "audio" | "audio_hd" | "music";
 
 interface GenerationTypeConfig {
   type: GenerationType;
@@ -27,9 +27,10 @@ const typeConfig: Record<GenerationType, { icon: typeof MessageSquare; label: st
   video: { icon: Video, label: "Video" },
   audio: { icon: Mic, label: "Audio" },
   audio_hd: { icon: AudioLines, label: "Audio HD" },
+  music: { icon: Music, label: "Musica" },
 };
 
-const typeOrder: GenerationType[] = ["text", "image", "video", "audio", "audio_hd"];
+const typeOrder: GenerationType[] = ["text", "image", "video", "audio", "audio_hd", "music"];
 
 export function GenerationTypeSelector({
   enabledTypes,

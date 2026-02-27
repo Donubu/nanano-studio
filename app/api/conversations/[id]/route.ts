@@ -122,6 +122,15 @@ export async function GET(
             : msg.grounding_data;
         } catch {}
       }
+      // Parse music_config JSON
+      let music_config = null;
+      if (msg.music_config) {
+        try {
+          music_config = typeof msg.music_config === 'string'
+            ? JSON.parse(msg.music_config)
+            : msg.music_config;
+        } catch {}
+      }
       return {
         ...msg,
         video_has_audio: Boolean(msg.video_has_audio),
@@ -129,6 +138,7 @@ export async function GET(
         ignore_in_context: Boolean(msg.ignore_in_context),
         images: msg.role === "user" ? images : undefined,
         grounding_data,
+        music_config,
       };
     });
 

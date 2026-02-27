@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 
-type GenerationType = "text" | "image" | "video" | "audio";
+type GenerationType = "text" | "image" | "video" | "audio" | "music";
 type QualityTier = "normal" | "hq" | "chirp";
 
 interface ConversationRow extends RowDataPacket {
@@ -122,12 +122,24 @@ export async function POST(request: NextRequest) {
       audio_tts_engine = "gemini",
       audio_speaking_rate = 1.0,
       audio_locale = "en-US",
+      // Music settings
+      music_prompts = null,
+      music_bpm = 120,
+      music_density = 0.50,
+      music_brightness = 0.50,
+      music_scale = "UNSPECIFIED",
+      music_guidance = 3.50,
+      music_generation_mode = "QUALITY",
+      music_duration = 30,
+      music_mute_bass = false,
+      music_mute_drums = false,
+      music_only_bass_and_drums = false,
     } = body;
 
     // Validar generation_type
-    if (!["text", "image", "video", "audio"].includes(generation_type)) {
+    if (!["text", "image", "video", "audio", "music"].includes(generation_type)) {
       return NextResponse.json(
-        { error: "generation_type invalido. Debe ser: text, image, video o audio" },
+        { error: "generation_type invalido. Debe ser: text, image, video, audio o music" },
         { status: 400 }
       );
     }
@@ -198,8 +210,8 @@ export async function POST(request: NextRequest) {
     }
 
     const [result] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO conversations (user_id, project_id, model_id, generation_type, title, system_instruction, temperature, top_p, top_k, max_output_tokens, image_aspect_ratio, image_size, video_duration, video_resolution, video_aspect_ratio, video_audio_enabled, video_negative_prompt, audio_voice_id, audio_style_prompt, audio_multi_speaker, audio_speaker_config, audio_output_format, audio_tts_engine, audio_speaking_rate, audio_locale)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO conversations (user_id, project_id, model_id, generation_type, title, system_instruction, temperature, top_p, top_k, max_output_tokens, image_aspect_ratio, image_size, video_duration, video_resolution, video_aspect_ratio, video_audio_enabled, video_negative_prompt, audio_voice_id, audio_style_prompt, audio_multi_speaker, audio_speaker_config, audio_output_format, audio_tts_engine, audio_speaking_rate, audio_locale, music_prompts, music_bpm, music_density, music_brightness, music_scale, music_guidance, music_generation_mode, music_duration, music_mute_bass, music_mute_drums, music_only_bass_and_drums)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         session.user.id,
         project_id || null,
@@ -226,6 +238,17 @@ export async function POST(request: NextRequest) {
         audio_tts_engine,
         audio_speaking_rate,
         audio_locale,
+        music_prompts ? JSON.stringify(music_prompts) : null,
+        music_bpm,
+        music_density,
+        music_brightness,
+        music_scale,
+        music_guidance,
+        music_generation_mode,
+        music_duration,
+        music_mute_bass ? 1 : 0,
+        music_mute_drums ? 1 : 0,
+        music_only_bass_and_drums ? 1 : 0,
       ]
     );
 

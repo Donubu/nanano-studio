@@ -287,6 +287,7 @@ export interface ModelCosts {
   cost_image_4k: number;
   cost_video_per_second: number;
   cost_audio_per_minute?: number;
+  cost_music_per_minute?: number;
 }
 
 export interface GenerationUsage {
@@ -296,6 +297,7 @@ export interface GenerationUsage {
   imageSize: string | null; // "1K", "2K", "4K"
   videoSeconds?: number | null;
   audioMinutes?: number | null;
+  musicMinutes?: number | null;
 }
 
 /**
@@ -342,6 +344,11 @@ export function calculateEstimatedCost(
   // Audio costs (per minute)
   if (usage.audioMinutes && usage.audioMinutes > 0 && costs.cost_audio_per_minute && costs.cost_audio_per_minute > 0) {
     totalCost += usage.audioMinutes * costs.cost_audio_per_minute;
+  }
+
+  // Music costs (per minute)
+  if (usage.musicMinutes && usage.musicMinutes > 0 && costs.cost_music_per_minute && costs.cost_music_per_minute > 0) {
+    totalCost += usage.musicMinutes * costs.cost_music_per_minute;
   }
 
   // Round to 6 decimal places to match database precision

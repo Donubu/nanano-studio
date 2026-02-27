@@ -6,6 +6,7 @@ import {useTheme} from "next-themes";
 import {cn, formatDateLocal, formatDateTimeLocal} from "@/lib/utils";
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
+import {Badge} from "@/components/ui/badge";
 import {Avatar, AvatarFallback, AvatarImage} from "@/components/ui/avatar";
 import {
     DropdownMenu,
@@ -53,6 +54,8 @@ import {
     ChevronLeft,
     Globe,
     ExternalLink,
+    Music,
+    AlertCircle,
 } from "lucide-react";
 import {ChangelogModal} from "@/components/chat/changelog-modal";
 import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
@@ -78,11 +81,14 @@ import {GenerationTypeSelector, GenerationType, GenerationTypeBadge} from "./gen
 import {QualitySelector, QualityTier, QualitySelectorCompact} from "./quality-selector";
 import {ImageModelSelector} from "./image-model-selector";
 import {AudioSettings} from "./audio-settings";
+import {MusicSettings} from "./music-settings";
+import {MusicPlayer} from "./music-player";
 import {TTSComposer} from "./tts-composer";
 import {TopazStudio} from "./topaz-studio";
 import {TopazStudioVideo} from "./topaz-studio-video";
 import {AudioGenerationHistory, AudioRestoreData} from "./audio-generation-history";
 import {AudioVoiceId, AudioOutputFormat, AudioSpeakerConfig, AudioGenerationStatus, AudioVoiceConfig} from "@/types/audio";
+import {type MusicGenerationSettings, type MusicGenerationStatus, DEFAULT_MUSIC_SETTINGS} from "@/types/music";
 import {useNavigation, generateSlug} from "@/contexts/navigation-context";
 
 // Helper function to get the icon for a conversation based on its generation type
@@ -96,6 +102,8 @@ function getConversationIcon(generationType: string | undefined, className: stri
             return <AudioLines className={className} />;
         case "audio":
             return <Mic className={className} />;
+        case "music":
+            return <Music className={className} />;
         case "text":
         default:
             return <MessageSquare className={className} />;
@@ -149,7 +157,7 @@ interface Message {
     id: number;
     role: "user" | "model";
     content: string;
-    content_type?: "text" | "image" | "video" | "audio" | "mixed" | "error";
+    content_type?: "text" | "image" | "video" | "audio" | "music" | "mixed" | "error";
     image_url?: string | null;
     images?: { url: string; mime_type: string | null }[];
     is_favorite?: boolean;
@@ -175,6 +183,16 @@ interface Message {
     audioProgress?: {
         status: AudioGenerationStatus;
         message: string;
+    };
+    // Music fields
+    music_url?: string | null;
+    music_duration?: number | null;
+    music_config?: MusicGenerationSettings | null;
+    isMusicGenerating?: boolean;
+    musicProgress?: {
+        status: MusicGenerationStatus;
+        message: string;
+        percent?: number;
     };
     // Grounding data from Google Search
     grounding_data?: {
@@ -305,6 +323,9 @@ export function ChatInterface() {
     const [audioSpeakingRate, setAudioSpeakingRate] = useState(1.0);
     const [audioLocale, setAudioLocale] = useState("es-US");
 
+    // Music generation settings
+    const [musicSettings, setMusicSettings] = useState<MusicGenerationSettings>({...DEFAULT_MUSIC_SETTINGS});
+
     // Generation mode (for video models that can also generate images)
     const [generationMode, setGenerationMode] = useState<GenerationMode>("video");
     const [imageModelIdForGeneration, setImageModelIdForGeneration] = useState<number | null>(null);
@@ -331,6 +352,7 @@ export function ChatInterface() {
         image: { normal: { used: number; limit: number; unlimited: boolean }; hq: { used: number; limit: number; unlimited: boolean } };
         video: { normal: { used: number; limit: number; unlimited: boolean }; hq: { used: number; limit: number; unlimited: boolean } };
         audio: { normal: { used: number; limit: number; unlimited: boolean }; hq: { used: number; limit: number; unlimited: boolean } };
+        music: { normal: { used: number; limit: number; unlimited: boolean }; hq: { used: number; limit: number; unlimited: boolean } };
     } | null>(null);
 
     // Project stats (for gallery count)
@@ -395,6 +417,7 @@ export function ChatInterface() {
     const isImageConversation = currentConversation?.generation_type === "image";
     const isVideoConversation = currentConversation?.generation_type === "video";
     const isAudioConversation = currentConversation?.generation_type === "audio" || currentConversation?.generation_type === "audio_hd";
+    const isMusicConversation = currentConversation?.generation_type === "music";
 
     // Get current model based on conversation type, generation mode, and quality tier
     // For video conversations in image mode, use the image model
@@ -851,7 +874,7 @@ export function ChatInterface() {
             if (res.ok) {
                 const data = await res.json();
                 // Transform object response to array format
-                const types: ("text" | "image" | "video" | "audio")[] = ["text", "image", "video", "audio"];
+                const types: ("text" | "image" | "video" | "audio" | "music")[] = ["text", "image", "video", "audio", "music"];
                 const configArray: GenerationConfigItem[] = types.map((type) => ({
                     generation_type: type as GenerationType,
                     is_enabled: data[type]?.enabled ?? false,
@@ -1360,6 +1383,18 @@ export function ChatInterface() {
                         audio_speaking_rate: audioSpeakingRate,
                         audio_locale: audioLocale,
                     }),
+                    // Music settings
+                    music_prompts: musicSettings.prompts,
+                    music_bpm: musicSettings.bpm,
+                    music_density: musicSettings.density,
+                    music_brightness: musicSettings.brightness,
+                    music_scale: musicSettings.scale,
+                    music_guidance: musicSettings.guidance,
+                    music_generation_mode: musicSettings.generationMode,
+                    music_duration: musicSettings.duration,
+                    music_mute_bass: musicSettings.muteBass,
+                    music_mute_drums: musicSettings.muteDrums,
+                    music_only_bass_and_drums: musicSettings.onlyBassAndDrums,
                 }),
             });
 
@@ -2771,6 +2806,177 @@ export function ChatInterface() {
         }
     };
 
+    // ==========================================
+    // MUSIC GENERATION
+    // ==========================================
+
+    const sendMusicMessage = async () => {
+        if (!activeTabId) return;
+
+        let tabId = activeTabId;
+        const currentTab = openTabs.find(t => t.id === tabId);
+        let conversationId = tabConversations[tabId]?.id;
+
+        // Si es un tab draft, crear la conversación real en BD
+        if (currentTab?.isDraft || !conversationId) {
+            const draftConv = tabConversations[tabId];
+            const newConv = await createNewConversation(draftConv?.model_id);
+            if (!newConv) return;
+            conversationId = newConv.id;
+            setTabConversations((prev) => ({...prev, [tabId]: newConv}));
+            setOpenTabs((prev) =>
+                prev.map((t) =>
+                    t.id === tabId ? {...t, conversationId: newConv.id, title: newConv.title, isDraft: false} : t
+                )
+            );
+        }
+
+        // Create a temporary generating message
+        const tempMusicMessageId = Date.now();
+        const musicMessageId = tempMusicMessageId + 1;
+
+        setSendingTabs((prev) => ({...prev, [tabId]: true}));
+
+        // Add optimistic user message + generating model message
+        setTabMessages((prev) => ({
+            ...prev,
+            [tabId]: [
+                ...(prev[tabId] || []),
+                {
+                    id: tempMusicMessageId,
+                    role: "user" as const,
+                    content: musicSettings.prompts.map(p => p.text).filter(t => t.trim()).join(" + ") || "Generar musica",
+                    content_type: "text" as const,
+                    created_at: new Date().toISOString(),
+                },
+                {
+                    id: musicMessageId,
+                    role: "model" as const,
+                    content: "",
+                    content_type: "music" as const,
+                    isMusicGenerating: true,
+                    musicProgress: { status: "connecting" as MusicGenerationStatus, message: "Conectando..." },
+                    created_at: new Date().toISOString(),
+                },
+            ],
+        }));
+
+        try {
+            const response = await fetch(`/api/conversations/${conversationId}/messages/music`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ musicSettings }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || "Error generando musica");
+            }
+
+            const reader = response.body?.getReader();
+            if (!reader) throw new Error("No response body");
+            const decoder = new TextDecoder();
+            let buffer = "";
+
+            while (true) {
+                const {value, done} = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, {stream: true});
+                const lines = buffer.split("\n\n");
+                buffer = lines.pop() || "";
+
+                for (const line of lines) {
+                    if (!line.startsWith("data: ")) continue;
+                    try {
+                        const data = JSON.parse(line.slice(6));
+
+                        if (data.type === "user_message") {
+                            setTabMessages((prev) => ({
+                                ...prev,
+                                [tabId]: prev[tabId].map((m) =>
+                                    m.id === tempMusicMessageId ? {...m, id: data.id} : m
+                                ),
+                            }));
+                        } else if (data.type === "progress") {
+                            setTabMessages((prev) => ({
+                                ...prev,
+                                [tabId]: prev[tabId].map((m) =>
+                                    m.id === musicMessageId
+                                        ? {
+                                            ...m,
+                                            musicProgress: {
+                                                status: data.status,
+                                                message: data.message,
+                                                percent: data.percent,
+                                            },
+                                        }
+                                        : m
+                                ),
+                            }));
+                        } else if (data.type === "saved") {
+                            // Music was auto-saved to DB, update message with final data
+                            setTabMessages((prev) => ({
+                                ...prev,
+                                [tabId]: prev[tabId].map((m) =>
+                                    m.id === musicMessageId
+                                        ? {
+                                            ...m,
+                                            id: data.messageId,
+                                            music_url: data.musicUrl,
+                                            music_duration: data.duration,
+                                            music_config: data.config || musicSettings,
+                                            isMusicGenerating: false,
+                                            musicProgress: undefined,
+                                        }
+                                        : m
+                                ),
+                            }));
+                        } else if (data.type === "error") {
+                            setTabMessages((prev) => ({
+                                ...prev,
+                                [tabId]: prev[tabId].map((m) =>
+                                    m.id === musicMessageId
+                                        ? {
+                                            ...m,
+                                            content: `Error: ${data.message}`,
+                                            content_type: "error" as const,
+                                            isMusicGenerating: false,
+                                            musicProgress: undefined,
+                                        }
+                                        : m
+                                ),
+                            }));
+                        }
+                    } catch (e) {
+                        // Ignore parse errors
+                    }
+                }
+            }
+
+            fetchConversations();
+        } catch (err) {
+            console.error("Error generating music:", err);
+            setTabMessages((prev) => ({
+                ...prev,
+                [tabId]: prev[tabId].map((m) =>
+                    m.id === musicMessageId
+                        ? {
+                            ...m,
+                            content: `Error: ${err instanceof Error ? err.message : "Error inesperado"}`,
+                            content_type: "error" as const,
+                            isMusicGenerating: false,
+                            musicProgress: undefined,
+                        }
+                        : m
+                ),
+            }));
+        } finally {
+            setSendingTabs((prev) => ({...prev, [tabId]: false}));
+        }
+    };
+
+
     const getInitials = (name: string | null | undefined) => {
         if (!name) return "U";
         return name
@@ -3073,8 +3279,8 @@ export function ChatInterface() {
                     </div>
                     )}
 
-                    {/* User Menu */}
-                    <div className="p-3 border-t border-border/50">
+                    {/* User Menu + Version */}
+                    <div className="p-3 border-t border-border/50 space-y-2">
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                                 <button className="flex items-center gap-2 w-full p-2 rounded-lg hover:bg-accent transition-colors">
@@ -3172,6 +3378,11 @@ export function ChatInterface() {
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
+                        <div className="flex justify-center">
+                            <Badge className="text-[10px]">
+                                v{process.env.NEXT_PUBLIC_APP_VERSION || "0.0.0"}
+                            </Badge>
+                        </div>
                     </div>
                 </div>
             )}
@@ -3217,7 +3428,7 @@ export function ChatInterface() {
                         </Button>
 
                         {/* Floating toggle for right sidebar */}
-                        {activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && (
+                        {activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && !isMusicConversation && (
                             <Button
                                 variant="ghost"
                                 size="icon"
@@ -3346,6 +3557,94 @@ export function ChatInterface() {
                                     onRestore={(data) => setAudioRestoreData(data)}
                                     onToggleFavorite={handleToggleFavorite}
                                 />
+                            </div>
+                        </div>
+                    ) : isMusicConversation && activeTabId !== null ? (
+                        /* Music Composer View - Settings (left, flex-1) + History (right, w-96) */
+                        <div className="flex-1 flex overflow-hidden">
+                            {/* Left: Music Settings (expanded) */}
+                            <div className="flex-1 border-r border-border/50 bg-card/50 overflow-y-auto">
+                                <MusicSettings
+                                    settings={musicSettings}
+                                    disabled={isSending}
+                                    isGenerating={(() => {
+                                        const msgs = tabMessages[activeTabId] || [];
+                                        return msgs.some(m => m.isMusicGenerating);
+                                    })()}
+                                    generationProgress={(() => {
+                                        const msgs = tabMessages[activeTabId] || [];
+                                        const generatingMsg = msgs.find(m => m.isMusicGenerating);
+                                        return generatingMsg?.musicProgress;
+                                    })()}
+                                    onChange={(partial) => {
+                                        setMusicSettings(prev => ({...prev, ...partial}));
+                                    }}
+                                    onGenerate={sendMusicMessage}
+                                />
+                            </div>
+                            {/* Right: History panel */}
+                            <div className="w-96 overflow-y-auto p-4">
+                                {(() => {
+                                    const msgs = tabMessages[activeTabId] || [];
+                                    const modelMsgs = msgs.filter(m => m.role === "model");
+                                    const musicFiles = modelMsgs.filter(m => m.music_url || m.isMusicGenerating);
+                                    const errorMsgs = modelMsgs.filter(m => m.content_type === "error");
+                                    const fileCount = musicFiles.filter(m => m.music_url && !m.isMusicGenerating).length;
+                                    const hasHistory = musicFiles.length > 0 || errorMsgs.length > 0;
+
+                                    if (!hasHistory) {
+                                        return (
+                                            <div className="flex items-center justify-center h-full text-muted-foreground">
+                                                <div className="text-center">
+                                                    <Music className="h-12 w-12 mx-auto mb-3 opacity-30" />
+                                                    <p className="text-sm">Los archivos generados aparecerán aquí</p>
+                                                </div>
+                                            </div>
+                                        );
+                                    }
+
+                                    // Combine music files and errors, sorted by id desc
+                                    const historyItems = [...musicFiles, ...errorMsgs].sort((a, b) => b.id - a.id);
+
+                                    return (
+                                        <div className="space-y-3">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <h3 className="text-sm font-semibold text-foreground">Historial</h3>
+                                                {fileCount > 0 && (
+                                                    <span className="text-xs bg-teal-500/20 text-teal-600 dark:text-teal-400 rounded-full px-2 py-0.5">
+                                                        {fileCount}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {historyItems.map((msg) => {
+                                                // Error messages
+                                                if (msg.content_type === "error") {
+                                                    return (
+                                                        <div key={msg.id} className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-200/30 dark:border-red-800/30">
+                                                            <AlertCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+                                                            <p className="text-xs text-red-600 dark:text-red-400 line-clamp-3">{msg.content}</p>
+                                                        </div>
+                                                    );
+                                                }
+                                                // Generating in progress — shown only in MusicSettings
+                                                if (msg.isMusicGenerating) return null;
+                                                if (!msg.music_url) return null;
+                                                return (
+                                                    <MusicPlayer
+                                                        key={msg.id}
+                                                        musicUrl={msg.music_url}
+                                                        duration={msg.music_duration ?? undefined}
+                                                        config={msg.music_config}
+                                                        onReuse={msg.music_config ? () => {
+                                                            setMusicSettings({...msg.music_config!});
+                                                        } : undefined}
+                                                    />
+                                                );
+                                            })}
+                                            <div ref={messagesEndRef} />
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         </div>
                     ) : (
@@ -3594,6 +3893,11 @@ export function ChatInterface() {
                                                     audioVoiceConfig={msg.audio_voice_config}
                                                     isAudioGenerating={msg.isAudioGenerating}
                                                     audioProgress={msg.audioProgress}
+                                                    musicUrl={msg.music_url}
+                                                    musicDuration={msg.music_duration}
+                                                    musicConfig={msg.music_config}
+                                                    isMusicGenerating={msg.isMusicGenerating}
+                                                    musicProgress={msg.musicProgress}
                                                     isUser={msg.role === "user"}
                                                     isStreaming={msg.isStreaming}
                                                     allowImageSelection={!activeTab?.isArchived && !!msg.image_url}
@@ -3661,7 +3965,7 @@ export function ChatInterface() {
                     )}
 
                     {/* Input Area - Hidden for gallery, archived, and audio conversations (TTSComposer handles audio) */}
-                    {activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && (
+                    {activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && !isMusicConversation && (
                         activeTab?.isArchived ? (
                             <div className="p-4 border-t border-border/50 bg-orange-500/5">
                                 <div className="flex items-center justify-center gap-2 text-orange-400 text-sm">
@@ -4091,7 +4395,7 @@ export function ChatInterface() {
             )}
 
             {/* Right Sidebar - Settings (solo visible con conversación activa, no galería, no audio) */}
-            {selectedProjectId && rightSidebarOpen && activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && (
+            {selectedProjectId && rightSidebarOpen && activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && !isMusicConversation && (
                 <div className="w-72 border-l border-border/50 bg-sidebar overflow-y-auto relative">
                     {/* Close button */}
                     <Button

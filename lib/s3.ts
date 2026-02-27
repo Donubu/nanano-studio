@@ -135,6 +135,40 @@ export function generateAudioFileName(
 }
 
 /**
+ * Sube musica temporal a S3 (para preview antes de guardar)
+ * Usa el subfolder "music/temp" para archivos temporales
+ */
+export async function uploadTempMusicToS3(
+  buffer: Buffer,
+  fileName: string,
+  mimeType: string = "audio/mpeg"
+): Promise<UploadResult> {
+  return uploadToS3(buffer, fileName, mimeType, "music/temp");
+}
+
+/**
+ * Sube musica final a S3
+ * Usa el subfolder "music" para archivos permanentes
+ */
+export async function uploadMusicToS3(
+  buffer: Buffer,
+  fileName: string,
+  mimeType: string = "audio/mpeg"
+): Promise<UploadResult> {
+  return uploadToS3(buffer, fileName, mimeType, "music");
+}
+
+/**
+ * Genera un nombre unico para un archivo de musica
+ */
+export function generateMusicFileName(
+  conversationId: string,
+  extension: string = "mp3"
+): string {
+  return generateFileName(conversationId, extension);
+}
+
+/**
  * Genera un nombre único para una imagen subida por usuario
  */
 export function generateUploadFileName(

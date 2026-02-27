@@ -3,6 +3,7 @@
 import Link from "next/link";
 import {usePathname} from "next/navigation";
 import {cn} from "@/lib/utils";
+import {Badge} from "@/components/ui/badge";
 import {
     Users,
     LayoutDashboard,
@@ -107,8 +108,10 @@ export function Sidebar() {
                     );
                 })}
             </nav>
-            <div className="p-3 text-[10px] text-muted-foreground/50">
-                v{process.env.NEXT_PUBLIC_APP_VERSION || "2.0.0"}
+            <div className="p-3 flex justify-center">
+                <Badge className="text-[10px]">
+                    v{process.env.NEXT_PUBLIC_APP_VERSION || "0.0.0"}
+                </Badge>
             </div>
         </aside>
     );

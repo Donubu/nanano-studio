@@ -52,6 +52,7 @@ import {
   ToggleRight,
   CalendarDays,
   AudioLines,
+  Music,
 } from "lucide-react";
 import { ProjectCalendar } from "@/components/dashboard/project-calendar";
 import Image from "next/image";
@@ -140,7 +141,7 @@ const statusColors: Record<string, string> = {
 
 type TabType = "overview" | "users" | "calendar" | "tags" | "config";
 
-type GenerationType = "text" | "image" | "video" | "audio";
+type GenerationType = "text" | "image" | "video" | "audio" | "music";
 
 interface ModelInfo {
   id: number;
@@ -160,6 +161,7 @@ interface GenerationConfigResponse {
   image: TypeConfig;
   video: TypeConfig;
   audio: TypeConfig;
+  music: TypeConfig;
 }
 
 export default function ProjectDetailPage() {
@@ -230,6 +232,7 @@ export default function ProjectDetailPage() {
     image: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
     video: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
     audio: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
+    music: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
   });
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [savingConfigType, setSavingConfigType] = useState<GenerationType | null>(null);
@@ -861,8 +864,9 @@ export default function ProjectDetailPage() {
                     image: { label: "Imagen", icon: ImageIcon },
                     video: { label: "Video", icon: Video },
                     audio: { label: "Audio", icon: Mic },
+                    music: { label: "Música", icon: Music },
                   };
-                  const enabledTypes = (["text", "image", "video", "audio"] as GenerationType[]).filter(
+                  const enabledTypes = (["text", "image", "video", "audio", "music"] as GenerationType[]).filter(
                     (type) => generationConfig[type]?.enabled
                   );
 
@@ -1289,13 +1293,14 @@ export default function ProjectDetailPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                {(["text", "image", "video", "audio"] as GenerationType[]).map((type) => {
+                {(["text", "image", "video", "audio", "music"] as GenerationType[]).map((type) => {
                   const config = generationConfig[type];
                   const typeLabels: Record<GenerationType, { label: string; icon: typeof MessageSquare }> = {
                     text: { label: "Texto", icon: MessageSquare },
                     image: { label: "Imagen", icon: ImageIcon },
                     video: { label: "Video", icon: Video },
                     audio: { label: "Audio", icon: Mic },
+                    music: { label: "Música", icon: Music },
                   };
                   const { label, icon: Icon } = typeLabels[type];
                   const isSaving = savingConfigType === type;

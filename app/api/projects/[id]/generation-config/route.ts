@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 
-type GenerationType = "text" | "image" | "video" | "audio";
+type GenerationType = "text" | "image" | "video" | "audio" | "music";
 
 interface GenerationConfigRow extends RowDataPacket {
   id: number;
@@ -29,6 +29,7 @@ interface GenerationConfigResponse {
   image: TypeConfig;
   video: TypeConfig;
   audio: TypeConfig;
+  music: TypeConfig;
 }
 
 interface TypeConfig {
@@ -89,6 +90,7 @@ export async function GET(
       image: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
       video: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
       audio: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
+      music: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
     };
 
     for (const row of rows) {
@@ -148,9 +150,9 @@ export async function PUT(
       model_chirp_id,
     } = body;
 
-    if (!generation_type || !["text", "image", "video", "audio"].includes(generation_type)) {
+    if (!generation_type || !["text", "image", "video", "audio", "music"].includes(generation_type)) {
       return NextResponse.json(
-        { error: "generation_type invalido. Debe ser: text, image, video o audio" },
+        { error: "generation_type invalido. Debe ser: text, image, video, audio o music" },
         { status: 400 }
       );
     }
@@ -298,7 +300,7 @@ export async function POST(
 
     // Insertar cada configuracion
     for (const config of configs) {
-      if (!["text", "image", "video", "audio"].includes(config.generation_type)) {
+      if (!["text", "image", "video", "audio", "music"].includes(config.generation_type)) {
         continue;
       }
 

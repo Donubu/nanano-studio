@@ -5,13 +5,15 @@ import NextImage from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
-import { Download, Loader2, Check, Mic, AlertCircle, ChevronDown, GripVertical, ZoomIn } from "lucide-react";
+import { Download, Loader2, Check, Mic, Music, AlertCircle, ChevronDown, GripVertical, ZoomIn } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VideoPlayer } from "./video-player";
 import { VideoProgress } from "./video-progress";
 import { VideoGenerationStatus } from "@/types/video";
 import { AudioPlayer } from "./audio-player";
+import { MusicPlayer } from "./music-player";
 import { AudioGenerationStatus, AudioVoiceConfig, AudioSpeakerConfig } from "@/types/audio";
+import type { MusicGenerationSettings, MusicGenerationStatus } from "@/types/music";
 import {
   Collapsible,
   CollapsibleContent,
@@ -73,6 +75,22 @@ interface MessageContentProps {
     status: AudioGenerationStatus;
     message: string;
   };
+  // Music fields
+  musicUrl?: string | null;
+  musicDuration?: number | null;
+  musicConfig?: MusicGenerationSettings | null;
+  isMusicGenerating?: boolean;
+  musicProgress?: {
+    status: MusicGenerationStatus;
+    message: string;
+    percent?: number;
+  };
+  // Music preview mode
+  isMusicPreview?: boolean;
+  onMusicSave?: () => void;
+  onMusicDiscard?: () => void;
+  onMusicRegenerate?: () => void;
+  isMusicSaving?: boolean;
   isUser?: boolean;
   isStreaming?: boolean;
   // Image selection
@@ -182,6 +200,16 @@ export function MessageContent({
   audioVoiceConfig,
   isAudioGenerating = false,
   audioProgress,
+  musicUrl,
+  musicDuration,
+  musicConfig,
+  isMusicGenerating = false,
+  musicProgress,
+  isMusicPreview = false,
+  onMusicSave,
+  onMusicDiscard,
+  onMusicRegenerate,
+  isMusicSaving = false,
   isUser = false,
   isStreaming = false,
   isImageSelected = false,
@@ -455,6 +483,46 @@ export function MessageContent({
           duration={audioDuration || undefined}
           mimeType={audioMimeType || undefined}
           voiceConfig={audioVoiceConfig}
+        />
+      )}
+
+      {/* Music en progreso de generacion */}
+      {isMusicGenerating && musicProgress && (
+        <div className="flex items-center gap-3 p-4 bg-teal-500/10 border border-teal-200/50 dark:border-teal-800/50 rounded-lg">
+          <div className="w-10 h-10 rounded-full bg-teal-500/20 flex items-center justify-center shrink-0">
+            <Music className="w-5 h-5 text-teal-600 animate-pulse" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-teal-700 dark:text-teal-300">
+              Generando musica...
+            </p>
+            <p className="text-xs text-teal-600/70 dark:text-teal-400/70 truncate">
+              {musicProgress.message}
+            </p>
+            {musicProgress.percent !== undefined && (
+              <div className="w-full h-1.5 bg-teal-200/30 dark:bg-teal-800/30 rounded-full mt-1.5">
+                <div
+                  className="h-full bg-teal-500 rounded-full transition-all"
+                  style={{ width: `${musicProgress.percent}%` }}
+                />
+              </div>
+            )}
+          </div>
+          <div className="w-5 h-5 border-2 border-teal-500 border-t-transparent rounded-full animate-spin shrink-0" />
+        </div>
+      )}
+
+      {/* Music generada */}
+      {musicUrl && !isMusicGenerating && (
+        <MusicPlayer
+          musicUrl={musicUrl}
+          duration={musicDuration || undefined}
+          config={musicConfig}
+          isPreview={isMusicPreview}
+          onSave={onMusicSave}
+          onDiscard={onMusicDiscard}
+          onRegenerate={onMusicRegenerate}
+          isSaving={isMusicSaving}
         />
       )}
 
