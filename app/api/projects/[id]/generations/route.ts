@@ -29,6 +29,11 @@ interface GenerationRow extends RowDataPacket {
   audio_file_size: number | null;
   audio_duration: number | null;
   audio_voice_config: string | null;
+  music_url: string | null;
+  music_mime_type: string | null;
+  music_file_size: number | null;
+  music_duration: number | null;
+  music_config: string | null;
   created_at: string;
   deleted_at: string | null;
   tags: string | null; // JSON string of tags
@@ -81,9 +86,11 @@ export async function GET(
       conditions.push("m.video_url IS NOT NULL AND m.video_url != ''");
     } else if (type === "audios") {
       conditions.push("m.audio_url IS NOT NULL AND m.audio_url != ''");
+    } else if (type === "music") {
+      conditions.push("m.music_url IS NOT NULL AND m.music_url != ''");
     } else {
-      // All generations (images OR videos OR audios)
-      conditions.push("((m.image_url IS NOT NULL AND m.image_url != '') OR (m.video_url IS NOT NULL AND m.video_url != '') OR (m.audio_url IS NOT NULL AND m.audio_url != ''))");
+      // All generations (images OR videos OR audios OR music)
+      conditions.push("((m.image_url IS NOT NULL AND m.image_url != '') OR (m.video_url IS NOT NULL AND m.video_url != '') OR (m.audio_url IS NOT NULL AND m.audio_url != '') OR (m.music_url IS NOT NULL AND m.music_url != ''))");
     }
 
     // Soft delete filter
@@ -168,6 +175,11 @@ export async function GET(
         m.audio_file_size,
         m.audio_duration,
         m.audio_voice_config,
+        m.music_url,
+        m.music_mime_type,
+        m.music_file_size,
+        m.music_duration,
+        m.music_config,
         m.created_at,
         m.deleted_at,
         (
@@ -192,9 +204,11 @@ export async function GET(
 
     // Parse tags JSON and transform response
     const result = generations.map(gen => {
-      // Determine type: video > audio > image (priority order)
-      let type: "video" | "audio" | "image" = "image";
-      if (gen.video_url) {
+      // Determine type: music > video > audio > image (priority order)
+      let type: "video" | "audio" | "image" | "music" = "image";
+      if (gen.music_url) {
+        type = "music";
+      } else if (gen.video_url) {
         type = "video";
       } else if (gen.audio_url) {
         type = "audio";
@@ -206,6 +220,7 @@ export async function GET(
         has_2x: Boolean(gen.has_2x),
         tags: gen.tags ? (typeof gen.tags === "string" ? JSON.parse(gen.tags) : gen.tags) as TagInfo[] : [],
         audio_voice_config: gen.audio_voice_config ? (typeof gen.audio_voice_config === "string" ? JSON.parse(gen.audio_voice_config) : gen.audio_voice_config) : null,
+        music_config: gen.music_config ? (typeof gen.music_config === "string" ? JSON.parse(gen.music_config) : gen.music_config) : null,
         type,
       };
     });

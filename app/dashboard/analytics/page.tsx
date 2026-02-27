@@ -9,6 +9,7 @@ import {
   DollarSign,
   ImageIcon,
   Video,
+  Music,
   MessageSquare,
   TrendingUp,
   TrendingDown,
@@ -43,6 +44,7 @@ interface DailyStat {
   estimatedCost: number;
   imageCount: number;
   videoCount: number;
+  musicCount: number;
   messageCount: number;
 }
 
@@ -54,6 +56,7 @@ interface ModelBreakdown {
   estimatedCost: number;
   imageCount: number;
   videoCount: number;
+  musicCount: number;
   messageCount: number;
 }
 
@@ -65,6 +68,7 @@ interface UserBreakdown {
   estimatedCost: number;
   imageCount: number;
   videoCount: number;
+  musicCount: number;
   conversationCount: number;
 }
 
@@ -76,6 +80,7 @@ interface ProjectBreakdown {
   estimatedCost: number;
   imageCount: number;
   videoCount: number;
+  musicCount: number;
   conversationCount: number;
 }
 
@@ -86,6 +91,7 @@ interface Summary {
   estimatedCost: number;
   imageCount: number;
   videoCount: number;
+  musicCount: number;
   messageCount: number;
   conversationCount: number;
   topazImageCredits: number;
@@ -118,6 +124,7 @@ const CHART_COLORS = {
   cost: "#10b981",
   images: "#8b5cf6",
   videos: "#f59e0b",
+  music: "#2dd4bf",
 };
 
 type PeriodType = "7" | "30" | "90" | "all";
@@ -165,7 +172,7 @@ export default function AnalyticsPage() {
   };
 
   const getCurrentSummary = (): Summary => {
-    if (!data) return { tokensInput: 0, tokensOutput: 0, totalTokens: 0, estimatedCost: 0, imageCount: 0, videoCount: 0, messageCount: 0, conversationCount: 0, topazImageCredits: 0, topazVideoCredits: 0 };
+    if (!data) return { tokensInput: 0, tokensOutput: 0, totalTokens: 0, estimatedCost: 0, imageCount: 0, videoCount: 0, musicCount: 0, messageCount: 0, conversationCount: 0, topazImageCredits: 0, topazVideoCredits: 0 };
     if (period === "7") return data.summaries["7d"];
     if (period === "30") return data.summaries["30d"];
     return data.summaries["all"];
@@ -231,7 +238,7 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
         <Card className="bg-card border-border/50">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -287,6 +294,19 @@ export default function AnalyticsPage() {
           <CardContent>
             <div className="text-2xl font-bold">{currentSummary.videoCount}</div>
             <p className="text-xs text-muted-foreground">Generados</p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border/50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Música
+            </CardTitle>
+            <Music className="h-4 w-4 text-teal-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{currentSummary.musicCount}</div>
+            <p className="text-xs text-muted-foreground">Generadas</p>
           </CardContent>
         </Card>
 
@@ -475,6 +495,7 @@ export default function AnalyticsPage() {
                   <Legend />
                   <Bar dataKey="imageCount" name="Imágenes" fill={CHART_COLORS.images} radius={[4, 4, 0, 0]} />
                   <Bar dataKey="videoCount" name="Videos" fill={CHART_COLORS.videos} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="musicCount" name="Música" fill={CHART_COLORS.music} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
@@ -526,7 +547,7 @@ export default function AnalyticsPage() {
                           className="w-3 h-3 rounded-full"
                           style={{ backgroundColor: COLORS[index % COLORS.length] }}
                         />
-                        <span className="capitalize">{type.type === "text" ? "Texto" : type.type === "image" ? "Imagen" : "Video"}</span>
+                        <span className="capitalize">{type.type === "text" ? "Texto" : type.type === "image" ? "Imagen" : type.type === "video" ? "Video" : "Música"}</span>
                       </div>
                       <div className="text-right">
                         <div className="font-medium">{type.count}</div>
@@ -569,9 +590,11 @@ export default function AnalyticsPage() {
                     <div className="text-right">
                       <div className="font-medium text-green-400">{formatCost(model.estimatedCost)}</div>
                       <div className="text-xs text-muted-foreground">
-                        {model.imageCount > 0 && `${model.imageCount} img`}
-                        {model.imageCount > 0 && model.videoCount > 0 && " / "}
-                        {model.videoCount > 0 && `${model.videoCount} vid`}
+                        {[
+                          model.imageCount > 0 && `${model.imageCount} img`,
+                          model.videoCount > 0 && `${model.videoCount} vid`,
+                          model.musicCount > 0 && `${model.musicCount} mus`,
+                        ].filter(Boolean).join(" / ")}
                       </div>
                     </div>
                   </div>
@@ -643,9 +666,11 @@ export default function AnalyticsPage() {
                     <div className="text-right">
                       <div className="font-medium text-green-400">{formatCost(project.estimatedCost)}</div>
                       <div className="text-xs text-muted-foreground">
-                        {project.imageCount > 0 && `${project.imageCount} img`}
-                        {project.imageCount > 0 && project.videoCount > 0 && " / "}
-                        {project.videoCount > 0 && `${project.videoCount} vid`}
+                        {[
+                          project.imageCount > 0 && `${project.imageCount} img`,
+                          project.videoCount > 0 && `${project.videoCount} vid`,
+                          project.musicCount > 0 && `${project.musicCount} mus`,
+                        ].filter(Boolean).join(" / ")}
                       </div>
                     </div>
                   </div>

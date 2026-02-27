@@ -11,13 +11,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { VideoPlayer } from "./video-player";
 import { AudioPlayer } from "./audio-player";
+import { MusicPlayer } from "./music-player";
 import { formatDateTimeLocal } from "@/lib/utils";
 import { AudioVoiceConfig, AudioSpeakerConfig, getVoiceById } from "@/types/audio";
 import { cn } from "@/lib/utils";
 
 // Export the Generation interface for reuse
 export interface Generation {
-  type: "image" | "video" | "audio";
+  type: "image" | "video" | "audio" | "music";
   id: number;
   conversation_id: number;
   conversation_user_id: number;
@@ -43,6 +44,11 @@ export interface Generation {
   audio_file_size: number | null;
   audio_duration: number | null;
   audio_voice_config: AudioVoiceConfig | AudioSpeakerConfig | null;
+  music_url: string | null;
+  music_mime_type: string | null;
+  music_file_size: number | null;
+  music_duration: number | null;
+  music_config: Record<string, unknown> | null;
   created_at: string;
   deleted_at: string | null;
   tags: TagInfo[];
@@ -228,6 +234,9 @@ export function GenerationModal({
       } else if (gen.type === "audio") {
         url = gen.audio_url;
         ext = gen.audio_mime_type?.split("/")[1] || "mp3";
+      } else if (gen.type === "music") {
+        url = gen.music_url;
+        ext = gen.music_mime_type?.split("/")[1] || "mp3";
       }
 
       if (!url) return;
@@ -384,6 +393,12 @@ export function GenerationModal({
               <Music className="h-4 w-4 text-white" />
             </div>
           </div>
+        ) : gen.type === "music" ? (
+          <div className="w-full h-full bg-gradient-to-br from-teal-900 to-cyan-900 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
+              <Music className="h-4 w-4 text-teal-300" />
+            </div>
+          </div>
         ) : null}
         {/* Favorite indicator */}
         {gen.is_favorite && (
@@ -485,6 +500,19 @@ export function GenerationModal({
                   </div>
                 )}
               </div>
+            ) : selectedItem.type === "music" && selectedItem.music_url ? (
+              <div className="w-full max-w-md">
+                <MusicPlayer
+                  musicUrl={selectedItem.music_url}
+                  duration={selectedItem.music_duration ?? undefined}
+                  config={selectedItem.music_config as import("@/types/music").MusicGenerationSettings | null}
+                />
+                {selectedItem.content && (
+                  <div className="mt-4 pt-4 border-t border-border/50">
+                    <p className="text-sm text-muted-foreground line-clamp-4">{selectedItem.content}</p>
+                  </div>
+                )}
+              </div>
             ) : null}
           </div>
 
@@ -567,7 +595,7 @@ export function GenerationModal({
             <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
               <div className="flex items-center gap-1.5">
                 <FileType className="h-4 w-4" />
-                <span>{selectedItem.type === "image" ? getFileExtension(selectedItem.image_mime_type) : selectedItem.type === "video" ? "MP4" : getFileExtension(selectedItem.audio_mime_type)}</span>
+                <span>{selectedItem.type === "image" ? getFileExtension(selectedItem.image_mime_type) : selectedItem.type === "video" ? "MP4" : selectedItem.type === "music" ? "MP3" : getFileExtension(selectedItem.audio_mime_type)}</span>
               </div>
               {selectedItem.type === "image" ? (
                 <>
@@ -606,6 +634,27 @@ export function GenerationModal({
                     <div className="flex items-center gap-1.5">
                       <HardDrive className="h-4 w-4" />
                       <span>{formatFileSize(selectedItem.video_file_size)}</span>
+                    </div>
+                  )}
+                </>
+              ) : selectedItem.type === "music" ? (
+                <>
+                  {selectedItem.music_duration && (
+                    <div className="flex items-center gap-1.5">
+                      <Clock className="h-4 w-4" />
+                      <span>{Math.floor(selectedItem.music_duration / 60)}:{(selectedItem.music_duration % 60).toString().padStart(2, "0")}</span>
+                    </div>
+                  )}
+                  {selectedItem.music_config && (selectedItem.music_config as Record<string, unknown>).bpm && (
+                    <div className="flex items-center gap-1.5">
+                      <Music className="h-4 w-4" />
+                      <span>{String((selectedItem.music_config as Record<string, unknown>).bpm)} BPM</span>
+                    </div>
+                  )}
+                  {formatFileSize(selectedItem.music_file_size) && (
+                    <div className="flex items-center gap-1.5">
+                      <HardDrive className="h-4 w-4" />
+                      <span>{formatFileSize(selectedItem.music_file_size)}</span>
                     </div>
                   )}
                 </>
@@ -671,7 +720,7 @@ export function GenerationModal({
                 </Button>
               ) : (
                 <Button onClick={() => handleDownload(selectedItem)} className="flex-1 gap-2" variant="outline">
-                  <Download className="h-4 w-4" /> Descargar audio
+                  <Download className="h-4 w-4" /> {selectedItem.type === "music" ? "Descargar música" : "Descargar audio"}
                 </Button>
               )}
 

@@ -10,6 +10,7 @@ interface StatsRow extends RowDataPacket {
   totalConversations: number;
   totalImages: number;
   totalVideos: number;
+  totalMusic: number;
   totalTokensInput: number;
   totalTokensOutput: number;
   totalEstimatedCost: number;
@@ -38,6 +39,7 @@ export async function GET() {
         (SELECT COUNT(*) FROM conversations) as totalConversations,
         (SELECT COUNT(*) FROM messages WHERE role = 'model' AND image_url IS NOT NULL AND image_url != '') as totalImages,
         (SELECT COUNT(*) FROM messages WHERE role = 'model' AND video_url IS NOT NULL AND video_url != '') as totalVideos,
+        (SELECT COUNT(*) FROM messages WHERE role = 'model' AND music_url IS NOT NULL AND music_url != '') as totalMusic,
         (SELECT COALESCE(SUM(tokens_input), 0) FROM messages) as totalTokensInput,
         (SELECT COALESCE(SUM(tokens_output), 0) FROM messages) as totalTokensOutput,
         (SELECT COALESCE(SUM(total_estimated_cost), 0) FROM conversations) as totalEstimatedCost,
@@ -51,6 +53,7 @@ export async function GET() {
       totalConversations: 0,
       totalImages: 0,
       totalVideos: 0,
+      totalMusic: 0,
       totalTokensInput: 0,
       totalTokensOutput: 0,
       totalEstimatedCost: 0,

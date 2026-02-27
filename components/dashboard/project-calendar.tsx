@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { ChevronLeft, ChevronRight, Image, Video, Mic, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Image, Video, Mic, Music, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,7 @@ interface DayData {
   images: number;
   videos: number;
   audios: number;
+  music: number;
   totalCost: number;
   generations: Generation[];
 }
@@ -111,6 +112,7 @@ export function ProjectCalendar({
             images: 0,
             videos: 0,
             audios: 0,
+            music: 0,
             totalCost: 0,
             generations: [],
           };
@@ -119,6 +121,7 @@ export function ProjectCalendar({
         if (gen.type === "image") byDay[day].images++;
         if (gen.type === "video") byDay[day].videos++;
         if (gen.type === "audio") byDay[day].audios++;
+        if (gen.type === "music") byDay[day].music++;
         byDay[day].totalCost += gen.estimated_cost || 0;
         byDay[day].generations.push({
           ...gen,
@@ -287,7 +290,7 @@ export function ProjectCalendar({
 
               const dateKey = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
               const data = dayDataMap[dateKey];
-              const hasActivity = data && (data.images + data.videos + data.audios) > 0;
+              const hasActivity = data && (data.images + data.videos + data.audios + data.music) > 0;
               const isToday = isCurrentMonth && day.getDate() === today.getDate();
 
               return (
@@ -331,6 +334,12 @@ export function ProjectCalendar({
                         <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4 gap-0.5">
                           {data.audios}
                           <Mic className="h-2.5 w-2.5" />
+                        </Badge>
+                      )}
+                      {data.music > 0 && !compact && (
+                        <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4 gap-0.5">
+                          {data.music}
+                          <Music className="h-2.5 w-2.5" />
                         </Badge>
                       )}
                     </div>

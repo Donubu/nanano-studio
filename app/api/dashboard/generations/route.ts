@@ -33,6 +33,9 @@ interface GenerationRow extends RowDataPacket {
   audio_url: string | null;
   audio_file_size: number | null;
   audio_duration: number | null;
+  music_url: string | null;
+  music_file_size: number | null;
+  music_duration: number | null;
   created_at: string;
   deleted_at: string | null;
 }
@@ -150,8 +153,10 @@ export async function GET(request: NextRequest) {
       conditions.push("m.video_url IS NOT NULL AND m.video_url != ''");
     } else if (type === "audio") {
       conditions.push("m.audio_url IS NOT NULL AND m.audio_url != ''");
+    } else if (type === "music") {
+      conditions.push("m.music_url IS NOT NULL AND m.music_url != ''");
     } else if (type === "text") {
-      conditions.push("m.image_url IS NULL AND m.video_url IS NULL AND m.audio_url IS NULL");
+      conditions.push("m.image_url IS NULL AND m.video_url IS NULL AND m.audio_url IS NULL AND m.music_url IS NULL");
     }
 
     // Project filter
@@ -238,6 +243,9 @@ export async function GET(request: NextRequest) {
         m.audio_url,
         m.audio_file_size,
         m.audio_duration,
+        m.music_url,
+        m.music_file_size,
+        m.music_duration,
         m.created_at,
         m.deleted_at
       FROM messages m
@@ -249,6 +257,7 @@ export async function GET(request: NextRequest) {
         AND pgc.generation_type = CASE
           WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 'video'
           WHEN m.audio_url IS NOT NULL AND m.audio_url != '' THEN 'audio'
+          WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 'music'
           WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 'image'
           ELSE 'text'
         END
@@ -271,9 +280,11 @@ export async function GET(request: NextRequest) {
 
     // Determine type for each generation
     const result = generations.map(gen => {
-      let generationType: "image" | "video" | "audio" | "text" = "text";
+      let generationType: "image" | "video" | "audio" | "music" | "text" = "text";
       if (gen.video_url) {
         generationType = "video";
+      } else if (gen.music_url) {
+        generationType = "music";
       } else if (gen.audio_url) {
         generationType = "audio";
       } else if (gen.image_url) {
@@ -297,7 +308,8 @@ export async function GET(request: NextRequest) {
         SUM(COALESCE(m.estimated_cost, 0)) as total_cost,
         COUNT(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 END) as image_count,
         COUNT(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 END) as video_count,
-        COUNT(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' THEN 1 END) as audio_count
+        COUNT(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' THEN 1 END) as audio_count,
+        COUNT(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 END) as music_count
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN projects p ON c.project_id = p.id
@@ -341,6 +353,7 @@ export async function GET(request: NextRequest) {
         image_count: Number(totals.image_count) || 0,
         video_count: Number(totals.video_count) || 0,
         audio_count: Number(totals.audio_count) || 0,
+        music_count: Number(totals.music_count) || 0,
         topaz_image_count: Number(topazImageTotals[0]?.count) || 0,
         topaz_video_count: Number(topazVideoTotals[0]?.count) || 0,
         topaz_image_credits: Number(topazImageTotals[0]?.credits) || 0,
@@ -788,6 +801,9 @@ async function handleAllGenerations(
       m.audio_url,
       m.audio_file_size,
       m.audio_duration,
+      m.music_url,
+      m.music_file_size,
+      m.music_duration,
       m.created_at,
       m.deleted_at
     FROM messages m
@@ -799,6 +815,7 @@ async function handleAllGenerations(
       AND pgc.generation_type = CASE
         WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 'video'
         WHEN m.audio_url IS NOT NULL AND m.audio_url != '' THEN 'audio'
+        WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 'music'
         WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 'image'
         ELSE 'text'
       END
@@ -889,7 +906,7 @@ async function handleAllGenerations(
   // Transform and combine all results
   type CombinedGeneration = {
     id: number;
-    type: "image" | "video" | "audio" | "text" | "topaz_image" | "topaz_video";
+    type: "image" | "video" | "audio" | "music" | "text" | "topaz_image" | "topaz_video";
     conversation_id: number;
     conversation_title: string;
     project_id: number | null;
@@ -912,6 +929,9 @@ async function handleAllGenerations(
     audio_url: string | null;
     audio_file_size: number | null;
     audio_duration: number | null;
+    music_url: string | null;
+    music_file_size: number | null;
+    music_duration: number | null;
     created_at: string;
     deleted_at: string | null;
     // Topaz fields
@@ -932,8 +952,9 @@ async function handleAllGenerations(
 
   // Add messages
   for (const msg of messages) {
-    let generationType: "image" | "video" | "audio" | "text" = "text";
+    let generationType: "image" | "video" | "audio" | "music" | "text" = "text";
     if (msg.video_url) generationType = "video";
+    else if (msg.music_url) generationType = "music";
     else if (msg.audio_url) generationType = "audio";
     else if (msg.image_url) generationType = "image";
 
@@ -962,6 +983,9 @@ async function handleAllGenerations(
       audio_url: msg.audio_url,
       audio_file_size: msg.audio_file_size,
       audio_duration: msg.audio_duration,
+      music_url: msg.music_url,
+      music_file_size: msg.music_file_size,
+      music_duration: msg.music_duration,
       created_at: msg.created_at,
       deleted_at: msg.deleted_at,
       quality_tier: msg.quality_tier,
@@ -995,6 +1019,9 @@ async function handleAllGenerations(
       audio_url: null,
       audio_file_size: null,
       audio_duration: null,
+      music_url: null,
+      music_file_size: null,
+      music_duration: null,
       created_at: ti.created_at,
       deleted_at: null,
       original_url: ti.original_url,
@@ -1036,6 +1063,9 @@ async function handleAllGenerations(
       audio_url: null,
       audio_file_size: null,
       audio_duration: null,
+      music_url: null,
+      music_file_size: null,
+      music_duration: null,
       created_at: tv.created_at,
       deleted_at: null,
       original_url: tv.original_url,
@@ -1064,7 +1094,8 @@ async function handleAllGenerations(
       SUM(COALESCE(m.estimated_cost, 0)) as total_cost,
       COUNT(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 END) as image_count,
       COUNT(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 END) as video_count,
-      COUNT(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' THEN 1 END) as audio_count
+      COUNT(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' THEN 1 END) as audio_count,
+      COUNT(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 END) as music_count
     FROM messages m
     JOIN conversations c ON m.conversation_id = c.id
     LEFT JOIN projects p ON c.project_id = p.id
@@ -1105,6 +1136,7 @@ async function handleAllGenerations(
       image_count: Number(totals.image_count) || 0,
       video_count: Number(totals.video_count) || 0,
       audio_count: Number(totals.audio_count) || 0,
+      music_count: Number(totals.music_count) || 0,
       topaz_image_count: Number(topazImageTotals[0]?.count) || 0,
       topaz_video_count: Number(topazVideoTotals[0]?.count) || 0,
       topaz_image_credits: Number(topazImageTotals[0]?.credits) || 0,

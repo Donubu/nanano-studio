@@ -6,7 +6,7 @@ import { useNavigation } from "@/contexts/navigation-context";
 import {
   X, Loader2, ExternalLink, Image as ImageIcon, Video, Calendar, FileType,
   Maximize2, RatioIcon, Ruler, Download, HardDrive, Volume2, VolumeX, Clock,
-  ChevronLeft, ChevronRight, LayoutGrid, Search, Tag, Plus, Trash2, Upload, Music, User, Users,
+  ChevronLeft, ChevronRight, LayoutGrid, Search, Tag, Plus, Trash2, Upload, Music, Mic, User, Users,
   Sparkles, Copy, Check, Star, CalendarDays, Wand2, RotateCcw
 } from "lucide-react";
 import { TopazStudio } from "./topaz-studio";
@@ -16,10 +16,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { VideoPlayer } from "./video-player";
 import { AudioPlayer } from "./audio-player";
+import { MusicPlayer } from "./music-player";
 import { formatDateTimeLocal } from "@/lib/utils";
 import { AudioVoiceConfig, AudioSpeakerConfig, getVoiceById } from "@/types/audio";
 
-type FilterType = "all" | "images" | "videos" | "audios";
+type FilterType = "all" | "images" | "videos" | "audios" | "music";
 type QualityFilterType = "all" | "normal" | "hq";
 type FavoriteFilterType = "all" | "favorites";
 type ViewMode = "grid" | "calendar";
@@ -31,7 +32,7 @@ interface TagInfo {
 }
 
 interface Generation {
-  type: "image" | "video" | "audio";
+  type: "image" | "video" | "audio" | "music";
   id: number;
   conversation_id: number;
   conversation_user_id: number;
@@ -59,6 +60,11 @@ interface Generation {
   audio_file_size: number | null;
   audio_duration: number | null;
   audio_voice_config: AudioVoiceConfig | AudioSpeakerConfig | null;
+  music_url: string | null;
+  music_mime_type: string | null;
+  music_file_size: number | null;
+  music_duration: number | null;
+  music_config: Record<string, unknown> | null;
   created_at: string;
   deleted_at: string | null;
   tags: TagInfo[];
@@ -172,7 +178,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
       }
 
       // Fetch uploads if enabled and filter allows images
-      if (showUploads && filter !== "videos" && filter !== "audios") {
+      if (showUploads && filter !== "videos" && filter !== "audios" && filter !== "music") {
         const uploadsRes = await fetch(`/api/projects/${projectId}/uploads`);
         if (uploadsRes.ok) {
           const uploadsData = await uploadsRes.json();
@@ -205,6 +211,11 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
             audio_file_size: null,
             audio_duration: null,
             audio_voice_config: null,
+            music_url: null,
+            music_mime_type: null,
+            music_file_size: null,
+            music_duration: null,
+            music_config: null,
             created_at: u.created_at,
             deleted_at: null,
             tags: [],
@@ -529,6 +540,9 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
       } else if (gen.type === "audio") {
         url = gen.audio_url;
         ext = gen.audio_mime_type?.split("/")[1] || "mp3";
+      } else if (gen.type === "music") {
+        url = gen.music_url;
+        ext = gen.music_mime_type?.split("/")[1] || "mp3";
       }
 
       if (!url) return;
@@ -595,6 +609,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
   const imageCount = filteredGenerations.filter(g => g.type === "image").length;
   const videoCount = filteredGenerations.filter(g => g.type === "video").length;
   const audioCount = filteredGenerations.filter(g => g.type === "audio").length;
+  const musicCount = filteredGenerations.filter(g => g.type === "music").length;
   const hqCount = generations.filter(g => g.quality_tier === "hq").length;
   const favoriteCount = generations.filter(g => g.is_favorite).length;
 
@@ -632,7 +647,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
           </div>
 
           <div className="flex items-center gap-1">
-            {(["all", "images", "videos", "audios"] as FilterType[]).map((f) => (
+            {(["all", "images", "videos", "audios", "music"] as FilterType[]).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -645,8 +660,9 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                 {f === "all" && <LayoutGrid className="h-4 w-4" />}
                 {f === "images" && <ImageIcon className="h-4 w-4" />}
                 {f === "videos" && <Video className="h-4 w-4" />}
-                {f === "audios" && <Music className="h-4 w-4" />}
-                {f === "all" ? "Todos" : f === "images" ? "Imágenes" : f === "videos" ? "Videos" : "Audios"}
+                {f === "audios" && <Mic className="h-4 w-4" />}
+                {f === "music" && <Music className="h-4 w-4" />}
+                {f === "all" ? "Todos" : f === "images" ? "Imágenes" : f === "videos" ? "Videos" : f === "audios" ? "Audios" : "Música"}
               </button>
             ))}
           </div>
@@ -779,13 +795,14 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
 
         <p className="text-sm text-muted-foreground">
           {total} {total === 1 ? "generación" : "generaciones"}
-          {(imageCount > 0 || videoCount > 0 || audioCount > 0) && ` (`}
-          {imageCount > 0 && `${imageCount} ${imageCount === 1 ? "imagen" : "imágenes"}`}
-          {imageCount > 0 && (videoCount > 0 || audioCount > 0) && ", "}
-          {videoCount > 0 && `${videoCount} ${videoCount === 1 ? "video" : "videos"}`}
-          {videoCount > 0 && audioCount > 0 && ", "}
-          {audioCount > 0 && `${audioCount} ${audioCount === 1 ? "audio" : "audios"}`}
-          {(imageCount > 0 || videoCount > 0 || audioCount > 0) && `)`}
+          {(imageCount > 0 || videoCount > 0 || audioCount > 0 || musicCount > 0) && ` (`}
+          {[
+            imageCount > 0 && `${imageCount} ${imageCount === 1 ? "imagen" : "imágenes"}`,
+            videoCount > 0 && `${videoCount} ${videoCount === 1 ? "video" : "videos"}`,
+            audioCount > 0 && `${audioCount} ${audioCount === 1 ? "audio" : "audios"}`,
+            musicCount > 0 && `${musicCount} ${musicCount === 1 ? "música" : "músicas"}`,
+          ].filter(Boolean).join(", ")}
+          {(imageCount > 0 || videoCount > 0 || audioCount > 0 || musicCount > 0) && `)`}
         </p>
       </div>
 
@@ -868,6 +885,22 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                         </span>
                       );
                     })()}
+                  </div>
+                ) : gen.type === "music" && gen.music_url ? (
+                  <div className="w-full h-full bg-gradient-to-br from-teal-500/20 to-cyan-500/20 flex flex-col items-center justify-center p-4">
+                    <div className="w-16 h-16 rounded-full bg-teal-500/20 flex items-center justify-center mb-3">
+                      <Music className="w-8 h-8 text-teal-400" />
+                    </div>
+                    {gen.music_duration && (
+                      <span className="text-sm font-medium text-foreground">
+                        {Math.floor(gen.music_duration / 60)}:{(gen.music_duration % 60).toString().padStart(2, "0")}
+                      </span>
+                    )}
+                    {gen.music_config && Boolean((gen.music_config as Record<string, unknown>).bpm) && (
+                      <span className="text-xs text-muted-foreground mt-1">
+                        {String((gen.music_config as Record<string, unknown>).bpm)} BPM
+                      </span>
+                    )}
                   </div>
                 ) : null}
 
@@ -1064,6 +1097,19 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                     </div>
                   )}
                 </div>
+              ) : selectedItem.type === "music" && selectedItem.music_url ? (
+                <div className="w-full max-w-md">
+                  <MusicPlayer
+                    musicUrl={selectedItem.music_url}
+                    duration={selectedItem.music_duration ?? undefined}
+                    config={selectedItem.music_config as import("@/types/music").MusicGenerationSettings | null}
+                  />
+                  {selectedItem.content && (
+                    <div className="mt-4 pt-4 border-t border-border/50">
+                      <p className="text-sm text-muted-foreground line-clamp-4">{selectedItem.content}</p>
+                    </div>
+                  )}
+                </div>
               ) : null}
             </div>
 
@@ -1144,7 +1190,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
               <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
                 <div className="flex items-center gap-1.5">
                   <FileType className="h-4 w-4" />
-                  <span>{selectedItem.type === "image" ? getFileExtension(selectedItem.image_mime_type) : selectedItem.type === "video" ? "MP4" : getFileExtension(selectedItem.audio_mime_type)}</span>
+                  <span>{selectedItem.type === "image" ? getFileExtension(selectedItem.image_mime_type) : selectedItem.type === "video" ? "MP4" : selectedItem.type === "music" ? "MP3" : getFileExtension(selectedItem.audio_mime_type)}</span>
                 </div>
                 {selectedItem.type === "image" ? (
                   <>
@@ -1186,7 +1232,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                       </div>
                     )}
                   </>
-                ) : (
+                ) : selectedItem.type === "audio" ? (
                   <>
                     {selectedItem.audio_duration && (
                       <div className="flex items-center gap-1.5">
@@ -1214,7 +1260,28 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                       </div>
                     )}
                   </>
-                )}
+                ) : selectedItem.type === "music" ? (
+                  <>
+                    {selectedItem.music_duration && (
+                      <div className="flex items-center gap-1.5">
+                        <Clock className="h-4 w-4" />
+                        <span>{Math.floor(selectedItem.music_duration / 60)}:{(selectedItem.music_duration % 60).toString().padStart(2, "0")}</span>
+                      </div>
+                    )}
+                    {selectedItem.music_config && (selectedItem.music_config as Record<string, unknown>).bpm && (
+                      <div className="flex items-center gap-1.5">
+                        <Music className="h-4 w-4" />
+                        <span>{String((selectedItem.music_config as Record<string, unknown>).bpm)} BPM</span>
+                      </div>
+                    )}
+                    {formatFileSize(selectedItem.music_file_size) && (
+                      <div className="flex items-center gap-1.5">
+                        <HardDrive className="h-4 w-4" />
+                        <span>{formatFileSize(selectedItem.music_file_size)}</span>
+                      </div>
+                    )}
+                  </>
+                ) : null}
                 {selectedItem.user_name && (
                   <div className="flex items-center gap-1.5">
                     <User className="h-4 w-4" />
@@ -1287,7 +1354,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                   </>
                 ) : (
                   <Button onClick={() => handleDownload(selectedItem)} className="flex-1 gap-2" variant="outline">
-                    <Download className="h-4 w-4" /> Descargar audio
+                    <Download className="h-4 w-4" /> {selectedItem.type === "music" ? "Descargar música" : "Descargar audio"}
                   </Button>
                 )}
 

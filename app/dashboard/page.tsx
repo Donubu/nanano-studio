@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, MessageSquare, FolderKanban, ImageIcon, Video, Loader2, Zap, DollarSign, Sparkles } from "lucide-react";
+import { Users, MessageSquare, FolderKanban, ImageIcon, Video, Music, Loader2, Zap, DollarSign, Sparkles } from "lucide-react";
 
 interface DashboardStats {
   totalUsers: number;
@@ -10,6 +10,7 @@ interface DashboardStats {
   totalConversations: number;
   totalImages: number;
   totalVideos: number;
+  totalMusic: number;
   totalTokensInput: number;
   totalTokensOutput: number;
   totalEstimatedCost: number;
@@ -66,7 +67,7 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
         <Card className="bg-card border-border/50">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -168,6 +169,27 @@ export default function DashboardPage() {
             </div>
             <p className="text-xs text-muted-foreground">
               Generados
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border/50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Música
+            </CardTitle>
+            <Music className="h-4 w-4 text-teal-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {loading ? (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              ) : (
+                formatNumber(stats?.totalMusic || 0)
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Generadas
             </p>
           </CardContent>
         </Card>

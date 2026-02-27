@@ -66,9 +66,12 @@ interface Generation {
   audio_url: string | null;
   audio_file_size: number | null;
   audio_duration: number | null;
+  music_url: string | null;
+  music_file_size: number | null;
+  music_duration: number | null;
   created_at: string;
   deleted_at: string | null;
-  type: "image" | "video" | "audio" | "text" | "topaz_image" | "topaz_video";
+  type: "image" | "video" | "audio" | "music" | "text" | "topaz_image" | "topaz_video";
   // Topaz-specific fields
   original_url?: string;
   result_url?: string;
@@ -94,6 +97,7 @@ interface Totals {
   image_count: number;
   video_count: number;
   audio_count: number;
+  music_count: number;
   topaz_image_count?: number;
   topaz_video_count?: number;
   topaz_image_credits?: number;
@@ -115,7 +119,7 @@ interface ApiResponse {
   };
 }
 
-type TypeFilter = "all" | "image" | "video" | "audio" | "text" | "topaz_image" | "topaz_video";
+type TypeFilter = "all" | "image" | "video" | "audio" | "music" | "text" | "topaz_image" | "topaz_video";
 
 export default function GenerationsPage() {
   const [data, setData] = useState<ApiResponse | null>(null);
@@ -218,6 +222,8 @@ export default function GenerationsPage() {
         return <Video className="h-4 w-4 text-orange-400" />;
       case "audio":
         return <Music className="h-4 w-4 text-green-400" />;
+      case "music":
+        return <Music className="h-4 w-4 text-teal-400" />;
       case "topaz_image":
         return <Sparkles className="h-4 w-4 text-purple-400" />;
       case "topaz_video":
@@ -235,6 +241,8 @@ export default function GenerationsPage() {
         return "Video";
       case "audio":
         return "Audio";
+      case "music":
+        return "Musica";
       case "topaz_image":
         return "Topaz Img";
       case "topaz_video":
@@ -263,7 +271,7 @@ export default function GenerationsPage() {
 
       {/* Summary Cards */}
       {data && (
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-4">
           <Card className="bg-card border-border/50">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -344,6 +352,18 @@ export default function GenerationsPage() {
           <Card className="bg-card border-border/50">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
+                Musica
+              </CardTitle>
+              <Music className="h-4 w-4 text-teal-400" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{data.totals.music_count || 0}</div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-card border-border/50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
                 Topaz Img
               </CardTitle>
               <Sparkles className="h-4 w-4 text-purple-400" />
@@ -398,6 +418,7 @@ export default function GenerationsPage() {
                 <SelectItem value="image">Imágenes</SelectItem>
                 <SelectItem value="video">Videos</SelectItem>
                 <SelectItem value="audio">Audios</SelectItem>
+                <SelectItem value="music">Musica</SelectItem>
                 <SelectItem value="text">Texto</SelectItem>
                 <SelectItem value="topaz_image">Topaz Imagen</SelectItem>
                 <SelectItem value="topaz_video">Topaz Video</SelectItem>
@@ -590,12 +611,20 @@ export default function GenerationsPage() {
                               )}
                             </div>
                           )}
+                          {gen.type === "music" && (
+                            <div>
+                              <div className="text-sm">{formatFileSize(gen.music_file_size)}</div>
+                              {gen.music_duration && (
+                                <div className="text-xs text-muted-foreground">{formatDuration(gen.music_duration)}</div>
+                              )}
+                            </div>
+                          )}
                           {gen.type === "text" && <span className="text-muted-foreground">-</span>}
                         </TableCell>
                         <TableCell>
-                          {(gen.image_url || gen.video_url || gen.audio_url || gen.result_url) && (
+                          {(gen.image_url || gen.video_url || gen.audio_url || gen.music_url || gen.result_url) && (
                             <a
-                              href={gen.result_url || gen.image_url || gen.video_url || gen.audio_url || "#"}
+                              href={gen.result_url || gen.image_url || gen.video_url || gen.audio_url || gen.music_url || "#"}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="p-1.5 hover:bg-accent rounded-md inline-flex"
