@@ -522,11 +522,14 @@ export async function sendMessageStream(
           for (const candidate of candidates) {
             const chunkImages = extractImagesFromParts(candidate.content?.parts);
             if (chunkImages.length > 0) {
-              allImages.push(...chunkImages);
               if (callbacks.onImage) {
+                // Stream mode: dispatch each image immediately, don't accumulate in memory
                 for (const img of chunkImages) {
                   callbacks.onImage(img);
                 }
+              } else {
+                // Non-stream fallback: accumulate for onComplete
+                allImages.push(...chunkImages);
               }
             }
 
