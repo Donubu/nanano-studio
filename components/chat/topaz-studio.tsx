@@ -404,6 +404,7 @@ export function TopazStudio({ imageUrl, messageId, imageDimensions, onClose }: T
                 fill
                 className="object-contain"
                 sizes="(max-width: 1280px) 60vw, 800px"
+                unoptimized
                 priority
               />
             </div>

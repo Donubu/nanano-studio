@@ -39,8 +39,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# Install mysql2 for migration script (not included in standalone)
-RUN npm install --no-save mysql2
+# Install mysql2 for migration script and sharp for image optimization (not included in standalone)
+RUN npm install --no-save mysql2 sharp
 
 # Copy standalone build
 COPY --from=builder /app/.next/standalone ./

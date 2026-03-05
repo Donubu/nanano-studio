@@ -1047,6 +1047,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                     fill
                     className="object-contain rounded-lg"
                     sizes="(max-width: 1280px) 90vw, 1024px"
+                    unoptimized
                     priority
                     onLoad={(e) => {
                       const img = e.target as HTMLImageElement;

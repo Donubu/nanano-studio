@@ -12,7 +12,15 @@ const nextConfig: NextConfig = {
     },
   },
   images: {
-    unoptimized: true,
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "static.puer.to",
+      },
+    ],
+    minimumCacheTTL: 2592000, // 30 days — avoid re-optimizing the same image
+    deviceSizes: [640, 828, 1080, 1200, 1920],
+    imageSizes: [128, 256, 384],
   },
   env: {
     NEXT_PUBLIC_APP_VERSION: packageJson.version,
