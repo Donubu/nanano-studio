@@ -12,12 +12,7 @@ const nextConfig: NextConfig = {
     },
   },
   images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "static.puer.to",
-      },
-    ],
+    unoptimized: true,
   },
   env: {
     NEXT_PUBLIC_APP_VERSION: packageJson.version,
