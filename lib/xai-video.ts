@@ -37,7 +37,7 @@ interface XaiGenerationRequest {
   duration?: number;
   aspect_ratio?: string;
   resolution?: string;
-  image_url?: string; // For image-to-video (initial frame reference)
+  image?: { url: string }; // For image-to-video (initial frame reference)
 }
 
 interface XaiGenerationStartResponse {
@@ -110,10 +110,10 @@ export async function generateXaiVideo(
     resolution: config.resolution,
   };
 
-  // Image-to-video: pass image URL as initial frame reference
+  // Image-to-video: pass image as { url: "..." } object
   if (imageUrl) {
-    requestBody.image_url = imageUrl;
-    console.log("[xAI Video] image_url set:", imageUrl.startsWith("http") ? imageUrl : `base64 (${imageUrl.length} chars)`);
+    requestBody.image = { url: imageUrl };
+    console.log("[xAI Video] image set:", imageUrl.startsWith("http") ? imageUrl : `base64 (${imageUrl.length} chars)`);
   }
 
   console.log("[xAI Video] Request body keys:", Object.keys(requestBody).join(", "));
