@@ -1,4 +1,26 @@
 services:
+  nginx:
+    image: nginx:alpine
+    container_name: puerto_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - certbot_webroot:/var/www/certbot:ro
+      - certbot_certs:/etc/letsencrypt:ro
+    depends_on:
+      - puerto_studio
+
+  certbot:
+    image: certbot/certbot
+    container_name: puerto_certbot
+    volumes:
+      - certbot_webroot:/var/www/certbot
+      - certbot_certs:/etc/letsencrypt
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do sleep 12h & wait $${!}; certbot renew --webroot -w /var/www/certbot --quiet; done'"
+
   redis:
     image: redis:7-alpine
     container_name: puerto_redis
@@ -16,9 +38,9 @@ services:
     container_name: puerto_studio
     restart: unless-stopped
     env_file:
-      - /var/www/vhosts/puerto.to/private/.env
+      - .env.production
     volumes:
-      - /var/www/vhosts/puerto.to/private/credentials.json:/run/secrets/credentials.json:ro
+      - ./credentials.json:/run/secrets/credentials.json:ro
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
       - NODE_ENV=production
@@ -29,9 +51,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4g
-    ports:
-      - "127.0.0.1:3005:3000"
+          memory: 2g
     depends_on:
       - redis
 
@@ -40,9 +60,9 @@ services:
     container_name: puerto_worker_1
     restart: unless-stopped
     env_file:
-      - /var/www/vhosts/puerto.to/private/.env
+      - .env.production
     volumes:
-      - /var/www/vhosts/puerto.to/private/credentials.json:/run/secrets/credentials.json:ro
+      - ./credentials.json:/run/secrets/credentials.json:ro
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
       - NODE_ENV=production
@@ -53,7 +73,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4g
+          memory: 1536m
     depends_on:
       - redis
 
@@ -62,9 +82,9 @@ services:
     container_name: puerto_worker_2
     restart: unless-stopped
     env_file:
-      - /var/www/vhosts/puerto.to/private/.env
+      - .env.production
     volumes:
-      - /var/www/vhosts/puerto.to/private/credentials.json:/run/secrets/credentials.json:ro
+      - ./credentials.json:/run/secrets/credentials.json:ro
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
       - NODE_ENV=production
@@ -75,7 +95,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4g
+          memory: 1536m
     depends_on:
       - redis
 
@@ -84,9 +104,9 @@ services:
     container_name: puerto_worker_3
     restart: unless-stopped
     env_file:
-      - /var/www/vhosts/puerto.to/private/.env
+      - .env.production
     volumes:
-      - /var/www/vhosts/puerto.to/private/credentials.json:/run/secrets/credentials.json:ro
+      - ./credentials.json:/run/secrets/credentials.json:ro
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
       - NODE_ENV=production
@@ -97,7 +117,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4g
+          memory: 1536m
     depends_on:
       - redis
 
@@ -106,9 +126,9 @@ services:
     container_name: puerto_worker_4
     restart: unless-stopped
     env_file:
-      - /var/www/vhosts/puerto.to/private/.env
+      - .env.production
     volumes:
-      - /var/www/vhosts/puerto.to/private/credentials.json:/run/secrets/credentials.json:ro
+      - ./credentials.json:/run/secrets/credentials.json:ro
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
       - NODE_ENV=production
@@ -119,9 +139,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4g
+          memory: 1536m
     depends_on:
       - redis
 
 volumes:
   redis_data:
+  certbot_webroot:
+  certbot_certs:

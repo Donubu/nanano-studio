@@ -3411,6 +3411,25 @@ export function ChatInterface() {
                             activeTabId={activeTabId}
                             onTabClick={setActiveTabId}
                             onTabClose={handleTabClose}
+                            onTabRename={async (tabId, conversationId, newTitle) => {
+                              try {
+                                const res = await fetch(`/api/conversations/${conversationId}`, {
+                                  method: "PUT",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ title: newTitle }),
+                                });
+                                if (res.ok) {
+                                  setOpenTabs((prev) =>
+                                    prev.map((t) => t.id === tabId ? { ...t, title: newTitle } : t)
+                                  );
+                                  setConversations((prev) =>
+                                    prev.map((c) => c.id === conversationId ? { ...c, title: newTitle } : c)
+                                  );
+                                }
+                              } catch (err) {
+                                console.error("Error renaming conversation:", err);
+                              }
+                            }}
                             onNewTab={() => setShowNewConversationModal(true)}
                             disabled={isSending}
                         />

@@ -1,21 +1,23 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
-// Configuración del cliente S3
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION || "us-east-1",
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
-  },
-});
+// Lazy initialization to support worker process where env vars load after module init
+let s3Client: S3Client | null = null;
+function getS3Client(): S3Client {
+  if (!s3Client) {
+    s3Client = new S3Client({
+      region: process.env.AWS_REGION || "us-east-1",
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
+      },
+    });
+  }
+  return s3Client;
+}
 
-const BUCKET = process.env.AWS_S3_BUCKET || "";
-// Limpiar slashes del inicio y final del folder
-const FOLDER = (process.env.AWS_S3_FOLDER || "").replace(/^\/+|\/+$/g, "");
-// Limpiar protocolo y slashes del dominio CloudFront
-const CLOUDFRONT_DOMAIN = (process.env.AWS_CLOUDFRONT_DOMAIN || "")
-  .replace(/^https?:\/\//, "")
-  .replace(/\/+$/, "");
+function getBucket() { return process.env.AWS_S3_BUCKET || ""; }
+function getFolder() { return (process.env.AWS_S3_FOLDER || "").replace(/^\/+|\/+$/g, ""); }
+function getCloudfrontDomain() { return (process.env.AWS_CLOUDFRONT_DOMAIN || "").replace(/^https?:\/\//, "").replace(/\/+$/, ""); }
 
 export interface UploadResult {
   url: string;
@@ -32,19 +34,23 @@ export async function uploadToS3(
   mimeType: string,
   subfolder: string = "generated"
 ): Promise<UploadResult> {
+  const bucket = getBucket();
+  const folder = getFolder();
+  const cloudfrontDomain = getCloudfrontDomain();
+
   // Construir la key (ruta) en S3
-  const key = FOLDER
-    ? `${FOLDER}/${subfolder}/${fileName}`
+  const key = folder
+    ? `${folder}/${subfolder}/${fileName}`
     : `${subfolder}/${fileName}`;
 
-  console.log("[S3] Uploading to bucket:", BUCKET);
+  console.log("[S3] Uploading to bucket:", bucket);
   console.log("[S3] Key:", key);
   console.log("[S3] File size:", buffer.length, "bytes");
 
   // Subir a S3
-  await s3Client.send(
+  await getS3Client().send(
     new PutObjectCommand({
-      Bucket: BUCKET,
+      Bucket: bucket,
       Key: key,
       Body: buffer,
       ContentType: mimeType,
@@ -53,9 +59,9 @@ export async function uploadToS3(
   );
 
   // Construir URL de CloudFront
-  const url = CLOUDFRONT_DOMAIN
-    ? `https://${CLOUDFRONT_DOMAIN}/${key}`
-    : `https://${BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
+  const url = cloudfrontDomain
+    ? `https://${cloudfrontDomain}/${key}`
+    : `https://${bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
 
   console.log("[S3] Upload successful, URL:", url);
 
@@ -210,9 +216,9 @@ export function extractS3KeyFromUrl(url: string): string | null {
  */
 export async function deleteFromS3(key: string): Promise<boolean> {
   try {
-    await s3Client.send(
+    await getS3Client().send(
       new DeleteObjectCommand({
-        Bucket: BUCKET,
+        Bucket: getBucket(),
         Key: key,
       })
     );

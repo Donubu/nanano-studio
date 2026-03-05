@@ -129,3 +129,25 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Custom scrollbar for conversation tabs */
+.tabs-scroll::-webkit-scrollbar {
+  height: 4px !important;
+}
+.tabs-scroll::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+.tabs-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(128, 128, 128, 0.3) !important;
+  border-radius: 4px !important;
+}
+.tabs-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(128, 128, 128, 0.5) !important;
+}
+/* Firefox */
+@supports (scrollbar-width: thin) {
+  .tabs-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(128, 128, 128, 0.3) transparent;
+  }
+}

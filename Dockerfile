@@ -24,6 +24,7 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN npm run build
+RUN npm run build:worker
 
 # ---- runner ----
 FROM node:20-alpine AS runner
@@ -39,8 +40,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# Install mysql2 for migration script and sharp for image optimization (not included in standalone)
-RUN npm install --no-save mysql2 sharp
+# Install runtime dependencies not included in standalone
+RUN npm install --no-save mysql2 sharp bullmq ioredis @google/genai @aws-sdk/client-s3 @google-cloud/text-to-speech
 
 # Copy standalone build
 COPY --from=builder /app/.next/standalone ./
@@ -52,6 +53,9 @@ COPY --from=builder /app/scripts/migrate.js ./scripts/migrate.js
 COPY --from=builder /app/scripts/migrations ./scripts/migrations
 COPY --from=builder /app/scripts/docker-start.sh ./scripts/docker-start.sh
 RUN chmod +x ./scripts/docker-start.sh
+
+# Copy worker build
+COPY --from=builder /app/worker/dist ./worker/dist
 
 EXPOSE 3000
 

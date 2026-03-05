@@ -1,6 +1,7 @@
 "use client";
 
-import { X, Plus, Loader2, MessageSquare, Archive, Image } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { X, Plus, Loader2, MessageSquare, Archive, Image, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface Tab {
@@ -18,6 +19,7 @@ interface ConversationTabsProps {
   activeTabId: number | null;
   onTabClick: (tabId: number) => void;
   onTabClose: (tabId: number) => void;
+  onTabRename?: (tabId: number, conversationId: number, newTitle: string) => void;
   onNewTab: () => void;
   disabled?: boolean;
 }
@@ -27,9 +29,39 @@ export function ConversationTabs({
   activeTabId,
   onTabClick,
   onTabClose,
+  onTabRename,
   onNewTab,
   disabled = false,
 }: ConversationTabsProps) {
+  const [editingTabId, setEditingTabId] = useState<number | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editingTabId !== null && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editingTabId]);
+
+  const startEditing = (tab: Tab, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (tab.isGallery || tab.isArchived || tab.isDraft || disabled) return;
+    setEditingTabId(tab.id);
+    setEditValue(tab.title);
+  };
+
+  const commitRename = (tab: Tab) => {
+    const trimmed = editValue.trim();
+    setEditingTabId(null);
+    if (trimmed && trimmed !== tab.title && onTabRename) {
+      onTabRename(tab.id, tab.conversationId, trimmed);
+    }
+  };
+
+  const cancelEditing = () => {
+    setEditingTabId(null);
+  };
   // Determine the active tab type for styling
   const activeTab = tabs.find(t => t.id === activeTabId);
   const isGalleryActive = activeTab?.isGallery;
@@ -56,16 +88,17 @@ export function ConversationTabs({
       )} />
 
       {/* Tabs */}
-      <div className="flex items-end gap-1 min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-thumb-border/50">
+      <div className="flex items-end gap-1 min-w-0 flex-1 overflow-x-auto overflow-y-hidden tabs-scroll">
         {tabs.map((tab) => {
           const isActive = activeTabId === tab.id;
 
           return (
             <div
               key={tab.id}
+              title={tab.title}
               onClick={() => !disabled && onTabClick(tab.id)}
               className={cn(
-                "group relative flex items-center gap-2 px-3 py-2 text-sm cursor-pointer transition-all min-w-0 max-w-[200px]",
+                "group relative flex items-center gap-2 px-3 py-2 text-sm cursor-pointer transition-all min-w-[120px] max-w-[260px] flex-1",
                 "rounded-t-lg border-x border-t",
                 isActive
                   ? cn(
@@ -94,7 +127,33 @@ export function ConversationTabs({
               ) : (
                 <MessageSquare className={cn("h-3.5 w-3.5 shrink-0", !isActive && "opacity-60")} />
               )}
-              <span className="truncate">{tab.title}</span>
+              {editingTabId === tab.id ? (
+                <input
+                  ref={inputRef}
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  onBlur={() => commitRename(tab)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitRename(tab);
+                    if (e.key === "Escape") cancelEditing();
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="bg-transparent border-b border-current outline-none text-sm min-w-0 w-full"
+                  maxLength={100}
+                />
+              ) : (
+                <>
+                  <span className="truncate" onDoubleClick={(e) => startEditing(tab, e)}>{tab.title}</span>
+                  {isActive && !tab.isGallery && !tab.isArchived && !tab.isDraft && onTabRename && (
+                    <button
+                      onClick={(e) => startEditing(tab, e)}
+                      className="p-0.5 rounded hover:bg-muted opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                    >
+                      <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
+                    </button>
+                  )}
+                </>
+              )}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
