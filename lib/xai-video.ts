@@ -37,7 +37,7 @@ interface XaiGenerationRequest {
   duration?: number;
   aspect_ratio?: string;
   resolution?: string;
-  video_url?: string; // For image-to-video or video editing
+  image_url?: string; // For image-to-video (initial frame reference)
 }
 
 interface XaiGenerationStartResponse {
@@ -110,9 +110,9 @@ export async function generateXaiVideo(
     resolution: config.resolution,
   };
 
-  // Image-to-video: pass image URL
+  // Image-to-video: pass image URL as initial frame reference
   if (imageUrl) {
-    requestBody.video_url = imageUrl;
+    requestBody.image_url = imageUrl;
   }
 
   onProgress?.({

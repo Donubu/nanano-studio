@@ -4,7 +4,7 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { generateVideo, isVideoConfigured, VideoGenerationConfig, VideoInput, VideoGenerationProgress } from "@/lib/google-ai-video";
 import { generateXaiVideo, isXaiVideoConfigured, XaiVideoConfig, validateXaiVideoConfig } from "@/lib/xai-video";
-import { uploadVideoToS3, generateVideoFileName, isS3Configured } from "@/lib/s3";
+import { uploadVideoToS3, uploadImageToS3, generateVideoFileName, isS3Configured } from "@/lib/s3";
 import { generateConversationTitle, Labels } from "@/lib/google-ai";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
 
@@ -289,8 +289,26 @@ export async function POST(
               return;
             }
 
-            // xAI supports image-to-video via URL (first frame image)
-            const imageUrl = videoInputs?.firstFrame || firstFrameImage || undefined;
+            // xAI supports image-to-video via public URL (not base64)
+            // If we have a base64 image, upload it to S3 first to get a public URL
+            let imageUrl: string | undefined;
+            const rawImage = videoInputs?.firstFrame || firstFrameImage || undefined;
+            if (rawImage) {
+              if (rawImage.startsWith("http://") || rawImage.startsWith("https://")) {
+                imageUrl = rawImage;
+              } else {
+                // Convert base64 data URI to buffer and upload to S3
+                const base64Data = rawImage.includes(",") ? rawImage.split(",")[1] : rawImage;
+                const mimeMatch = rawImage.match(/data:([^;]+);/);
+                const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+                const ext = mimeType.includes("png") ? "png" : "jpg";
+                const buffer = Buffer.from(base64Data, "base64");
+                const fileName = generateVideoFileName(id, ext); // reuse naming for temp images
+                const uploadResult = await uploadImageToS3(buffer, fileName, mimeType);
+                imageUrl = uploadResult.url;
+                console.log("[Video xAI] Uploaded first frame to S3:", imageUrl);
+              }
+            }
 
             const backendLabel = 'xAI';
             console.log(`\n========== [VIDEO GENERATION REQUEST] (${backendLabel}) ==========`);
