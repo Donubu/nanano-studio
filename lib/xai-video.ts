@@ -113,7 +113,10 @@ export async function generateXaiVideo(
   // Image-to-video: pass image URL as initial frame reference
   if (imageUrl) {
     requestBody.image_url = imageUrl;
+    console.log("[xAI Video] image_url set:", imageUrl.startsWith("http") ? imageUrl : `base64 (${imageUrl.length} chars)`);
   }
+
+  console.log("[xAI Video] Request body keys:", Object.keys(requestBody).join(", "));
 
   onProgress?.({
     status: "processing",
