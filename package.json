@@ -1,6 +1,6 @@
 {
   "name": "nanano",
-  "version": "5.0.3",
+  "version": "5.0.5",
   "private": true,
   "scripts": {
     "dev": "node scripts/bump-version.js && next dev",
@@ -41,6 +41,7 @@
     "recharts": "^3.6.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
+    "sharp": "^0.34.5",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
