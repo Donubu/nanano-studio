@@ -113,6 +113,9 @@ async function withRetry<T>(
 let vertexClient: GoogleGenAI | null = null;
 let geminiClient: GoogleGenAI | null = null;
 
+// Timeout for audio API calls (5 minutes)
+const AUDIO_TIMEOUT_MS = Number(process.env.GOOGLE_AI_TIMEOUT_MS) || 300000;
+
 function getClient(backend?: string): GoogleGenAI {
   if (useVertexForBackend(backend)) {
     if (!vertexClient) {
@@ -120,6 +123,7 @@ function getClient(backend?: string): GoogleGenAI {
         vertexai: true,
         project: process.env.GOOGLE_CLOUD_PROJECT,
         location: process.env.GOOGLE_CLOUD_LOCATION,
+        httpOptions: { timeout: AUDIO_TIMEOUT_MS },
       });
     }
     return vertexClient;
@@ -128,6 +132,7 @@ function getClient(backend?: string): GoogleGenAI {
     geminiClient = new GoogleGenAI({
       apiKey: process.env.GEMINI_API_KEY,
       vertexai: false,
+      httpOptions: { timeout: AUDIO_TIMEOUT_MS },
     });
   }
   return geminiClient;

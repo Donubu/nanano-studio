@@ -135,6 +135,9 @@ function useVertexForBackend(backend?: string): boolean {
 let vertexClient: GoogleGenAI | null = null;
 let geminiClient: GoogleGenAI | null = null;
 
+// Timeout for API calls (5 minutes — image generation in 4K can be slow)
+const API_TIMEOUT_MS = Number(process.env.GOOGLE_AI_TIMEOUT_MS) || 300000;
+
 function getClient(backend?: string): GoogleGenAI {
   if (useVertexForBackend(backend)) {
     if (!vertexClient) {
@@ -142,6 +145,7 @@ function getClient(backend?: string): GoogleGenAI {
         vertexai: true,
         project: process.env.GOOGLE_CLOUD_PROJECT,
         location: process.env.GOOGLE_CLOUD_LOCATION,
+        httpOptions: { timeout: API_TIMEOUT_MS },
       });
     }
     return vertexClient;
@@ -151,7 +155,7 @@ function getClient(backend?: string): GoogleGenAI {
     // GOOGLE_API_KEY which may be a Vertex AI token, not a standard Gemini API key
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error("No Gemini API key configured (GEMINI_API_KEY)");
-    geminiClient = new GoogleGenAI({ apiKey, vertexai: false });
+    geminiClient = new GoogleGenAI({ apiKey, vertexai: false, httpOptions: { timeout: API_TIMEOUT_MS } });
   }
   return geminiClient;
 }

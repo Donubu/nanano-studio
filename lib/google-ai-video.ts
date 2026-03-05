@@ -116,6 +116,9 @@ async function withRetry<T>(
   throw lastError;
 }
 
+// Timeout for video API calls (10 minutes — video generation can be very slow)
+const VIDEO_API_TIMEOUT_MS = Number(process.env.GOOGLE_AI_VIDEO_TIMEOUT_MS) || 600000;
+
 // Lazy dual-client support for per-model backend selection
 let vertexClient: GoogleGenAI | null = null;
 let geminiClient: GoogleGenAI | null = null;
@@ -127,6 +130,7 @@ function getClient(backend?: string): GoogleGenAI {
         vertexai: true,
         project: process.env.GOOGLE_CLOUD_PROJECT,
         location: process.env.GOOGLE_CLOUD_LOCATION,
+        httpOptions: { timeout: VIDEO_API_TIMEOUT_MS },
       });
     }
     return vertexClient;
@@ -135,6 +139,7 @@ function getClient(backend?: string): GoogleGenAI {
     geminiClient = new GoogleGenAI({
       apiKey: process.env.GEMINI_API_KEY,
       vertexai: false,
+      httpOptions: { timeout: VIDEO_API_TIMEOUT_MS },
     });
   }
   return geminiClient;
