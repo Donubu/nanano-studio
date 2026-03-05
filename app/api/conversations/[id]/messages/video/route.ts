@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { generateVideo, isVideoConfigured, VideoGenerationConfig, VideoInput, VideoGenerationProgress } from "@/lib/google-ai-video";
+import { generateXaiVideo, isXaiVideoConfigured, XaiVideoConfig, validateXaiVideoConfig } from "@/lib/xai-video";
 import { uploadVideoToS3, generateVideoFileName, isS3Configured } from "@/lib/s3";
 import { generateConversationTitle, Labels } from "@/lib/google-ai";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
@@ -52,13 +53,6 @@ export async function POST(
     if (!session?.user) {
       return new Response(JSON.stringify({ error: "No autorizado" }), {
         status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    if (!isVideoConfigured()) {
-      return new Response(JSON.stringify({ error: "API de Google AI Video no configurada" }), {
-        status: 500,
         headers: { "Content-Type": "application/json" },
       });
     }
@@ -215,6 +209,28 @@ export async function POST(
             }
           }
 
+          // Determine if this is an xAI model
+          const isXaiProvider = effectiveBackend === 'xai';
+
+          // Validate that the appropriate video API is configured
+          if (isXaiProvider) {
+            if (!isXaiVideoConfigured()) {
+              sendEvent({ type: "error", message: "API de xAI Video no configurada (falta XAI_API_KEY)" });
+              clearInterval(heartbeat);
+              controllerClosed = true;
+              controller.close();
+              return;
+            }
+          } else {
+            if (!isVideoConfigured()) {
+              sendEvent({ type: "error", message: "API de Google AI Video no configurada" });
+              clearInterval(heartbeat);
+              controllerClosed = true;
+              controller.close();
+              return;
+            }
+          }
+
           // Guardar mensaje del usuario (con quality_tier)
           const [userMessageResult] = await pool.execute<ResultSetHeader>(
             `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)
@@ -242,53 +258,6 @@ export async function POST(
           // Enviar el ID del mensaje del usuario
           sendEvent({ type: "user_message", id: userMessageId });
 
-          // Configuración de generación de video (usa request settings, fallback a conversation settings)
-          const audioEnabled = videoSettings?.audioEnabled !== undefined
-            ? videoSettings.audioEnabled
-            : (conversation.video_audio_enabled ?? true);
-
-          // Use user-provided seed or generate random seed (uint32 range: 0-4294967295)
-          const generatedSeed = videoSettings?.seed ?? Math.floor(Math.random() * 4294967295);
-
-          const videoConfig: VideoGenerationConfig = {
-            durationSeconds: ((videoSettings?.duration || conversation.video_duration) as 4 | 6 | 8) || 8,
-            resolution: ((videoSettings?.resolution || conversation.video_resolution) as "720p" | "1080p") || "720p",
-            aspectRatio: ((videoSettings?.aspectRatio || conversation.video_aspect_ratio) as "16:9" | "9:16") || "16:9",
-            generateAudio: audioEnabled,
-            negativePrompt: videoSettings?.negativePrompt || conversation.video_negative_prompt || undefined,
-            seed: generatedSeed,
-            personGeneration: "allow_all",
-          };
-
-          // Debug: log final config
-          console.log("[Video API] Final generateAudio value:", videoConfig.generateAudio);
-
-          // Input del video (usa videoInputs si está disponible, fallback a campos directos)
-          // Get reference images - could be from referenceImages or videoInputs.referenceImages
-          const refImages = referenceImages || videoInputs?.referenceImages;
-
-          const videoInput: VideoInput = {
-            prompt: content,
-            firstFrameImage: videoInputs?.firstFrame || firstFrameImage || undefined,
-            lastFrameImage: videoInputs?.lastFrame || lastFrameImage || undefined,
-            referenceImages: refImages,
-          };
-
-          const backendLabel = effectiveBackend === 'vertex' ? 'Vertex AI' : effectiveBackend === 'gemini' ? 'Gemini API' : (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API");
-          console.log(`\n========== [VIDEO GENERATION REQUEST] (${backendLabel}) ==========`);
-          console.log("Model:", effectiveModelId);
-          console.log("Quality tier:", effectiveQualityTier);
-          console.log("Seed:", generatedSeed, videoSettings?.seed ? "(user-provided)" : "(auto-generated)");
-          console.log("Config:", JSON.stringify(videoConfig, null, 2));
-          console.log("Input prompt:", content);
-          console.log("Has first frame:", !!videoInput.firstFrameImage);
-          console.log("Has last frame:", !!videoInput.lastFrameImage);
-          console.log("Reference images count:", refImages?.length || 0);
-          if (refImages && refImages.length > 0) {
-            console.log("Reference images types:", refImages.map(r => r.type).join(", "));
-          }
-          console.log("================================================\n");
-
           // Callback de progreso
           const onProgress = (progress: VideoGenerationProgress) => {
             sendEvent({
@@ -299,15 +268,101 @@ export async function POST(
             });
           };
 
-          // Generar video using effective model
-          const generatedVideo = await generateVideo(
-            effectiveModelId,
-            videoInput,
-            videoConfig,
-            onProgress,
-            labels,
-            effectiveBackend
-          );
+          let generatedVideo;
+          let generatedSeed: number;
+
+          if (isXaiProvider) {
+            // ===== xAI Grok Imagine Video =====
+            const xaiConfig: XaiVideoConfig = {
+              duration: videoSettings?.duration || conversation.video_duration || 8,
+              aspectRatio: (videoSettings?.aspectRatio || conversation.video_aspect_ratio || "16:9") as XaiVideoConfig["aspectRatio"],
+              resolution: (videoSettings?.resolution || conversation.video_resolution || "720p") as XaiVideoConfig["resolution"],
+            };
+
+            // Validate xAI-specific config
+            const validationError = validateXaiVideoConfig(xaiConfig);
+            if (validationError) {
+              sendEvent({ type: "error", message: validationError });
+              clearInterval(heartbeat);
+              controllerClosed = true;
+              controller.close();
+              return;
+            }
+
+            // xAI supports image-to-video via URL (first frame image)
+            const imageUrl = videoInputs?.firstFrame || firstFrameImage || undefined;
+
+            const backendLabel = 'xAI';
+            console.log(`\n========== [VIDEO GENERATION REQUEST] (${backendLabel}) ==========`);
+            console.log("Model:", effectiveModelId);
+            console.log("Quality tier:", effectiveQualityTier);
+            console.log("Config:", JSON.stringify(xaiConfig, null, 2));
+            console.log("Input prompt:", content);
+            console.log("Has image URL:", !!imageUrl);
+            console.log("================================================\n");
+
+            generatedVideo = await generateXaiVideo(
+              effectiveModelId,
+              content,
+              xaiConfig,
+              onProgress,
+              imageUrl,
+            );
+            generatedSeed = 0; // xAI does not support seeds
+
+          } else {
+            // ===== Google AI (VEO) =====
+            const audioEnabled = videoSettings?.audioEnabled !== undefined
+              ? videoSettings.audioEnabled
+              : (conversation.video_audio_enabled ?? true);
+
+            generatedSeed = videoSettings?.seed ?? Math.floor(Math.random() * 4294967295);
+
+            const videoConfig: VideoGenerationConfig = {
+              durationSeconds: ((videoSettings?.duration || conversation.video_duration) as 4 | 6 | 8) || 8,
+              resolution: ((videoSettings?.resolution || conversation.video_resolution) as "720p" | "1080p") || "720p",
+              aspectRatio: ((videoSettings?.aspectRatio || conversation.video_aspect_ratio) as "16:9" | "9:16") || "16:9",
+              generateAudio: audioEnabled,
+              negativePrompt: videoSettings?.negativePrompt || conversation.video_negative_prompt || undefined,
+              seed: generatedSeed,
+              personGeneration: "allow_all",
+            };
+
+            console.log("[Video API] Final generateAudio value:", videoConfig.generateAudio);
+
+            const refImages = referenceImages || videoInputs?.referenceImages;
+
+            const videoInput: VideoInput = {
+              prompt: content,
+              firstFrameImage: videoInputs?.firstFrame || firstFrameImage || undefined,
+              lastFrameImage: videoInputs?.lastFrame || lastFrameImage || undefined,
+              referenceImages: refImages,
+            };
+
+            const backendLabel = effectiveBackend === 'vertex' ? 'Vertex AI' : effectiveBackend === 'gemini' ? 'Gemini API' : (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API");
+            console.log(`\n========== [VIDEO GENERATION REQUEST] (${backendLabel}) ==========`);
+            console.log("Model:", effectiveModelId);
+            console.log("Quality tier:", effectiveQualityTier);
+            console.log("Seed:", generatedSeed, videoSettings?.seed ? "(user-provided)" : "(auto-generated)");
+            console.log("Config:", JSON.stringify(videoConfig, null, 2));
+            console.log("Input prompt:", content);
+            console.log("Has first frame:", !!videoInput.firstFrameImage);
+            console.log("Has last frame:", !!videoInput.lastFrameImage);
+            console.log("Reference images count:", refImages?.length || 0);
+            if (refImages && refImages.length > 0) {
+              console.log("Reference images types:", refImages.map(r => r.type).join(", "));
+            }
+            console.log("================================================\n");
+
+            generatedVideo = await generateVideo(
+              effectiveModelId,
+              videoInput,
+              videoConfig,
+              onProgress,
+              labels,
+              effectiveBackend
+            );
+          }
 
           // Guardar video en S3
           sendEvent({
@@ -343,6 +398,9 @@ export async function POST(
             }
           );
 
+          // Resolve aspect ratio from settings (works for both providers)
+          const effectiveAspectRatio = videoSettings?.aspectRatio || conversation.video_aspect_ratio || "16:9";
+
           // Guardar respuesta del modelo en la base de datos (con quality_tier y seed)
           const [modelResult] = await pool.execute<ResultSetHeader>(
             `INSERT INTO messages (conversation_id, role, content_type, quality_tier, generation_seed, content, video_url, video_mime_type, video_file_size, video_duration, video_has_audio, video_aspect_ratio, estimated_cost)
@@ -356,7 +414,7 @@ export async function POST(
               uploadResult.fileSize,
               generatedVideo.duration,
               generatedVideo.hasAudio ? 1 : 0,
-              videoConfig.aspectRatio,
+              effectiveAspectRatio,
               estimatedCost,
             ]
           );
@@ -378,7 +436,7 @@ export async function POST(
             mimeType: generatedVideo.mimeType,
             duration: generatedVideo.duration,
             hasAudio: generatedVideo.hasAudio,
-            aspectRatio: videoConfig.aspectRatio,
+            aspectRatio: effectiveAspectRatio,
             fileSize: uploadResult.fileSize,
             estimatedCost,
             seed: generatedSeed,
@@ -391,7 +449,7 @@ export async function POST(
             videoUrl: uploadResult.url,
             duration: generatedVideo.duration,
             hasAudio: generatedVideo.hasAudio,
-            aspectRatio: videoConfig.aspectRatio,
+            aspectRatio: effectiveAspectRatio,
             estimatedCost,
             seed: generatedSeed,
           });

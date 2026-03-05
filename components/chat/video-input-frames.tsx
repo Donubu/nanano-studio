@@ -20,6 +20,8 @@ export interface ReferenceImage {
   type: ReferenceType;
 }
 
+export type VideoInputProvider = "google" | "xai";
+
 interface VideoInputFramesProps {
   projectId: number;
   firstFrame: string | null;
@@ -30,6 +32,7 @@ interface VideoInputFramesProps {
   onReferenceImagesChange: (images: ReferenceImage[]) => void;
   disabled?: boolean;
   supportsReferenceImages?: boolean;
+  provider?: VideoInputProvider;
 }
 
 type ModalMode = "first" | "last" | "reference" | null;
@@ -45,7 +48,9 @@ export function VideoInputFrames({
   onReferenceImagesChange,
   disabled = false,
   supportsReferenceImages = false,
+  provider = "google",
 }: VideoInputFramesProps) {
+  const isXai = provider === "xai";
   const [modalMode, setModalMode] = useState<ModalMode>(null);
   const [dragOverTarget, setDragOverTarget] = useState<DragTarget>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -204,29 +209,35 @@ export function VideoInputFrames({
       <div className="space-y-4">
         <div className="flex items-center gap-2 text-sm font-medium">
           <ImageIcon className="w-4 h-4" />
-          <span>Frames de Entrada</span>
+          <span>{isXai ? "Imagen de Entrada" : "Frames de Entrada"}</span>
           <Tooltip>
             <TooltipTrigger>
               <Info className="w-3.5 h-3.5 text-muted-foreground" />
             </TooltipTrigger>
             <TooltipContent className="max-w-xs">
-              <p>
-                Puedes usar imágenes para guiar la generación del video:
-                <br />
-                <strong>First frame:</strong> Imagen inicial del video
-                <br />
-                <strong>Last frame:</strong> Imagen final (el video interpolará entre ambas)
-                <br />
-                <strong>Referencias:</strong> Imágenes de estilo (STYLE) o contenido (ASSET)
-              </p>
+              {isXai ? (
+                <p>
+                  Puedes usar una imagen como base para generar el video (image-to-video).
+                </p>
+              ) : (
+                <p>
+                  Puedes usar imagenes para guiar la generacion del video:
+                  <br />
+                  <strong>First frame:</strong> Imagen inicial del video
+                  <br />
+                  <strong>Last frame:</strong> Imagen final (el video interpolara entre ambas)
+                  <br />
+                  <strong>Referencias:</strong> Imagenes de estilo (STYLE) o contenido (ASSET)
+                </p>
+              )}
             </TooltipContent>
           </Tooltip>
         </div>
 
-        {/* First Frame */}
+        {/* First Frame / Source Image */}
         <div className="space-y-2">
           <Label className="text-xs text-muted-foreground flex items-center gap-1">
-            First Frame
+            {isXai ? "Imagen base" : "First Frame"}
             <span className="text-muted-foreground/60">(opcional)</span>
           </Label>
           {firstFrame ? (
@@ -301,8 +312,8 @@ export function VideoInputFrames({
           )}
         </div>
 
-        {/* Last Frame */}
-        <div className="space-y-2">
+        {/* Last Frame - not supported by xAI */}
+        {!isXai && <div className="space-y-2">
           <Label className="text-xs text-muted-foreground flex items-center gap-1">
             Last Frame
             <span className="text-muted-foreground/60">(opcional)</span>
@@ -379,13 +390,13 @@ export function VideoInputFrames({
           )}
           {firstFrame && lastFrame && (
             <p className="text-xs text-muted-foreground">
-              El video interpolará entre ambas imágenes
+              El video interpolara entre ambas imagenes
             </p>
           )}
-        </div>
+        </div>}
 
-        {/* Reference Images */}
-        {supportsReferenceImages && (
+        {/* Reference Images - not supported by xAI */}
+        {supportsReferenceImages && !isXai && (
           <div className="space-y-2">
             <Label className="text-xs text-muted-foreground flex items-center gap-1">
               Imágenes de Referencia

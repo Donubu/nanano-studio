@@ -382,6 +382,8 @@ export function ChatInterface() {
         model_chirp_model_id: string | null;
         model_normal_supports_google_search: boolean;
         model_hq_supports_google_search: boolean;
+        model_normal_api_backend: string | null;
+        model_hq_api_backend: string | null;
     }
     const [generationConfig, setGenerationConfig] = useState<GenerationConfigItem[]>([]);
 
@@ -410,6 +412,14 @@ export function ChatInterface() {
     // Get configs for different types
     const videoTypeConfig = generationConfig.find(c => c.generation_type === "video");
     const imageTypeConfig = generationConfig.find(c => c.generation_type === "image");
+
+    // Determine if the active video model is an xAI provider
+    const activeVideoBackend = videoTypeConfig
+        ? (selectedQualityTier === "hq"
+            ? videoTypeConfig.model_hq_api_backend
+            : videoTypeConfig.model_normal_api_backend)
+        : null;
+    const isXaiVideoProvider = activeVideoBackend === "xai";
 
     // UI mode helpers based on conversation generation_type
     // Default to text if generation_type is null/undefined (for legacy conversations)
@@ -889,6 +899,8 @@ export function ChatInterface() {
                     model_chirp_model_id: data[type]?.model_chirp?.model_id ?? null,
                     model_normal_supports_google_search: data[type]?.model_normal?.supports_google_search ?? false,
                     model_hq_supports_google_search: data[type]?.model_hq?.supports_google_search ?? false,
+                    model_normal_api_backend: data[type]?.model_normal?.api_backend ?? null,
+                    model_hq_api_backend: data[type]?.model_hq?.api_backend ?? null,
                 }));
 
                 // If audio has a chirp model configured, add "audio_hd" as a virtual generation type
@@ -908,6 +920,8 @@ export function ChatInterface() {
                         model_normal_supports_google_search: false,
                         model_hq_supports_google_search: false,
                         model_chirp_model_id: audioConfig.model_chirp.model_id,
+                        model_normal_api_backend: audioConfig.model_chirp.api_backend ?? null,
+                        model_hq_api_backend: audioConfig.model_chirp.api_backend ?? null,
                     });
                 }
 
@@ -4609,6 +4623,7 @@ export function ChatInterface() {
                                     negativePrompt={videoNegativePrompt}
                                     disabled={isSending}
                                     hasReferenceImages={videoReferenceImages.length > 0}
+                                    provider={isXaiVideoProvider ? "xai" : "google"}
                                     onChange={(settings) => {
                                         if (settings.duration !== undefined) {
                                             setVideoDuration(settings.duration);
@@ -4648,6 +4663,7 @@ export function ChatInterface() {
                                     onReferenceImagesChange={setVideoReferenceImages}
                                     disabled={isSending}
                                     supportsReferenceImages={true}
+                                    provider={isXaiVideoProvider ? "xai" : "google"}
                                 />
                             </div>
                         )}
