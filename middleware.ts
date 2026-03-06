@@ -8,9 +8,10 @@ export default auth((req) => {
   const isLoggedIn = !!req.auth;
   const isLoginPage = req.nextUrl.pathname === "/login";
   const isAuthRoute = req.nextUrl.pathname.startsWith("/api/auth");
+  const isHealthRoute = req.nextUrl.pathname === "/api/health";
 
-  // Permitir rutas de autenticación
-  if (isAuthRoute) {
+  // Permitir rutas de autenticación y health check
+  if (isAuthRoute || isHealthRoute) {
     return NextResponse.next();
   }
 

@@ -12,6 +12,8 @@ interface DailyStatsRow extends RowDataPacket {
   image_count: number;
   video_count: number;
   music_count: number;
+  audio_count: number;
+  audio_hd_count: number;
   message_count: number;
 }
 
@@ -24,6 +26,8 @@ interface ModelBreakdownRow extends RowDataPacket {
   image_count: number;
   video_count: number;
   music_count: number;
+  audio_count: number;
+  audio_hd_count: number;
   message_count: number;
 }
 
@@ -37,18 +41,24 @@ interface UserBreakdownRow extends RowDataPacket {
   image_count: number;
   video_count: number;
   music_count: number;
+  audio_count: number;
+  audio_hd_count: number;
+  message_count: number;
   conversation_count: number;
 }
 
 interface ProjectBreakdownRow extends RowDataPacket {
   project_id: number;
   project_name: string;
+  client_name: string | null;
   tokens_input: number;
   tokens_output: number;
   estimated_cost: number;
   image_count: number;
   video_count: number;
   music_count: number;
+  audio_count: number;
+  audio_hd_count: number;
   conversation_count: number;
 }
 
@@ -59,6 +69,8 @@ interface PeriodSummaryRow extends RowDataPacket {
   image_count: number;
   video_count: number;
   music_count: number;
+  audio_count: number;
+  audio_hd_count: number;
   message_count: number;
   conversation_count: number;
 }
@@ -112,6 +124,8 @@ export async function GET(request: NextRequest) {
         SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
         SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
         SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
+        SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
+        SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
         COUNT(*) as message_count
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
@@ -133,6 +147,8 @@ export async function GET(request: NextRequest) {
         SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
         SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
         SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
+        SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
+        SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
         COUNT(*) as message_count
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
@@ -156,6 +172,9 @@ export async function GET(request: NextRequest) {
         SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
         SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
         SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
+        SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
+        SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
+        COUNT(*) as message_count,
         COUNT(DISTINCT c.id) as conversation_count
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
@@ -173,20 +192,24 @@ export async function GET(request: NextRequest) {
       SELECT
         p.id as project_id,
         p.title as project_name,
+        cl.name as client_name,
         COALESCE(SUM(m.tokens_input), 0) as tokens_input,
         COALESCE(SUM(m.tokens_output), 0) as tokens_output,
         COALESCE(SUM(m.estimated_cost), 0) as estimated_cost,
         SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
         SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
         SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
+        SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
+        SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
         COUNT(DISTINCT c.id) as conversation_count
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN projects p ON c.project_id = p.id
+      LEFT JOIN clients cl ON p.client_id = cl.id
       WHERE m.role = 'model'
         ${dateFilter}
         ${projectFilter}
-      GROUP BY p.id, p.title
+      GROUP BY p.id, p.title, cl.name
       ORDER BY estimated_cost DESC
     `);
 
@@ -202,7 +225,9 @@ export async function GET(request: NextRequest) {
           COALESCE(SUM(m.estimated_cost), 0) as estimated_cost,
           SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
           SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
-        SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
+          SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
+          SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
+          SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
           COUNT(*) as message_count,
           COUNT(DISTINCT c.id) as conversation_count
         FROM messages m
@@ -242,6 +267,8 @@ export async function GET(request: NextRequest) {
           WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 'music'
           WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 'video'
           WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 'image'
+          WHEN m.quality_tier = 'chirp' THEN 'audio_hd'
+          WHEN m.audio_url IS NOT NULL AND m.audio_url != '' THEN 'audio'
           ELSE 'text'
         END as type,
         COUNT(*) as count,
@@ -297,6 +324,8 @@ export async function GET(request: NextRequest) {
         imageCount: Number(row.image_count),
         videoCount: Number(row.video_count),
         musicCount: Number(row.music_count),
+        audioCount: Number(row.audio_count),
+        audioHdCount: Number(row.audio_hd_count),
         messageCount: Number(row.message_count),
       })),
       modelBreakdown: modelBreakdown.map(row => ({
@@ -308,6 +337,8 @@ export async function GET(request: NextRequest) {
         imageCount: Number(row.image_count),
         videoCount: Number(row.video_count),
         musicCount: Number(row.music_count),
+        audioCount: Number(row.audio_count),
+        audioHdCount: Number(row.audio_hd_count),
         messageCount: Number(row.message_count),
       })),
       userBreakdown: userBreakdown.map(row => ({
@@ -319,17 +350,23 @@ export async function GET(request: NextRequest) {
         imageCount: Number(row.image_count),
         videoCount: Number(row.video_count),
         musicCount: Number(row.music_count),
+        audioCount: Number(row.audio_count),
+        audioHdCount: Number(row.audio_hd_count),
+        messageCount: Number(row.message_count),
         conversationCount: Number(row.conversation_count),
       })),
       projectBreakdown: projectBreakdown.map(row => ({
         projectId: row.project_id,
         projectName: row.project_name || "Sin proyecto",
+        clientName: row.client_name || null,
         tokensInput: Number(row.tokens_input),
         tokensOutput: Number(row.tokens_output),
         estimatedCost: Number(row.estimated_cost) * costMultiplier,
         imageCount: Number(row.image_count),
         videoCount: Number(row.video_count),
         musicCount: Number(row.music_count),
+        audioCount: Number(row.audio_count),
+        audioHdCount: Number(row.audio_hd_count),
         conversationCount: Number(row.conversation_count),
       })),
       summaries: {
@@ -341,6 +378,8 @@ export async function GET(request: NextRequest) {
           imageCount: Number(summary7d.image_count),
           videoCount: Number(summary7d.video_count),
           musicCount: Number(summary7d.music_count),
+          audioCount: Number(summary7d.audio_count),
+          audioHdCount: Number(summary7d.audio_hd_count),
           messageCount: Number(summary7d.message_count),
           conversationCount: Number(summary7d.conversation_count),
           topazImageCredits: topaz7d.imageCredits,
@@ -354,6 +393,8 @@ export async function GET(request: NextRequest) {
           imageCount: Number(summary30d.image_count),
           videoCount: Number(summary30d.video_count),
           musicCount: Number(summary30d.music_count),
+          audioCount: Number(summary30d.audio_count),
+          audioHdCount: Number(summary30d.audio_hd_count),
           messageCount: Number(summary30d.message_count),
           conversationCount: Number(summary30d.conversation_count),
           topazImageCredits: topaz30d.imageCredits,
@@ -367,6 +408,8 @@ export async function GET(request: NextRequest) {
           imageCount: Number(summaryAll.image_count),
           videoCount: Number(summaryAll.video_count),
           musicCount: Number(summaryAll.music_count),
+          audioCount: Number(summaryAll.audio_count),
+          audioHdCount: Number(summaryAll.audio_hd_count),
           messageCount: Number(summaryAll.message_count),
           conversationCount: Number(summaryAll.conversation_count),
           topazImageCredits: topazAll.imageCredits,
@@ -383,6 +426,29 @@ export async function GET(request: NextRequest) {
         count: Number(row.count),
         cost: Number(row.cost) * costMultiplier,
       })),
+      budgetStats: await (async () => {
+        const [rows] = await pool.execute<RowDataPacket[]>(`
+          SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) as draft,
+            SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) as accepted,
+            SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
+            COALESCE(SUM(total), 0) as total_amount,
+            COALESCE(SUM(CASE WHEN status = 'accepted' THEN total ELSE 0 END), 0) as accepted_amount
+          FROM budgets
+          WHERE deleted_at IS NULL
+            ${period !== "all" ? `AND created_at >= DATE_SUB(NOW(), INTERVAL ${parseInt(period)} DAY)` : ""}
+        `);
+        const r = rows[0];
+        return {
+          total: Number(r.total),
+          draft: Number(r.draft),
+          accepted: Number(r.accepted),
+          rejected: Number(r.rejected),
+          totalAmount: Number(r.total_amount),
+          acceptedAmount: Number(r.accepted_amount),
+        };
+      })(),
     });
   } catch (error) {
     console.error("Error fetching analytics:", error);

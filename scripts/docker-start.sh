@@ -1,12 +1,19 @@
 #!/bin/sh
 set -e
 
-echo "=== Starting nanano ==="
+APP_MODE="${APP_MODE:-web}"
 
-# Run database migrations
-echo "Running database migrations..."
-node /app/scripts/migrate.js
+echo "=== Starting nanano (mode: ${APP_MODE}) ==="
 
-# Start the application (standalone mode)
-echo "Starting Next.js server..."
-exec node server.js
+if [ "$APP_MODE" = "worker" ]; then
+  echo "Starting worker process..."
+  exec node /app/worker/dist/worker.js
+else
+  # Run database migrations
+  echo "Running database migrations..."
+  node /app/scripts/migrate.js
+
+  # Start the application (standalone mode)
+  echo "Starting Next.js server..."
+  exec node server.js
+fi

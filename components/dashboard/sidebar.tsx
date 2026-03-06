@@ -17,6 +17,7 @@ import {
     FileStack,
     Cloud,
     Calculator,
+    Activity,
 } from "lucide-react";
 
 const menuItems = [
@@ -59,6 +60,11 @@ const menuItems = [
         title: "Calculadora IA",
         href: "/dashboard/calculadora",
         icon: Calculator,
+    },
+    {
+        title: "Workers",
+        href: "/dashboard/workers",
+        icon: Activity,
     },
     {
         title: "Chat",

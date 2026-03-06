@@ -5,6 +5,8 @@ import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { sendMessageStream, sendMessage, ChatMessage, isConfigured, Labels, GeneratedImage, GroundingData, generateConversationTitle, AttachedFile } from "@/lib/google-ai";
 import { uploadToS3, generateFileName, isS3Configured } from "@/lib/s3";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
+import { isRedisConfigured, createRedisConnection } from "@/lib/redis";
+import { getStreamQueue, jobChannel, StreamJobEvent, hasActiveWorkers } from "@/lib/queue";
 
 // Guardar imagen generada en S3 y retornar la URL de CloudFront y tamaño
 async function saveGeneratedImage(image: GeneratedImage, conversationId: string): Promise<{ url: string; fileSize: number }> {
@@ -536,6 +538,96 @@ export async function POST(
               [JSON.stringify(requestData), userMessageId]
             );
           }
+
+          // ============================================
+          // WORKER DELEGATION (when Redis is available)
+          // ============================================
+          if (isRedisConfigured() && await hasActiveWorkers()) {
+            try {
+              const queue = getStreamQueue();
+              const job = await queue.add("stream", {
+                conversationId: id,
+                userMessageId,
+                skipUserMessage: skip_user_message,
+                content,
+                modelId: effectiveModelId,
+                backend: effectiveBackend,
+                generationType,
+                qualityTier: effectiveQualityTier,
+                systemInstruction: finalSystemInstruction || undefined,
+                settings: generationConfig,
+                messages: messagesToSend.map((m) => ({
+                  role: m.role,
+                  content: m.content,
+                  imageUrl: m.imageUrl || undefined,
+                  imageMimeType: m.imageMimeType || undefined,
+                  files: m.files?.map((f) => ({
+                    dataUrl: f.dataUrl,
+                    mimeType: f.mimeType,
+                    name: f.name,
+                    type: f.type as string,
+                  })),
+                })),
+                labels: {
+                  project_name: labels.project_name || "sin_proyecto",
+                  user_name: labels.user_name || "unknown",
+                },
+                needsTitle,
+                effectiveCosts,
+                effectiveImageAspectRatio,
+                effectiveImageSize,
+              });
+
+              console.log(`[Stream] Job ${job.id} enqueued to worker`);
+
+              // Subscribe to worker events via Redis pub/sub
+              const subRedis = createRedisConnection();
+              const channel = jobChannel(job.id!);
+
+              // Safety timeout: if worker doesn't respond in 10 minutes, close
+              const workerTimeout = setTimeout(() => {
+                if (!controllerClosed) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", message: "Worker timeout" })}\n\n`));
+                  clearInterval(heartbeat);
+                  controllerClosed = true;
+                  controller.close();
+                  subRedis.unsubscribe();
+                  subRedis.disconnect();
+                }
+              }, 600000);
+
+              await subRedis.subscribe(channel);
+              subRedis.on("message", (ch: string, message: string) => {
+                if (ch !== channel || controllerClosed) return;
+                try {
+                  const event: StreamJobEvent = JSON.parse(message);
+
+                  if (event.type === "complete" || event.type === "error") {
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+                    clearInterval(heartbeat);
+                    clearTimeout(workerTimeout);
+                    controllerClosed = true;
+                    controller.close();
+                    subRedis.unsubscribe();
+                    subRedis.disconnect();
+                  } else {
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+                  }
+                } catch (err) {
+                  console.error("[Stream] Error parsing worker event:", err);
+                }
+              });
+
+              return; // Skip direct processing — worker handles it
+            } catch (err) {
+              console.error("[Stream] Error enqueuing to worker, falling back to direct:", err);
+              // Fall through to direct processing
+            }
+          }
+
+          // ============================================
+          // DIRECT PROCESSING (fallback when no Redis)
+          // ============================================
 
           // Variables para trackear múltiples imágenes generadas durante streaming
           interface SavedImage {

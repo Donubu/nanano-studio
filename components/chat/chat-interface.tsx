@@ -1117,48 +1117,54 @@ export function ChatInterface() {
         prevMessageCountRef.current = currentCount;
     }, [messages]);
 
-    // Update settings when switching tabs
+    // Update settings when switching tabs (only triggered by tab change, not by settings updates)
+    const prevActiveTabRef = useRef<number | null>(null);
     useEffect(() => {
         if (activeTabId && tabConversations[activeTabId]) {
             const conv = tabConversations[activeTabId];
-            setTemperature(Number(conv.temperature));
-            setTopP(Number(conv.top_p));
-            setTopK(conv.top_k);
-            setMaxOutputTokens(conv.max_output_tokens);
-            setSystemInstruction(conv.system_instruction || "");
-            setSelectedModelId(conv.model_id);
-            setImageAspectRatio(conv.image_aspect_ratio || "16:9");
-            setImageSize(conv.image_size || "1K");
-            // Video settings
-            setVideoDuration((conv.video_duration || 8) as VideoDuration);
-            setVideoResolution((conv.video_resolution || "720p") as VideoResolution);
-            setVideoAspectRatio((conv.video_aspect_ratio || "16:9") as VideoAspectRatio);
-            setVideoAudioEnabled(conv.video_audio_enabled !== false);
-            setVideoNegativePrompt(conv.video_negative_prompt || "");
-            // Clear video frames when switching tabs
-            setVideoFirstFrame(null);
-            setVideoLastFrame(null);
-            setVideoReferenceImages([]);
-            // Reset generation mode and selected images when switching tabs
-            setGenerationMode("video");
-            setSelectedConversationImages([]);
-            // Set engine based on conversation type
-            if (conv.generation_type === "audio_hd") {
-                setAudioTTSEngine("chirp");
-                setAudioMultiSpeaker(false);
-            } else if (conv.generation_type === "audio") {
-                setAudioTTSEngine("gemini");
-            }
-            // Google Search - reset to off for each conversation (per-message now)
-            setGoogleSearchEnabled(false);
-            setGoogleImageSearchEnabled(false);
-            // Auto-select quality tier based on available models
-            const typeConf = generationConfig.find(c => c.generation_type === conv.generation_type);
-            if (typeConf) {
-                if (typeConf.model_normal_id) {
-                    setSelectedQualityTier("normal");
-                } else if (typeConf.model_hq_id) {
-                    setSelectedQualityTier("hq");
+            const isTabSwitch = prevActiveTabRef.current !== activeTabId;
+            prevActiveTabRef.current = activeTabId;
+
+            if (isTabSwitch) {
+                setTemperature(Number(conv.temperature));
+                setTopP(Number(conv.top_p));
+                setTopK(conv.top_k);
+                setMaxOutputTokens(conv.max_output_tokens);
+                setSystemInstruction(conv.system_instruction || "");
+                setSelectedModelId(conv.model_id);
+                setImageAspectRatio(conv.image_aspect_ratio || "16:9");
+                setImageSize(conv.image_size || "1K");
+                // Video settings
+                setVideoDuration((conv.video_duration || 8) as VideoDuration);
+                setVideoResolution((conv.video_resolution || "720p") as VideoResolution);
+                setVideoAspectRatio((conv.video_aspect_ratio || "16:9") as VideoAspectRatio);
+                setVideoAudioEnabled(conv.video_audio_enabled !== false);
+                setVideoNegativePrompt(conv.video_negative_prompt || "");
+                // Clear video frames when switching tabs
+                setVideoFirstFrame(null);
+                setVideoLastFrame(null);
+                setVideoReferenceImages([]);
+                // Reset generation mode and selected images when switching tabs
+                setGenerationMode("video");
+                setSelectedConversationImages([]);
+                // Set engine based on conversation type
+                if (conv.generation_type === "audio_hd") {
+                    setAudioTTSEngine("chirp");
+                    setAudioMultiSpeaker(false);
+                } else if (conv.generation_type === "audio") {
+                    setAudioTTSEngine("gemini");
+                }
+                // Google Search - reset to off for each conversation (per-message now)
+                setGoogleSearchEnabled(false);
+                setGoogleImageSearchEnabled(false);
+                // Auto-select quality tier based on available models
+                const typeConf = generationConfig.find(c => c.generation_type === conv.generation_type);
+                if (typeConf) {
+                    if (typeConf.model_normal_id) {
+                        setSelectedQualityTier("normal");
+                    } else if (typeConf.model_hq_id) {
+                        setSelectedQualityTier("hq");
+                    }
                 }
             }
         }
@@ -1907,12 +1913,34 @@ export function ChatInterface() {
                 : 0;
 
             if (extraImageCount > 0) {
+                // Add loading placeholders for each extra image
+                const extraPlaceholderIds: number[] = [];
+                for (let i = 0; i < extraImageCount; i++) {
+                    const placeholderId = Date.now() + 300 + i;
+                    extraPlaceholderIds.push(placeholderId);
+                }
+                setTabMessages((prev) => ({
+                    ...prev,
+                    [tabId]: [
+                        ...prev[tabId],
+                        ...extraPlaceholderIds.map((pid) => ({
+                            id: pid,
+                            role: "model" as const,
+                            content: "",
+                            content_type: "image" as const,
+                            created_at: new Date().toISOString(),
+                            isStreaming: true,
+                        })),
+                    ],
+                }));
+
                 const extraRequestBody = {
                     ...requestBody,
                     skip_user_message: true,
                 };
                 for (let i = 0; i < extraImageCount; i++) {
-                    // Fire-and-forget: each extra request processes its own SSE and adds images
+                    const placeholderId = extraPlaceholderIds[i];
+                    // Fire-and-forget: each extra request processes its own SSE and updates its placeholder
                     (async () => {
                         try {
                             const extraResponse = await fetch(endpoint, {
@@ -1939,44 +1967,40 @@ export function ChatInterface() {
                                     try {
                                         const data = JSON.parse(line.slice(6));
                                         if (data.type === "image") {
-                                            const tempImgId = Date.now() + 200 + i * 10 + (data.imageIndex || 0);
-                                            tempImageMessageIds.push(tempImgId);
+                                            // Update placeholder with actual image
+                                            tempImageMessageIds.push(placeholderId);
                                             setTabMessages((prev) => ({
                                                 ...prev,
-                                                [tabId]: [...prev[tabId], {
-                                                    id: tempImgId,
-                                                    role: "model" as const,
-                                                    content: "",
-                                                    content_type: "image" as const,
-                                                    image_url: data.imageUrl,
-                                                    created_at: new Date().toISOString(),
-                                                    isStreaming: true,
-                                                }],
+                                                [tabId]: prev[tabId].map((m) =>
+                                                    m.id === placeholderId
+                                                        ? { ...m, image_url: data.imageUrl }
+                                                        : m
+                                                ),
                                             }));
                                         } else if (data.type === "complete") {
                                             const serverImgs: Array<{ id: number; imageUrl: string }> = data.imageMessages || [];
                                             if (serverImgs.length > 0) {
                                                 setTabMessages((prev) => {
                                                     let msgs = prev[tabId];
-                                                    for (const serverImg of serverImgs) {
-                                                        // Find a temp image message matching this URL and finalize it
-                                                        const tempMsg = msgs.find(m => m.isStreaming && m.image_url === serverImg.imageUrl);
-                                                        if (tempMsg) {
-                                                            msgs = msgs.map(m => m.id === tempMsg.id
-                                                                ? { ...m, id: serverImg.id, isStreaming: false }
-                                                                : m
-                                                            );
-                                                        } else {
-                                                            msgs = [...msgs, {
-                                                                id: serverImg.id,
-                                                                role: "model" as const,
-                                                                content: "",
-                                                                content_type: "image" as const,
-                                                                image_url: serverImg.imageUrl,
-                                                                created_at: new Date().toISOString(),
-                                                                isStreaming: false,
-                                                            }];
-                                                        }
+                                                    // Finalize placeholder with server ID
+                                                    const serverImg = serverImgs[0];
+                                                    if (serverImg) {
+                                                        msgs = msgs.map(m => m.id === placeholderId
+                                                            ? { ...m, id: serverImg.id, image_url: serverImg.imageUrl, isStreaming: false }
+                                                            : m
+                                                        );
+                                                    }
+                                                    // Add any additional images from this request
+                                                    for (let j = 1; j < serverImgs.length; j++) {
+                                                        msgs = [...msgs, {
+                                                            id: serverImgs[j].id,
+                                                            role: "model" as const,
+                                                            content: "",
+                                                            content_type: "image" as const,
+                                                            image_url: serverImgs[j].imageUrl,
+                                                            created_at: new Date().toISOString(),
+                                                            isStreaming: false,
+                                                        }];
                                                     }
                                                     return { ...prev, [tabId]: msgs };
                                                 });
@@ -1987,6 +2011,11 @@ export function ChatInterface() {
                             }
                         } catch (err) {
                             console.error("[Extra image request] Error:", err);
+                            // Remove placeholder on error
+                            setTabMessages((prev) => ({
+                                ...prev,
+                                [tabId]: prev[tabId].filter((m) => m.id !== placeholderId),
+                            }));
                         }
                     })();
                 }
@@ -3411,6 +3440,25 @@ export function ChatInterface() {
                             activeTabId={activeTabId}
                             onTabClick={setActiveTabId}
                             onTabClose={handleTabClose}
+                            onTabRename={async (tabId, conversationId, newTitle) => {
+                              try {
+                                const res = await fetch(`/api/conversations/${conversationId}`, {
+                                  method: "PUT",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ title: newTitle }),
+                                });
+                                if (res.ok) {
+                                  setOpenTabs((prev) =>
+                                    prev.map((t) => t.id === tabId ? { ...t, title: newTitle } : t)
+                                  );
+                                  setConversations((prev) =>
+                                    prev.map((c) => c.id === conversationId ? { ...c, title: newTitle } : c)
+                                  );
+                                }
+                              } catch (err) {
+                                console.error("Error renaming conversation:", err);
+                              }
+                            }}
                             onNewTab={() => setShowNewConversationModal(true)}
                             disabled={isSending}
                         />
@@ -3810,7 +3858,7 @@ export function ChatInterface() {
                                                     </button>
                                                 )}
                                                 {/* Seed button for model messages with generation_seed (image or video) */}
-                                                {msg.role === "model" && msg.generation_seed && (msg.image_url || msg.video_url) && (
+                                                {msg.role === "model" && msg.generation_seed != null && msg.generation_seed !== 0 && (msg.image_url || msg.video_url) && (
                                                     <button
                                                         onClick={() => {
                                                             if (selectedSeed === msg.generation_seed) {
@@ -3868,7 +3916,7 @@ export function ChatInterface() {
                                                                 }
                                                             }
                                                         }}
-                                                        className={`absolute ${msg.generation_seed ? "top-12" : "top-5"} -right-2 p-1 rounded-full transition-all z-10 bg-card border border-border/50 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-blue-400`}
+                                                        className={`absolute ${msg.generation_seed != null && msg.generation_seed !== 0 ? "top-12" : "top-5"} -right-2 p-1 rounded-full transition-all z-10 bg-card border border-border/50 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-blue-400`}
                                                         title="Reusar prompt"
                                                     >
                                                         <RotateCcw className="h-4 w-4" />

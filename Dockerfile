@@ -24,6 +24,7 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN npm run build
+RUN npm run build:worker
 
 # ---- runner ----
 FROM node:20-alpine AS runner
@@ -39,11 +40,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# Install mysql2 for migration script and sharp for image optimization (not included in standalone)
-RUN npm install --no-save mysql2 sharp
-
 # Copy standalone build
 COPY --from=builder /app/.next/standalone ./
+
+# Copy full node_modules from deps (worker needs all transitive dependencies)
+COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
@@ -52,6 +53,9 @@ COPY --from=builder /app/scripts/migrate.js ./scripts/migrate.js
 COPY --from=builder /app/scripts/migrations ./scripts/migrations
 COPY --from=builder /app/scripts/docker-start.sh ./scripts/docker-start.sh
 RUN chmod +x ./scripts/docker-start.sh
+
+# Copy worker build
+COPY --from=builder /app/worker/dist ./worker/dist
 
 EXPOSE 3000
 
