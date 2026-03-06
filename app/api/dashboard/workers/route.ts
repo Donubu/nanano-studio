@@ -54,27 +54,29 @@ export async function GET() {
 
       const completedJobsRaw = await queue.getJobs(["completed"], 0, 19);
       const completedJobs = completedJobsRaw
+        .filter((job) => job.data)
         .sort((a, b) => (b.finishedOn || 0) - (a.finishedOn || 0))
         .map((job) => ({
           id: job.id,
-          model: job.data.modelId,
-          generationType: job.data.generationType,
-          qualityTier: job.data.qualityTier,
-          user: job.data.labels?.user_name || "—",
-          project: job.data.labels?.project_name || "—",
+          model: job.data?.modelId || "—",
+          generationType: job.data?.generationType || "—",
+          qualityTier: job.data?.qualityTier || "—",
+          user: job.data?.labels?.user_name || "—",
+          project: job.data?.labels?.project_name || "—",
           completedAt: job.finishedOn || null,
           duration: job.finishedOn && job.processedOn ? job.finishedOn - job.processedOn : null,
         }));
 
       const failedJobsRaw = await queue.getJobs(["failed"], 0, 19);
       const failedJobs = failedJobsRaw
+        .filter((job) => job.data)
         .sort((a, b) => (b.finishedOn || 0) - (a.finishedOn || 0))
         .map((job) => ({
           id: job.id,
-          model: job.data.modelId,
-          generationType: job.data.generationType,
-          qualityTier: job.data.qualityTier,
-          user: job.data.labels?.user_name || "—",
+          model: job.data?.modelId || "—",
+          generationType: job.data?.generationType || "—",
+          qualityTier: job.data?.qualityTier || "—",
+          user: job.data?.labels?.user_name || "—",
           error: job.failedReason || "Unknown error",
           failedAt: job.finishedOn || null,
         }));
