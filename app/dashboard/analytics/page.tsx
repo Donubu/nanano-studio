@@ -17,6 +17,10 @@ import {
   FolderKanban,
   BarChart3,
   Sparkles,
+  Volume2,
+  Calculator,
+  FileCheck,
+  FileClock,
 } from "lucide-react";
 import {
   LineChart,
@@ -45,6 +49,8 @@ interface DailyStat {
   imageCount: number;
   videoCount: number;
   musicCount: number;
+  audioCount: number;
+  audioHdCount: number;
   messageCount: number;
 }
 
@@ -57,6 +63,8 @@ interface ModelBreakdown {
   imageCount: number;
   videoCount: number;
   musicCount: number;
+  audioCount: number;
+  audioHdCount: number;
   messageCount: number;
 }
 
@@ -69,18 +77,24 @@ interface UserBreakdown {
   imageCount: number;
   videoCount: number;
   musicCount: number;
+  audioCount: number;
+  audioHdCount: number;
+  messageCount: number;
   conversationCount: number;
 }
 
 interface ProjectBreakdown {
   projectId: number;
   projectName: string;
+  clientName: string | null;
   tokensInput: number;
   tokensOutput: number;
   estimatedCost: number;
   imageCount: number;
   videoCount: number;
   musicCount: number;
+  audioCount: number;
+  audioHdCount: number;
   conversationCount: number;
 }
 
@@ -92,6 +106,8 @@ interface Summary {
   imageCount: number;
   videoCount: number;
   musicCount: number;
+  audioCount: number;
+  audioHdCount: number;
   messageCount: number;
   conversationCount: number;
   topazImageCredits: number;
@@ -102,6 +118,15 @@ interface GenerationType {
   type: string;
   count: number;
   cost: number;
+}
+
+interface BudgetStats {
+  total: number;
+  draft: number;
+  accepted: number;
+  rejected: number;
+  totalAmount: number;
+  acceptedAmount: number;
 }
 
 interface AnalyticsData {
@@ -115,6 +140,7 @@ interface AnalyticsData {
     "all": Summary;
   };
   generationTypes: GenerationType[];
+  budgetStats: BudgetStats;
 }
 
 const COLORS = ["#8b5cf6", "#06b6d4", "#f59e0b", "#10b981", "#ec4899", "#3b82f6"];
@@ -125,6 +151,8 @@ const CHART_COLORS = {
   images: "#8b5cf6",
   videos: "#f59e0b",
   music: "#2dd4bf",
+  audio: "#f472b6",
+  audioHd: "#e11d48",
 };
 
 type PeriodType = "7" | "30" | "90" | "all";
@@ -172,7 +200,7 @@ export default function AnalyticsPage() {
   };
 
   const getCurrentSummary = (): Summary => {
-    if (!data) return { tokensInput: 0, tokensOutput: 0, totalTokens: 0, estimatedCost: 0, imageCount: 0, videoCount: 0, musicCount: 0, messageCount: 0, conversationCount: 0, topazImageCredits: 0, topazVideoCredits: 0 };
+    if (!data) return { tokensInput: 0, tokensOutput: 0, totalTokens: 0, estimatedCost: 0, imageCount: 0, videoCount: 0, musicCount: 0, audioCount: 0, audioHdCount: 0, messageCount: 0, conversationCount: 0, topazImageCredits: 0, topazVideoCredits: 0 };
     if (period === "7") return data.summaries["7d"];
     if (period === "30") return data.summaries["30d"];
     return data.summaries["all"];
@@ -238,7 +266,7 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="bg-card border-border/50">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -307,6 +335,32 @@ export default function AnalyticsPage() {
           <CardContent>
             <div className="text-2xl font-bold">{currentSummary.musicCount}</div>
             <p className="text-xs text-muted-foreground">Generadas</p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border/50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Audio
+            </CardTitle>
+            <Volume2 className="h-4 w-4 text-pink-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{currentSummary.audioCount}</div>
+            <p className="text-xs text-muted-foreground">Generados</p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border/50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Audio HD
+            </CardTitle>
+            <Volume2 className="h-4 w-4 text-rose-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{currentSummary.audioHdCount}</div>
+            <p className="text-xs text-muted-foreground">Chirp 3 HD</p>
           </CardContent>
         </Card>
 
@@ -496,6 +550,8 @@ export default function AnalyticsPage() {
                   <Bar dataKey="imageCount" name="Imágenes" fill={CHART_COLORS.images} radius={[4, 4, 0, 0]} />
                   <Bar dataKey="videoCount" name="Videos" fill={CHART_COLORS.videos} radius={[4, 4, 0, 0]} />
                   <Bar dataKey="musicCount" name="Música" fill={CHART_COLORS.music} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="audioCount" name="Audio" fill={CHART_COLORS.audio} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="audioHdCount" name="Audio HD" fill={CHART_COLORS.audioHd} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
@@ -547,7 +603,7 @@ export default function AnalyticsPage() {
                           className="w-3 h-3 rounded-full"
                           style={{ backgroundColor: COLORS[index % COLORS.length] }}
                         />
-                        <span className="capitalize">{type.type === "text" ? "Texto" : type.type === "image" ? "Imagen" : type.type === "video" ? "Video" : "Música"}</span>
+                        <span className="capitalize">{type.type === "text" ? "Texto" : type.type === "image" ? "Imagen" : type.type === "video" ? "Video" : type.type === "audio" ? "Audio" : type.type === "audio_hd" ? "Audio HD" : "Música"}</span>
                       </div>
                       <div className="text-right">
                         <div className="font-medium">{type.count}</div>
@@ -565,6 +621,67 @@ export default function AnalyticsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Calculadora IA Stats */}
+      {data?.budgetStats && data.budgetStats.total > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card className="bg-card border-border/50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Cotizaciones
+              </CardTitle>
+              <Calculator className="h-4 w-4 text-blue-400" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{data.budgetStats.total}</div>
+              <p className="text-xs text-muted-foreground">{periodLabels[period]}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-card border-border/50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Aceptadas
+              </CardTitle>
+              <FileCheck className="h-4 w-4 text-green-400" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-400">{data.budgetStats.accepted}</div>
+              <p className="text-xs text-muted-foreground">
+                ${data.budgetStats.acceptedAmount.toLocaleString("es-CL")}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-card border-border/50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Pendientes
+              </CardTitle>
+              <FileClock className="h-4 w-4 text-yellow-400" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-yellow-400">{data.budgetStats.draft}</div>
+              <p className="text-xs text-muted-foreground">En borrador</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-card border-border/50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Monto Total
+              </CardTitle>
+              <DollarSign className="h-4 w-4 text-cyan-400" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-cyan-400">
+                ${data.budgetStats.totalAmount.toLocaleString("es-CL")}
+              </div>
+              <p className="text-xs text-muted-foreground">Todas las cotizaciones</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Tables Row: Models, Users, Projects */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -594,6 +711,8 @@ export default function AnalyticsPage() {
                           model.imageCount > 0 && `${model.imageCount} img`,
                           model.videoCount > 0 && `${model.videoCount} vid`,
                           model.musicCount > 0 && `${model.musicCount} mus`,
+                          model.audioCount > 0 && `${model.audioCount} aud`,
+                          model.audioHdCount > 0 && `${model.audioHdCount} hd`,
                         ].filter(Boolean).join(" / ")}
                       </div>
                     </div>
@@ -624,7 +743,16 @@ export default function AnalyticsPage() {
                     <div>
                       <div className="font-medium text-sm">{user.userName}</div>
                       <div className="text-xs text-muted-foreground">
-                        {user.conversationCount} conversaciones
+                        {formatNumber(user.messageCount)} msgs / {user.conversationCount} conv
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {[
+                          user.imageCount > 0 && `${user.imageCount} img`,
+                          user.videoCount > 0 && `${user.videoCount} vid`,
+                          user.musicCount > 0 && `${user.musicCount} mus`,
+                          user.audioCount > 0 && `${user.audioCount} aud`,
+                          user.audioHdCount > 0 && `${user.audioHdCount} hd`,
+                        ].filter(Boolean).join(" / ")}
                       </div>
                     </div>
                     <div className="text-right">
@@ -658,6 +786,9 @@ export default function AnalyticsPage() {
                 data.projectBreakdown.slice(0, 5).map((project) => (
                   <div key={project.projectId || "no-project"} className="flex items-center justify-between py-2 border-b border-border/30 last:border-0">
                     <div>
+                      {project.clientName && (
+                        <div className="text-xs text-muted-foreground">{project.clientName}</div>
+                      )}
                       <div className="font-medium text-sm">{project.projectName}</div>
                       <div className="text-xs text-muted-foreground">
                         {project.conversationCount} conversaciones
@@ -670,6 +801,8 @@ export default function AnalyticsPage() {
                           project.imageCount > 0 && `${project.imageCount} img`,
                           project.videoCount > 0 && `${project.videoCount} vid`,
                           project.musicCount > 0 && `${project.musicCount} mus`,
+                          project.audioCount > 0 && `${project.audioCount} aud`,
+                          project.audioHdCount > 0 && `${project.audioHdCount} hd`,
                         ].filter(Boolean).join(" / ")}
                       </div>
                     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, Fragment } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -19,6 +19,8 @@ import {
   XCircle,
   AlertTriangle,
   Server,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -80,6 +82,16 @@ export default function WorkersPage() {
   const [data, setData] = useState<WorkerData | null>(null);
   const [loading, setLoading] = useState(true);
   const [, setTick] = useState(0);
+  const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
+
+  const toggleError = (jobId: string) => {
+    setExpandedErrors((prev) => {
+      const next = new Set(prev);
+      if (next.has(jobId)) next.delete(jobId);
+      else next.add(jobId);
+      return next;
+    });
+  };
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -314,20 +326,43 @@ export default function WorkersPage() {
               </TableHeader>
               <TableBody>
                 {data.failedJobs.map((job) => (
-                  <TableRow key={job.id}>
-                    <TableCell className="font-mono text-xs">
-                      {job.id}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{job.model}</Badge>
-                    </TableCell>
-                    <TableCell className="text-sm text-red-400 max-w-md truncate">
-                      {job.error}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                      {formatDate(job.failedAt)}
-                    </TableCell>
-                  </TableRow>
+                  <Fragment key={job.id}>
+                    <TableRow
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => toggleError(job.id)}
+                    >
+                      <TableCell className="font-mono text-xs">
+                        {job.id}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{job.model}</Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-red-400 max-w-md">
+                        <div className="flex items-center gap-2">
+                          {expandedErrors.has(job.id) ? (
+                            <ChevronUp className="h-3 w-3 flex-shrink-0" />
+                          ) : (
+                            <ChevronDown className="h-3 w-3 flex-shrink-0" />
+                          )}
+                          <span className={expandedErrors.has(job.id) ? "" : "truncate"}>
+                            {job.error}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                        {formatDate(job.failedAt)}
+                      </TableCell>
+                    </TableRow>
+                    {expandedErrors.has(job.id) && (
+                      <TableRow>
+                        <TableCell colSpan={4} className="p-0">
+                          <pre className="text-xs text-red-300 bg-red-950/30 p-3 m-2 rounded overflow-x-auto whitespace-pre-wrap break-all">
+                            {job.error}
+                          </pre>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
                 ))}
               </TableBody>
             </Table>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, MessageSquare, FolderKanban, ImageIcon, Video, Music, Loader2, Zap, DollarSign, Sparkles } from "lucide-react";
+import { Users, MessageSquare, FolderKanban, ImageIcon, Video, Music, Volume2, Loader2, Zap, DollarSign, Sparkles, Bot, Calculator, FileCheck, FileClock, FileX } from "lucide-react";
 
 interface DashboardStats {
   totalUsers: number;
@@ -11,11 +11,20 @@ interface DashboardStats {
   totalImages: number;
   totalVideos: number;
   totalMusic: number;
+  totalAudio: number;
+  totalAudioHd: number;
   totalTokensInput: number;
   totalTokensOutput: number;
   totalEstimatedCost: number;
   topazImageCredits: number;
   topazVideoCredits: number;
+  totalModels: number;
+  activeModels: number;
+  assignedModels: number;
+  totalBudgets: number;
+  draftBudgets: number;
+  acceptedBudgets: number;
+  rejectedBudgets: number;
 }
 
 export default function DashboardPage() {
@@ -67,7 +76,7 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card className="bg-card border-border/50">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -190,6 +199,135 @@ export default function DashboardPage() {
             </div>
             <p className="text-xs text-muted-foreground">
               Generadas
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border/50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Audio
+            </CardTitle>
+            <Volume2 className="h-4 w-4 text-pink-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {loading ? (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              ) : (
+                formatNumber(stats?.totalAudio || 0)
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Generados
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border/50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Audio HD
+            </CardTitle>
+            <Volume2 className="h-4 w-4 text-rose-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {loading ? (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              ) : (
+                formatNumber(stats?.totalAudioHd || 0)
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Chirp 3 HD
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Models & Calculadora Section */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card className="bg-card border-border/50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Modelos
+            </CardTitle>
+            <Bot className="h-4 w-4 text-indigo-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {loading ? (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              ) : (
+                <>{stats?.activeModels || 0} <span className="text-sm font-normal text-muted-foreground">/ {stats?.totalModels || 0}</span></>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Activos / Total
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border/50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Cotizaciones
+            </CardTitle>
+            <Calculator className="h-4 w-4 text-blue-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {loading ? (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              ) : (
+                formatNumber(stats?.totalBudgets || 0)
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Calculadora IA
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border/50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Aprobadas
+            </CardTitle>
+            <FileCheck className="h-4 w-4 text-green-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-400">
+              {loading ? (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              ) : (
+                stats?.acceptedBudgets || 0
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Cotizaciones aceptadas
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border/50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Pendientes
+            </CardTitle>
+            <FileClock className="h-4 w-4 text-yellow-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-yellow-400">
+              {loading ? (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              ) : (
+                stats?.draftBudgets || 0
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Cotizaciones en borrador
             </p>
           </CardContent>
         </Card>
