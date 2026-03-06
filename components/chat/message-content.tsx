@@ -301,6 +301,8 @@ export function MessageContent({
     }
   }, [fileSize]);
 
+  const [imageLoaded, setImageLoaded] = useState(false);
+
   return (
     <div className="space-y-2">
       {/* Imagen si existe */}
@@ -320,18 +322,28 @@ export function MessageContent({
               />
             ) : (
               // Para URLs de CloudFront, usar NextImage optimizado
-              <NextImage
-                src={imageUrl}
-                alt="Imagen adjunta"
-                width={512}
-                height={512}
-                className={cn(
-                  "w-full h-auto object-cover",
-                  !isUser && "cursor-grab active:cursor-grabbing"
+              <>
+                {!imageLoaded && (
+                  <div className="w-full aspect-square max-w-sm bg-muted/50 animate-pulse rounded-lg flex items-center justify-center">
+                    <Loader2 className="h-6 w-6 text-muted-foreground/40 animate-spin" />
+                  </div>
                 )}
-                sizes="(max-width: 640px) 100vw, 384px"
-                draggable={!isUser}
-                onLoad={handleImageLoad}
+                <NextImage
+                  src={imageUrl}
+                  alt="Imagen adjunta"
+                  width={512}
+                  height={512}
+                  className={cn(
+                    "w-full h-auto object-cover",
+                    !isUser && "cursor-grab active:cursor-grabbing",
+                    !imageLoaded && "hidden"
+                  )}
+                  sizes="(max-width: 640px) 100vw, 384px"
+                  draggable={!isUser}
+                  onLoad={(e) => {
+                    setImageLoaded(true);
+                    handleImageLoad(e);
+                  }}
                 onDragStart={(e) => {
                   if (isUser) return;
                   e.dataTransfer.effectAllowed = "copy";
@@ -345,6 +357,7 @@ export function MessageContent({
                   );
                 }}
               />
+              </>
             )}
             {/* Indicador de drag - solo para imágenes del modelo */}
             {!isUser && (
