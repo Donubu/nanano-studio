@@ -333,6 +333,7 @@ export function MessageContent({
                   alt="Imagen adjunta"
                   width={512}
                   height={512}
+                  loading="eager"
                   className={cn(
                     "w-full h-auto object-cover",
                     !isUser && "cursor-grab active:cursor-grabbing",
