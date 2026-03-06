@@ -18,6 +18,7 @@ import {
     Cloud,
     Calculator,
     Activity,
+    Sparkles,
 } from "lucide-react";
 
 const menuItems = [
@@ -65,6 +66,11 @@ const menuItems = [
         title: "Workers",
         href: "/dashboard/workers",
         icon: Activity,
+    },
+    {
+        title: "Changelog",
+        href: "/dashboard/changelog",
+        icon: Sparkles,
     },
     {
         title: "Chat",

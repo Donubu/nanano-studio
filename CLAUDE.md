@@ -8,13 +8,22 @@ Multi-provider AI generation platform for text, images, video, audio, and music.
 - **Database**: MySQL via `mysql2/promise` (Google Cloud SQL in production)
 - **Auth**: NextAuth v5 (beta) with Google OAuth (`auth.ts` + `auth.config.ts`)
 - **Queue**: BullMQ + Redis for async generation jobs
-- **Storage**: AWS S3 for generated files
+- **Storage**: AWS S3 for generated files, CloudFront CDN for delivery
 - **AI Providers**:
   - Google Gemini API / Vertex AI (text streaming, Imagen 4 images, VEO video, Chirp 3 HD TTS, Lyria music)
   - xAI Grok (Grok Imagine Video)
   - Future: more providers planned
 - **UI**: Tailwind CSS, Radix UI primitives, Lucide icons
 - **Deployment**: Docker + docker-compose on GCP VM, Nginx reverse proxy
+
+## Production Environment
+- **Domain**: `https://puerto.studio` (primary), `https://v2.puerto.studio` (temporary alias)
+- **Branch**: `main` (auto-deployed via GitHub webhook on push)
+- **Deploy script**: `scripts/deploy.sh` (blue-green zero-downtime)
+- **SSL**: Let's Encrypt certificates via certbot (installed on host, certs copied to Docker volume `nanano-studio_certbot_certs`)
+- **Auto-deploy webhook**: GitHub pushes to `main` trigger `/home/mgomez/deploy.sh` on the server
+- **Server**: GCP VM at `34.176.106.54`, user `mgomez`, root for docker commands
+- **Git on server**: Must run as `mgomez` user (SSH key), not root: `su - mgomez -c "cd /home/mgomez/nanano-studio && git pull origin main"`
 
 ## Project Structure
 
@@ -34,6 +43,7 @@ app/
         audio/            # Audio/TTS generation
         music/            # Music generation (save/discard)
     dashboard/            # Stats, analytics, workers, generations
+    health/               # Health check endpoint (excluded from auth)
     images/               # Image upscale, Topaz Studio
     messages/             # Message operations (favorite, tags, reference images)
     models/               # AI model management CRUD
@@ -97,12 +107,25 @@ scripts/
   migrate-init.js         # Migration initialization
   build-worker.js         # Worker build script
   bump-version.js         # Version auto-increment
+  deploy.sh               # Blue-green zero-downtime deploy script
   docker-start.sh         # Docker entrypoint (web vs worker mode)
+  init-ssl.sh             # SSL certificate initialization (puerto.studio)
   recalculate-costs.js    # Cost recalculation utility
   sync-gcp-costs.ts       # GCP cost sync script
+
+nginx/
+  conf.d/default.conf     # Nginx config (serves puerto.studio + v2.puerto.studio)
+  conf.d/upstream.active  # Active blue/green backend slot
 ```
 
 ## Architecture
+
+### Blue-Green Deployment
+- `scripts/deploy.sh` manages zero-downtime deploys
+- Two slots: `puerto_studio_blue` and `puerto_studio_green`
+- `nginx/conf.d/upstream.active` contains `set $backend puerto_studio_blue:3000;` or green
+- Deploy builds new slot, health checks it, switches nginx upstream, stops old slot
+- Workers are rolling-restarted after web deploy
 
 ### Web + Worker Pattern
 - `APP_MODE=web` runs the Next.js server
@@ -149,12 +172,13 @@ npm run migrate      # Run database migrations
 
 ## Docker Deployment
 ```bash
-docker-compose -f docker-compose.gcp.yml up -d  # Production (GCP)
-docker-compose up -d                              # Development
+docker compose -f docker-compose.gcp.yml up -d  # Production (GCP)
+docker compose up -d                              # Development
 ```
-- Services: redis, puerto_studio (web), worker_1+ (workers)
+- Services: nginx, redis, puerto_studio_blue/green (web), worker_1+ (workers), certbot
 - Memory limits: 4GB for web, configured per worker
 - Node heap limit: `--max-old-space-size=4096`
+- Docker volumes: `nanano-studio_certbot_certs` (SSL certs), `certbot_webroot` (ACME challenges)
 
 ## Conventions
 - API routes use `mysql2/promise` with raw SQL (no ORM)
@@ -163,3 +187,4 @@ docker-compose up -d                              # Development
 - Costs tracked per generation, synced with GCP billing via BigQuery
 - Timezone: `America/Santiago` (-03:00)
 - Body size limit: 50MB (middleware + server actions)
+- Env files: `.env.local` (dev), `.env.gcp` (production, gitignored), `.env.private` (reference)
