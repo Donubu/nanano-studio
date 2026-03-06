@@ -20,6 +20,7 @@ import { ResultSetHeader, RowDataPacket } from "mysql2";
 
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 const CONCURRENCY = Number(process.env.WORKER_CONCURRENCY) || 3;
+const WORKER_NAME = process.env.HOSTNAME || `worker-${process.pid}`;
 
 // ============================================
 // DB POOL (independent from Next.js)
@@ -70,7 +71,10 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
     pubRedis.publish(channel, JSON.stringify(event));
   };
 
-  console.log(`[Worker] Processing job ${job.id} - model: ${data.modelId}, type: ${data.generationType}`);
+  console.log(`[${WORKER_NAME}] Processing job ${job.id} - model: ${data.modelId}, type: ${data.generationType}`);
+
+  // Store worker name in job data so dashboard can show which worker handles it
+  await job.updateData({ ...data, workerName: WORKER_NAME });
 
   try {
     const messagesToSend: ChatMessage[] = data.messages.map((m) => ({

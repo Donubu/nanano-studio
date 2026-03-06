@@ -48,6 +48,7 @@ export async function GET() {
         generationType: job.data.generationType,
         qualityTier: job.data.qualityTier,
         user: job.data.labels?.user_name || "—",
+        worker: job.data.workerName || "—",
         startedAt: job.processedOn || null,
       }));
 

@@ -1907,12 +1907,34 @@ export function ChatInterface() {
                 : 0;
 
             if (extraImageCount > 0) {
+                // Add loading placeholders for each extra image
+                const extraPlaceholderIds: number[] = [];
+                for (let i = 0; i < extraImageCount; i++) {
+                    const placeholderId = Date.now() + 300 + i;
+                    extraPlaceholderIds.push(placeholderId);
+                }
+                setTabMessages((prev) => ({
+                    ...prev,
+                    [tabId]: [
+                        ...prev[tabId],
+                        ...extraPlaceholderIds.map((pid) => ({
+                            id: pid,
+                            role: "model" as const,
+                            content: "",
+                            content_type: "image" as const,
+                            created_at: new Date().toISOString(),
+                            isStreaming: true,
+                        })),
+                    ],
+                }));
+
                 const extraRequestBody = {
                     ...requestBody,
                     skip_user_message: true,
                 };
                 for (let i = 0; i < extraImageCount; i++) {
-                    // Fire-and-forget: each extra request processes its own SSE and adds images
+                    const placeholderId = extraPlaceholderIds[i];
+                    // Fire-and-forget: each extra request processes its own SSE and updates its placeholder
                     (async () => {
                         try {
                             const extraResponse = await fetch(endpoint, {
@@ -1939,44 +1961,40 @@ export function ChatInterface() {
                                     try {
                                         const data = JSON.parse(line.slice(6));
                                         if (data.type === "image") {
-                                            const tempImgId = Date.now() + 200 + i * 10 + (data.imageIndex || 0);
-                                            tempImageMessageIds.push(tempImgId);
+                                            // Update placeholder with actual image
+                                            tempImageMessageIds.push(placeholderId);
                                             setTabMessages((prev) => ({
                                                 ...prev,
-                                                [tabId]: [...prev[tabId], {
-                                                    id: tempImgId,
-                                                    role: "model" as const,
-                                                    content: "",
-                                                    content_type: "image" as const,
-                                                    image_url: data.imageUrl,
-                                                    created_at: new Date().toISOString(),
-                                                    isStreaming: true,
-                                                }],
+                                                [tabId]: prev[tabId].map((m) =>
+                                                    m.id === placeholderId
+                                                        ? { ...m, image_url: data.imageUrl }
+                                                        : m
+                                                ),
                                             }));
                                         } else if (data.type === "complete") {
                                             const serverImgs: Array<{ id: number; imageUrl: string }> = data.imageMessages || [];
                                             if (serverImgs.length > 0) {
                                                 setTabMessages((prev) => {
                                                     let msgs = prev[tabId];
-                                                    for (const serverImg of serverImgs) {
-                                                        // Find a temp image message matching this URL and finalize it
-                                                        const tempMsg = msgs.find(m => m.isStreaming && m.image_url === serverImg.imageUrl);
-                                                        if (tempMsg) {
-                                                            msgs = msgs.map(m => m.id === tempMsg.id
-                                                                ? { ...m, id: serverImg.id, isStreaming: false }
-                                                                : m
-                                                            );
-                                                        } else {
-                                                            msgs = [...msgs, {
-                                                                id: serverImg.id,
-                                                                role: "model" as const,
-                                                                content: "",
-                                                                content_type: "image" as const,
-                                                                image_url: serverImg.imageUrl,
-                                                                created_at: new Date().toISOString(),
-                                                                isStreaming: false,
-                                                            }];
-                                                        }
+                                                    // Finalize placeholder with server ID
+                                                    const serverImg = serverImgs[0];
+                                                    if (serverImg) {
+                                                        msgs = msgs.map(m => m.id === placeholderId
+                                                            ? { ...m, id: serverImg.id, image_url: serverImg.imageUrl, isStreaming: false }
+                                                            : m
+                                                        );
+                                                    }
+                                                    // Add any additional images from this request
+                                                    for (let j = 1; j < serverImgs.length; j++) {
+                                                        msgs = [...msgs, {
+                                                            id: serverImgs[j].id,
+                                                            role: "model" as const,
+                                                            content: "",
+                                                            content_type: "image" as const,
+                                                            image_url: serverImgs[j].imageUrl,
+                                                            created_at: new Date().toISOString(),
+                                                            isStreaming: false,
+                                                        }];
                                                     }
                                                     return { ...prev, [tabId]: msgs };
                                                 });
@@ -1987,6 +2005,11 @@ export function ChatInterface() {
                             }
                         } catch (err) {
                             console.error("[Extra image request] Error:", err);
+                            // Remove placeholder on error
+                            setTabMessages((prev) => ({
+                                ...prev,
+                                [tabId]: prev[tabId].filter((m) => m.id !== placeholderId),
+                            }));
                         }
                     })();
                 }

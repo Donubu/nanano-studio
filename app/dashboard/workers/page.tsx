@@ -29,6 +29,7 @@ interface ActiveJob {
   generationType: string;
   qualityTier: string;
   user: string;
+  worker: string;
   startedAt: number | null;
 }
 
@@ -246,8 +247,8 @@ export default function WorkersPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Job ID</TableHead>
+                  <TableHead>Worker</TableHead>
                   <TableHead>Modelo</TableHead>
-                  <TableHead>Conversacion</TableHead>
                   <TableHead>Tipo</TableHead>
                   <TableHead>Calidad</TableHead>
                   <TableHead>Usuario</TableHead>
@@ -261,10 +262,12 @@ export default function WorkersPage() {
                       {job.id}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline">{job.model}</Badge>
+                      <Badge variant="secondary" className="font-mono text-xs">
+                        {job.worker}
+                      </Badge>
                     </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {job.conversationId}
+                    <TableCell>
+                      <Badge variant="outline">{job.model}</Badge>
                     </TableCell>
                     <TableCell>{job.generationType}</TableCell>
                     <TableCell>

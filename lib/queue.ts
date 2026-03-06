@@ -63,6 +63,9 @@ export interface StreamJobData {
   };
   effectiveImageAspectRatio?: string;
   effectiveImageSize?: string;
+
+  // Set by worker when processing
+  workerName?: string;
 }
 
 // Events published by worker via Redis pub/sub
