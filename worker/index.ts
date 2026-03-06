@@ -72,7 +72,20 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
     pubRedis.publish(channel, JSON.stringify(event));
   };
 
-  console.log(`[${WORKER_NAME}] Processing job ${job.id} - model: ${data.modelId}, type: ${data.generationType}`);
+  console.log(`\n========== [${WORKER_NAME}] Job ${job.id} ==========`);
+  console.log(`  Model: ${data.modelId} (${data.backend || "default"})`);
+  console.log(`  Type: ${data.generationType} | Quality: ${data.qualityTier}`);
+  console.log(`  Conversation: ${data.conversationId} | User: ${data.labels?.user_name || "—"}`);
+  console.log(`  Project: ${data.labels?.project_name || "—"}`);
+  if (data.settings.imageConfig) {
+    console.log(`  Image: ${data.settings.imageConfig.aspectRatio || "—"} @ ${data.settings.imageConfig.imageSize || "—"}`);
+  }
+  if (data.settings.googleSearchEnabled) console.log(`  Google Search: enabled`);
+  if (data.settings.googleImageSearchEnabled) console.log(`  Image Search: enabled`);
+  console.log(`  Temperature: ${data.settings.temperature ?? "—"} | TopP: ${data.settings.topP ?? "—"} | MaxTokens: ${data.settings.maxOutputTokens ?? "—"}`);
+  console.log(`  Content: ${data.content.substring(0, 100)}${data.content.length > 100 ? "..." : ""}`);
+  console.log(`  Messages: ${data.messages.length} | NeedsTitle: ${data.needsTitle}`);
+  console.log(`==========================================\n`);
 
   // Store worker name in job data so dashboard can show which worker handles it
   await job.updateData({ ...data, workerName: WORKER_NAME });
@@ -348,6 +361,18 @@ async function saveResultsToDB(
     [data.conversationId]
   );
 
+  // Generate title before completing (so the SSE connection is still open)
+  if (data.needsTitle && !data.skipUserMessage) {
+    try {
+      const title = await generateConversationTitle(data.content, data.labels);
+      await pool.execute("UPDATE conversations SET title = ? WHERE id = ?", [title, data.conversationId]);
+      publish({ type: "title", title });
+      console.log(`[${WORKER_NAME}] Generated title: ${title}`);
+    } catch (err) {
+      console.error(`[${WORKER_NAME}] Error generating title:`, err);
+    }
+  }
+
   // Publish complete event
   publish({
     type: "complete",
@@ -362,23 +387,13 @@ async function saveResultsToDB(
     imageUrl: validImages.length === 1 ? validImages[0].url : null,
     imageMessages: imageMessages.length > 0 ? imageMessages : undefined,
   });
-
-  // Generate title (fire-and-forget)
-  if (data.needsTitle && !data.skipUserMessage) {
-    generateConversationTitle(data.content, data.labels)
-      .then(async (title) => {
-        await pool.execute("UPDATE conversations SET title = ? WHERE id = ?", [title, data.conversationId]);
-        console.log("[Worker] Generated title:", title);
-      })
-      .catch((err) => console.error("[Worker] Error generating title:", err));
-  }
 }
 
 // ============================================
 // START WORKER
 // ============================================
 
-console.log(`[Worker] Starting with concurrency=${CONCURRENCY}, redis=${REDIS_URL}`);
+console.log(`[${WORKER_NAME}] Starting with concurrency=${CONCURRENCY}, redis=${REDIS_URL}`);
 
 const worker = new Worker<StreamJobData>(
   STREAM_QUEUE_NAME,
@@ -390,18 +405,18 @@ const worker = new Worker<StreamJobData>(
 );
 
 worker.on("completed", (job) => {
-  console.log(`[Worker] Job ${job.id} completed`);
+  console.log(`[${WORKER_NAME}] ✓ Job ${job.id} completed`);
 });
 
 worker.on("failed", (job, err) => {
-  console.error(`[Worker] Job ${job?.id} failed:`, err.message);
+  console.error(`[${WORKER_NAME}] ✗ Job ${job?.id} failed: ${err.message}`);
 });
 
 worker.on("error", (err) => {
-  console.error("[Worker] Error:", err);
+  console.error(`[${WORKER_NAME}] Error:`, err);
 });
 
-console.log("[Worker] Ready and waiting for jobs...");
+console.log(`[${WORKER_NAME}] Ready and waiting for jobs...`);
 
 // Graceful shutdown
 process.on("SIGTERM", async () => {

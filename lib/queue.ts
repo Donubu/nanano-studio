@@ -74,6 +74,7 @@ export type StreamJobEvent =
   | { type: "image"; imageUrl: string; mimeType: string; imageIndex: number }
   | { type: "grounding"; sources: unknown[]; searchEntryPointHtml?: string; webSearchQueries?: string[]; imageSearchQueries?: string[] }
   | { type: "retry"; attempt: number; maxAttempts: number; delaySeconds: number; error: string }
+  | { type: "title"; title: string }
   | { type: "complete"; id: number; tokens: { input: number; output: number }; totalTokens: { input: number; output: number }; estimatedCost: number; totalCost: number; imageUrl: string | null; imageMessages?: Array<{ id: number; imageUrl: string }> }
   | { type: "error"; message: string; id?: number };
 

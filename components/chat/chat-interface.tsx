@@ -3858,7 +3858,7 @@ export function ChatInterface() {
                                                     </button>
                                                 )}
                                                 {/* Seed button for model messages with generation_seed (image or video) */}
-                                                {msg.role === "model" && msg.generation_seed && (msg.image_url || msg.video_url) && (
+                                                {msg.role === "model" && msg.generation_seed != null && msg.generation_seed !== 0 && (msg.image_url || msg.video_url) && (
                                                     <button
                                                         onClick={() => {
                                                             if (selectedSeed === msg.generation_seed) {
@@ -3916,7 +3916,7 @@ export function ChatInterface() {
                                                                 }
                                                             }
                                                         }}
-                                                        className={`absolute ${msg.generation_seed ? "top-12" : "top-5"} -right-2 p-1 rounded-full transition-all z-10 bg-card border border-border/50 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-blue-400`}
+                                                        className={`absolute ${msg.generation_seed != null && msg.generation_seed !== 0 ? "top-12" : "top-5"} -right-2 p-1 rounded-full transition-all z-10 bg-card border border-border/50 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-blue-400`}
                                                         title="Reusar prompt"
                                                     >
                                                         <RotateCcw className="h-4 w-4" />
