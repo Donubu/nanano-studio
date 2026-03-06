@@ -40,11 +40,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# Install runtime dependencies not included in standalone
-RUN npm install --no-save mysql2 sharp bullmq ioredis dotenv @google/genai google-auth-library gtoken @aws-sdk/client-s3 @google-cloud/text-to-speech
-
 # Copy standalone build
 COPY --from=builder /app/.next/standalone ./
+
+# Copy full node_modules from deps (worker needs all transitive dependencies)
+COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
