@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-DOMAIN="v2.puerto.studio"
+DOMAIN="puerto.studio"
 EMAIL="mgomez@puer.to"
 COMPOSE_FILE="docker-compose.gcp.yml"
 
@@ -12,7 +12,7 @@ mkdir -p nginx/conf.d
 cat > nginx/conf.d/default.conf <<'TMPCONF'
 server {
     listen 80;
-    server_name v2.puerto.studio;
+    server_name puerto.studio;
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -40,7 +40,7 @@ docker compose -f $COMPOSE_FILE run --rm certbot certonly \
 cat > nginx/conf.d/default.conf <<'SSLCONF'
 server {
     listen 80;
-    server_name v2.puerto.studio;
+    server_name puerto.studio;
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -53,10 +53,10 @@ server {
 
 server {
     listen 443 ssl http2;
-    server_name v2.puerto.studio;
+    server_name puerto.studio;
 
-    ssl_certificate /etc/letsencrypt/live/v2.puerto.studio/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/v2.puerto.studio/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/puerto.studio/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/puerto.studio/privkey.pem;
 
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
