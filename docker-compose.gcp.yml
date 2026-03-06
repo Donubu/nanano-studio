@@ -70,6 +70,7 @@ services:
       - APP_MODE=worker
       - REDIS_URL=redis://redis:6379
       - WORKER_CONCURRENCY=1
+      - WORKER_NAME=worker_1
     deploy:
       resources:
         limits:
@@ -92,6 +93,7 @@ services:
       - APP_MODE=worker
       - REDIS_URL=redis://redis:6379
       - WORKER_CONCURRENCY=1
+      - WORKER_NAME=worker_2
     deploy:
       resources:
         limits:
@@ -114,6 +116,7 @@ services:
       - APP_MODE=worker
       - REDIS_URL=redis://redis:6379
       - WORKER_CONCURRENCY=1
+      - WORKER_NAME=worker_3
     deploy:
       resources:
         limits:
@@ -136,6 +139,7 @@ services:
       - APP_MODE=worker
       - REDIS_URL=redis://redis:6379
       - WORKER_CONCURRENCY=1
+      - WORKER_NAME=worker_4
     deploy:
       resources:
         limits:

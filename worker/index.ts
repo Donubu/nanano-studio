@@ -20,7 +20,8 @@ import { ResultSetHeader, RowDataPacket } from "mysql2";
 
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 const CONCURRENCY = Number(process.env.WORKER_CONCURRENCY) || 3;
-const WORKER_NAME = process.env.HOSTNAME || `worker-${process.pid}`;
+import os from "os";
+const WORKER_NAME = process.env.WORKER_NAME || os.hostname() || `worker-${process.pid}`;
 
 // ============================================
 // DB POOL (independent from Next.js)

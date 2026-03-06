@@ -1117,48 +1117,54 @@ export function ChatInterface() {
         prevMessageCountRef.current = currentCount;
     }, [messages]);
 
-    // Update settings when switching tabs
+    // Update settings when switching tabs (only triggered by tab change, not by settings updates)
+    const prevActiveTabRef = useRef<number | null>(null);
     useEffect(() => {
         if (activeTabId && tabConversations[activeTabId]) {
             const conv = tabConversations[activeTabId];
-            setTemperature(Number(conv.temperature));
-            setTopP(Number(conv.top_p));
-            setTopK(conv.top_k);
-            setMaxOutputTokens(conv.max_output_tokens);
-            setSystemInstruction(conv.system_instruction || "");
-            setSelectedModelId(conv.model_id);
-            setImageAspectRatio(conv.image_aspect_ratio || "16:9");
-            setImageSize(conv.image_size || "1K");
-            // Video settings
-            setVideoDuration((conv.video_duration || 8) as VideoDuration);
-            setVideoResolution((conv.video_resolution || "720p") as VideoResolution);
-            setVideoAspectRatio((conv.video_aspect_ratio || "16:9") as VideoAspectRatio);
-            setVideoAudioEnabled(conv.video_audio_enabled !== false);
-            setVideoNegativePrompt(conv.video_negative_prompt || "");
-            // Clear video frames when switching tabs
-            setVideoFirstFrame(null);
-            setVideoLastFrame(null);
-            setVideoReferenceImages([]);
-            // Reset generation mode and selected images when switching tabs
-            setGenerationMode("video");
-            setSelectedConversationImages([]);
-            // Set engine based on conversation type
-            if (conv.generation_type === "audio_hd") {
-                setAudioTTSEngine("chirp");
-                setAudioMultiSpeaker(false);
-            } else if (conv.generation_type === "audio") {
-                setAudioTTSEngine("gemini");
-            }
-            // Google Search - reset to off for each conversation (per-message now)
-            setGoogleSearchEnabled(false);
-            setGoogleImageSearchEnabled(false);
-            // Auto-select quality tier based on available models
-            const typeConf = generationConfig.find(c => c.generation_type === conv.generation_type);
-            if (typeConf) {
-                if (typeConf.model_normal_id) {
-                    setSelectedQualityTier("normal");
-                } else if (typeConf.model_hq_id) {
-                    setSelectedQualityTier("hq");
+            const isTabSwitch = prevActiveTabRef.current !== activeTabId;
+            prevActiveTabRef.current = activeTabId;
+
+            if (isTabSwitch) {
+                setTemperature(Number(conv.temperature));
+                setTopP(Number(conv.top_p));
+                setTopK(conv.top_k);
+                setMaxOutputTokens(conv.max_output_tokens);
+                setSystemInstruction(conv.system_instruction || "");
+                setSelectedModelId(conv.model_id);
+                setImageAspectRatio(conv.image_aspect_ratio || "16:9");
+                setImageSize(conv.image_size || "1K");
+                // Video settings
+                setVideoDuration((conv.video_duration || 8) as VideoDuration);
+                setVideoResolution((conv.video_resolution || "720p") as VideoResolution);
+                setVideoAspectRatio((conv.video_aspect_ratio || "16:9") as VideoAspectRatio);
+                setVideoAudioEnabled(conv.video_audio_enabled !== false);
+                setVideoNegativePrompt(conv.video_negative_prompt || "");
+                // Clear video frames when switching tabs
+                setVideoFirstFrame(null);
+                setVideoLastFrame(null);
+                setVideoReferenceImages([]);
+                // Reset generation mode and selected images when switching tabs
+                setGenerationMode("video");
+                setSelectedConversationImages([]);
+                // Set engine based on conversation type
+                if (conv.generation_type === "audio_hd") {
+                    setAudioTTSEngine("chirp");
+                    setAudioMultiSpeaker(false);
+                } else if (conv.generation_type === "audio") {
+                    setAudioTTSEngine("gemini");
+                }
+                // Google Search - reset to off for each conversation (per-message now)
+                setGoogleSearchEnabled(false);
+                setGoogleImageSearchEnabled(false);
+                // Auto-select quality tier based on available models
+                const typeConf = generationConfig.find(c => c.generation_type === conv.generation_type);
+                if (typeConf) {
+                    if (typeConf.model_normal_id) {
+                        setSelectedQualityTier("normal");
+                    } else if (typeConf.model_hq_id) {
+                        setSelectedQualityTier("hq");
+                    }
                 }
             }
         }
