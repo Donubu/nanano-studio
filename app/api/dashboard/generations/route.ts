@@ -268,11 +268,10 @@ export async function GET(request: NextRequest) {
       LEFT JOIN models mo_conv ON c.model_id = mo_conv.id
       WHERE ${conditions.join(" AND ")}
       ORDER BY m.created_at DESC
-      LIMIT ? OFFSET ?
+      LIMIT ${Number(limit)} OFFSET ${Number(offset)}
     `;
 
-    const mainQueryParams = [...queryParams, limit, offset];
-    const [generations] = await pool.execute<GenerationRow[]>(mainQuery, mainQueryParams);
+    const [generations] = await pool.execute<GenerationRow[]>(mainQuery, queryParams);
 
     // Apply cost corrections
     const costMultiplier = getCostMultiplier();
@@ -459,8 +458,8 @@ async function handleTopazGenerations(
       LEFT JOIN users u ON c.user_id = u.id
       ${whereClause}
       ORDER BY te.created_at DESC
-      LIMIT ? OFFSET ?
-    `, [...queryParams, limit, offset]);
+      LIMIT ${Number(limit)} OFFSET ${Number(offset)}
+    `, queryParams);
 
     // Get totals
     const [totalsResult] = await pool.execute<RowDataPacket[]>(`
@@ -598,8 +597,8 @@ async function handleTopazGenerations(
       LEFT JOIN users u ON c.user_id = u.id
       ${whereClause}
       ORDER BY tve.created_at DESC
-      LIMIT ? OFFSET ?
-    `, [...queryParams, limit, offset]);
+      LIMIT ${Number(limit)} OFFSET ${Number(offset)}
+    `, queryParams);
 
     // Get totals
     const [totalsResult] = await pool.execute<RowDataPacket[]>(`
@@ -826,8 +825,8 @@ async function handleAllGenerations(
     LEFT JOIN models mo_conv ON c.model_id = mo_conv.id
     WHERE ${msgConditions.join(" AND ")}
     ORDER BY m.created_at DESC
-    LIMIT ?
-  `, [...msgParams, fetchLimit]);
+    LIMIT ${Number(fetchLimit)}
+  `, msgParams);
 
   // Fetch Topaz image edits
   const [topazImages] = await pool.execute<TopazImageEditRow[]>(`
@@ -862,8 +861,8 @@ async function handleAllGenerations(
     LEFT JOIN users u ON c.user_id = u.id
     WHERE 1=1 ${topazWhereClause}
     ORDER BY te.created_at DESC
-    LIMIT ?
-  `, [...topazParams, fetchLimit]);
+    LIMIT ${Number(fetchLimit)}
+  `, topazParams);
 
   // Fetch Topaz video edits
   const [topazVideos] = await pool.execute<TopazVideoEditRow[]>(`
@@ -900,8 +899,8 @@ async function handleAllGenerations(
     LEFT JOIN users u ON c.user_id = u.id
     WHERE tve.status = 'completed' ${topazWhereClause}
     ORDER BY tve.created_at DESC
-    LIMIT ?
-  `, [...topazParams, fetchLimit]);
+    LIMIT ${Number(fetchLimit)}
+  `, topazParams);
 
   // Transform and combine all results
   type CombinedGeneration = {

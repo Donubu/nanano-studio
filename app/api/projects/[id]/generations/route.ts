@@ -194,13 +194,10 @@ export async function GET(
       ${tagJoin}
       WHERE ${conditions.join(" AND ")}
       ORDER BY m.created_at DESC
-      LIMIT ? OFFSET ?
+      LIMIT ${Number(limit)} OFFSET ${Number(offset)}
     `;
 
-    // Add limit and offset to params (use finalQueryParams for correct order)
-    const mainQueryParams = [...finalQueryParams, limit, offset];
-
-    const [generations] = await pool.execute<GenerationRow[]>(mainQuery, mainQueryParams);
+    const [generations] = await pool.execute<GenerationRow[]>(mainQuery, finalQueryParams);
 
     // Parse tags JSON and transform response
     const result = generations.map(gen => {
