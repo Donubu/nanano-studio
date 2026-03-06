@@ -41,7 +41,7 @@ ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
 # Install runtime dependencies not included in standalone
-RUN npm install --no-save mysql2 sharp bullmq ioredis @google/genai @aws-sdk/client-s3 @google-cloud/text-to-speech
+RUN npm install --no-save mysql2 sharp bullmq ioredis dotenv @google/genai @aws-sdk/client-s3 @google-cloud/text-to-speech
 
 # Copy standalone build
 COPY --from=builder /app/.next/standalone ./
