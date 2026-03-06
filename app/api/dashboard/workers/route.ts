@@ -52,13 +52,32 @@ export async function GET() {
         startedAt: job.processedOn || null,
       }));
 
-      const failedJobsRaw = await queue.getJobs(["failed"], 0, 9);
-      const failedJobs = failedJobsRaw.map((job) => ({
-        id: job.id,
-        model: job.data.modelId,
-        error: job.failedReason || "Unknown error",
-        failedAt: job.finishedOn || null,
-      }));
+      const completedJobsRaw = await queue.getJobs(["completed"], 0, 19);
+      const completedJobs = completedJobsRaw
+        .sort((a, b) => (b.finishedOn || 0) - (a.finishedOn || 0))
+        .map((job) => ({
+          id: job.id,
+          model: job.data.modelId,
+          generationType: job.data.generationType,
+          qualityTier: job.data.qualityTier,
+          user: job.data.labels?.user_name || "—",
+          project: job.data.labels?.project_name || "—",
+          completedAt: job.finishedOn || null,
+          duration: job.finishedOn && job.processedOn ? job.finishedOn - job.processedOn : null,
+        }));
+
+      const failedJobsRaw = await queue.getJobs(["failed"], 0, 19);
+      const failedJobs = failedJobsRaw
+        .sort((a, b) => (b.finishedOn || 0) - (a.finishedOn || 0))
+        .map((job) => ({
+          id: job.id,
+          model: job.data.modelId,
+          generationType: job.data.generationType,
+          qualityTier: job.data.qualityTier,
+          user: job.data.labels?.user_name || "—",
+          error: job.failedReason || "Unknown error",
+          failedAt: job.finishedOn || null,
+        }));
 
       // Get connected workers via Redis CLIENT LIST
       // BullMQ names worker connections as "bull:<base64-encoded-queue-name>"
@@ -83,6 +102,7 @@ export async function GET() {
           delayed: counts.delayed || 0,
         },
         activeJobs,
+        completedJobs,
         failedJobs,
       });
     } finally {

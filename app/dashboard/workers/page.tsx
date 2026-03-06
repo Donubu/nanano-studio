@@ -35,9 +35,23 @@ interface ActiveJob {
   startedAt: number | null;
 }
 
+interface CompletedJob {
+  id: string;
+  model: string;
+  generationType: string;
+  qualityTier: string;
+  user: string;
+  project: string;
+  completedAt: number | null;
+  duration: number | null;
+}
+
 interface FailedJob {
   id: string;
   model: string;
+  generationType: string;
+  qualityTier: string;
+  user: string;
   error: string;
   failedAt: number | null;
 }
@@ -53,6 +67,7 @@ interface WorkerData {
     delayed: number;
   };
   activeJobs: ActiveJob[];
+  completedJobs: CompletedJob[];
   failedJobs: FailedJob[];
 }
 
@@ -63,6 +78,15 @@ function formatElapsed(startedAt: number | null): string {
   const mins = Math.floor(elapsed / 60);
   const secs = elapsed % 60;
   return `${mins}m ${secs}s`;
+}
+
+function formatDuration(ms: number | null): string {
+  if (!ms) return "—";
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  const remSecs = secs % 60;
+  return `${mins}m ${remSecs}s`;
 }
 
 function formatDate(timestamp: number | null): string {
@@ -305,6 +329,72 @@ export default function WorkersPage() {
         </CardContent>
       </Card>
 
+      {/* Completed Jobs */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2 text-emerald-400">
+            <CheckCircle2 className="h-5 w-5" />
+            Ultimos Jobs Completados
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {data.completedJobs.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              No hay jobs completados recientes
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Job ID</TableHead>
+                  <TableHead>Modelo</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Calidad</TableHead>
+                  <TableHead>Usuario</TableHead>
+                  <TableHead>Proyecto</TableHead>
+                  <TableHead>Duracion</TableHead>
+                  <TableHead>Fecha</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.completedJobs.map((job) => (
+                  <TableRow key={job.id}>
+                    <TableCell className="font-mono text-xs">
+                      {job.id}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{job.model}</Badge>
+                    </TableCell>
+                    <TableCell>{job.generationType}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          job.qualityTier === "hq" &&
+                            "border-amber-500/50 text-amber-400"
+                        )}
+                      >
+                        {job.qualityTier}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{job.user}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {job.project}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {formatDuration(job.duration)}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                      {formatDate(job.completedAt)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Failed Jobs */}
       {data.failedJobs.length > 0 && (
         <Card>
@@ -315,57 +405,63 @@ export default function WorkersPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Job ID</TableHead>
-                  <TableHead>Modelo</TableHead>
-                  <TableHead>Error</TableHead>
-                  <TableHead>Fecha</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.failedJobs.map((job) => (
-                  <Fragment key={job.id}>
-                    <TableRow
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => toggleError(job.id)}
-                    >
-                      <TableCell className="font-mono text-xs">
-                        {job.id}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{job.model}</Badge>
-                      </TableCell>
-                      <TableCell className="text-sm text-red-400 max-w-md">
-                        <div className="flex items-center gap-2">
-                          {expandedErrors.has(job.id) ? (
-                            <ChevronUp className="h-3 w-3 flex-shrink-0" />
-                          ) : (
-                            <ChevronDown className="h-3 w-3 flex-shrink-0" />
-                          )}
-                          <span className={expandedErrors.has(job.id) ? "" : "truncate"}>
-                            {job.error}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                        {formatDate(job.failedAt)}
-                      </TableCell>
-                    </TableRow>
-                    {expandedErrors.has(job.id) && (
-                      <TableRow>
-                        <TableCell colSpan={4} className="p-0">
-                          <pre className="text-xs text-red-300 bg-red-950/30 p-3 m-2 rounded overflow-x-auto whitespace-pre-wrap break-all">
-                            {job.error}
-                          </pre>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[80px]">Job ID</TableHead>
+                    <TableHead>Modelo</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead>Usuario</TableHead>
+                    <TableHead>Error</TableHead>
+                    <TableHead className="w-[160px]">Fecha</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.failedJobs.map((job) => (
+                    <Fragment key={job.id}>
+                      <TableRow
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => toggleError(job.id)}
+                      >
+                        <TableCell className="font-mono text-xs">
+                          {job.id}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{job.model}</Badge>
+                        </TableCell>
+                        <TableCell>{job.generationType}</TableCell>
+                        <TableCell>{job.user}</TableCell>
+                        <TableCell className="text-sm text-red-400">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {expandedErrors.has(job.id) ? (
+                              <ChevronUp className="h-3 w-3 flex-shrink-0" />
+                            ) : (
+                              <ChevronDown className="h-3 w-3 flex-shrink-0" />
+                            )}
+                            <span className="truncate max-w-[300px] inline-block">
+                              {job.error.split("\n")[0]}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                          {formatDate(job.failedAt)}
                         </TableCell>
                       </TableRow>
-                    )}
-                  </Fragment>
-                ))}
-              </TableBody>
-            </Table>
+                      {expandedErrors.has(job.id) && (
+                        <TableRow>
+                          <TableCell colSpan={6} className="p-0">
+                            <pre className="text-xs text-red-300 bg-red-950/30 p-3 m-2 rounded overflow-x-auto whitespace-pre-wrap break-words">
+                              {job.error}
+                            </pre>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       )}
