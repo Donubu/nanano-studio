@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS project_generation_models (
   FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
   FOREIGN KEY (model_id) REFERENCES models(id),
   UNIQUE KEY uq_project_type_model (project_id, generation_type, model_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Migrar datos existentes de project_generation_config a project_generation_models
 -- Normal models (sort_order=0, is_default=1)

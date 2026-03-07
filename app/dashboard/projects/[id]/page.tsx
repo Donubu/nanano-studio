@@ -346,8 +346,8 @@ export default function ProjectDetailPage() {
     }
   }, [projectId]);
 
-  const fetchGenerationConfig = useCallback(async () => {
-    setLoadingConfig(true);
+  const fetchGenerationConfig = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoadingConfig(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/generation-config`);
       if (res.ok) {
@@ -357,7 +357,7 @@ export default function ProjectDetailPage() {
     } catch (err) {
       console.error("Error fetching generation config:", err);
     } finally {
-      setLoadingConfig(false);
+      if (showLoading) setLoadingConfig(false);
     }
   }, [projectId]);
 
@@ -567,7 +567,7 @@ export default function ProjectDetailPage() {
       });
 
       if (res.ok) {
-        fetchGenerationConfig();
+        fetchGenerationConfig(false);
       } else {
         const data = await res.json();
         alert(data.error || "Error al actualizar configuración");
