@@ -7,7 +7,7 @@ import {
   X, Loader2, ExternalLink, Image as ImageIcon, Video, Calendar, FileType,
   Maximize2, RatioIcon, Ruler, Download, HardDrive, Volume2, VolumeX, Clock,
   ChevronLeft, ChevronRight, LayoutGrid, Search, Tag, Plus, Trash2, Upload, Music, Mic, User, Users,
-  Sparkles, Copy, Check, Star, CalendarDays, Wand2, RotateCcw
+  Copy, Check, Star, CalendarDays, Wand2, RotateCcw
 } from "lucide-react";
 import { TopazStudio } from "./topaz-studio";
 import { TopazStudioVideo } from "./topaz-studio-video";
@@ -21,7 +21,6 @@ import { formatDateTimeLocal } from "@/lib/utils";
 import { AudioVoiceConfig, AudioSpeakerConfig, getVoiceById } from "@/types/audio";
 
 type FilterType = "all" | "images" | "videos" | "audios" | "music";
-type QualityFilterType = "all" | "normal" | "hq";
 type FavoriteFilterType = "all" | "favorites";
 type ViewMode = "grid" | "calendar";
 
@@ -41,6 +40,7 @@ interface Generation {
   user_image: string | null;
   content: string | null;
   quality_tier: "normal" | "hq" | null;
+  model_name: string | null;
   generation_seed: number | null;
   is_favorite: boolean;
   image_url: string | null;
@@ -108,7 +108,6 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
 
   // Filter states
   const [filter, setFilter] = useState<FilterType>("all");
-  const [qualityFilter, setQualityFilter] = useState<QualityFilterType>("all");
   const [favoriteFilter, setFavoriteFilter] = useState<FavoriteFilterType>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -254,10 +253,8 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Apply quality and favorite filters early for navigation
+  // Apply favorite filter early for navigation
   const filteredGenerations = generations.filter(g => {
-    // Uploads don't have quality_tier, so exclude them from quality filtering
-    if (qualityFilter !== "all" && g.source !== "upload" && g.quality_tier !== qualityFilter) return false;
     // Uploads can't be favorited, so exclude them from favorite filtering
     if (favoriteFilter === "favorites" && g.source !== "upload" && !g.is_favorite) return false;
     return true;
@@ -610,7 +607,6 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
   const videoCount = filteredGenerations.filter(g => g.type === "video").length;
   const audioCount = filteredGenerations.filter(g => g.type === "audio").length;
   const musicCount = filteredGenerations.filter(g => g.type === "music").length;
-  const hqCount = generations.filter(g => g.quality_tier === "hq").length;
   const favoriteCount = generations.filter(g => g.is_favorite).length;
 
   const tagColors = ["#6366f1", "#ec4899", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ef4444", "#06b6d4"];
@@ -663,29 +659,6 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                 {f === "audios" && <Mic className="h-4 w-4" />}
                 {f === "music" && <Music className="h-4 w-4" />}
                 {f === "all" ? "Todos" : f === "images" ? "Imágenes" : f === "videos" ? "Videos" : f === "audios" ? "Audios" : "Música"}
-              </button>
-            ))}
-          </div>
-
-          {/* Quality Filter */}
-          <div className="flex items-center gap-1 p-1 bg-muted rounded-lg">
-            {(["all", "normal", "hq"] as QualityFilterType[]).map((q) => (
-              <button
-                key={q}
-                onClick={() => setQualityFilter(q)}
-                className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors ${
-                  qualityFilter === q
-                    ? q === "hq"
-                      ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white"
-                      : "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {q === "hq" && <Sparkles className="h-3 w-3" />}
-                {q === "all" ? "Todas" : q === "normal" ? "Normal" : "HQ"}
-                {q === "hq" && hqCount > 0 && (
-                  <span className="ml-0.5 opacity-60">({hqCount})</span>
-                )}
               </button>
             ))}
           </div>
@@ -823,7 +796,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
             <LayoutGrid className="h-16 w-16 text-muted-foreground/30 mb-4" />
             <h3 className="text-lg font-medium mb-2">Sin generaciones</h3>
             <p className="text-muted-foreground text-sm max-w-md">
-              {searchQuery || selectedTagIds.length > 0 || qualityFilter !== "all"
+              {searchQuery || selectedTagIds.length > 0
                 ? "No hay resultados para los filtros seleccionados."
                 : "Aún no hay generaciones en este proyecto."}
             </p>
@@ -906,11 +879,10 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
 
                 {/* Top-right badges */}
                 <div className="absolute top-2 right-2 flex items-center gap-1">
-                  {/* HQ badge */}
-                  {gen.quality_tier === "hq" && !gen.deleted_at && (
-                    <div className="bg-gradient-to-r from-amber-500 to-orange-500 rounded px-1.5 py-0.5 text-[10px] text-white font-medium flex items-center gap-0.5">
-                      <Sparkles className="h-2.5 w-2.5" />
-                      HQ
+                  {/* Model name badge */}
+                  {gen.model_name && !gen.deleted_at && (
+                    <div className="bg-black/60 backdrop-blur-sm rounded px-1.5 py-0.5 text-[10px] text-white font-medium">
+                      {gen.model_name}
                     </div>
                   )}
                   {/* Deleted indicator */}
@@ -1293,11 +1265,10 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                   <Calendar className="h-4 w-4" />
                   <span>{formatDateTimeLocal(selectedItem.created_at)}</span>
                 </div>
-                {/* Quality badge */}
-                {selectedItem.quality_tier === "hq" && (
-                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-500">
-                    <Sparkles className="h-4 w-4" />
-                    <span className="font-medium">Alta Calidad</span>
+                {/* Model name */}
+                {selectedItem.model_name && (
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                    <span className="font-medium">{selectedItem.model_name}</span>
                   </div>
                 )}
                 {/* Seed */}

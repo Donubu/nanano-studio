@@ -58,7 +58,8 @@ export async function POST(
     const {
       content,
       imageSettings,
-      quality_tier = "normal",
+      quality_tier,
+      selected_model_id,
       generation_type_override,
     } = body as {
       content: string;
@@ -70,10 +71,10 @@ export async function POST(
         numberOfImages?: number;
       };
       quality_tier?: QualityTier;
+      selected_model_id?: number;
       generation_type_override?: "text" | "image" | "video" | "audio";
     };
 
-    // Validate quality_tier
     const effectiveQualityTier: QualityTier = quality_tier === "hq" ? "hq" : "normal";
 
     if (!content || content.trim() === "") {
@@ -126,6 +127,7 @@ export async function POST(
         try {
           // Get the correct model from project_generation_config based on quality_tier
           let effectiveModelId = conversation.model_model_id;
+          let effectiveModelDbId = conversation.model_id;
           let effectiveBackend = conversation.model_api_backend || undefined;
           let effectiveCostImage1k = Number(conversation.cost_image_1k) || 0;
           let effectiveCostImage2k = Number(conversation.cost_image_2k) || 0;
@@ -136,43 +138,33 @@ export async function POST(
           }
 
           if (conversation.project_id) {
-            const [configRows] = await pool.execute<RowDataPacket[]>(`
+            const [projectModels] = await pool.execute<RowDataPacket[]>(`
               SELECT
-                pgc.model_normal_id,
-                pgc.model_hq_id,
-                mn.model_id as model_normal_model_id,
-                mn.api_backend as mn_api_backend,
-                mn.cost_image_1k as mn_cost_1k,
-                mn.cost_image_2k as mn_cost_2k,
-                mn.cost_image_4k as mn_cost_4k,
-                mh.model_id as model_hq_model_id,
-                mh.api_backend as mh_api_backend,
-                mh.cost_image_1k as mh_cost_1k,
-                mh.cost_image_2k as mh_cost_2k,
-                mh.cost_image_4k as mh_cost_4k
-              FROM project_generation_config pgc
-              LEFT JOIN models mn ON pgc.model_normal_id = mn.id
-              LEFT JOIN models mh ON pgc.model_hq_id = mh.id
-              WHERE pgc.project_id = ? AND pgc.generation_type = ? AND pgc.is_enabled = 1
+                pgm.model_id,
+                pgm.is_default,
+                m.model_id as model_model_id,
+                m.api_backend as model_api_backend,
+                m.cost_image_1k,
+                m.cost_image_2k,
+                m.cost_image_4k
+              FROM project_generation_models pgm
+              JOIN models m ON pgm.model_id = m.id
+              JOIN project_generation_config pgc ON pgc.project_id = pgm.project_id AND pgc.generation_type = pgm.generation_type
+              WHERE pgm.project_id = ? AND pgm.generation_type = ? AND pgc.is_enabled = 1
+              ORDER BY pgm.sort_order ASC
             `, [conversation.project_id, generationType]);
 
-            if (configRows.length > 0) {
-              const config = configRows[0];
-              if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
-                effectiveModelId = config.model_hq_model_id;
-                effectiveBackend = config.mh_api_backend || undefined;
-                effectiveCostImage1k = Number(config.mh_cost_1k) || 0;
-                effectiveCostImage2k = Number(config.mh_cost_2k) || 0;
-                effectiveCostImage4k = Number(config.mh_cost_4k) || 0;
-                console.log(`[Imagen] Using HQ model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
-              } else if (config.model_normal_model_id) {
-                effectiveModelId = config.model_normal_model_id;
-                effectiveBackend = config.mn_api_backend || undefined;
-                effectiveCostImage1k = Number(config.mn_cost_1k) || 0;
-                effectiveCostImage2k = Number(config.mn_cost_2k) || 0;
-                effectiveCostImage4k = Number(config.mn_cost_4k) || 0;
-                console.log(`[Imagen] Using Normal model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
-              }
+            if (projectModels.length > 0) {
+              const chosen = projectModels.find((m: RowDataPacket) => selected_model_id && m.model_id === selected_model_id)
+                || projectModels.find((m: RowDataPacket) => m.is_default)
+                || projectModels[0];
+              effectiveModelId = chosen.model_model_id;
+              effectiveModelDbId = chosen.model_id;
+              effectiveBackend = chosen.model_api_backend || undefined;
+              effectiveCostImage1k = Number(chosen.cost_image_1k) || 0;
+              effectiveCostImage2k = Number(chosen.cost_image_2k) || 0;
+              effectiveCostImage4k = Number(chosen.cost_image_4k) || 0;
+              console.log(`[Imagen] Using model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
             }
           }
 
@@ -309,11 +301,12 @@ export async function POST(
 
             // Save to DB
             const [modelResult] = await pool.execute<ResultSetHeader>(
-              `INSERT INTO messages (conversation_id, role, content_type, quality_tier, generation_seed, content, image_url, image_mime_type, estimated_cost)
-               VALUES (?, 'model', 'image', ?, ?, '', ?, ?, ?)`,
+              `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, generation_seed, content, image_url, image_mime_type, estimated_cost)
+               VALUES (?, 'model', 'image', ?, ?, ?, '', ?, ?, ?)`,
               [
                 id,
                 effectiveQualityTier,
+                effectiveModelDbId,
                 generatedImage.seed,
                 uploadResult.url,
                 generatedImage.mimeType,

@@ -4,6 +4,7 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 
 type GenerationType = "text" | "image" | "video" | "audio" | "music";
+// quality_tier kept in type for legacy DB column references
 type QualityTier = "normal" | "hq" | "chirp";
 
 interface ConversationRow extends RowDataPacket {
@@ -26,10 +27,12 @@ interface ConversationRow extends RowDataPacket {
   message_count: number;
 }
 
-interface GenerationConfigRow extends RowDataPacket {
-  model_normal_id: number | null;
-  model_hq_id: number | null;
-  model_chirp_id: number | null;
+interface ProjectModelRow extends RowDataPacket {
+  model_id: number;
+  is_default: number;
+}
+
+interface EnabledRow extends RowDataPacket {
   is_enabled: number;
 }
 
@@ -98,7 +101,8 @@ export async function POST(request: NextRequest) {
       project_id,
       model_id: providedModelId,
       generation_type = "text" as GenerationType,
-      quality_tier = "normal" as QualityTier,
+      quality_tier,
+      selected_model_id,
       title = "Nueva conversación",
       system_instruction,
       temperature = 1.0,
@@ -144,50 +148,44 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validar quality_tier
-    if (!["normal", "hq", "chirp"].includes(quality_tier)) {
-      return NextResponse.json(
-        { error: "quality_tier invalido. Debe ser: normal, hq o chirp" },
-        { status: 400 }
-      );
-    }
-
     let model_id = providedModelId;
 
     // Si hay proyecto, obtener modelo desde la configuracion del proyecto
     if (project_id) {
       // Verificar que el tipo esta habilitado para el proyecto
-      const [genConfig] = await pool.execute<GenerationConfigRow[]>(
-        `SELECT model_normal_id, model_hq_id, model_chirp_id, is_enabled
-         FROM project_generation_config
-         WHERE project_id = ? AND generation_type = ?`,
+      const [enabledCheck] = await pool.execute<EnabledRow[]>(
+        `SELECT is_enabled FROM project_generation_config WHERE project_id = ? AND generation_type = ?`,
         [project_id, generation_type]
       );
 
-      if (genConfig.length === 0 || !genConfig[0].is_enabled) {
+      if (enabledCheck.length === 0 || !enabledCheck[0].is_enabled) {
         return NextResponse.json(
           { error: `El tipo de generacion '${generation_type}' no esta habilitado para este proyecto` },
           { status: 400 }
         );
       }
 
-      // Obtener el modelo segun la calidad
-      const configRow = genConfig[0];
-      const selectedModelId = quality_tier === "chirp"
-        ? configRow.model_chirp_id
-        : quality_tier === "hq"
-          ? configRow.model_hq_id
-          : configRow.model_normal_id;
+      // Obtener modelos asignados al proyecto para este tipo
+      const [projectModels] = await pool.execute<ProjectModelRow[]>(
+        `SELECT model_id, is_default FROM project_generation_models
+         WHERE project_id = ? AND generation_type = ?
+         ORDER BY sort_order ASC`,
+        [project_id, generation_type]
+      );
 
-      if (!selectedModelId) {
-        const tierLabel = quality_tier === "chirp" ? "Chirp HD" : quality_tier === "hq" ? "HQ" : "normal";
+      if (projectModels.length === 0) {
         return NextResponse.json(
-          { error: `No hay modelo ${tierLabel} configurado para '${generation_type}' en este proyecto` },
+          { error: `No hay modelos configurados para '${generation_type}' en este proyecto` },
           { status: 400 }
         );
       }
 
-      model_id = selectedModelId;
+      // Pick model: selected_model_id > default > first
+      const chosen = projectModels.find(m => selected_model_id && m.model_id === selected_model_id)
+        || projectModels.find(m => m.is_default)
+        || projectModels[0];
+
+      model_id = chosen.model_id;
     } else if (!model_id) {
       // Si no hay proyecto ni model_id, es error
       return NextResponse.json(

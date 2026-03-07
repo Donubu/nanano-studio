@@ -79,7 +79,8 @@ export async function POST(
       referenceImages,
       videoSettings,
       videoInputs,
-      quality_tier = "normal",
+      quality_tier,
+      selected_model_id,
     } = body as {
       content: string;
       firstFrameImage?: string;
@@ -99,9 +100,9 @@ export async function POST(
         referenceImages?: ReferenceImageWithType[];
       };
       quality_tier?: QualityTier;
+      selected_model_id?: number;
     };
 
-    // Validate quality_tier
     const effectiveQualityTier: QualityTier = quality_tier === "hq" ? "hq" : "normal";
 
     // Debug: log received settings
@@ -172,40 +173,35 @@ export async function POST(
         try {
           // Get the correct model from project_generation_config based on quality_tier
           let effectiveModelId = conversation.model_model_id;
+          let effectiveModelDbId = conversation.model_id;
           let effectiveBackend = conversation.model_api_backend || undefined;
           let effectiveCostVideoPerSecond = Number(conversation.cost_video_per_second) || 0;
           const generationType = conversation.generation_type || "video";
 
           if (conversation.project_id) {
-            const [configRows] = await pool.execute<RowDataPacket[]>(`
+            const [projectModels] = await pool.execute<RowDataPacket[]>(`
               SELECT
-                pgc.model_normal_id,
-                pgc.model_hq_id,
-                mn.model_id as model_normal_model_id,
-                mn.api_backend as mn_api_backend,
-                mn.cost_video_per_second as mn_cost_video,
-                mh.model_id as model_hq_model_id,
-                mh.api_backend as mh_api_backend,
-                mh.cost_video_per_second as mh_cost_video
-              FROM project_generation_config pgc
-              LEFT JOIN models mn ON pgc.model_normal_id = mn.id
-              LEFT JOIN models mh ON pgc.model_hq_id = mh.id
-              WHERE pgc.project_id = ? AND pgc.generation_type = ? AND pgc.is_enabled = 1
+                pgm.model_id,
+                pgm.is_default,
+                m.model_id as model_model_id,
+                m.api_backend as model_api_backend,
+                m.cost_video_per_second
+              FROM project_generation_models pgm
+              JOIN models m ON pgm.model_id = m.id
+              JOIN project_generation_config pgc ON pgc.project_id = pgm.project_id AND pgc.generation_type = pgm.generation_type
+              WHERE pgm.project_id = ? AND pgm.generation_type = ? AND pgc.is_enabled = 1
+              ORDER BY pgm.sort_order ASC
             `, [conversation.project_id, generationType]);
 
-            if (configRows.length > 0) {
-              const config = configRows[0];
-              if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
-                effectiveModelId = config.model_hq_model_id;
-                effectiveBackend = config.mh_api_backend || undefined;
-                effectiveCostVideoPerSecond = Number(config.mh_cost_video) || 0;
-                console.log(`[Video] Using HQ model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
-              } else if (config.model_normal_model_id) {
-                effectiveModelId = config.model_normal_model_id;
-                effectiveBackend = config.mn_api_backend || undefined;
-                effectiveCostVideoPerSecond = Number(config.mn_cost_video) || 0;
-                console.log(`[Video] Using Normal model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
-              }
+            if (projectModels.length > 0) {
+              const chosen = projectModels.find((m: RowDataPacket) => selected_model_id && m.model_id === selected_model_id)
+                || projectModels.find((m: RowDataPacket) => m.is_default)
+                || projectModels[0];
+              effectiveModelId = chosen.model_model_id;
+              effectiveModelDbId = chosen.model_id;
+              effectiveBackend = chosen.model_api_backend || undefined;
+              effectiveCostVideoPerSecond = Number(chosen.cost_video_per_second) || 0;
+              console.log(`[Video] Using model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
             }
           }
 
@@ -404,11 +400,12 @@ export async function POST(
 
           // Guardar respuesta del modelo en la base de datos (con quality_tier y seed)
           const [modelResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, quality_tier, generation_seed, content, video_url, video_mime_type, video_file_size, video_duration, video_has_audio, video_aspect_ratio, estimated_cost)
-             VALUES (?, 'model', 'video', ?, ?, '', ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, generation_seed, content, video_url, video_mime_type, video_file_size, video_duration, video_has_audio, video_aspect_ratio, estimated_cost)
+             VALUES (?, 'model', 'video', ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?)`,
             [
               id,
               effectiveQualityTier,
+              effectiveModelDbId,
               generatedVideo.seed,
               uploadResult.url,
               generatedVideo.mimeType,

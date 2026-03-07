@@ -10,6 +10,7 @@ interface GenerationRow extends RowDataPacket {
   conversation_title: string;
   content: string | null;
   quality_tier: "normal" | "hq" | null;
+  model_name: string | null;
   generation_seed: number | null;
   is_favorite: number;
   image_url: string | null;
@@ -156,6 +157,7 @@ export async function GET(
         u.image as user_image,
         m.content,
         m.quality_tier,
+        mo.display_name as model_name,
         m.generation_seed,
         m.is_favorite,
         m.image_url,
@@ -191,6 +193,7 @@ export async function GET(
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN users u ON c.user_id = u.id
+      LEFT JOIN models mo ON m.model_id = mo.id
       ${tagJoin}
       WHERE ${conditions.join(" AND ")}
       ORDER BY m.created_at DESC

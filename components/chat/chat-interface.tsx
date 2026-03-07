@@ -78,7 +78,7 @@ import {VideoInputFrames, ReferenceImage} from "./video-input-frames";
 import {VideoDuration, VideoResolution, VideoAspectRatio, VideoGenerationStatus} from "@/types/video";
 import {GenerationModeSelector, GenerationMode} from "./generation-mode-selector";
 import {GenerationTypeSelector, GenerationType, GenerationTypeBadge} from "./generation-type-selector";
-import {QualitySelector, QualityTier, QualitySelectorCompact} from "./quality-selector";
+import {ModelSelector, ProjectModel as ConfigModel, QualityBadge, QualityTier} from "./quality-selector";
 import {ImageModelSelector} from "./image-model-selector";
 import {AudioSettings} from "./audio-settings";
 import {MusicSettings} from "./music-settings";
@@ -371,24 +371,12 @@ export function ChatInterface() {
     interface GenerationConfigItem {
         generation_type: GenerationType;
         is_enabled: boolean;
-        model_normal_id: number | null;
-        model_hq_id: number | null;
-        model_chirp_id: number | null;
-        model_normal_name: string | null;
-        model_hq_name: string | null;
-        model_chirp_name: string | null;
-        model_normal_model_id: string | null;
-        model_hq_model_id: string | null;
-        model_chirp_model_id: string | null;
-        model_normal_supports_google_search: boolean;
-        model_hq_supports_google_search: boolean;
-        model_normal_api_backend: string | null;
-        model_hq_api_backend: string | null;
+        models: ConfigModel[];
     }
     const [generationConfig, setGenerationConfig] = useState<GenerationConfigItem[]>([]);
 
-    // Quality tier selection
-    const [selectedQualityTier, setSelectedQualityTier] = useState<QualityTier>("normal");
+    // Selected model for generation (from project config)
+    const [selectedConfigModelId, setSelectedConfigModelId] = useState<number | null>(null);
 
     // Generation type for new conversations
     const [newConversationType, setNewConversationType] = useState<GenerationType>("text");
@@ -413,13 +401,17 @@ export function ChatInterface() {
     const videoTypeConfig = generationConfig.find(c => c.generation_type === "video");
     const imageTypeConfig = generationConfig.find(c => c.generation_type === "image");
 
+    // Helper to get the selected model from a config item
+    const getSelectedModel = (config: GenerationConfigItem | null | undefined): ConfigModel | null => {
+        if (!config || config.models.length === 0) return null;
+        return config.models.find(m => m.id === selectedConfigModelId)
+            || config.models.find(m => m.is_default)
+            || config.models[0];
+    };
+
     // Determine if the active video model is an xAI provider
-    const activeVideoBackend = videoTypeConfig
-        ? (selectedQualityTier === "hq"
-            ? videoTypeConfig.model_hq_api_backend
-            : videoTypeConfig.model_normal_api_backend)
-        : null;
-    const isXaiVideoProvider = activeVideoBackend === "xai";
+    const activeVideoModel = getSelectedModel(videoTypeConfig);
+    const isXaiVideoProvider = activeVideoModel?.api_backend === "xai";
 
     // UI mode helpers based on conversation generation_type
     // Default to text if generation_type is null/undefined (for legacy conversations)
@@ -440,45 +432,35 @@ export function ChatInterface() {
             : null;
     })();
 
-    const currentModelInfo = currentTypeConfig
-        ? (selectedQualityTier === "hq"
-            ? { id: currentTypeConfig.model_hq_id, name: currentTypeConfig.model_hq_name }
-            : { id: currentTypeConfig.model_normal_id, name: currentTypeConfig.model_normal_name })
+    const currentSelectedModel = getSelectedModel(currentTypeConfig);
+    const currentModelInfo = currentSelectedModel
+        ? { id: currentSelectedModel.id, name: currentSelectedModel.display_name }
         : null;
 
     // Check if image models are available for video conversations
-    const hasImageModelsForVideo = imageTypeConfig && (imageTypeConfig.model_normal_id || imageTypeConfig.model_hq_id);
+    const hasImageModelsForVideo = imageTypeConfig && imageTypeConfig.models.length > 0;
 
-    // Check if the current image model is Imagen 4 (based on quality tier)
+    // Check if the current image model is Imagen 4
     const isImagen4Model = (() => {
-        if (!imageTypeConfig) return false;
-        const modelId = selectedQualityTier === "hq"
-            ? imageTypeConfig.model_hq_model_id
-            : imageTypeConfig.model_normal_model_id;
-        return modelId?.includes("imagen-4") ?? false;
+        const imageModel = getSelectedModel(imageTypeConfig);
+        return imageModel?.model_id?.includes("imagen-4") ?? false;
     })();
 
     // Gemini native models that support multi-image via parallel requests
     const supportsMultiImage = (() => {
-        if (!imageTypeConfig) return false;
-        const modelId = selectedQualityTier === "hq"
-            ? imageTypeConfig.model_hq_model_id
-            : imageTypeConfig.model_normal_model_id;
-        return modelId === "gemini-3.1-flash-image-preview";
+        const imageModel = getSelectedModel(imageTypeConfig);
+        return imageModel?.model_id === "gemini-3.1-flash-image-preview";
     })();
 
     // Check if the current model supports Google Search grounding
     const supportsGoogleSearch = (() => {
-        // Check generation config for the current conversation type
         const convType = currentConversation?.generation_type || "text";
         const config = generationConfig.find(c => c.generation_type === convType)
             || generationConfig.find(c => c.generation_type === "text");
-        if (config) {
-            return selectedQualityTier === "hq"
-                ? config.model_hq_supports_google_search
-                : config.model_normal_supports_google_search;
+        const model = getSelectedModel(config);
+        if (model) {
+            return model.supports_google_search;
         }
-        // Fallback to conversation-level model info
         return currentConversation?.model_supports_google_search ?? false;
     })();
 
@@ -888,40 +870,17 @@ export function ChatInterface() {
                 const configArray: GenerationConfigItem[] = types.map((type) => ({
                     generation_type: type as GenerationType,
                     is_enabled: data[type]?.enabled ?? false,
-                    model_normal_id: data[type]?.model_normal?.id ?? null,
-                    model_hq_id: data[type]?.model_hq?.id ?? null,
-                    model_chirp_id: data[type]?.model_chirp?.id ?? null,
-                    model_normal_name: data[type]?.model_normal?.display_name ?? null,
-                    model_hq_name: data[type]?.model_hq?.display_name ?? null,
-                    model_chirp_name: data[type]?.model_chirp?.display_name ?? null,
-                    model_normal_model_id: data[type]?.model_normal?.model_id ?? null,
-                    model_hq_model_id: data[type]?.model_hq?.model_id ?? null,
-                    model_chirp_model_id: data[type]?.model_chirp?.model_id ?? null,
-                    model_normal_supports_google_search: data[type]?.model_normal?.supports_google_search ?? false,
-                    model_hq_supports_google_search: data[type]?.model_hq?.supports_google_search ?? false,
-                    model_normal_api_backend: data[type]?.model_normal?.api_backend ?? null,
-                    model_hq_api_backend: data[type]?.model_hq?.api_backend ?? null,
+                    models: (data[type]?.models ?? []) as ConfigModel[],
                 }));
 
-                // If audio has a chirp model configured, add "audio_hd" as a virtual generation type
+                // If audio has a chirp-backend model, add "audio_hd" as a virtual generation type
                 const audioConfig = data["audio"];
-                if (audioConfig?.model_chirp?.id) {
+                const chirpModel = audioConfig?.models?.find((m: ConfigModel) => m.api_backend === "chirp");
+                if (chirpModel) {
                     configArray.push({
                         generation_type: "audio_hd",
                         is_enabled: audioConfig.enabled ?? false,
-                        model_normal_id: audioConfig.model_chirp.id,
-                        model_hq_id: audioConfig.model_chirp.id,
-                        model_chirp_id: audioConfig.model_chirp.id,
-                        model_normal_name: audioConfig.model_chirp.display_name,
-                        model_hq_name: audioConfig.model_chirp.display_name,
-                        model_chirp_name: audioConfig.model_chirp.display_name,
-                        model_normal_model_id: audioConfig.model_chirp.model_id,
-                        model_hq_model_id: audioConfig.model_chirp.model_id,
-                        model_normal_supports_google_search: false,
-                        model_hq_supports_google_search: false,
-                        model_chirp_model_id: audioConfig.model_chirp.model_id,
-                        model_normal_api_backend: audioConfig.model_chirp.api_backend ?? null,
-                        model_hq_api_backend: audioConfig.model_chirp.api_backend ?? null,
+                        models: [chirpModel],
                     });
                 }
 
@@ -1091,8 +1050,8 @@ export function ChatInterface() {
             // Clear archived conversations
             setArchivedConversations([]);
             setShowArchived(false);
-            // Reset quality tier
-            setSelectedQualityTier("normal");
+            // Reset selected model
+            setSelectedConfigModelId(null);
         } else {
             setProjectModels([]);
             setSelectedModelId(null);
@@ -1159,12 +1118,9 @@ export function ChatInterface() {
                 setGoogleImageSearchEnabled(false);
                 // Auto-select quality tier based on available models
                 const typeConf = generationConfig.find(c => c.generation_type === conv.generation_type);
-                if (typeConf) {
-                    if (typeConf.model_normal_id) {
-                        setSelectedQualityTier("normal");
-                    } else if (typeConf.model_hq_id) {
-                        setSelectedQualityTier("hq");
-                    }
+                if (typeConf && typeConf.models.length > 0) {
+                    const defaultModel = typeConf.models.find(m => m.is_default) || typeConf.models[0];
+                    setSelectedConfigModelId(defaultModel.id);
                 }
             }
         }
@@ -1380,7 +1336,7 @@ export function ChatInterface() {
                     model_id: modelIdToUse, // Can be null, API will use generation_config
                     project_id: selectedProjectId,
                     generation_type: apiGenerationType,
-                    quality_tier: isCreatingAudioHD ? "chirp" : selectedQualityTier,
+                    selected_model_id: selectedConfigModelId,
                     temperature,
                     top_p: topP,
                     top_k: topK,
@@ -1519,13 +1475,15 @@ export function ChatInterface() {
         }
 
         // Use override, or normal model, or HQ model as fallback
-        const modelIdToUse = overrideModelId || typeConfig?.model_normal_id || typeConfig?.model_hq_id;
+        const defaultModel = typeConfig?.models?.find(m => m.is_default) || typeConfig?.models?.[0];
+        const modelIdToUse = overrideModelId || defaultModel?.id;
         if (!modelIdToUse) {
             console.error("No hay modelo configurado para el tipo:", effectiveType);
             return;
         }
 
-        const modelName = typeConfig?.model_normal_name || typeConfig?.model_hq_name || "";
+        const defaultModelForName = typeConfig?.models?.find(m => m.is_default) || typeConfig?.models?.[0];
+        const modelName = defaultModelForName?.display_name || "";
 
         const tabId = nextTabId.current++;
         const draftTab: Tab = {
@@ -1839,7 +1797,7 @@ export function ChatInterface() {
             const requestBody = useImagenEndpoint
                 ? {
                     content,
-                    quality_tier: selectedQualityTier,
+                    selected_model_id: selectedConfigModelId,
                     imageSettings: {
                         aspectRatio: imageSettings?.aspectRatio,
                         resolution: imageSettings?.size,
@@ -1853,7 +1811,7 @@ export function ChatInterface() {
                     content,
                     files: filesToSend,
                     useProjectSystemInstruction,
-                    quality_tier: selectedQualityTier,
+                    selected_model_id: selectedConfigModelId,
                     google_search_enabled: googleSearchEnabled,
                     google_image_search_enabled: googleImageSearchEnabled,
                     ...(modelIdOverride && { modelIdOverride }),
@@ -2386,7 +2344,7 @@ export function ChatInterface() {
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({
                     content,
-                    quality_tier: selectedQualityTier,
+                    selected_model_id: selectedConfigModelId,
                     videoSettings: {
                         duration: videoDuration,
                         resolution: videoResolution,
@@ -2590,7 +2548,7 @@ export function ChatInterface() {
     };
 
     // Send audio generation message
-    const sendAudioMessage = async (content: string, qualityTier: "normal" | "hq" | "chirp" = "normal", overrideSpeakerConfig?: AudioSpeakerConfig) => {
+    const sendAudioMessage = async (content: string, qualityTier: "normal" | "hq" | "chirp" = "normal", overrideSpeakerConfig?: AudioSpeakerConfig, modelId?: number | null) => {
         if (!activeTabId || !content.trim()) return;
 
         let tabId = activeTabId;
@@ -2661,7 +2619,7 @@ export function ChatInterface() {
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({
                     content,
-                    quality_tier: qualityTier,
+                    selected_model_id: modelId ?? selectedConfigModelId,
                     audioSettings: {
                         voiceId: audioVoiceId,
                         stylePrompt: audioStylePrompt || undefined,
@@ -3549,8 +3507,8 @@ export function ChatInterface() {
                                     ttsEngine={audioTTSEngine}
                                     lockedEngine={currentConversation?.generation_type === "audio_hd"}
                                     chirpAvailable={false}
-                                    normalModelName={currentTypeConfig?.model_normal_name}
-                                    hqModelName={currentTypeConfig?.model_hq_name}
+                                    normalModelName={currentTypeConfig?.models?.[0]?.display_name}
+                                    hqModelName={currentTypeConfig?.models?.[1]?.display_name}
                                     speakingRate={audioSpeakingRate}
                                     locale={audioLocale}
                                     disabled={isSending}
@@ -3570,7 +3528,7 @@ export function ChatInterface() {
                                             setAudioSpeakerConfig(speakers);
                                             setAudioMultiSpeaker(true);
                                         }
-                                        sendAudioMessage(text, qualityTier || audioQualityTier, speakers || undefined);
+                                        sendAudioMessage(text, qualityTier || audioQualityTier, speakers || undefined, selectedConfigModelId);
                                     }}
                                     onSettingsChange={(settings) => {
                                         if (settings.voiceId !== undefined) {
@@ -4054,26 +4012,14 @@ export function ChatInterface() {
                                         />
                                     </div>
                                 )}
-                                {/* Quality Tier Selector */}
-                                {projectUsage && currentConversation?.generation_type && currentConversation.generation_type !== "audio_hd" && (
+                                {/* Model Selector */}
+                                {currentTypeConfig && currentTypeConfig.models.length > 0 && currentConversation?.generation_type && (
                                     <div className="flex justify-center py-2 border-t border-border/50">
-                                        <QualitySelector
-                                            selectedQuality={selectedQualityTier}
-                                            onSelect={setSelectedQualityTier}
+                                        <ModelSelector
+                                            models={currentTypeConfig.models}
+                                            selectedModelId={selectedConfigModelId}
+                                            onSelect={setSelectedConfigModelId}
                                             disabled={isSending}
-                                            normalUsage={
-                                                isVideoConversation && generationMode === "image"
-                                                    ? projectUsage.image?.normal
-                                                    : projectUsage[currentConversation.generation_type]?.normal
-                                            }
-                                            hqUsage={
-                                                isVideoConversation && generationMode === "image"
-                                                    ? projectUsage.image?.hq
-                                                    : projectUsage[currentConversation.generation_type]?.hq
-                                            }
-                                            showUsage={true}
-                                            normalModelName={currentTypeConfig?.model_normal_name}
-                                            hqModelName={currentTypeConfig?.model_hq_name}
                                         />
                                     </div>
                                 )}
@@ -4489,15 +4435,14 @@ export function ChatInterface() {
                             </div>
 
                             {/* Quality Selector - only show if not archived and has both models */}
-                            {!activeTab?.isArchived && currentTypeConfig && (currentTypeConfig.model_normal_id || currentTypeConfig.model_hq_id) && (
+                            {!activeTab?.isArchived && currentTypeConfig && currentTypeConfig.models.length > 0 && (
                                 <div>
                                     <label className="text-sm font-medium mb-2 block">Calidad</label>
-                                    <QualitySelectorCompact
-                                        selectedQuality={selectedQualityTier}
-                                        onSelect={setSelectedQualityTier}
+                                    <ModelSelector
+                                        models={currentTypeConfig?.models ?? []}
+                                        selectedModelId={selectedConfigModelId}
+                                        onSelect={setSelectedConfigModelId}
                                         disabled={isSending || messages.length > 0}
-                                        normalModelName={currentTypeConfig?.model_normal_name}
-                                        hqModelName={currentTypeConfig?.model_hq_name}
                                     />
                                     {messages.length > 0 && (
                                         <p className="text-xs text-muted-foreground mt-1">
@@ -4957,9 +4902,7 @@ export function ChatInterface() {
                             enabledTypes={generationConfig.map(c => ({
                                 type: c.generation_type,
                                 isEnabled: c.is_enabled && !!(
-                                    c.generation_type === "audio_hd"
-                                        ? c.model_chirp_id
-                                        : (c.model_normal_id || c.model_hq_id)
+                                    c.models.length > 0
                                 ),
                             }))}
                             selectedType={newConversationType}
@@ -4975,9 +4918,7 @@ export function ChatInterface() {
                                 handleNewTab();
                                 setShowNewConversationModal(false);
                             }}
-                            disabled={!generationConfig.some(c => c.is_enabled && c.generation_type === newConversationType && (
-                                c.generation_type === "audio_hd" ? c.model_chirp_id : (c.model_normal_id || c.model_hq_id)
-                            ))}
+                            disabled={!generationConfig.some(c => c.is_enabled && c.generation_type === newConversationType && c.models.length > 0)}
                         >
                             Crear conversación
                         </Button>

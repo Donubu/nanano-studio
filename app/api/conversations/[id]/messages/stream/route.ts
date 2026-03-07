@@ -53,6 +53,21 @@ interface MessageRow extends RowDataPacket {
 type GenerationType = "text" | "image" | "video" | "audio";
 type QualityTier = "normal" | "hq";
 
+interface ProjectModelRow extends RowDataPacket {
+  model_id: number;
+  model_model_id: string;
+  model_supports_image: number;
+  model_supports_google_search: number;
+  model_api_backend: string | null;
+  cost_input_per_million: number;
+  cost_output_per_million: number;
+  cost_image_1k: number;
+  cost_image_2k: number;
+  cost_image_4k: number;
+  cost_video_per_second: number;
+  is_default: number;
+}
+
 interface ConversationRow extends RowDataPacket {
   id: number;
   user_id: number;
@@ -82,23 +97,8 @@ interface ConversationRow extends RowDataPacket {
   model_supports_google_search: number;
 }
 
-interface GenerationConfigRow extends RowDataPacket {
-  model_normal_id: number | null;
-  model_hq_id: number | null;
-}
-
 interface ProjectModelRow extends RowDataPacket {
   system_instruction: string | null;
-}
-
-interface ImageLimitRow extends RowDataPacket {
-  max_monthly_image_generations: number;
-  current_month_image_count: number;
-  // New quality-based limits
-  max_monthly_image_normal: number;
-  max_monthly_image_hq: number;
-  max_monthly_text_normal: number;
-  max_monthly_text_hq: number;
 }
 
 interface ModelRow extends RowDataPacket {
@@ -131,13 +131,14 @@ export async function POST(
 
     const { id } = await params;
     const body = await request.json();
-    const { content, files, useProjectSystemInstruction = true, modelIdOverride, imageSettings, quality_tier = "normal", generation_type_override, no_context = false, skip_user_message = false, google_search_enabled: reqGoogleSearchEnabled, google_image_search_enabled: reqGoogleImageSearchEnabled } = body as {
+    const { content, files, useProjectSystemInstruction = true, modelIdOverride, imageSettings, quality_tier, selected_model_id, generation_type_override, no_context = false, skip_user_message = false, google_search_enabled: reqGoogleSearchEnabled, google_image_search_enabled: reqGoogleImageSearchEnabled } = body as {
       content: string;
       files?: AttachedFile[];
       useProjectSystemInstruction?: boolean;
       modelIdOverride?: number;
       imageSettings?: { aspectRatio: string; size: string; numberOfImages?: number };
       quality_tier?: QualityTier;
+      selected_model_id?: number;
       generation_type_override?: GenerationType;
       no_context?: boolean;
       skip_user_message?: boolean;
@@ -145,7 +146,7 @@ export async function POST(
       google_image_search_enabled?: boolean;
     };
 
-    // Validate quality_tier
+    // quality_tier kept for legacy compat but selected_model_id takes precedence
     const effectiveQualityTier: QualityTier = quality_tier === "hq" ? "hq" : "normal";
 
     if (!content || content.trim() === "") {
@@ -227,69 +228,48 @@ export async function POST(
           };
 
           if (conversation.project_id && !modelIdOverride) {
-            const [configRows] = await pool.execute<RowDataPacket[]>(`
+            // Query models assigned to this project+type from new table
+            const [projectModels] = await pool.execute<ProjectModelRow[]>(`
               SELECT
-                pgc.model_normal_id,
-                pgc.model_hq_id,
-                mn.model_id as model_normal_model_id,
-                mn.supports_image_generation as model_normal_supports_image,
-                mn.api_backend as mn_api_backend,
-                mn.cost_input_per_million as mn_cost_input,
-                mn.cost_output_per_million as mn_cost_output,
-                mn.cost_image_1k as mn_cost_image_1k,
-                mn.cost_image_2k as mn_cost_image_2k,
-                mn.cost_image_4k as mn_cost_image_4k,
-                mn.cost_video_per_second as mn_cost_video,
-                mn.supports_google_search as mn_supports_google_search,
-                mh.model_id as model_hq_model_id,
-                mh.supports_image_generation as model_hq_supports_image,
-                mh.api_backend as mh_api_backend,
-                mh.supports_google_search as mh_supports_google_search,
-                mh.cost_input_per_million as mh_cost_input,
-                mh.cost_output_per_million as mh_cost_output,
-                mh.cost_image_1k as mh_cost_image_1k,
-                mh.cost_image_2k as mh_cost_image_2k,
-                mh.cost_image_4k as mh_cost_image_4k,
-                mh.cost_video_per_second as mh_cost_video
-              FROM project_generation_config pgc
-              LEFT JOIN models mn ON pgc.model_normal_id = mn.id
-              LEFT JOIN models mh ON pgc.model_hq_id = mh.id
-              WHERE pgc.project_id = ? AND pgc.generation_type = ? AND pgc.is_enabled = 1
+                pgm.model_id,
+                pgm.is_default,
+                m.model_id as model_model_id,
+                m.supports_image_generation as model_supports_image,
+                m.supports_google_search as model_supports_google_search,
+                m.api_backend as model_api_backend,
+                m.cost_input_per_million,
+                m.cost_output_per_million,
+                m.cost_image_1k,
+                m.cost_image_2k,
+                m.cost_image_4k,
+                m.cost_video_per_second
+              FROM project_generation_models pgm
+              JOIN models m ON pgm.model_id = m.id
+              JOIN project_generation_config pgc ON pgc.project_id = pgm.project_id AND pgc.generation_type = pgm.generation_type
+              WHERE pgm.project_id = ? AND pgm.generation_type = ? AND pgc.is_enabled = 1
+              ORDER BY pgm.sort_order ASC
             `, [conversation.project_id, generationType]);
 
-            if (configRows.length > 0) {
-              const config = configRows[0];
-              if (effectiveQualityTier === "hq" && config.model_hq_model_id) {
-                effectiveModelId = config.model_hq_model_id;
-                effectiveSupportsImageGeneration = config.model_hq_supports_image;
-                effectiveSupportsGoogleSearch = Boolean(config.mh_supports_google_search);
-                effectiveModelDbId = config.model_hq_id;
-                effectiveBackend = config.mh_api_backend || undefined;
-                effectiveCosts = {
-                  cost_input_per_million: Number(config.mh_cost_input) || 0,
-                  cost_output_per_million: Number(config.mh_cost_output) || 0,
-                  cost_image_1k: Number(config.mh_cost_image_1k) || 0,
-                  cost_image_2k: Number(config.mh_cost_image_2k) || 0,
-                  cost_image_4k: Number(config.mh_cost_image_4k) || 0,
-                  cost_video_per_second: Number(config.mh_cost_video) || 0,
-                };
-                console.log(`[Stream] Using HQ model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
-              } else if (config.model_normal_model_id) {
-                effectiveModelId = config.model_normal_model_id;
-                effectiveSupportsImageGeneration = config.model_normal_supports_image;
-                effectiveSupportsGoogleSearch = Boolean(config.mn_supports_google_search);
-                effectiveModelDbId = config.model_normal_id;
-                effectiveBackend = config.mn_api_backend || undefined;
-                effectiveCosts = {
-                  cost_input_per_million: Number(config.mn_cost_input) || 0,
-                  cost_output_per_million: Number(config.mn_cost_output) || 0,
-                  cost_image_1k: Number(config.mn_cost_image_1k) || 0,
-                  cost_image_2k: Number(config.mn_cost_image_2k) || 0,
-                  cost_image_4k: Number(config.mn_cost_image_4k) || 0,
-                  cost_video_per_second: Number(config.mn_cost_video) || 0,
-                };
-                console.log(`[Stream] Using Normal model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
-              }
+            if (projectModels.length > 0) {
+              // Pick model: selected_model_id > default > first
+              let chosen = projectModels.find(m => selected_model_id && m.model_id === selected_model_id)
+                || projectModels.find(m => m.is_default)
+                || projectModels[0];
+
+              effectiveModelId = chosen.model_model_id;
+              effectiveSupportsImageGeneration = Boolean(chosen.model_supports_image);
+              effectiveSupportsGoogleSearch = Boolean(chosen.model_supports_google_search);
+              effectiveModelDbId = chosen.model_id;
+              effectiveBackend = chosen.model_api_backend || undefined;
+              effectiveCosts = {
+                cost_input_per_million: Number(chosen.cost_input_per_million) || 0,
+                cost_output_per_million: Number(chosen.cost_output_per_million) || 0,
+                cost_image_1k: Number(chosen.cost_image_1k) || 0,
+                cost_image_2k: Number(chosen.cost_image_2k) || 0,
+                cost_image_4k: Number(chosen.cost_image_4k) || 0,
+                cost_video_per_second: Number(chosen.cost_video_per_second) || 0,
+              };
+              console.log(`[Stream] Using model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
             }
           }
 
@@ -706,9 +686,9 @@ export async function POST(
                 });
                 totalEstimatedCost += textCost;
                 const [modelResult] = await pool.execute<ResultSetHeader>(
-                  `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, tokens_input, tokens_output, estimated_cost, grounding_data)
-                   VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?)`,
-                  [id, effectiveQualityTier, fullResponse, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
+                  `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, tokens_input, tokens_output, estimated_cost, grounding_data)
+                   VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?, ?)`,
+                  [id, effectiveQualityTier, effectiveModelDbId, fullResponse, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
                 );
                 modelMessageId = modelResult.insertId;
               }
@@ -723,9 +703,9 @@ export async function POST(
                 });
                 totalEstimatedCost += imageCost;
                 const [imgResult] = await pool.execute<ResultSetHeader>(
-                  `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost)
-                   VALUES (?, 'model', 'image', ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
-                  [id, effectiveQualityTier, img.url, img.mimeType, img.fileSize, imageAspectRatioToSave, imageSizeToSave,
+                  `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost)
+                   VALUES (?, 'model', 'image', ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  [id, effectiveQualityTier, effectiveModelDbId, img.url, img.mimeType, img.fileSize, imageAspectRatioToSave, imageSizeToSave,
                    isFirstMessage ? tokenCount.input : 0, isFirstMessage ? tokenCount.output : 0, imageCost]
                 );
                 imageMessages.push({ id: imgResult.insertId, imageUrl: img.url });
@@ -739,9 +719,9 @@ export async function POST(
                 });
                 totalEstimatedCost += textCost;
                 const [modelResult] = await pool.execute<ResultSetHeader>(
-                  `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, tokens_input, tokens_output, estimated_cost)
-                   VALUES (?, 'model', 'text', ?, '', ?, ?, ?)`,
-                  [id, effectiveQualityTier, tokenCount.input, tokenCount.output, textCost]
+                  `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, tokens_input, tokens_output, estimated_cost)
+                   VALUES (?, 'model', 'text', ?, ?, '', ?, ?, ?)`,
+                  [id, effectiveQualityTier, effectiveModelDbId, tokenCount.input, tokenCount.output, textCost]
                 );
                 modelMessageId = modelResult.insertId;
               }
@@ -934,7 +914,7 @@ export async function POST(
                   const [modelResult] = await pool.execute<ResultSetHeader>(
                     `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, tokens_input, tokens_output, estimated_cost, grounding_data)
                      VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?)`,
-                    [id, effectiveQualityTier, text, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
+                    [id, effectiveQualityTier, effectiveModelDbId, text, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
                   );
                   modelMessageId = modelResult.insertId;
                 }
@@ -959,7 +939,7 @@ export async function POST(
                   const [imgResult] = await pool.execute<ResultSetHeader>(
                     `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost)
                      VALUES (?, 'model', 'image', ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [id, effectiveQualityTier, img.url, img.mimeType, img.fileSize, imageAspectRatioToSave, imageSizeToSave,
+                    [id, effectiveQualityTier, effectiveModelDbId, img.url, img.mimeType, img.fileSize, imageAspectRatioToSave, imageSizeToSave,
                      isFirstMessage ? tokenCount.input : 0,
                      isFirstMessage ? tokenCount.output : 0,
                      imageCost]
@@ -990,7 +970,7 @@ export async function POST(
                   const [modelResult] = await pool.execute<ResultSetHeader>(
                     `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, tokens_input, tokens_output, estimated_cost)
                      VALUES (?, 'model', 'text', ?, '', ?, ?, ?)`,
-                    [id, effectiveQualityTier, tokenCount.input, tokenCount.output, textCost]
+                    [id, effectiveQualityTier, effectiveModelDbId, tokenCount.input, tokenCount.output, textCost]
                   );
                   modelMessageId = modelResult.insertId;
                 }

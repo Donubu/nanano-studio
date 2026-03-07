@@ -58,7 +58,7 @@ export async function GET() {
         (SELECT COALESCE(SUM(credits_consumed), 0) FROM topaz_video_edits WHERE status = 'completed') as topazVideoCredits,
         (SELECT COUNT(*) FROM models) as totalModels,
         (SELECT COUNT(*) FROM models WHERE is_active = 1) as activeModels,
-        (SELECT COUNT(DISTINCT model_normal_id) + COUNT(DISTINCT model_hq_id) FROM project_generation_config WHERE is_enabled = 1) as assignedModels,
+        (SELECT COUNT(DISTINCT model_id) FROM project_generation_models pgm JOIN project_generation_config pgc ON pgc.project_id = pgm.project_id AND pgc.generation_type = pgm.generation_type WHERE pgc.is_enabled = 1) as assignedModels,
         (SELECT COUNT(*) FROM budgets WHERE deleted_at IS NULL) as totalBudgets,
         (SELECT COUNT(*) FROM budgets WHERE deleted_at IS NULL AND status = 'draft') as draftBudgets,
         (SELECT COUNT(*) FROM budgets WHERE deleted_at IS NULL AND status = 'accepted') as acceptedBudgets,

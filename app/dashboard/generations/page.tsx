@@ -507,9 +507,9 @@ export default function GenerationsPage() {
                             <span className="text-xs text-muted-foreground">
                               {getTypeLabel(gen.type)}
                             </span>
-                            {gen.quality_tier === "hq" && (
-                              <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">
-                                HQ
+                            {gen.model_name && (
+                              <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded">
+                                {gen.model_name}
                               </span>
                             )}
                           </div>

@@ -143,17 +143,20 @@ type TabType = "overview" | "users" | "calendar" | "tags" | "config";
 
 type GenerationType = "text" | "image" | "video" | "audio" | "music";
 
-interface ModelInfo {
+interface ConfigModelInfo {
   id: number;
   model_id: string;
   display_name: string;
+  label: string;
+  sort_order: number;
+  is_default: boolean;
+  supports_google_search: boolean;
+  api_backend: string | null;
 }
 
 interface TypeConfig {
   enabled: boolean;
-  model_normal: ModelInfo | null;
-  model_hq: ModelInfo | null;
-  model_chirp: ModelInfo | null;
+  models: ConfigModelInfo[];
 }
 
 interface GenerationConfigResponse {
@@ -228,11 +231,11 @@ export default function ProjectDetailPage() {
 
   // Generation config state
   const [generationConfig, setGenerationConfig] = useState<GenerationConfigResponse>({
-    text: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
-    image: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
-    video: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
-    audio: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
-    music: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
+    text: { enabled: false, models: [] },
+    image: { enabled: false, models: [] },
+    video: { enabled: false, models: [] },
+    audio: { enabled: false, models: [] },
+    music: { enabled: false, models: [] },
   });
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [savingConfigType, setSavingConfigType] = useState<GenerationType | null>(null);
@@ -549,7 +552,7 @@ export default function ProjectDetailPage() {
   // Generation config handlers
   const handleUpdateGenerationConfig = async (
     type: GenerationType,
-    updates: { is_enabled?: boolean; model_normal_id?: number | null; model_hq_id?: number | null; model_chirp_id?: number | null }
+    updates: Record<string, unknown>
   ) => {
     setSavingConfigType(type);
 
@@ -885,25 +888,13 @@ export default function ProjectDetailPage() {
                             <div>
                               <span className="font-medium">{label}</span>
                               <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
-                                {config.model_normal && (
-                                  <div className="flex items-center gap-1">
+                                {config.models.length > 0 ? config.models.map((m) => (
+                                  <div key={m.id} className="flex items-center gap-1">
                                     <Zap className="h-3 w-3" />
-                                    <span>Normal: {config.model_normal.display_name}</span>
+                                    <span>{m.label ? `${m.label} — ` : ""}{m.display_name}</span>
+                                    {m.is_default && <span className="text-[9px] text-primary">(default)</span>}
                                   </div>
-                                )}
-                                {config.model_hq && (
-                                  <div className="flex items-center gap-1 text-amber-400">
-                                    <Sparkles className="h-3 w-3" />
-                                    <span>HQ: {config.model_hq.display_name}</span>
-                                  </div>
-                                )}
-                                {config.model_chirp && (
-                                  <div className="flex items-center gap-1 text-yellow-500">
-                                    <AudioLines className="h-3 w-3" />
-                                    <span>Chirp HD: {config.model_chirp.display_name}</span>
-                                  </div>
-                                )}
-                                {!config.model_normal && !config.model_hq && !config.model_chirp && (
+                                )) : (
                                   <span className="text-yellow-500">Sin modelos asignados</span>
                                 )}
                               </div>
@@ -1283,7 +1274,7 @@ export default function ProjectDetailPage() {
             <div className="space-y-2">
               <h3 className="font-medium">Configuración de Tipos de Generación</h3>
               <p className="text-sm text-muted-foreground">
-                Habilita o deshabilita tipos de generación y asigna los modelos Normal, HQ y Chirp HD para cada uno.
+                Habilita o deshabilita tipos de generación y asigna los modelos disponibles para cada uno.
               </p>
             </div>
 
@@ -1342,102 +1333,110 @@ export default function ProjectDetailPage() {
                         </button>
                       </div>
 
-                      {/* Model selectors */}
+                      {/* Model list */}
                       {config.enabled && (
-                        <div className={`grid gap-4 pt-4 border-t border-border/30 ${type === "audio" ? "grid-cols-3" : "grid-cols-2"}`}>
-                          {/* Normal model */}
-                          <div>
-                            <label className="text-xs font-medium mb-1.5 flex items-center gap-1.5 text-muted-foreground">
-                              <Zap className="h-3.5 w-3.5" />
-                              Modelo Normal
-                            </label>
-                            <select
-                              className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
-                              value={config.model_normal?.id || ""}
-                              onChange={(e) =>
-                                handleUpdateGenerationConfig(type, {
-                                  model_normal_id: e.target.value ? Number(e.target.value) : null,
-                                })
-                              }
-                              disabled={isSaving}
-                            >
-                              <option value="">Sin modelo asignado</option>
-                              {models.map((model) => (
-                                <option key={model.id} value={model.id}>
-                                  {model.display_name}
-                                </option>
+                        <div className="pt-4 border-t border-border/30 space-y-3">
+                          {/* Assigned models */}
+                          {config.models.length > 0 && (
+                            <div className="space-y-2">
+                              {config.models.map((model, index) => (
+                                <div key={model.id} className="flex items-center gap-2 p-2 rounded-lg bg-muted/50 border border-border/30">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      {model.is_default && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary font-medium shrink-0">
+                                          Default
+                                        </span>
+                                      )}
+                                      <input
+                                        type="text"
+                                        defaultValue={model.label}
+                                        placeholder="Label (ej: Normal, HQ, Ultra...)"
+                                        onBlur={(e) => {
+                                          if (e.target.value !== model.label) {
+                                            handleUpdateGenerationConfig(type, {
+                                              action: "update_model",
+                                              model_id: model.id,
+                                              label: e.target.value,
+                                            });
+                                          }
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                                        }}
+                                        className="bg-transparent border-0 border-b border-border/30 focus:border-primary text-sm px-1 py-0.5 w-28 outline-none"
+                                      />
+                                      <span className="text-sm font-medium truncate">
+                                        {model.display_name}
+                                      </span>
+                                      <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                                        {model.model_id}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    {!model.is_default && (
+                                      <button
+                                        onClick={() => handleUpdateGenerationConfig(type, {
+                                          action: "set_default",
+                                          model_id: model.id,
+                                        })}
+                                        className="text-xs text-muted-foreground hover:text-primary px-1.5 py-0.5 rounded hover:bg-primary/10"
+                                        title="Hacer default"
+                                        disabled={isSaving}
+                                      >
+                                        Default
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => handleUpdateGenerationConfig(type, {
+                                        action: "remove_model",
+                                        model_id: model.id,
+                                      })}
+                                      className="text-muted-foreground hover:text-red-400 p-1 rounded hover:bg-red-500/10"
+                                      title="Quitar modelo"
+                                      disabled={isSaving}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
                               ))}
-                            </select>
-                            {config.model_normal && (
-                              <div className="text-xs text-muted-foreground mt-1 font-mono">
-                                {config.model_normal.model_id}
-                              </div>
-                            )}
-                          </div>
+                            </div>
+                          )}
 
-                          {/* HQ model */}
-                          <div>
-                            <label className="text-xs font-medium mb-1.5 flex items-center gap-1.5 text-amber-400">
-                              <Sparkles className="h-3.5 w-3.5" />
-                              Modelo HQ
-                            </label>
+                          {/* Add model */}
+                          <div className="flex items-center gap-2">
                             <select
-                              className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
-                              value={config.model_hq?.id || ""}
-                              onChange={(e) =>
-                                handleUpdateGenerationConfig(type, {
-                                  model_hq_id: e.target.value ? Number(e.target.value) : null,
-                                })
-                              }
-                              disabled={isSaving}
-                            >
-                              <option value="">Sin modelo asignado</option>
-                              {models.map((model) => (
-                                <option key={model.id} value={model.id}>
-                                  {model.display_name}
-                                </option>
-                              ))}
-                            </select>
-                            {config.model_hq && (
-                              <div className="text-xs text-muted-foreground mt-1 font-mono">
-                                {config.model_hq.model_id}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Chirp HD model — only for audio */}
-                          {type === "audio" && (
-                            <div>
-                              <label className="text-xs font-medium mb-1.5 flex items-center gap-1.5 text-yellow-500">
-                                <AudioLines className="h-3.5 w-3.5" />
-                                Modelo Chirp HD
-                              </label>
-                              <select
-                                className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
-                                value={config.model_chirp?.id || ""}
-                                onChange={(e) =>
+                              className="flex-1 bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
+                              defaultValue=""
+                              onChange={(e) => {
+                                if (e.target.value) {
                                   handleUpdateGenerationConfig(type, {
-                                    model_chirp_id: e.target.value ? Number(e.target.value) : null,
-                                  })
+                                    action: "add_model",
+                                    model_id: Number(e.target.value),
+                                    label: "",
+                                  });
+                                  e.target.value = "";
                                 }
-                                disabled={isSaving}
-                              >
-                                <option value="">Sin modelo asignado</option>
-                                {models.map((model) => (
+                              }}
+                              disabled={isSaving}
+                            >
+                              <option value="">+ Agregar modelo...</option>
+                              {models
+                                .filter(m => !config.models.some(cm => cm.id === m.id))
+                                .map((model) => (
                                   <option key={model.id} value={model.id}>
                                     {model.display_name}
                                   </option>
                                 ))}
-                              </select>
-                              {config.model_chirp && (
-                                <div className="text-xs text-muted-foreground mt-1 font-mono">
-                                  {config.model_chirp.model_id}
-                                </div>
-                              )}
-                              <div className="text-[10px] text-yellow-600 dark:text-yellow-400 mt-1">
-                                Habilita &quot;Audio HD&quot; en nueva conversación
-                              </div>
-                            </div>
+                            </select>
+                          </div>
+
+                          {config.models.length === 0 && (
+                            <p className="text-xs text-muted-foreground text-center py-2">
+                              No hay modelos asignados. Agrega al menos uno.
+                            </p>
                           )}
                         </div>
                       )}

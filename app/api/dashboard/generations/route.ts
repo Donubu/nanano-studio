@@ -226,7 +226,7 @@ export async function GET(request: NextRequest) {
         u.name as user_name,
         u.email as user_email,
         c.model_id,
-        COALESCE(mo_cfg.display_name, mo_conv.display_name) as model_name,
+        COALESCE(mo_msg.display_name, mo_conv.display_name) as model_name,
         m.content,
         m.content_type,
         m.quality_tier,
@@ -253,18 +253,7 @@ export async function GET(request: NextRequest) {
       LEFT JOIN projects p ON c.project_id = p.id
       LEFT JOIN clients cl ON p.client_id = cl.id
       LEFT JOIN users u ON c.user_id = u.id
-      LEFT JOIN project_generation_config pgc ON pgc.project_id = c.project_id
-        AND pgc.generation_type = CASE
-          WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 'video'
-          WHEN m.audio_url IS NOT NULL AND m.audio_url != '' THEN 'audio'
-          WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 'music'
-          WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 'image'
-          ELSE 'text'
-        END
-      LEFT JOIN models mo_cfg ON mo_cfg.id = CASE
-        WHEN m.quality_tier = 'hq' THEN pgc.model_hq_id
-        ELSE pgc.model_normal_id
-      END
+      LEFT JOIN models mo_msg ON m.model_id = mo_msg.id
       LEFT JOIN models mo_conv ON c.model_id = mo_conv.id
       WHERE ${conditions.join(" AND ")}
       ORDER BY m.created_at DESC
@@ -783,7 +772,7 @@ async function handleAllGenerations(
       u.name as user_name,
       u.email as user_email,
       c.model_id,
-      COALESCE(mo_cfg.display_name, mo_conv.display_name) as model_name,
+      COALESCE(mo_msg.display_name, mo_conv.display_name) as model_name,
       m.content,
       m.content_type,
       m.quality_tier,
@@ -810,18 +799,7 @@ async function handleAllGenerations(
     LEFT JOIN projects p ON c.project_id = p.id
     LEFT JOIN clients cl ON p.client_id = cl.id
     LEFT JOIN users u ON c.user_id = u.id
-    LEFT JOIN project_generation_config pgc ON pgc.project_id = c.project_id
-      AND pgc.generation_type = CASE
-        WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 'video'
-        WHEN m.audio_url IS NOT NULL AND m.audio_url != '' THEN 'audio'
-        WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 'music'
-        WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 'image'
-        ELSE 'text'
-      END
-    LEFT JOIN models mo_cfg ON mo_cfg.id = CASE
-      WHEN m.quality_tier = 'hq' THEN pgc.model_hq_id
-      ELSE pgc.model_normal_id
-    END
+    LEFT JOIN models mo_msg ON m.model_id = mo_msg.id
     LEFT JOIN models mo_conv ON c.model_id = mo_conv.id
     WHERE ${msgConditions.join(" AND ")}
     ORDER BY m.created_at DESC

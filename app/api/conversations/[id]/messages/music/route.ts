@@ -118,16 +118,19 @@ export async function POST(
     let effectiveCostMusicPerMinute = Number(conversation.cost_music_per_minute) || 0;
 
     if (conversation.project_id) {
-      const [configRows] = await pool.execute<RowDataPacket[]>(`
+      const [projectModels] = await pool.execute<RowDataPacket[]>(`
         SELECT
-          mn.cost_music_per_minute as mn_cost_music
-        FROM project_generation_config pgc
-        LEFT JOIN models mn ON pgc.model_normal_id = mn.id
-        WHERE pgc.project_id = ? AND pgc.generation_type = 'music' AND pgc.is_enabled = 1
+          m.cost_music_per_minute
+        FROM project_generation_models pgm
+        JOIN models m ON pgm.model_id = m.id
+        JOIN project_generation_config pgc ON pgc.project_id = pgm.project_id AND pgc.generation_type = pgm.generation_type
+        WHERE pgm.project_id = ? AND pgm.generation_type = 'music' AND pgc.is_enabled = 1
+        ORDER BY pgm.sort_order ASC
+        LIMIT 1
       `, [conversation.project_id]);
 
-      if (configRows.length > 0) {
-        effectiveCostMusicPerMinute = Number(configRows[0].mn_cost_music) || effectiveCostMusicPerMinute;
+      if (projectModels.length > 0) {
+        effectiveCostMusicPerMinute = Number(projectModels[0].cost_music_per_minute) || effectiveCostMusicPerMinute;
       }
     }
 

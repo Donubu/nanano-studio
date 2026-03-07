@@ -5,23 +5,40 @@ import { RowDataPacket, ResultSetHeader } from "mysql2";
 
 type GenerationType = "text" | "image" | "video" | "audio" | "music";
 
-interface GenerationConfigRow extends RowDataPacket {
+interface ModelRow extends RowDataPacket {
   id: number;
   project_id: number;
   generation_type: GenerationType;
+  model_id: number;
+  label: string;
+  sort_order: number;
+  is_default: number;
+  // From models table
+  model_model_id: string;
+  model_display_name: string;
+  model_supports_google_search: number;
+  model_api_backend: string | null;
+}
+
+interface ConfigEnabledRow extends RowDataPacket {
+  generation_type: GenerationType;
   is_enabled: number;
-  model_normal_id: number | null;
-  model_hq_id: number | null;
-  model_chirp_id: number | null;
-  // Model normal info
-  model_normal_model_id: string | null;
-  model_normal_display_name: string | null;
-  // Model HQ info
-  model_hq_model_id: string | null;
-  model_hq_display_name: string | null;
-  // Model Chirp info
-  model_chirp_model_id: string | null;
-  model_chirp_display_name: string | null;
+}
+
+interface ModelInfo {
+  id: number;
+  model_id: string;
+  display_name: string;
+  label: string;
+  sort_order: number;
+  is_default: boolean;
+  supports_google_search: boolean;
+  api_backend: string | null;
+}
+
+interface TypeConfig {
+  enabled: boolean;
+  models: ModelInfo[];
 }
 
 interface GenerationConfigResponse {
@@ -30,21 +47,6 @@ interface GenerationConfigResponse {
   video: TypeConfig;
   audio: TypeConfig;
   music: TypeConfig;
-}
-
-interface TypeConfig {
-  enabled: boolean;
-  model_normal: ModelInfo | null;
-  model_hq: ModelInfo | null;
-  model_chirp: ModelInfo | null;
-}
-
-interface ModelInfo {
-  id: number;
-  model_id: string;
-  display_name: string;
-  supports_google_search: boolean;
-  api_backend: string | null;
 }
 
 // GET - Obtener configuracion de tipos de generacion del proyecto
@@ -61,68 +63,63 @@ export async function GET(
 
     const { id } = await params;
 
-    const [rows] = await pool.execute<GenerationConfigRow[]>(`
+    // Fetch enabled status from legacy table
+    const [enabledRows] = await pool.execute<ConfigEnabledRow[]>(
+      `SELECT generation_type, is_enabled FROM project_generation_config WHERE project_id = ?`,
+      [id]
+    );
+
+    // Fetch models from new table
+    const [modelRows] = await pool.execute<ModelRow[]>(`
       SELECT
-        pgc.id,
-        pgc.project_id,
-        pgc.generation_type,
-        pgc.is_enabled,
-        pgc.model_normal_id,
-        pgc.model_hq_id,
-        pgc.model_chirp_id,
-        mn.model_id as model_normal_model_id,
-        mn.display_name as model_normal_display_name,
-        mh.model_id as model_hq_model_id,
-        mh.display_name as model_hq_display_name,
-        mc.model_id as model_chirp_model_id,
-        mc.display_name as model_chirp_display_name,
-        mn.supports_google_search as model_normal_supports_google_search,
-        mh.supports_google_search as model_hq_supports_google_search,
-        mn.api_backend as model_normal_api_backend,
-        mh.api_backend as model_hq_api_backend,
-        mc.api_backend as model_chirp_api_backend
-      FROM project_generation_config pgc
-      LEFT JOIN models mn ON pgc.model_normal_id = mn.id
-      LEFT JOIN models mh ON pgc.model_hq_id = mh.id
-      LEFT JOIN models mc ON pgc.model_chirp_id = mc.id
-      WHERE pgc.project_id = ?
+        pgm.id,
+        pgm.project_id,
+        pgm.generation_type,
+        pgm.model_id,
+        pgm.label,
+        pgm.sort_order,
+        pgm.is_default,
+        m.model_id as model_model_id,
+        m.display_name as model_display_name,
+        m.supports_google_search as model_supports_google_search,
+        m.api_backend as model_api_backend
+      FROM project_generation_models pgm
+      JOIN models m ON pgm.model_id = m.id
+      WHERE pgm.project_id = ?
+      ORDER BY pgm.generation_type, pgm.sort_order ASC
     `, [id]);
 
-    // Construir respuesta estructurada
+    const enabledMap: Record<string, boolean> = {};
+    for (const row of enabledRows) {
+      enabledMap[row.generation_type] = Boolean(row.is_enabled);
+    }
+
     const config: GenerationConfigResponse = {
-      text: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
-      image: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
-      video: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
-      audio: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
-      music: { enabled: false, model_normal: null, model_hq: null, model_chirp: null },
+      text: { enabled: false, models: [] },
+      image: { enabled: false, models: [] },
+      video: { enabled: false, models: [] },
+      audio: { enabled: false, models: [] },
+      music: { enabled: false, models: [] },
     };
 
-    for (const row of rows) {
+    // Set enabled status
+    for (const type of Object.keys(config) as GenerationType[]) {
+      config[type].enabled = enabledMap[type] ?? false;
+    }
+
+    // Group models by type
+    for (const row of modelRows) {
       const type = row.generation_type as GenerationType;
-      config[type] = {
-        enabled: Boolean(row.is_enabled),
-        model_normal: row.model_normal_id ? {
-          id: row.model_normal_id,
-          model_id: row.model_normal_model_id!,
-          display_name: row.model_normal_display_name!,
-          supports_google_search: Boolean((row as Record<string, unknown>).model_normal_supports_google_search),
-          api_backend: (row as Record<string, unknown>).model_normal_api_backend as string | null,
-        } : null,
-        model_hq: row.model_hq_id ? {
-          id: row.model_hq_id,
-          model_id: row.model_hq_model_id!,
-          display_name: row.model_hq_display_name!,
-          supports_google_search: Boolean((row as Record<string, unknown>).model_hq_supports_google_search),
-          api_backend: (row as Record<string, unknown>).model_hq_api_backend as string | null,
-        } : null,
-        model_chirp: row.model_chirp_id ? {
-          id: row.model_chirp_id,
-          model_id: row.model_chirp_model_id!,
-          display_name: row.model_chirp_display_name!,
-          supports_google_search: false,
-          api_backend: (row as Record<string, unknown>).model_chirp_api_backend as string | null,
-        } : null,
-      };
+      config[type].models.push({
+        id: row.model_id,
+        model_id: row.model_model_id,
+        display_name: row.model_display_name,
+        label: row.label,
+        sort_order: row.sort_order,
+        is_default: Boolean(row.is_default),
+        supports_google_search: Boolean(row.model_supports_google_search),
+        api_backend: row.model_api_backend,
+      });
     }
 
     return NextResponse.json(config);
@@ -149,13 +146,7 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
-    const {
-      generation_type,
-      is_enabled,
-      model_normal_id,
-      model_hq_id,
-      model_chirp_id,
-    } = body;
+    const { generation_type, action } = body;
 
     if (!generation_type || !["text", "image", "video", "audio", "music"].includes(generation_type)) {
       return NextResponse.json(
@@ -173,98 +164,152 @@ export async function PUT(
       return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 });
     }
 
-    // Verificar que los modelos existen si se proporcionaron
-    if (model_normal_id) {
-      const [model] = await pool.execute<RowDataPacket[]>(
-        "SELECT id FROM models WHERE id = ? AND is_active = 1",
-        [model_normal_id]
+    // Toggle enabled/disabled
+    if (body.is_enabled !== undefined) {
+      const [existing] = await pool.execute<RowDataPacket[]>(
+        "SELECT id FROM project_generation_config WHERE project_id = ? AND generation_type = ?",
+        [id, generation_type]
       );
-      if (model.length === 0) {
-        return NextResponse.json({ error: "Modelo normal no encontrado o inactivo" }, { status: 400 });
-      }
-    }
-
-    if (model_hq_id) {
-      const [model] = await pool.execute<RowDataPacket[]>(
-        "SELECT id FROM models WHERE id = ? AND is_active = 1",
-        [model_hq_id]
-      );
-      if (model.length === 0) {
-        return NextResponse.json({ error: "Modelo HQ no encontrado o inactivo" }, { status: 400 });
-      }
-    }
-
-    if (model_chirp_id) {
-      const [model] = await pool.execute<RowDataPacket[]>(
-        "SELECT id FROM models WHERE id = ? AND is_active = 1",
-        [model_chirp_id]
-      );
-      if (model.length === 0) {
-        return NextResponse.json({ error: "Modelo Chirp no encontrado o inactivo" }, { status: 400 });
-      }
-    }
-
-    // Check if config exists for this type
-    const [existing] = await pool.execute<RowDataPacket[]>(
-      "SELECT id, is_enabled, model_normal_id, model_hq_id, model_chirp_id FROM project_generation_config WHERE project_id = ? AND generation_type = ?",
-      [id, generation_type]
-    );
-
-    if (existing.length === 0) {
-      // Insert new config
-      await pool.execute<ResultSetHeader>(`
-        INSERT INTO project_generation_config
-          (project_id, generation_type, is_enabled, model_normal_id, model_hq_id, model_chirp_id)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `, [
-        id,
-        generation_type,
-        is_enabled !== undefined ? (is_enabled ? 1 : 0) : 1,
-        model_normal_id !== undefined ? (model_normal_id || null) : null,
-        model_hq_id !== undefined ? (model_hq_id || null) : null,
-        model_chirp_id !== undefined ? (model_chirp_id || null) : null,
-      ]);
-    } else {
-      // Partial update - only update provided fields
-      const updates: string[] = [];
-      const values: (string | number | null)[] = [];
-
-      if (is_enabled !== undefined) {
-        updates.push("is_enabled = ?");
-        values.push(is_enabled ? 1 : 0);
-      }
-      if (model_normal_id !== undefined) {
-        updates.push("model_normal_id = ?");
-        values.push(model_normal_id || null);
-      }
-      if (model_hq_id !== undefined) {
-        updates.push("model_hq_id = ?");
-        values.push(model_hq_id || null);
-      }
-      if (model_chirp_id !== undefined) {
-        updates.push("model_chirp_id = ?");
-        values.push(model_chirp_id || null);
-      }
-
-      if (updates.length > 0) {
-        updates.push("updated_at = CURRENT_TIMESTAMP");
-        values.push(id, generation_type);
-
+      if (existing.length === 0) {
         await pool.execute<ResultSetHeader>(
-          `UPDATE project_generation_config SET ${updates.join(", ")} WHERE project_id = ? AND generation_type = ?`,
+          `INSERT INTO project_generation_config (project_id, generation_type, is_enabled) VALUES (?, ?, ?)`,
+          [id, generation_type, body.is_enabled ? 1 : 0]
+        );
+      } else {
+        await pool.execute<ResultSetHeader>(
+          `UPDATE project_generation_config SET is_enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND generation_type = ?`,
+          [body.is_enabled ? 1 : 0, id, generation_type]
+        );
+      }
+    }
+
+    // Add a model
+    if (action === "add_model") {
+      const { model_id, label = "", sort_order } = body;
+      if (!model_id) {
+        return NextResponse.json({ error: "model_id requerido" }, { status: 400 });
+      }
+      // Verify model exists and is active
+      const [model] = await pool.execute<RowDataPacket[]>(
+        "SELECT id FROM models WHERE id = ? AND is_active = 1",
+        [model_id]
+      );
+      if (model.length === 0) {
+        return NextResponse.json({ error: "Modelo no encontrado o inactivo" }, { status: 400 });
+      }
+
+      // Get next sort_order if not provided
+      let effectiveSortOrder = sort_order;
+      if (effectiveSortOrder === undefined) {
+        const [maxOrder] = await pool.execute<RowDataPacket[]>(
+          "SELECT COALESCE(MAX(sort_order), -1) + 1 as next_order FROM project_generation_models WHERE project_id = ? AND generation_type = ?",
+          [id, generation_type]
+        );
+        effectiveSortOrder = maxOrder[0].next_order;
+      }
+
+      // Check if this is the first model for this type (make it default)
+      const [existingModels] = await pool.execute<RowDataPacket[]>(
+        "SELECT id FROM project_generation_models WHERE project_id = ? AND generation_type = ?",
+        [id, generation_type]
+      );
+      const isFirst = existingModels.length === 0;
+
+      await pool.execute<ResultSetHeader>(
+        `INSERT INTO project_generation_models (project_id, generation_type, model_id, label, sort_order, is_default)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE label = VALUES(label), sort_order = VALUES(sort_order)`,
+        [id, generation_type, model_id, label, effectiveSortOrder, isFirst ? 1 : 0]
+      );
+    }
+
+    // Remove a model
+    if (action === "remove_model") {
+      const { model_id } = body;
+      if (!model_id) {
+        return NextResponse.json({ error: "model_id requerido" }, { status: 400 });
+      }
+
+      // Check if removing the default model
+      const [removingDefault] = await pool.execute<RowDataPacket[]>(
+        "SELECT is_default FROM project_generation_models WHERE project_id = ? AND generation_type = ? AND model_id = ?",
+        [id, generation_type, model_id]
+      );
+
+      await pool.execute<ResultSetHeader>(
+        "DELETE FROM project_generation_models WHERE project_id = ? AND generation_type = ? AND model_id = ?",
+        [id, generation_type, model_id]
+      );
+
+      // If we removed the default, set the first remaining model as default
+      if (removingDefault.length > 0 && removingDefault[0].is_default) {
+        await pool.execute<ResultSetHeader>(
+          `UPDATE project_generation_models SET is_default = 1
+           WHERE project_id = ? AND generation_type = ?
+           ORDER BY sort_order ASC LIMIT 1`,
+          [id, generation_type]
+        );
+      }
+    }
+
+    // Update a model's label or sort_order
+    if (action === "update_model") {
+      const { model_id, label, sort_order: newSortOrder } = body;
+      if (!model_id) {
+        return NextResponse.json({ error: "model_id requerido" }, { status: 400 });
+      }
+      const updates: string[] = [];
+      const values: (string | number)[] = [];
+      if (label !== undefined) {
+        updates.push("label = ?");
+        values.push(label);
+      }
+      if (newSortOrder !== undefined) {
+        updates.push("sort_order = ?");
+        values.push(newSortOrder);
+      }
+      if (updates.length > 0) {
+        values.push(Number(id), generation_type, model_id);
+        await pool.execute<ResultSetHeader>(
+          `UPDATE project_generation_models SET ${updates.join(", ")} WHERE project_id = ? AND generation_type = ? AND model_id = ?`,
           values
         );
       }
     }
 
-    return NextResponse.json({
-      success: true,
-      generation_type,
-      is_enabled: is_enabled !== undefined ? is_enabled : true,
-      model_normal_id: model_normal_id || null,
-      model_hq_id: model_hq_id || null,
-      model_chirp_id: model_chirp_id || null,
-    });
+    // Set default model
+    if (action === "set_default") {
+      const { model_id } = body;
+      if (!model_id) {
+        return NextResponse.json({ error: "model_id requerido" }, { status: 400 });
+      }
+      // Unset all defaults for this type
+      await pool.execute<ResultSetHeader>(
+        "UPDATE project_generation_models SET is_default = 0 WHERE project_id = ? AND generation_type = ?",
+        [id, generation_type]
+      );
+      // Set the new default
+      await pool.execute<ResultSetHeader>(
+        "UPDATE project_generation_models SET is_default = 1 WHERE project_id = ? AND generation_type = ? AND model_id = ?",
+        [id, generation_type, model_id]
+      );
+    }
+
+    // Reorder models
+    if (action === "reorder") {
+      const { model_ids } = body as { model_ids: number[] };
+      if (!model_ids || !Array.isArray(model_ids)) {
+        return NextResponse.json({ error: "model_ids requerido (array)" }, { status: 400 });
+      }
+      for (let i = 0; i < model_ids.length; i++) {
+        await pool.execute<ResultSetHeader>(
+          "UPDATE project_generation_models SET sort_order = ? WHERE project_id = ? AND generation_type = ? AND model_id = ?",
+          [i, id, generation_type, model_ids[i]]
+        );
+      }
+    }
+
+    return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error actualizando configuracion de generacion:", error);
     return NextResponse.json(
@@ -291,9 +336,12 @@ export async function POST(
     const configs: Array<{
       generation_type: GenerationType;
       is_enabled: boolean;
-      model_normal_id?: number;
-      model_hq_id?: number;
-      model_chirp_id?: number;
+      models?: Array<{
+        model_id: number;
+        label?: string;
+        sort_order?: number;
+        is_default?: boolean;
+      }>;
     }> = body.configs || [];
 
     // Verificar que el proyecto existe
@@ -305,30 +353,36 @@ export async function POST(
       return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 });
     }
 
-    // Insertar cada configuracion
     for (const config of configs) {
       if (!["text", "image", "video", "audio", "music"].includes(config.generation_type)) {
         continue;
       }
 
+      // Upsert enabled status in legacy table
       await pool.execute<ResultSetHeader>(`
-        INSERT INTO project_generation_config
-          (project_id, generation_type, is_enabled, model_normal_id, model_hq_id, model_chirp_id)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE
-          is_enabled = VALUES(is_enabled),
-          model_normal_id = VALUES(model_normal_id),
-          model_hq_id = VALUES(model_hq_id),
-          model_chirp_id = VALUES(model_chirp_id),
-          updated_at = CURRENT_TIMESTAMP
-      `, [
-        id,
-        config.generation_type,
-        config.is_enabled ? 1 : 0,
-        config.model_normal_id || null,
-        config.model_hq_id || null,
-        config.model_chirp_id || null,
-      ]);
+        INSERT INTO project_generation_config (project_id, generation_type, is_enabled)
+        VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE is_enabled = VALUES(is_enabled), updated_at = CURRENT_TIMESTAMP
+      `, [id, config.generation_type, config.is_enabled ? 1 : 0]);
+
+      // Insert models
+      if (config.models) {
+        for (let i = 0; i < config.models.length; i++) {
+          const m = config.models[i];
+          await pool.execute<ResultSetHeader>(`
+            INSERT INTO project_generation_models (project_id, generation_type, model_id, label, sort_order, is_default)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE label = VALUES(label), sort_order = VALUES(sort_order), is_default = VALUES(is_default)
+          `, [
+            id,
+            config.generation_type,
+            m.model_id,
+            m.label || "",
+            m.sort_order ?? i,
+            m.is_default ? 1 : 0,
+          ]);
+        }
+      }
     }
 
     return NextResponse.json({ success: true, count: configs.length }, { status: 201 });

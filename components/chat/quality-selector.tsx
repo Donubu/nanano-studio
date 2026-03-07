@@ -1,6 +1,6 @@
 "use client";
 
-import { Sparkles, Zap } from "lucide-react";
+import { Sparkles, Zap, ChevronDown } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -8,119 +8,132 @@ import {
 } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 
+// Legacy export for backward compat
 export type QualityTier = "normal" | "hq";
 
-interface UsageInfo {
-  used: number;
-  limit: number;
+export interface ProjectModel {
+  id: number;
+  model_id: string;
+  display_name: string;
+  label: string;
+  sort_order: number;
+  is_default: boolean;
+  supports_google_search: boolean;
+  api_backend: string | null;
 }
 
-interface QualitySelectorProps {
-  selectedQuality: QualityTier;
-  onSelect: (quality: QualityTier) => void;
+interface ModelSelectorProps {
+  models: ProjectModel[];
+  selectedModelId: number | null;
+  onSelect: (modelId: number) => void;
   disabled?: boolean;
-  normalUsage?: UsageInfo;
-  hqUsage?: UsageInfo;
-  showUsage?: boolean;
-  normalModelName?: string | null;
-  hqModelName?: string | null;
 }
 
-export function QualitySelector({
-  selectedQuality,
+export function ModelSelector({
+  models,
+  selectedModelId,
   onSelect,
   disabled,
-  normalUsage,
-  hqUsage,
-  showUsage = true,
-  normalModelName,
-  hqModelName,
-}: QualitySelectorProps) {
-  const hasNormal = !!normalModelName;
-  const hasHq = !!hqModelName;
-  const normalDisabled = normalUsage ? normalUsage.limit > 0 && normalUsage.used >= normalUsage.limit : false;
-  const hqDisabled = hqUsage ? hqUsage.limit > 0 && hqUsage.used >= hqUsage.limit : false;
+}: ModelSelectorProps) {
+  if (models.length === 0) return null;
 
-  const formatUsage = (usage?: UsageInfo) => {
-    if (!usage || usage.limit === 0) return null;
-    return `${usage.used}/${usage.limit}`;
-  };
+  // Auto-select default if nothing selected
+  const effectiveSelected = selectedModelId ?? models.find(m => m.is_default)?.id ?? models[0]?.id;
 
-  const normalLabel = normalModelName || "Normal";
-  const hqLabel = hqModelName || "HQ";
+  // 1 model: no selector needed
+  if (models.length === 1) {
+    return (
+      <div className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-muted-foreground">
+        <Zap className="w-4 h-4 shrink-0" />
+        <span className="truncate max-w-[200px]">
+          {models[0].label ? `${models[0].label} — ${models[0].display_name}` : models[0].display_name}
+        </span>
+      </div>
+    );
+  }
 
-  // If only one tier has a model, don't show the selector at all — just show a label
-  if (!hasNormal && !hasHq) return null;
+  // 2-3 models: segmented control (buttons)
+  if (models.length <= 3) {
+    return (
+      <div className="flex items-center gap-1 p-1 bg-muted rounded-lg">
+        {models.map((model, index) => {
+          const isSelected = model.id === effectiveSelected;
+          const displayLabel = model.label
+            ? `${model.label} — ${model.display_name}`
+            : model.display_name;
+
+          return (
+            <Tooltip key={model.id}>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => onSelect(model.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    isSelected
+                      ? index === 0
+                        ? "bg-background text-foreground shadow-sm"
+                        : "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  disabled={disabled}
+                >
+                  {index === 0 ? (
+                    <Zap className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <Sparkles className="w-4 h-4 shrink-0" />
+                  )}
+                  <span className="truncate max-w-[120px]">{displayLabel}</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{model.display_name}</TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // 4+ models: dropdown
+  const selectedModel = models.find(m => m.id === effectiveSelected) || models[0];
+  const selectedLabel = selectedModel.label
+    ? `${selectedModel.label} — ${selectedModel.display_name}`
+    : selectedModel.display_name;
 
   return (
-    <div className="flex items-center gap-1 p-1 bg-muted rounded-lg">
-      {hasNormal && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => !normalDisabled && onSelect("normal")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                normalDisabled
-                  ? "text-muted-foreground/50 cursor-not-allowed"
-                  : selectedQuality === "normal"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-              }`}
-              disabled={disabled || normalDisabled}
-            >
-              <Zap className="w-4 h-4 shrink-0" />
-              <span className="truncate max-w-[120px]">{normalLabel}</span>
-              {showUsage && formatUsage(normalUsage) && (
-                <span className="text-xs opacity-60 shrink-0">({formatUsage(normalUsage)})</span>
-              )}
-            </button>
-          </TooltipTrigger>
-          {normalDisabled ? (
-            <TooltipContent>
-              Has alcanzado el límite de generaciones normales para este mes
-            </TooltipContent>
-          ) : (
-            <TooltipContent>Normal — {normalModelName}</TooltipContent>
-          )}
-        </Tooltip>
-      )}
-
-      {hasHq && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => !hqDisabled && onSelect("hq")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                hqDisabled
-                  ? "text-muted-foreground/50 cursor-not-allowed"
-                  : selectedQuality === "hq"
-                    ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-              }`}
-              disabled={disabled || hqDisabled}
-            >
-              <Sparkles className="w-4 h-4 shrink-0" />
-              <span className="truncate max-w-[120px]">{hqLabel}</span>
-              {showUsage && formatUsage(hqUsage) && (
-                <span className="text-xs opacity-60 shrink-0">({formatUsage(hqUsage)})</span>
-              )}
-            </button>
-          </TooltipTrigger>
-          {hqDisabled ? (
-            <TooltipContent>
-              Has alcanzado el límite de generaciones HQ para este mes
-            </TooltipContent>
-          ) : (
-            <TooltipContent>HQ — {hqModelName}</TooltipContent>
-          )}
-        </Tooltip>
-      )}
+    <div className="relative">
+      <select
+        value={effectiveSelected ?? ""}
+        onChange={(e) => onSelect(Number(e.target.value))}
+        disabled={disabled}
+        className="appearance-none flex items-center gap-1.5 px-3 py-1.5 pr-8 rounded-lg text-sm font-medium bg-muted text-foreground border-0 cursor-pointer hover:bg-muted/80 transition-colors"
+      >
+        {models.map((model) => {
+          const label = model.label
+            ? `${model.label} — ${model.display_name}`
+            : model.display_name;
+          return (
+            <option key={model.id} value={model.id}>
+              {label}
+            </option>
+          );
+        })}
+      </select>
+      <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
     </div>
   );
 }
 
-// Badge for displaying quality in gallery/lists
-export function QualityBadge({ quality }: { quality: QualityTier }) {
+// Badge for displaying model label in gallery/lists
+export function QualityBadge({ quality, label }: { quality?: QualityTier | string; label?: string }) {
+  // Show label if provided
+  if (label && label !== "Normal") {
+    return (
+      <Badge className="bg-gradient-to-r from-amber-500 to-orange-500 text-white border-0 text-[10px] px-1.5 py-0">
+        <Sparkles className="w-3 h-3 mr-0.5" />
+        {label}
+      </Badge>
+    );
+  }
+  // Legacy support
   if (quality === "hq") {
     return (
       <Badge className="bg-gradient-to-r from-amber-500 to-orange-500 text-white border-0 text-[10px] px-1.5 py-0">
@@ -129,60 +142,84 @@ export function QualityBadge({ quality }: { quality: QualityTier }) {
       </Badge>
     );
   }
-  return null; // Don't show badge for normal quality
+  return null;
 }
 
-// Compact inline selector for tight spaces
+// Legacy exports for backward compatibility during transition
+export function QualitySelector({
+  selectedQuality,
+  onSelect,
+  disabled,
+  normalModelName,
+  hqModelName,
+}: {
+  selectedQuality: QualityTier;
+  onSelect: (quality: QualityTier) => void;
+  disabled?: boolean;
+  normalUsage?: { used: number; limit: number };
+  hqUsage?: { used: number; limit: number };
+  showUsage?: boolean;
+  normalModelName?: string | null;
+  hqModelName?: string | null;
+}) {
+  const models: ProjectModel[] = [];
+  if (normalModelName) {
+    models.push({
+      id: -1,
+      model_id: "",
+      display_name: normalModelName,
+      label: "Normal",
+      sort_order: 0,
+      is_default: true,
+      supports_google_search: false,
+      api_backend: null,
+    });
+  }
+  if (hqModelName) {
+    models.push({
+      id: -2,
+      model_id: "",
+      display_name: hqModelName,
+      label: "HQ",
+      sort_order: 1,
+      is_default: false,
+      supports_google_search: false,
+      api_backend: null,
+    });
+  }
+
+  const selectedId = selectedQuality === "hq" ? -2 : -1;
+
+  return (
+    <ModelSelector
+      models={models}
+      selectedModelId={selectedId}
+      onSelect={(id) => onSelect(id === -2 ? "hq" : "normal")}
+      disabled={disabled}
+    />
+  );
+}
+
 export function QualitySelectorCompact({
   selectedQuality,
   onSelect,
   disabled,
   normalModelName,
   hqModelName,
-}: Pick<QualitySelectorProps, "selectedQuality" | "onSelect" | "disabled" | "normalModelName" | "hqModelName">) {
-  const hasNormal = !!normalModelName;
-  const hasHq = !!hqModelName;
-
-  if (!hasNormal && !hasHq) return null;
-
+}: {
+  selectedQuality: QualityTier;
+  onSelect: (quality: QualityTier) => void;
+  disabled?: boolean;
+  normalModelName?: string | null;
+  hqModelName?: string | null;
+}) {
   return (
-    <div className="flex items-center gap-0.5 p-0.5 bg-muted rounded-md">
-      {hasNormal && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => onSelect("normal")}
-              className={`px-2 py-1 rounded text-xs font-medium transition-colors truncate max-w-[100px] ${
-                selectedQuality === "normal"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              disabled={disabled}
-            >
-              {normalModelName}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>{normalModelName}</TooltipContent>
-        </Tooltip>
-      )}
-      {hasHq && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => onSelect("hq")}
-              className={`px-2 py-1 rounded text-xs font-medium transition-colors truncate max-w-[100px] ${
-                selectedQuality === "hq"
-                  ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              disabled={disabled}
-            >
-              {hqModelName}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>{hqModelName}</TooltipContent>
-        </Tooltip>
-      )}
-    </div>
+    <QualitySelector
+      selectedQuality={selectedQuality}
+      onSelect={onSelect}
+      disabled={disabled}
+      normalModelName={normalModelName}
+      hqModelName={hqModelName}
+    />
   );
 }

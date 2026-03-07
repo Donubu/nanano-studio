@@ -5,7 +5,7 @@ import {
   X, Loader2, ExternalLink, Image as ImageIcon, Video, Calendar, FileType,
   RatioIcon, Ruler, Download, HardDrive, Volume2, VolumeX, Clock,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Tag, Plus, Music, User, Users,
-  Sparkles, Copy, Check, Star
+  Copy, Check, Star
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ export interface Generation {
   conversation_title: string;
   content: string | null;
   quality_tier: "normal" | "hq" | null;
+  model_name: string | null;
   generation_seed: number | null;
   is_favorite: boolean;
   image_url: string | null;
@@ -678,10 +679,9 @@ export function GenerationModal({
                 <Calendar className="h-4 w-4" />
                 <span>{formatDateTimeLocal(selectedItem.created_at)}</span>
               </div>
-              {selectedItem.quality_tier === "hq" && (
-                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-500">
-                  <Sparkles className="h-4 w-4" />
-                  <span className="font-medium">Alta Calidad</span>
+              {selectedItem.model_name && (
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                  <span className="text-xs font-medium">{selectedItem.model_name}</span>
                 </div>
               )}
               {selectedItem.generation_seed && (
