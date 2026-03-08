@@ -334,6 +334,10 @@ export function ChatInterface() {
     const [selectedConversationImages, setSelectedConversationImages] = useState<string[]>([]);
     // Selected assets for Kling (images + videos from conversation)
     const [selectedKlingAssets, setSelectedKlingAssets] = useState<Array<{ url: string; type: "image" | "video" }>>([]);
+    // Track Kling full asset list (from MessageInput) for dynamic limits and voice bindings
+    const [klingAssetList, setKlingAssetList] = useState<Array<{ assetId: string; type: string; label: string }>>([]);
+    // Kling per-asset voice bindings: assetId → voice audio
+    const [klingVoiceBindings, setKlingVoiceBindings] = useState<Record<string, { dataUrl: string; name: string; duration: number }>>({});
 
     // Project system instruction
     const [useProjectSystemInstruction, setUseProjectSystemInstruction] = useState(true);
@@ -415,6 +419,12 @@ export function ChatInterface() {
     const activeVideoModel = getSelectedModel(videoTypeConfig);
     const isXaiVideoProvider = activeVideoModel?.api_backend === "xai";
     const isKlingVideoProvider = activeVideoModel?.api_backend === "kling" || activeVideoModel?.model_id?.includes("kling-v3-omni");
+
+    // Kling dynamic limits: max 7 images without video input, max 4 with video input, max 1 video
+    const klingHasVideoInput = klingAssetList.some(a => a.type === "video") || selectedKlingAssets.some(a => a.type === "video");
+    const klingMaxAssets = klingHasVideoInput ? 5 : 7; // 4 images + 1 video = 5 total, or 7 images only
+    // Image assets for voice binding UI
+    const klingImageAssets = klingAssetList.filter(a => a.type === "image");
 
     // UI mode helpers based on conversation generation_type
     // Default to text if generation_type is null/undefined (for legacy conversations)
@@ -2404,7 +2414,8 @@ export function ChatInterface() {
                         duration: videoDuration,
                         resolution: videoResolution,
                         aspectRatio: videoAspectRatio,
-                        audioEnabled: videoAudioEnabled,
+                        // Kling: force audio off when video input is present (not supported)
+                        audioEnabled: (isKlingVideoProvider && assetFiles?.some(f => f.type === "video")) ? false : videoAudioEnabled,
                         negativePrompt: videoNegativePrompt || undefined,
                         seed: seed,
                     },
@@ -2415,6 +2426,11 @@ export function ChatInterface() {
                     },
                     referenceImages: videoReferenceImages.length > 0 ? videoReferenceImages : undefined,
                     ...(inlineAssets && inlineAssets.length > 0 && { inlineAssets }),
+                    ...(Object.keys(klingVoiceBindings).length > 0 && {
+                        voiceBindings: Object.fromEntries(
+                            Object.entries(klingVoiceBindings).map(([assetId, v]) => [assetId, v.dataUrl])
+                        ),
+                    }),
                 }),
             });
 
@@ -4227,6 +4243,8 @@ export function ChatInterface() {
                                     disabled={isSending || !currentModelInfo?.id}
                                     supportsFiles={isTextConversation || isImageConversation || (isVideoConversation && generationMode === "image") || (isVideoConversation && generationMode === "video" && isKlingVideoProvider)}
                                     assetMode={isVideoConversation && generationMode === "video" && isKlingVideoProvider}
+                                    maxFilesOverride={isVideoConversation && generationMode === "video" && isKlingVideoProvider ? klingMaxAssets : undefined}
+                                    onAssetsChange={isVideoConversation && generationMode === "video" && isKlingVideoProvider ? setKlingAssetList : undefined}
                                     preselectedImages={
                                         isVideoConversation && generationMode === "video" && isKlingVideoProvider
                                             ? selectedKlingAssets.map((a, idx) => ({ url: a.url, assetLabel: `asset${idx + 1}` }))
@@ -4734,7 +4752,11 @@ export function ChatInterface() {
                                     negativePrompt={videoNegativePrompt}
                                     disabled={isSending}
                                     hasReferenceImages={videoReferenceImages.length > 0}
+                                    hasVideoInput={isKlingVideoProvider && klingHasVideoInput}
                                     provider={isKlingVideoProvider ? "kling" : isXaiVideoProvider ? "xai" : "google"}
+                                    imageAssets={isKlingVideoProvider ? klingImageAssets.map(a => ({ assetId: a.assetId, type: a.type as "image" | "video", label: a.label })) : undefined}
+                                    voiceBindings={isKlingVideoProvider ? klingVoiceBindings : undefined}
+                                    onVoiceBindingsChange={isKlingVideoProvider ? setKlingVoiceBindings : undefined}
                                     onChange={(settings) => {
                                         if (settings.duration !== undefined) {
                                             setVideoDuration(settings.duration);

@@ -31,6 +31,8 @@ interface MessageInputProps {
   onInitialValueUsed?: () => void;
   showNoContextOption?: boolean;
   assetMode?: boolean; // When true, files get auto-incremental asset IDs and @ mentions are enabled
+  maxFilesOverride?: number; // Override max files limit (e.g., dynamic Kling limits)
+  onAssetsChange?: (assets: { assetId: string; type: string; label: string }[]) => void; // Notify parent of full asset list
 }
 
 const MAX_FILES = 5;
@@ -83,6 +85,8 @@ export function MessageInput({
   onInitialValueUsed,
   showNoContextOption = false,
   assetMode = false,
+  maxFilesOverride,
+  onAssetsChange,
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [noContext, setNoContext] = useState(false);
@@ -121,7 +125,31 @@ export function MessageInput({
     }
   }, [attachedFiles.length, assetMode, preselectedImages]);
 
-  const maxFiles = assetMode ? MAX_FILES_ASSET_MODE : MAX_FILES;
+  const maxFiles = maxFilesOverride ?? (assetMode ? MAX_FILES_ASSET_MODE : MAX_FILES);
+
+  // Notify parent about full asset list (for voice bindings, limits, etc.)
+  const prevAssetKeyRef = useRef("");
+  useEffect(() => {
+    if (!assetMode || !onAssetsChange) return;
+    const assets: { assetId: string; type: string; label: string }[] = [];
+    // Preselected assets from conversation
+    preselectedImages.forEach((img) => {
+      if (img.assetLabel) {
+        const isVideo = img.url.includes("/video") || img.url.endsWith(".mp4");
+        assets.push({ assetId: img.assetLabel, type: isVideo ? "video" : "image", label: isVideo ? "video del chat" : "imagen del chat" });
+      }
+    });
+    // Attached files from disk
+    attachedFiles.filter(f => f.assetId).forEach(f => {
+      assets.push({ assetId: f.assetId!, type: f.type, label: f.name });
+    });
+    // Only update if list actually changed
+    const key = assets.map(a => `${a.assetId}:${a.type}`).join(",");
+    if (prevAssetKeyRef.current !== key) {
+      prevAssetKeyRef.current = key;
+      onAssetsChange(assets);
+    }
+  }, [assetMode, attachedFiles, preselectedImages, onAssetsChange]);
 
   // Get list of assets for @ mention (preselected from conversation + attached from disk)
   const assetList = useMemo(() => {
@@ -210,6 +238,15 @@ export function MessageInput({
         };
 
         if (assetMode) {
+          // Enforce max 1 video in asset mode
+          if (fileType === "video") {
+            const existingVideos = attachedFiles.filter(f => f.type === "video").length;
+            const preselectedVideos = preselectedImages.filter(img => img.url.includes("/video") || img.url.endsWith(".mp4")).length;
+            if (existingVideos + preselectedVideos >= 1) {
+              alert("Kling soporta maximo 1 video como input");
+              continue;
+            }
+          }
           newFile.assetId = `asset${nextAssetId.current}`;
           nextAssetId.current++;
         }
@@ -549,9 +586,12 @@ export function MessageInput({
         )}
 
         {/* Asset mode hint */}
-        {assetMode && attachedFiles.length > 0 && (
+        {assetMode && (attachedFiles.length > 0 || preselectedImages.length > 0) && (
           <div className="text-xs text-muted-foreground bg-cyan-950/30 border border-cyan-800/30 rounded-md px-3 py-1.5">
             Usa <span className="font-mono text-cyan-400">@</span> en el prompt para referenciar assets. Ej: <span className="font-mono text-cyan-400">@asset1</span> caminando hacia <span className="font-mono text-cyan-400">@asset2</span>
+            {attachedFiles.some(f => f.type === "video") || preselectedImages.some(img => img.url.includes("/video") || img.url.endsWith(".mp4")) ? (
+              <span className="block mt-1 text-amber-400/80">Max 4 imagenes + 1 video. Audio deshabilitado con video input.</span>
+            ) : null}
           </div>
         )}
 

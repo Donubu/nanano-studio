@@ -91,6 +91,7 @@ export async function POST(
       quality_tier,
       selected_model_id,
       inlineAssets,
+      voiceBindings,
     } = body as {
       content: string;
       firstFrameImage?: string;
@@ -112,6 +113,7 @@ export async function POST(
       quality_tier?: QualityTier;
       selected_model_id?: number;
       inlineAssets?: InlineAsset[];
+      voiceBindings?: Record<string, string>; // assetId → base64 audio data URL for per-asset voice cloning
     };
 
     const effectiveQualityTier: QualityTier = quality_tier === "hq" ? "hq" : "normal";
@@ -310,6 +312,29 @@ export async function POST(
               return;
             }
 
+            // Upload per-asset voice bindings to S3 if provided
+            const voiceBindingUrls: Record<string, string> = {};
+            if (voiceBindings && Object.keys(voiceBindings).length > 0) {
+              for (const [assetId, audioData] of Object.entries(voiceBindings)) {
+                if (audioData.startsWith("http")) {
+                  voiceBindingUrls[assetId] = audioData;
+                  continue;
+                }
+                const base64Match = audioData.match(/^data:([^;]+);base64,(.+)$/);
+                if (!base64Match) continue;
+                const [, mimeType, base64Data] = base64Match;
+                const ext = mimeType.split("/")[1] || "mp3";
+                const fileName = generateFileName(id, ext);
+                const buffer = Buffer.from(base64Data, "base64");
+                const result = await uploadToS3(buffer, fileName, mimeType, "voice");
+                voiceBindingUrls[assetId] = result.url;
+              }
+              if (Object.keys(voiceBindingUrls).length > 0) {
+                klingConfig.voiceBindings = voiceBindingUrls;
+                console.log(`[Kling] ${Object.keys(voiceBindingUrls).length} voice binding(s) uploaded`);
+              }
+            }
+
             // Kling requires public URLs for images - upload base64 to S3 if needed
             const klingImages: KlingImageInput[] = [];
             const refImages = referenceImages || videoInputs?.referenceImages;
@@ -331,6 +356,30 @@ export async function POST(
 
             // Handle inline assets (from @ mention system)
             if (inlineAssets && inlineAssets.length > 0) {
+              // Validate Kling asset limits: max 1 video, max 7 images without video, max 4 images with video
+              const videoAssets = inlineAssets.filter(a => a.type === "video");
+              const imageAssets = inlineAssets.filter(a => a.type === "image");
+              if (videoAssets.length > 1) {
+                sendEvent({ type: "error", message: "Kling soporta maximo 1 video como input" });
+                clearInterval(heartbeat);
+                controllerClosed = true;
+                controller.close();
+                return;
+              }
+              const maxImages = videoAssets.length > 0 ? 4 : 7;
+              if (imageAssets.length > maxImages) {
+                sendEvent({ type: "error", message: `Kling soporta maximo ${maxImages} imagenes${videoAssets.length > 0 ? " cuando se incluye un video" : ""}` });
+                clearInterval(heartbeat);
+                controllerClosed = true;
+                controller.close();
+                return;
+              }
+              // Kling: audio not supported with video input
+              if (videoAssets.length > 0 && klingConfig.generateAudio) {
+                console.log("[Kling] Forcing audio off - video input present");
+                klingConfig.generateAudio = false;
+              }
+
               sendEvent({
                 type: "progress",
                 status: "processing",

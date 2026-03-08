@@ -33,6 +33,7 @@ export interface KlingVideoConfig {
   negativePrompt?: string;
   cfgScale?: number; // 0-1
   generateAudio?: boolean;
+  voiceBindings?: Record<string, string>; // assetId → URL of voice reference audio (5-30s) per character
 }
 
 export interface KlingImageInput {
@@ -107,6 +108,18 @@ export async function generateKlingVideo(
   }
   // sound: "on" or "off" (not generate_audio)
   requestBody.sound = config.generateAudio ? "on" : "off";
+
+  // Per-asset voice bindings for voice cloning
+  if (config.voiceBindings && Object.keys(config.voiceBindings).length > 0) {
+    // Kling expects voice bindings as part of image_list entries or as a separate voice_list
+    // Map assetId (e.g., "asset1") to positional index for the image_list
+    const voiceList = Object.entries(config.voiceBindings).map(([assetId, url]) => {
+      const idx = parseInt(assetId.replace("asset", ""), 10) - 1; // 0-based index
+      return { image_index: idx, voice_url: url };
+    });
+    requestBody.voice_list = voiceList;
+    console.log(`[Kling Video] ${voiceList.length} voice binding(s) for assets: ${Object.keys(config.voiceBindings).join(", ")}`);
+  }
 
   // Images: first_frame, end_frame, or reference images
   // Format: array of { image_url, type? } objects

@@ -29,7 +29,6 @@ interface ActiveJob {
   model: string;
   conversationId: string;
   generationType: string;
-  qualityTier: string;
   user: string;
   worker: string;
   startedAt: number | null;
@@ -39,7 +38,6 @@ interface CompletedJob {
   id: string;
   model: string;
   generationType: string;
-  qualityTier: string;
   user: string;
   project: string;
   completedAt: number | null;
@@ -50,7 +48,6 @@ interface FailedJob {
   id: string;
   model: string;
   generationType: string;
-  qualityTier: string;
   user: string;
   error: string;
   failedAt: number | null;
@@ -286,7 +283,6 @@ export default function WorkersPage() {
                   <TableHead>Worker</TableHead>
                   <TableHead>Modelo</TableHead>
                   <TableHead>Tipo</TableHead>
-                  <TableHead>Calidad</TableHead>
                   <TableHead>Usuario</TableHead>
                   <TableHead>Tiempo</TableHead>
                 </TableRow>
@@ -306,17 +302,6 @@ export default function WorkersPage() {
                       <Badge variant="outline">{job.model}</Badge>
                     </TableCell>
                     <TableCell>{job.generationType}</TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          job.qualityTier === "hq" &&
-                            "border-amber-500/50 text-amber-400"
-                        )}
-                      >
-                        {job.qualityTier}
-                      </Badge>
-                    </TableCell>
                     <TableCell>{job.user}</TableCell>
                     <TableCell className="font-mono text-xs">
                       {formatElapsed(job.startedAt)}
@@ -349,7 +334,6 @@ export default function WorkersPage() {
                   <TableHead>Job ID</TableHead>
                   <TableHead>Modelo</TableHead>
                   <TableHead>Tipo</TableHead>
-                  <TableHead>Calidad</TableHead>
                   <TableHead>Usuario</TableHead>
                   <TableHead>Proyecto</TableHead>
                   <TableHead>Duracion</TableHead>
@@ -366,17 +350,6 @@ export default function WorkersPage() {
                       <Badge variant="outline">{job.model}</Badge>
                     </TableCell>
                     <TableCell>{job.generationType}</TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          job.qualityTier === "hq" &&
-                            "border-amber-500/50 text-amber-400"
-                        )}
-                      >
-                        {job.qualityTier}
-                      </Badge>
-                    </TableCell>
                     <TableCell>{job.user}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {job.project}
