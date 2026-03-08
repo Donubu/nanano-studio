@@ -25,6 +25,9 @@ interface ModelRow extends RowDataPacket {
   cost_video_per_second: number;
   cost_audio_per_minute: number;
   api_backend: string | null;
+  is_obsolete: boolean;
+  replaced_by_model_id: number | null;
+  project_count: number;
   created_at: Date;
 }
 
@@ -40,11 +43,14 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const activeOnly = searchParams.get("active") !== "false";
 
-    let query = "SELECT * FROM models";
+    let query = `
+      SELECT m.*,
+        (SELECT COUNT(*) FROM project_generation_models pgm WHERE pgm.model_id = m.id) as project_count
+      FROM models m`;
     if (activeOnly) {
-      query += " WHERE is_active = TRUE";
+      query += " WHERE m.is_active = TRUE";
     }
-    query += " ORDER BY display_name ASC";
+    query += " ORDER BY m.is_obsolete ASC, m.display_name ASC";
 
     const [rows] = await pool.execute<ModelRow[]>(query);
 

@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, Loader2, Image, AudioLines, Video, DollarSign, Sparkles, Clapperboard, Mic } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Image, AudioLines, Video, DollarSign, Sparkles, Clapperboard, Mic, Archive, FolderKanban } from "lucide-react";
 
 interface Model {
   id: number;
@@ -28,6 +28,8 @@ interface Model {
   display_name: string;
   description: string | null;
   is_active: boolean;
+  is_obsolete: boolean;
+  replaced_by_model_id: number | null;
   supports_images: boolean;
   supports_audio: boolean;
   supports_video: boolean;
@@ -43,6 +45,7 @@ interface Model {
   cost_image_4k: number;
   cost_video_per_second: number;
   cost_audio_per_minute: number;
+  project_count: number;
   created_at: string;
 }
 
@@ -74,6 +77,9 @@ export default function ModelsPage() {
     cost_video_per_second: 0,
     cost_audio_per_minute: 0,
   });
+  const [isObsoleteDialogOpen, setIsObsoleteDialogOpen] = useState(false);
+  const [obsoletingModel, setObsoletingModel] = useState<Model | null>(null);
+  const [replacementModelId, setReplacementModelId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -212,6 +218,44 @@ export default function ModelsPage() {
     }
   };
 
+  const openObsoleteDialog = (model: Model) => {
+    setObsoletingModel(model);
+    setReplacementModelId(null);
+    setError("");
+    setIsObsoleteDialogOpen(true);
+  };
+
+  const handleMarkObsolete = async () => {
+    if (!obsoletingModel) return;
+    setSaving(true);
+    setError("");
+
+    try {
+      const res = await fetch(`/api/models/${obsoletingModel.id}/obsolete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          replacement_model_id: replacementModelId,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Error al marcar como obsoleto");
+        return;
+      }
+
+      setIsObsoleteDialogOpen(false);
+      fetchModels();
+    } catch (err) {
+      console.error("Error:", err);
+      setError("Error de conexión");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const toggleActive = async (model: Model) => {
     try {
       await fetch(`/api/models/${model.id}`, {
@@ -256,6 +300,7 @@ export default function ModelsPage() {
               <TableHead className="text-muted-foreground">Model ID</TableHead>
               <TableHead className="text-muted-foreground">Capacidades</TableHead>
               <TableHead className="text-muted-foreground">Max Tokens</TableHead>
+              <TableHead className="text-muted-foreground text-center">Proyectos</TableHead>
               <TableHead className="text-muted-foreground">Estado</TableHead>
               <TableHead className="w-[100px] text-muted-foreground">Acciones</TableHead>
             </TableRow>
@@ -263,19 +308,29 @@ export default function ModelsPage() {
           <TableBody>
             {models.length === 0 ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                   No hay modelos registrados
                 </TableCell>
               </TableRow>
             ) : (
               models.map((model) => (
-                <TableRow key={model.id} className="border-border/50 hover:bg-accent/50">
+                <TableRow key={model.id} className={`border-border/50 hover:bg-accent/50 ${model.is_obsolete ? "opacity-50" : ""}`}>
                   <TableCell>
                     <div>
-                      <div className="font-medium">{model.display_name}</div>
+                      <div className="font-medium flex items-center gap-2">
+                        {model.display_name}
+                        {!!model.is_obsolete && (
+                          <Badge className="bg-orange-500/20 text-orange-400 text-[10px]">Obsoleto</Badge>
+                        )}
+                      </div>
                       {model.description && (
                         <div className="text-xs text-muted-foreground truncate max-w-[200px]">
                           {model.description}
+                        </div>
+                      )}
+                      {!!model.is_obsolete && model.replaced_by_model_id && (
+                        <div className="text-xs text-orange-400/70">
+                          Reemplazado por: {models.find(m => m.id === model.replaced_by_model_id)?.display_name || `ID ${model.replaced_by_model_id}`}
                         </div>
                       )}
                     </div>
@@ -323,10 +378,26 @@ export default function ModelsPage() {
                   <TableCell className="text-muted-foreground">
                     {model.max_tokens.toLocaleString()}
                   </TableCell>
+                  <TableCell className="text-center">
+                    {model.project_count > 0 ? (
+                      <span className="inline-flex items-center gap-1 text-sm">
+                        <FolderKanban className="h-3 w-3 text-muted-foreground" />
+                        {model.project_count}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground/50">—</span>
+                    )}
+                  </TableCell>
                   <TableCell>
-                    <button onClick={() => toggleActive(model)}>
-                      <Badge className={model.is_active ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}>
-                        {model.is_active ? "Activo" : "Inactivo"}
+                    <button onClick={() => toggleActive(model)} disabled={!!model.is_obsolete}>
+                      <Badge className={
+                        model.is_obsolete
+                          ? "bg-orange-500/20 text-orange-400"
+                          : model.is_active
+                            ? "bg-green-500/20 text-green-400"
+                            : "bg-red-500/20 text-red-400"
+                      }>
+                        {model.is_obsolete ? "Obsoleto" : model.is_active ? "Activo" : "Inactivo"}
                       </Badge>
                     </button>
                   </TableCell>
@@ -340,6 +411,17 @@ export default function ModelsPage() {
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
+                      {!model.is_obsolete && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 hover:bg-orange-500/10"
+                          onClick={() => openObsoleteDialog(model)}
+                          title="Marcar como obsoleto"
+                        >
+                          <Archive className="h-4 w-4 text-orange-400" />
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon"
@@ -653,6 +735,68 @@ export default function ModelsPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog para marcar como obsoleto */}
+      <Dialog open={isObsoleteDialogOpen} onOpenChange={setIsObsoleteDialogOpen}>
+        <DialogContent className="bg-card border-border/50">
+          <DialogHeader>
+            <DialogTitle>Marcar como Obsoleto</DialogTitle>
+            <DialogDescription>
+              Marcar <strong className="text-foreground">{obsoletingModel?.display_name}</strong> como obsoleto.
+              {obsoletingModel && obsoletingModel.project_count > 0 && (
+                <span className="block mt-2 text-orange-400">
+                  Este modelo está asociado a {obsoletingModel.project_count} proyecto{obsoletingModel.project_count !== 1 ? "s" : ""}. Debes seleccionar un modelo de reemplazo.
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {error && (
+              <div className="bg-red-500/10 text-red-400 p-3 rounded-lg text-sm border border-red-500/20">
+                {error}
+              </div>
+            )}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Modelo de reemplazo {obsoletingModel && obsoletingModel.project_count > 0 ? "*" : "(opcional)"}
+              </label>
+              <select
+                value={replacementModelId ?? ""}
+                onChange={(e) => setReplacementModelId(e.target.value ? Number(e.target.value) : null)}
+                className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="">Sin reemplazo</option>
+                {models
+                  .filter(m => m.id !== obsoletingModel?.id && !m.is_obsolete && m.is_active)
+                  .map(m => (
+                    <option key={m.id} value={m.id}>{m.display_name}</option>
+                  ))
+                }
+              </select>
+              <p className="text-xs text-muted-foreground">
+                El modelo de reemplazo sustituirá al obsoleto en todos los proyectos donde esté configurado.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsObsoleteDialogOpen(false)}
+              className="border-border/50"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleMarkObsolete}
+              disabled={saving || (obsoletingModel != null && obsoletingModel.project_count > 0 && !replacementModelId)}
+              className="bg-orange-500 hover:bg-orange-600"
+            >
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Marcar Obsoleto
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

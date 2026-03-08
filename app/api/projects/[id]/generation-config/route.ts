@@ -189,13 +189,16 @@ export async function PUT(
       if (!model_id) {
         return NextResponse.json({ error: "model_id requerido" }, { status: 400 });
       }
-      // Verify model exists and is active
+      // Verify model exists, is active, and not obsolete
       const [model] = await pool.execute<RowDataPacket[]>(
-        "SELECT id FROM models WHERE id = ? AND is_active = 1",
+        "SELECT id, is_obsolete FROM models WHERE id = ? AND is_active = 1",
         [model_id]
       );
       if (model.length === 0) {
         return NextResponse.json({ error: "Modelo no encontrado o inactivo" }, { status: 400 });
+      }
+      if (model[0].is_obsolete) {
+        return NextResponse.json({ error: "No se puede agregar un modelo obsoleto a un proyecto" }, { status: 400 });
       }
 
       // Get next sort_order if not provided
