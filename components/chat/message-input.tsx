@@ -1,21 +1,23 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { Send, Paperclip, X, Loader2, FileText, Music, Image as ImageIcon } from "lucide-react";
+import { Send, Paperclip, X, Loader2, FileText, Music, Image as ImageIcon, Film } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface AttachedFile {
   dataUrl: string;
   mimeType: string;
   name: string;
-  type: "image" | "document" | "audio";
+  type: "image" | "document" | "audio" | "video";
   size: number;
+  assetId?: string; // e.g., "asset1", "asset2" - only set in asset mode
 }
 
 export interface PreselectedImage {
   url: string;
   dataUrl?: string; // Will be populated when sent
+  assetLabel?: string; // e.g., "asset1" - shown in asset mode
 }
 
 interface MessageInputProps {
@@ -28,9 +30,11 @@ interface MessageInputProps {
   initialValue?: string;
   onInitialValueUsed?: () => void;
   showNoContextOption?: boolean;
+  assetMode?: boolean; // When true, files get auto-incremental asset IDs and @ mentions are enabled
 }
 
 const MAX_FILES = 5;
+const MAX_FILES_ASSET_MODE = 10;
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
 // Tipos de archivo soportados
@@ -40,19 +44,26 @@ const SUPPORTED_TYPES = {
   audio: ["audio/mp3", "audio/mpeg", "audio/wav", "audio/ogg", "audio/webm"],
 };
 
-function getFileType(mimeType: string): "image" | "document" | "audio" | null {
+const SUPPORTED_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/webm"];
+
+function getFileType(mimeType: string, allowVideo?: boolean): "image" | "document" | "audio" | "video" | null {
   if (SUPPORTED_TYPES.image.includes(mimeType)) return "image";
   if (SUPPORTED_TYPES.document.includes(mimeType)) return "document";
   if (SUPPORTED_TYPES.audio.includes(mimeType)) return "audio";
+  if (allowVideo && SUPPORTED_VIDEO_TYPES.includes(mimeType)) return "video";
   return null;
 }
 
-function getAcceptString(): string {
-  return [
+function getAcceptString(allowVideo?: boolean): string {
+  const types = [
     ...SUPPORTED_TYPES.image,
     ...SUPPORTED_TYPES.document,
     ...SUPPORTED_TYPES.audio,
-  ].join(",");
+  ];
+  if (allowVideo) {
+    types.push(...SUPPORTED_VIDEO_TYPES);
+  }
+  return types.join(",");
 }
 
 function formatFileSize(bytes: number): string {
@@ -71,6 +82,7 @@ export function MessageInput({
   initialValue,
   onInitialValueUsed,
   showNoContextOption = false,
+  assetMode = false,
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [noContext, setNoContext] = useState(false);
@@ -87,14 +99,78 @@ export function MessageInput({
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mentionListRef = useRef<HTMLDivElement>(null);
+
+  // @ mention state
+  const [showMentionPopup, setShowMentionPopup] = useState(false);
+  const [mentionFilter, setMentionFilter] = useState("");
+  const [mentionStartPos, setMentionStartPos] = useState(-1);
+  const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
+
+  // Auto-incremental asset counter - starts after preselected assets
+  const nextAssetId = useRef(1);
+
+  // Update asset counter based on preselected assets count
+  useEffect(() => {
+    if (assetMode) {
+      const preselectedCount = preselectedImages.filter(img => img.assetLabel).length;
+      const attachedCount = attachedFiles.filter(f => f.assetId).length;
+      nextAssetId.current = preselectedCount + attachedCount + 1;
+    } else if (attachedFiles.length === 0) {
+      nextAssetId.current = 1;
+    }
+  }, [attachedFiles.length, assetMode, preselectedImages]);
+
+  const maxFiles = assetMode ? MAX_FILES_ASSET_MODE : MAX_FILES;
+
+  // Get list of assets for @ mention (preselected from conversation + attached from disk)
+  const assetList = useMemo(() => {
+    const assets: Array<{ id: string; name: string; type: string; mimeType: string }> = [];
+
+    // Add preselected images with asset labels (from conversation selection)
+    if (assetMode) {
+      preselectedImages.forEach((img) => {
+        if (img.assetLabel) {
+          const isVideo = img.url.includes("/video") || img.url.endsWith(".mp4");
+          assets.push({
+            id: img.assetLabel,
+            name: isVideo ? "video del chat" : "imagen del chat",
+            type: isVideo ? "video" : "image",
+            mimeType: isVideo ? "video/mp4" : "image/png",
+          });
+        }
+      });
+    }
+
+    // Add attached files with asset IDs
+    attachedFiles
+      .filter(f => f.assetId)
+      .forEach(f => {
+        assets.push({
+          id: f.assetId!,
+          name: f.name,
+          type: f.type,
+          mimeType: f.mimeType,
+        });
+      });
+
+    return assets;
+  }, [attachedFiles, assetMode, preselectedImages]);
+
+  // Filtered assets based on mention filter
+  const filteredAssets = useMemo(() => {
+    if (!mentionFilter) return assetList;
+    const lower = mentionFilter.toLowerCase();
+    return assetList.filter(a => a.id.toLowerCase().includes(lower));
+  }, [assetList, mentionFilter]);
 
   const handleFileSelect = useCallback(async (files: FileList | File[]) => {
     const fileArray = Array.from(files);
     const totalCurrentFiles = attachedFiles.length + preselectedImages.length;
-    const remainingSlots = MAX_FILES - totalCurrentFiles;
+    const remainingSlots = maxFiles - totalCurrentFiles;
 
     if (remainingSlots <= 0) {
-      alert(`Máximo ${MAX_FILES} archivos permitidos`);
+      alert(`Máximo ${maxFiles} archivos permitidos`);
       return;
     }
 
@@ -104,10 +180,11 @@ export function MessageInput({
     const newFiles: AttachedFile[] = [];
 
     for (const file of filesToProcess) {
-      const fileType = getFileType(file.type);
+      const fileType = getFileType(file.type, assetMode);
 
       if (!fileType) {
-        alert(`Tipo de archivo no soportado: ${file.name}\n\nFormatos permitidos:\n- Imágenes: JPG, PNG, GIF, WebP\n- Documentos: PDF\n- Audio: MP3, WAV, OGG, WebM`);
+        const videoNote = assetMode ? "\n- Videos: MP4, MOV, WebM" : "";
+        alert(`Tipo de archivo no soportado: ${file.name}\n\nFormatos permitidos:\n- Imágenes: JPG, PNG, GIF, WebP\n- Documentos: PDF\n- Audio: MP3, WAV, OGG, WebM${videoNote}`);
         continue;
       }
 
@@ -124,13 +201,20 @@ export function MessageInput({
           reader.readAsDataURL(file);
         });
 
-        newFiles.push({
+        const newFile: AttachedFile = {
           dataUrl,
           mimeType: file.type,
           name: file.name,
           type: fileType,
           size: file.size,
-        });
+        };
+
+        if (assetMode) {
+          newFile.assetId = `asset${nextAssetId.current}`;
+          nextAssetId.current++;
+        }
+
+        newFiles.push(newFile);
       } catch (error) {
         console.error("Error reading file:", error);
       }
@@ -138,7 +222,7 @@ export function MessageInput({
 
     setAttachedFiles((prev) => [...prev, ...newFiles]);
     setIsProcessing(false);
-  }, [attachedFiles.length, preselectedImages.length]);
+  }, [attachedFiles.length, preselectedImages.length, assetMode, maxFiles]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -177,6 +261,31 @@ export function MessageInput({
     [handleFileSelect]
   );
 
+  // Insert asset mention into message
+  const insertMention = useCallback((assetId: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea || mentionStartPos < 0) return;
+
+    const before = message.substring(0, mentionStartPos);
+    const after = message.substring(textarea.selectionStart);
+    const newMessage = `${before}@${assetId} ${after}`;
+    setMessage(newMessage);
+    setShowMentionPopup(false);
+    setMentionFilter("");
+    setMentionStartPos(-1);
+    setMentionSelectedIndex(0);
+
+    // Set cursor position after the inserted mention
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        const pos = before.length + assetId.length + 2; // +2 for @ and space
+        textareaRef.current.selectionStart = pos;
+        textareaRef.current.selectionEnd = pos;
+        textareaRef.current.focus();
+      }
+    });
+  }, [message, mentionStartPos]);
+
   const handleSend = useCallback(async () => {
     const hasContent = message.trim() || attachedFiles.length > 0 || preselectedImages.length > 0;
     if (!hasContent || disabled) return;
@@ -211,23 +320,95 @@ export function MessageInput({
     setMessage("");
     setAttachedFiles([]);
     setNoContext(false); // Reset after sending
+    nextAssetId.current = 1; // Reset asset counter
   }, [message, attachedFiles, preselectedImages, disabled, onSend, noContext]);
+
+  // Handle textarea changes for @ mention detection
+  const handleMessageChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    const cursorPos = e.target.selectionStart;
+    setMessage(value);
+
+    if (assetMode && assetList.length > 0) {
+      // Look backwards from cursor for @ trigger
+      const textBeforeCursor = value.substring(0, cursorPos);
+      const lastAtIndex = textBeforeCursor.lastIndexOf("@");
+
+      if (lastAtIndex >= 0) {
+        // Check that @ is at start of text or preceded by whitespace
+        const charBefore = lastAtIndex > 0 ? textBeforeCursor[lastAtIndex - 1] : " ";
+        if (charBefore === " " || charBefore === "\n" || lastAtIndex === 0) {
+          const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
+          // Only show popup if no space after @ (user is still typing the mention)
+          if (!textAfterAt.includes(" ") && !textAfterAt.includes("\n")) {
+            setMentionStartPos(lastAtIndex);
+            setMentionFilter(textAfterAt);
+            setShowMentionPopup(true);
+            setMentionSelectedIndex(0);
+            return;
+          }
+        }
+      }
+    }
+
+    setShowMentionPopup(false);
+  }, [assetMode, assetList.length]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Handle @ mention navigation
+      if (showMentionPopup && filteredAssets.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setMentionSelectedIndex(prev => Math.min(prev + 1, filteredAssets.length - 1));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setMentionSelectedIndex(prev => Math.max(prev - 1, 0));
+          return;
+        }
+        if (e.key === "Enter" || e.key === "Tab") {
+          e.preventDefault();
+          insertMention(filteredAssets[mentionSelectedIndex].id);
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setShowMentionPopup(false);
+          return;
+        }
+      }
+
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
       }
     },
-    [handleSend]
+    [handleSend, showMentionPopup, filteredAssets, mentionSelectedIndex, insertMention]
   );
 
   const removeFile = useCallback((index: number) => {
-    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
-  }, []);
+    setAttachedFiles((prev) => {
+      const newFiles = prev.filter((_, i) => i !== index);
+      // Re-assign asset IDs to keep them sequential (after preselected assets)
+      if (assetMode) {
+        const preselectedCount = preselectedImages.filter(img => img.assetLabel).length;
+        let counter = preselectedCount + 1;
+        newFiles.forEach(f => {
+          if (f.assetId) {
+            f.assetId = `asset${counter}`;
+            counter++;
+          }
+        });
+        nextAssetId.current = counter;
+      }
+      return newFiles;
+    });
+  }, [assetMode, preselectedImages]);
 
   const renderFilePreview = (file: AttachedFile, index: number) => {
+    const isVideo = file.type === "video";
     return (
       <div
         key={index}
@@ -242,6 +423,15 @@ export function MessageInput({
               className="w-full h-full object-cover"
             />
           </div>
+        ) : isVideo ? (
+          <div className="w-20 h-20 relative bg-black/20 flex items-center justify-center">
+            <video
+              src={file.dataUrl}
+              className="w-full h-full object-cover"
+              muted
+            />
+            <Film className="absolute h-6 w-6 text-white/80" />
+          </div>
         ) : (
           <div className="w-20 h-20 flex flex-col items-center justify-center p-2">
             {file.type === "document" ? (
@@ -252,6 +442,13 @@ export function MessageInput({
             <span className="text-[10px] text-muted-foreground mt-1 uppercase">
               {file.mimeType.split("/")[1]}
             </span>
+          </div>
+        )}
+
+        {/* Asset ID badge */}
+        {file.assetId && (
+          <div className="absolute top-0 left-0 right-0 bg-cyan-600/90 text-[9px] text-white text-center py-0.5 font-mono font-bold">
+            {file.assetId}
           </div>
         )}
 
@@ -288,39 +485,57 @@ export function MessageInput({
         {/* Preview de archivos adjuntos e imágenes preseleccionadas */}
         {(attachedFiles.length > 0 || preselectedImages.length > 0) && (
           <div className="flex flex-wrap gap-2">
-            {/* Imágenes preseleccionadas de la conversación */}
-            {preselectedImages.map((img, index) => (
-              <div
-                key={`preselected-${index}`}
-                className="relative group rounded-lg overflow-hidden border-2 border-primary/50 bg-card"
-              >
-                <div className="w-20 h-20 relative">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={img.url}
-                    alt="Preseleccionada"
-                    className="w-full h-full object-cover"
-                  />
+            {/* Imágenes/videos preseleccionadas de la conversación */}
+            {preselectedImages.map((img, index) => {
+              const isVideoUrl = img.url.includes("/video") || img.url.endsWith(".mp4");
+              return (
+                <div
+                  key={`preselected-${index}`}
+                  className={cn(
+                    "relative group rounded-lg overflow-hidden border-2 bg-card",
+                    img.assetLabel ? "border-cyan-500/50" : "border-primary/50"
+                  )}
+                >
+                  <div className="w-20 h-20 relative">
+                    {isVideoUrl ? (
+                      <div className="w-full h-full bg-black/20 flex items-center justify-center">
+                        <video src={img.url} className="w-full h-full object-cover" muted />
+                        <Film className="absolute h-6 w-6 text-white/80" />
+                      </div>
+                    ) : (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={img.url}
+                        alt={img.assetLabel || "Preseleccionada"}
+                        className="w-full h-full object-cover"
+                      />
+                    )}
+                  </div>
+                  {/* Badge indicador */}
+                  <div className={cn(
+                    "absolute top-0 left-0 right-0 text-[9px] text-center py-0.5 font-medium",
+                    img.assetLabel
+                      ? "bg-cyan-600/90 text-white font-mono font-bold"
+                      : "bg-primary/90 text-primary-foreground text-[8px]"
+                  )}>
+                    {img.assetLabel || "Del chat"}
+                  </div>
+                  {/* Overlay con botón eliminar */}
+                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <button
+                      onClick={() => onRemovePreselectedImage?.(img.url)}
+                      className="p-1 rounded-full bg-red-500/80 hover:bg-red-500 transition-colors"
+                    >
+                      <X className="h-3 w-3 text-white" />
+                    </button>
+                  </div>
                 </div>
-                {/* Badge indicador */}
-                <div className="absolute top-0 left-0 right-0 bg-primary/90 text-[8px] text-primary-foreground text-center py-0.5 font-medium">
-                  Del chat
-                </div>
-                {/* Overlay con botón eliminar */}
-                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                  <button
-                    onClick={() => onRemovePreselectedImage?.(img.url)}
-                    className="p-1 rounded-full bg-red-500/80 hover:bg-red-500 transition-colors"
-                  >
-                    <X className="h-3 w-3 text-white" />
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {/* Archivos adjuntos subidos */}
             {attachedFiles.map((file, index) => renderFilePreview(file, index))}
             {/* Botón agregar más */}
-            {(attachedFiles.length + preselectedImages.length) < MAX_FILES && supportsFiles && (
+            {(attachedFiles.length + preselectedImages.length) < maxFiles && supportsFiles && (
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled || isProcessing}
@@ -333,6 +548,13 @@ export function MessageInput({
           </div>
         )}
 
+        {/* Asset mode hint */}
+        {assetMode && attachedFiles.length > 0 && (
+          <div className="text-xs text-muted-foreground bg-cyan-950/30 border border-cyan-800/30 rounded-md px-3 py-1.5">
+            Usa <span className="font-mono text-cyan-400">@</span> en el prompt para referenciar assets. Ej: <span className="font-mono text-cyan-400">@asset1</span> caminando hacia <span className="font-mono text-cyan-400">@asset2</span>
+          </div>
+        )}
+
         {/* Input y botones */}
         <div className="flex gap-2 items-end">
           {/* Botón de adjuntar archivo */}
@@ -341,7 +563,7 @@ export function MessageInput({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept={getAcceptString()}
+                accept={getAcceptString(assetMode)}
                 onChange={handleFileInputChange}
                 className="hidden"
                 multiple
@@ -351,9 +573,9 @@ export function MessageInput({
                 variant="ghost"
                 size="icon"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={disabled || isProcessing || (attachedFiles.length + preselectedImages.length) >= MAX_FILES}
+                disabled={disabled || isProcessing || (attachedFiles.length + preselectedImages.length) >= maxFiles}
                 className="shrink-0 h-10 w-10"
-                title={`Adjuntar archivos (${attachedFiles.length + preselectedImages.length}/${MAX_FILES})`}
+                title={`Adjuntar archivos (${attachedFiles.length + preselectedImages.length}/${maxFiles})`}
               >
                 {isProcessing ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
@@ -364,14 +586,17 @@ export function MessageInput({
             </>
           )}
 
-          {/* Textarea */}
+          {/* Textarea with @ mention popup */}
           <div className="flex-1 relative">
             <textarea
               ref={textareaRef}
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={handleMessageChange}
               onKeyDown={handleKeyDown}
-              placeholder={placeholder}
+              placeholder={assetMode && attachedFiles.length > 0
+                ? "Escribe tu prompt... usa @ para referenciar assets"
+                : placeholder
+              }
               disabled={disabled}
               rows={3}
               className={cn(
@@ -390,7 +615,57 @@ export function MessageInput({
                 target.style.height = "auto";
                 target.style.height = `${Math.min(target.scrollHeight, 300)}px`;
               }}
+              onBlur={() => {
+                // Delay hiding to allow click on mention item
+                setTimeout(() => setShowMentionPopup(false), 200);
+              }}
             />
+
+            {/* @ Mention Popup */}
+            {showMentionPopup && filteredAssets.length > 0 && (
+              <div
+                ref={mentionListRef}
+                className="absolute bottom-full mb-1 left-0 w-64 bg-popover border border-border rounded-lg shadow-lg overflow-hidden z-50"
+              >
+                <div className="px-2 py-1.5 text-[10px] text-muted-foreground border-b border-border/50 font-medium uppercase tracking-wider">
+                  Assets disponibles
+                </div>
+                {filteredAssets.map((asset, idx) => (
+                  <button
+                    key={asset.id}
+                    className={cn(
+                      "w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors text-left",
+                      idx === mentionSelectedIndex
+                        ? "bg-accent text-accent-foreground"
+                        : "hover:bg-accent/50"
+                    )}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      insertMention(asset.id);
+                    }}
+                    onMouseEnter={() => setMentionSelectedIndex(idx)}
+                  >
+                    <span className={cn(
+                      "w-5 h-5 rounded flex items-center justify-center shrink-0",
+                      asset.type === "image" ? "bg-blue-500/20 text-blue-400" : "bg-purple-500/20 text-purple-400"
+                    )}>
+                      {asset.type === "image" ? (
+                        <ImageIcon className="h-3 w-3" />
+                      ) : (
+                        <Film className="h-3 w-3" />
+                      )}
+                    </span>
+                    <span className="font-mono text-cyan-400 font-medium">{asset.id}</span>
+                    <span className="text-muted-foreground text-xs truncate">
+                      {asset.name}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground/60 ml-auto uppercase">
+                      {asset.type}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Sin contexto checkbox */}
@@ -447,6 +722,7 @@ export function MessageInput({
           <div className="text-center text-sm text-primary flex items-center justify-center gap-2">
             <ImageIcon className="h-4 w-4" />
             <FileText className="h-4 w-4" />
+            {assetMode && <Film className="h-4 w-4" />}
             <Music className="h-4 w-4" />
             <span>Suelta los archivos aquí</span>
           </div>
@@ -455,7 +731,7 @@ export function MessageInput({
         {/* Contador de archivos */}
         {(attachedFiles.length > 0 || preselectedImages.length > 0) && (
           <div className="text-xs text-muted-foreground text-center">
-            {attachedFiles.length + preselectedImages.length} de {MAX_FILES} archivos adjuntos
+            {attachedFiles.length + preselectedImages.length} de {maxFiles} archivos adjuntos
             {preselectedImages.length > 0 && (
               <span className="text-primary ml-1">
                 ({preselectedImages.length} del chat)

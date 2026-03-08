@@ -357,8 +357,8 @@ export default function WorkersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.completedJobs.map((job) => (
-                  <TableRow key={job.id}>
+                {data.completedJobs.map((job, idx) => (
+                  <TableRow key={`${job.id}-${idx}`}>
                     <TableCell className="font-mono text-xs">
                       {job.id}
                     </TableCell>

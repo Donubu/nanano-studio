@@ -40,18 +40,22 @@ export function ImageSettings({
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const isGrok = modelId?.includes("grok-imagine-image") ?? false;
+  const isKling = modelId?.includes("kling-omni-image") ?? false;
 
   // Auto-correct unsupported values when switching models
   useEffect(() => {
-    if (isGrok && resolution === "4K") {
+    if ((isGrok || isKling) && resolution === "4K") {
       onChange({ resolution: "2K" });
     }
     if (isGrok && numberOfImages > 10) {
       onChange({ numberOfImages: 10 });
     }
-  }, [isGrok, resolution, numberOfImages, onChange]);
+    if (isKling && numberOfImages > 9) {
+      onChange({ numberOfImages: 9 });
+    }
+  }, [isGrok, isKling, resolution, numberOfImages, onChange]);
 
-  const aspectRatios: { value: ImagenAspectRatio; label: string; icon: "square" | "portrait" | "landscape" }[] = [
+  const defaultAspectRatios: { value: ImagenAspectRatio; label: string; icon: "square" | "portrait" | "landscape" }[] = [
     { value: "1:1", label: "1:1", icon: "square" },
     { value: "3:4", label: "3:4", icon: "portrait" },
     { value: "4:3", label: "4:3", icon: "landscape" },
@@ -59,20 +63,32 @@ export function ImageSettings({
     { value: "16:9", label: "16:9", icon: "landscape" },
   ];
 
+  const klingAspectRatios: { value: ImagenAspectRatio; label: string; icon: "square" | "portrait" | "landscape" }[] = [
+    { value: "1:1", label: "1:1", icon: "square" },
+    { value: "3:4", label: "3:4", icon: "portrait" },
+    { value: "4:3", label: "4:3", icon: "landscape" },
+    { value: "9:16", label: "9:16", icon: "portrait" },
+    { value: "16:9", label: "16:9", icon: "landscape" },
+    { value: "3:2" as ImagenAspectRatio, label: "3:2", icon: "landscape" },
+    { value: "2:3" as ImagenAspectRatio, label: "2:3", icon: "portrait" },
+  ];
+
+  const aspectRatios = isKling ? klingAspectRatios : defaultAspectRatios;
+
   const allResolutions: { value: ImagenResolution; label: string; description: string }[] = [
     { value: "1K", label: "1K", description: "1024px" },
     { value: "2K", label: "2K", description: "2048px" },
     { value: "4K", label: "4K", description: "4096px" },
   ];
 
-  // Grok only supports 1K and 2K
-  const resolutions = isGrok
+  // Grok and Kling only support 1K and 2K
+  const resolutions = (isGrok || isKling)
     ? allResolutions.filter(r => r.value !== "4K")
     : allResolutions;
 
-  // Grok supports up to 10 images, Imagen 4 up to 4
-  const maxImages = isGrok ? 10 : 4;
-  const imageCountOptions = isGrok ? [1, 2, 4, 6, 10] : [1, 2, 3, 4];
+  // Kling: up to 9, Grok: up to 10, Imagen 4: up to 4
+  const maxImages = isKling ? 9 : isGrok ? 10 : 4;
+  const imageCountOptions = isKling ? [1, 2, 4, 6, 9] : isGrok ? [1, 2, 4, 6, 10] : [1, 2, 3, 4];
 
   const getIconDimensions = (icon: "square" | "portrait" | "landscape") => {
     switch (icon) {
@@ -166,7 +182,7 @@ export function ImageSettings({
       </div>
 
       {/* Opciones avanzadas (only for models that support negative prompt) */}
-      {!isGrok && (
+      {!isGrok && !isKling && (
         <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
           <CollapsibleTrigger className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors w-full">
             <ChevronDown

@@ -4,7 +4,8 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { generateVideo, isVideoConfigured, VideoGenerationConfig, VideoInput, VideoGenerationProgress } from "@/lib/google-ai-video";
 import { generateXaiVideo, isXaiVideoConfigured, XaiVideoConfig, validateXaiVideoConfig } from "@/lib/xai-video";
-import { uploadVideoToS3, generateVideoFileName, isS3Configured } from "@/lib/s3";
+import { generateKlingVideo, isKlingConfigured, KlingVideoConfig, validateKlingVideoConfig, KlingImageInput } from "@/lib/kling-video";
+import { uploadVideoToS3, generateVideoFileName, isS3Configured, uploadToS3, generateFileName } from "@/lib/s3";
 import { generateConversationTitle, Labels } from "@/lib/google-ai";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
 
@@ -72,6 +73,14 @@ export async function POST(
       type: "ASSET" | "STYLE";
     };
 
+    // Inline asset type for Kling Omni <<<>>> references
+    type InlineAsset = {
+      assetId: string;
+      dataUrl: string;
+      mimeType: string;
+      type: "image" | "video";
+    };
+
     const {
       content,
       firstFrameImage,
@@ -81,6 +90,7 @@ export async function POST(
       videoInputs,
       quality_tier,
       selected_model_id,
+      inlineAssets,
     } = body as {
       content: string;
       firstFrameImage?: string;
@@ -101,6 +111,7 @@ export async function POST(
       };
       quality_tier?: QualityTier;
       selected_model_id?: number;
+      inlineAssets?: InlineAsset[];
     };
 
     const effectiveQualityTier: QualityTier = quality_tier === "hq" ? "hq" : "normal";
@@ -205,11 +216,20 @@ export async function POST(
             }
           }
 
-          // Determine if this is an xAI model
+          // Determine provider
           const isXaiProvider = effectiveBackend === 'xai';
+          const isKlingProvider = effectiveBackend === 'kling' || effectiveModelId.includes('kling-v3-omni');
 
           // Validate that the appropriate video API is configured
-          if (isXaiProvider) {
+          if (isKlingProvider) {
+            if (!isKlingConfigured()) {
+              sendEvent({ type: "error", message: "API de Kling no configurada (falta KLING_ACCESS_KEY / KLING_SECRET_KEY)" });
+              clearInterval(heartbeat);
+              controllerClosed = true;
+              controller.close();
+              return;
+            }
+          } else if (isXaiProvider) {
             if (!isXaiVideoConfigured()) {
               sendEvent({ type: "error", message: "API de xAI Video no configurada (falta XAI_API_KEY)" });
               clearInterval(heartbeat);
@@ -267,7 +287,94 @@ export async function POST(
           let generatedVideo;
           let generatedSeed: number;
 
-          if (isXaiProvider) {
+          if (isKlingProvider) {
+            // ===== Kling v3 Omni Video =====
+            const klingMode = (videoSettings?.resolution === "1080p" ? "pro" : "std") as KlingVideoConfig["mode"];
+            const klingConfig: KlingVideoConfig = {
+              duration: videoSettings?.duration || conversation.video_duration || 5,
+              aspectRatio: (videoSettings?.aspectRatio || conversation.video_aspect_ratio || "16:9") as KlingVideoConfig["aspectRatio"],
+              mode: klingMode,
+              negativePrompt: videoSettings?.negativePrompt || conversation.video_negative_prompt || undefined,
+              generateAudio: videoSettings?.audioEnabled !== undefined
+                ? videoSettings.audioEnabled
+                : (conversation.video_audio_enabled ?? false),
+            };
+
+            // Validate Kling-specific config
+            const validationError = validateKlingVideoConfig(klingConfig);
+            if (validationError) {
+              sendEvent({ type: "error", message: validationError });
+              clearInterval(heartbeat);
+              controllerClosed = true;
+              controller.close();
+              return;
+            }
+
+            // Kling requires public URLs for images - upload base64 to S3 if needed
+            const klingImages: KlingImageInput[] = [];
+            const refImages = referenceImages || videoInputs?.referenceImages;
+            const firstFrame = videoInputs?.firstFrame || firstFrameImage;
+            const lastFrame = videoInputs?.lastFrame || lastFrameImage;
+
+            const uploadBase64IfNeeded = async (data: string): Promise<string> => {
+              if (data.startsWith("http")) return data;
+              // Extract base64 data and upload to S3
+              const base64Match = data.match(/^data:([^;]+);base64,(.+)$/);
+              if (!base64Match) return data;
+              const [, mimeType, base64Data] = base64Match;
+              const ext = mimeType.split("/")[1] || "png";
+              const fileName = generateFileName(id, ext);
+              const buffer = Buffer.from(base64Data, "base64");
+              const result = await uploadToS3(buffer, fileName, mimeType, "reference");
+              return result.url;
+            };
+
+            // Handle inline assets (from @ mention system)
+            if (inlineAssets && inlineAssets.length > 0) {
+              sendEvent({
+                type: "progress",
+                status: "processing",
+                message: `Subiendo ${inlineAssets.length} asset(s)...`,
+                progress: 5,
+              });
+              for (const asset of inlineAssets) {
+                const url = await uploadBase64IfNeeded(asset.dataUrl);
+                klingImages.push({ url });
+              }
+              console.log(`[Kling] Uploaded ${inlineAssets.length} inline assets for <<<>>> references`);
+            }
+
+            if (firstFrame) {
+              klingImages.push({ url: await uploadBase64IfNeeded(firstFrame), type: "first_frame" });
+            }
+            if (lastFrame) {
+              klingImages.push({ url: await uploadBase64IfNeeded(lastFrame), type: "end_frame" });
+            }
+            if (refImages) {
+              for (const ref of refImages) {
+                klingImages.push({ url: await uploadBase64IfNeeded(ref.image) });
+              }
+            }
+
+            console.log(`\n========== [VIDEO GENERATION REQUEST] (Kling) ==========`);
+            console.log("Model:", effectiveModelId);
+            console.log("Mode:", klingConfig.mode, "Duration:", klingConfig.duration);
+            console.log("Audio:", klingConfig.generateAudio);
+            console.log("Images:", klingImages.map(i => i.type || "reference").join(", ") || "none");
+            console.log("Inline assets:", inlineAssets?.length || 0);
+            console.log("Input prompt:", content);
+            console.log("================================================\n");
+
+            generatedVideo = await generateKlingVideo(
+              effectiveModelId,
+              content,
+              klingConfig,
+              onProgress,
+              klingImages.length > 0 ? klingImages : undefined,
+            );
+            generatedSeed = 0; // Kling does not support seeds
+
+          } else if (isXaiProvider) {
             // ===== xAI Grok Imagine Video =====
             const xaiConfig: XaiVideoConfig = {
               duration: videoSettings?.duration || conversation.video_duration || 8,

@@ -97,6 +97,12 @@ interface MessageContentProps {
   isImageSelected?: boolean;
   onImageSelect?: (imageUrl: string) => void;
   allowImageSelection?: boolean;
+  // Video selection (for Kling asset mode)
+  isVideoSelected?: boolean;
+  onVideoSelect?: (videoUrl: string) => void;
+  allowVideoSelection?: boolean;
+  videoAssetLabel?: string; // e.g., "asset1"
+  imageAssetLabel?: string; // e.g., "asset1"
   // View image in modal
   onViewImage?: () => void;
   // View video in modal
@@ -215,6 +221,11 @@ export function MessageContent({
   isImageSelected = false,
   onImageSelect,
   allowImageSelection = false,
+  isVideoSelected = false,
+  onVideoSelect,
+  allowVideoSelection = false,
+  videoAssetLabel,
+  imageAssetLabel,
   onViewImage,
   onViewVideo,
 }: MessageContentProps) {
@@ -384,8 +395,13 @@ export function MessageContent({
             )}
             {/* Indicador de selección permanente */}
             {isImageSelected && (
-              <div className="absolute top-2 left-2 bg-primary text-primary-foreground text-xs px-2 py-0.5 rounded-full font-medium">
-                Seleccionada
+              <div className={cn(
+                "absolute top-2 left-2 text-xs px-2 py-0.5 rounded-full font-medium",
+                imageAssetLabel
+                  ? "bg-cyan-600 text-white font-mono"
+                  : "bg-primary text-primary-foreground"
+              )}>
+                {imageAssetLabel || "Seleccionada"}
               </div>
             )}
             {/* Botones de acciones - solo para imágenes del modelo (no del usuario) */}
@@ -450,13 +466,42 @@ export function MessageContent({
 
       {/* Video generado */}
       {videoUrl && !isVideoGenerating && (
-        <div className="relative group">
+        <div className={cn(
+          "relative group",
+          isVideoSelected && "ring-2 ring-cyan-500 ring-offset-2 ring-offset-background rounded-lg"
+        )}>
           <VideoPlayer
             videoUrl={videoUrl}
             duration={videoDuration || undefined}
             hasAudio={videoHasAudio}
             aspectRatio={videoAspectRatio}
           />
+          {/* Botón de selección de video - esquina inferior izquierda */}
+          {allowVideoSelection && onVideoSelect && (
+            <button
+              onClick={() => onVideoSelect(videoUrl)}
+              className={cn(
+                "absolute bottom-2 left-2 p-1.5 rounded-full transition-all z-10",
+                isVideoSelected
+                  ? "bg-cyan-600 text-white"
+                  : "bg-black/60 hover:bg-black/80 text-white opacity-0 group-hover:opacity-100"
+              )}
+              title={isVideoSelected ? "Quitar selección" : "Seleccionar video como asset"}
+            >
+              <Check className="h-4 w-4" />
+            </button>
+          )}
+          {/* Indicador de selección con asset label */}
+          {isVideoSelected && (
+            <div className={cn(
+              "absolute top-2 left-2 text-xs px-2 py-0.5 rounded-full font-medium z-10",
+              videoAssetLabel
+                ? "bg-cyan-600 text-white font-mono"
+                : "bg-primary text-primary-foreground"
+            )}>
+              {videoAssetLabel || "Seleccionado"}
+            </div>
+          )}
           {/* Botón de zoom para video */}
           {!isUser && onViewVideo && (
             <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

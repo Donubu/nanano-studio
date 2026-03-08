@@ -4,6 +4,7 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { generateImagen, ImagenAspectRatio, ImagenResolution, Labels } from "@/lib/google-ai-imagen";
 import { generateXaiImage, XaiImageAspectRatio, XaiImageResolution } from "@/lib/xai-image";
+import { generateKlingImage, KlingImageConfig } from "@/lib/kling-image";
 import { uploadToS3, generateFileName, isS3Configured } from "@/lib/s3";
 import { generateConversationTitle } from "@/lib/google-ai";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
@@ -139,7 +140,8 @@ export async function POST(
     // Verificar que el modelo soporta generacion de imagenes dedicada
     const isImagen4 = effectiveModelId.includes("imagen-4");
     const isGrokImage = effectiveModelId.includes("grok-imagine-image");
-    if (!isImagen4 && !isGrokImage) {
+    const isKlingImage = effectiveBackend === "kling" || effectiveModelId.includes("kling-omni-image");
+    if (!isImagen4 && !isGrokImage && !isKlingImage) {
       return NextResponse.json({ error: "El modelo seleccionado no soporta generacion de imagenes dedicada" }, { status: 400 });
     }
 
@@ -168,7 +170,7 @@ export async function POST(
       conversation.image_aspect_ratio || "16:9") as ImagenAspectRatio;
     const resolution: ImagenResolution = (imageSettings?.resolution ||
       conversation.image_size || "1K") as ImagenResolution;
-    const maxImages = isGrokImage ? 10 : 4;
+    const maxImages = isKlingImage ? 9 : isGrokImage ? 10 : 4;
     const numberOfImages = Math.min(maxImages, Math.max(1, imageSettings?.numberOfImages || 1));
 
     // SSE stream
@@ -295,7 +297,19 @@ export async function POST(
           // Generate images using the appropriate provider
           let generatedImages: Array<{ data: Buffer; mimeType: string; seed?: number }>;
 
-          if (effectiveBackend === "xai") {
+          if (isKlingImage) {
+            const klingResults = await generateKlingImage(
+              effectiveModelId,
+              content,
+              {
+                aspectRatio: aspectRatio as KlingImageConfig["aspectRatio"],
+                resolution: (resolution?.toLowerCase() || "1k") as KlingImageConfig["resolution"],
+                numberOfImages,
+              },
+              onProgress,
+            );
+            generatedImages = klingResults;
+          } else if (effectiveBackend === "xai") {
             const xaiResults = await generateXaiImage(
               effectiveModelId,
               content,

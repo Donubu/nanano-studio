@@ -1272,7 +1272,7 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                   </div>
                 )}
                 {/* Seed */}
-                {selectedItem.generation_seed && (
+                {selectedItem.generation_seed != null && selectedItem.generation_seed !== 0 && (
                   <button
                     onClick={() => handleCopySeed(selectedItem.generation_seed!)}
                     className="flex items-center gap-1.5 hover:text-foreground transition-colors"

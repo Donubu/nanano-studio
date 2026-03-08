@@ -52,8 +52,8 @@ export function ModelSelector({
     );
   }
 
-  // 2-3 models: segmented control (buttons)
-  if (models.length <= 3) {
+  // 2 models: segmented control (buttons)
+  if (models.length <= 2) {
     return (
       <div className="flex items-center gap-1 p-1 bg-muted rounded-lg">
         {models.map((model, index) => {
@@ -92,19 +92,14 @@ export function ModelSelector({
     );
   }
 
-  // 4+ models: dropdown
-  const selectedModel = models.find(m => m.id === effectiveSelected) || models[0];
-  const selectedLabel = selectedModel.label
-    ? `${selectedModel.label} — ${selectedModel.display_name}`
-    : selectedModel.display_name;
-
+  // 3+ models: dropdown select
   return (
     <div className="relative">
       <select
         value={effectiveSelected ?? ""}
         onChange={(e) => onSelect(Number(e.target.value))}
         disabled={disabled}
-        className="appearance-none flex items-center gap-1.5 px-3 py-1.5 pr-8 rounded-lg text-sm font-medium bg-muted text-foreground border-0 cursor-pointer hover:bg-muted/80 transition-colors"
+        className="appearance-none w-full px-3 py-2 pr-8 rounded-lg text-sm font-medium bg-muted text-foreground border border-border/30 cursor-pointer hover:bg-muted/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {models.map((model) => {
           const label = model.label
@@ -117,7 +112,7 @@ export function ModelSelector({
           );
         })}
       </select>
-      <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+      <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
     </div>
   );
 }

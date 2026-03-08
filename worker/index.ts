@@ -12,6 +12,7 @@ import { STREAM_QUEUE_NAME, StreamJobData, StreamJobEvent, IMAGEN_QUEUE_NAME, Im
 import { sendMessageStream, sendMessage, ChatMessage, GeneratedImage, GroundingData, generateConversationTitle, Labels, GenerationSettings } from "@/lib/google-ai";
 import { generateImagen, ImagenAspectRatio, ImagenResolution, Labels as ImagenLabels } from "@/lib/google-ai-imagen";
 import { generateXaiImage, XaiImageAspectRatio, XaiImageResolution } from "@/lib/xai-image";
+import { generateKlingImage, KlingImageConfig } from "@/lib/kling-image";
 import { uploadToS3, generateFileName } from "@/lib/s3";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
 import { ResultSetHeader, RowDataPacket } from "mysql2";
@@ -432,7 +433,20 @@ async function processImagenJob(job: Job<ImagenJobData>): Promise<void> {
     // Generate images using the appropriate provider
     let generatedImages: Array<{ data: Buffer; mimeType: string; seed?: number }>;
 
-    if (data.backend === "xai") {
+    if (data.backend === "kling" || data.modelId.includes("kling-omni-image")) {
+      // Kling Omni Image
+      const klingResults = await generateKlingImage(
+        data.modelId,
+        data.content,
+        {
+          aspectRatio: data.aspectRatio as KlingImageConfig["aspectRatio"],
+          resolution: (data.resolution?.toLowerCase() || "1k") as KlingImageConfig["resolution"],
+          numberOfImages: data.numberOfImages,
+        },
+        onProgress,
+      );
+      generatedImages = klingResults;
+    } else if (data.backend === "xai") {
       // xAI Grok Imagine Image
       const xaiResults = await generateXaiImage(
         data.modelId,

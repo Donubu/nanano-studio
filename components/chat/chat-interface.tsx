@@ -332,6 +332,8 @@ export function ChatInterface() {
 
     // Selected images from conversation (for use as attachments)
     const [selectedConversationImages, setSelectedConversationImages] = useState<string[]>([]);
+    // Selected assets for Kling (images + videos from conversation)
+    const [selectedKlingAssets, setSelectedKlingAssets] = useState<Array<{ url: string; type: "image" | "video" }>>([]);
 
     // Project system instruction
     const [useProjectSystemInstruction, setUseProjectSystemInstruction] = useState(true);
@@ -409,9 +411,10 @@ export function ChatInterface() {
             || config.models[0];
     };
 
-    // Determine if the active video model is an xAI provider
+    // Determine video provider
     const activeVideoModel = getSelectedModel(videoTypeConfig);
     const isXaiVideoProvider = activeVideoModel?.api_backend === "xai";
+    const isKlingVideoProvider = activeVideoModel?.api_backend === "kling" || activeVideoModel?.model_id?.includes("kling-v3-omni");
 
     // UI mode helpers based on conversation generation_type
     // Default to text if generation_type is null/undefined (for legacy conversations)
@@ -443,8 +446,8 @@ export function ChatInterface() {
     // Get the current image model ID string
     const currentImageModelId = getSelectedModel(imageTypeConfig)?.model_id || "";
 
-    // Check if the current image model uses dedicated image generation endpoint (Imagen 4 or Grok)
-    const isImagen4Model = currentImageModelId.includes("imagen-4") || currentImageModelId.includes("grok-imagine-image");
+    // Check if the current image model uses dedicated image generation endpoint (Imagen 4, Grok, or Kling)
+    const isImagen4Model = currentImageModelId.includes("imagen-4") || currentImageModelId.includes("grok-imagine-image") || currentImageModelId.includes("kling-omni-image");
 
     // Gemini native models that support multi-image via parallel requests
     const supportsMultiImage = (() => {
@@ -2219,6 +2222,17 @@ export function ChatInterface() {
 
     // Handle image selection from conversation
     const handleConversationImageSelect = (imageUrl: string) => {
+        // In Kling video mode, use asset selection instead
+        if (isVideoConversation && generationMode === "video" && isKlingVideoProvider) {
+            setSelectedKlingAssets((prev) => {
+                const isSelected = prev.some(a => a.url === imageUrl);
+                if (isSelected) {
+                    return prev.filter(a => a.url !== imageUrl);
+                }
+                return [...prev, { url: imageUrl, type: "image" as const }];
+            });
+            return;
+        }
         setSelectedConversationImages((prev) => {
             const isSelected = prev.includes(imageUrl);
             if (isSelected) {
@@ -2231,6 +2245,17 @@ export function ChatInterface() {
                 }
                 return [...prev, imageUrl];
             }
+        });
+    };
+
+    // Handle video selection for Kling asset mode
+    const handleConversationVideoSelect = (videoUrl: string) => {
+        setSelectedKlingAssets((prev) => {
+            const isSelected = prev.some(a => a.url === videoUrl);
+            if (isSelected) {
+                return prev.filter(a => a.url !== videoUrl);
+            }
+            return [...prev, { url: videoUrl, type: "video" as const }];
         });
     };
 
@@ -2272,8 +2297,23 @@ export function ChatInterface() {
         }
     };
 
+    // Transform @assetN references in prompt to Kling <<<>>> format
+    const transformKlingPrompt = (content: string, files: AttachedFile[]): string => {
+        let transformed = content;
+        for (const file of files) {
+            if (!file.assetId) continue;
+            const klingType = file.type === "video" ? "video" : "image";
+            // Extract the number from assetN
+            const num = file.assetId.replace("asset", "");
+            const klingRef = `<<<${klingType}_${num}>>>`;
+            // Replace @assetN with <<<image_N>>> or <<<video_N>>>
+            transformed = transformed.replace(new RegExp(`@${file.assetId}\\b`, "g"), klingRef);
+        }
+        return transformed;
+    };
+
     // Send video generation message
-    const sendVideoMessage = async (content: string, seed?: number) => {
+    const sendVideoMessage = async (content: string, seed?: number, assetFiles?: AttachedFile[]) => {
         if (!activeTabId || !content.trim()) return;
 
         let tabId = activeTabId;
@@ -2305,11 +2345,13 @@ export function ChatInterface() {
         });
 
         // Add optimistic user message
+        const assetImageFiles = assetFiles?.filter(f => f.type === "image") || [];
         const tempUserMessage: Message = {
             id: Date.now(),
             role: "user",
             content,
-            content_type: "text",
+            content_type: assetImageFiles.length > 0 ? "mixed" : "text",
+            images: assetImageFiles.length > 0 ? assetImageFiles.map(f => ({ url: f.dataUrl, mime_type: f.mimeType })) : undefined,
             created_at: new Date().toISOString(),
         };
 
@@ -2339,11 +2381,24 @@ export function ChatInterface() {
         }));
 
         try {
+            // Transform prompt for Kling inline assets
+            const finalContent = (assetFiles && assetFiles.length > 0)
+                ? transformKlingPrompt(content, assetFiles)
+                : content;
+
+            // Build inline assets array for API
+            const inlineAssets = assetFiles?.filter(f => f.assetId).map(f => ({
+                assetId: f.assetId!,
+                dataUrl: f.dataUrl,
+                mimeType: f.mimeType,
+                type: f.type as "image" | "video",
+            }));
+
             const response = await fetch(`/api/conversations/${conversationId}/messages/video`, {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({
-                    content,
+                    content: finalContent,
                     selected_model_id: selectedConfigModelId,
                     videoSettings: {
                         duration: videoDuration,
@@ -2359,6 +2414,7 @@ export function ChatInterface() {
                         referenceImages: videoReferenceImages.length > 0 ? videoReferenceImages : undefined,
                     },
                     referenceImages: videoReferenceImages.length > 0 ? videoReferenceImages : undefined,
+                    ...(inlineAssets && inlineAssets.length > 0 && { inlineAssets }),
                 }),
             });
 
@@ -3921,8 +3977,31 @@ export function ChatInterface() {
                                                     isUser={msg.role === "user"}
                                                     isStreaming={msg.isStreaming}
                                                     allowImageSelection={!activeTab?.isArchived && !!msg.image_url}
-                                                    isImageSelected={msg.image_url ? selectedConversationImages.includes(msg.image_url) : false}
+                                                    isImageSelected={msg.image_url ? (
+                                                        isKlingVideoProvider && isVideoConversation && generationMode === "video"
+                                                            ? selectedKlingAssets.some(a => a.url === msg.image_url)
+                                                            : selectedConversationImages.includes(msg.image_url)
+                                                    ) : false}
+                                                    imageAssetLabel={
+                                                        isKlingVideoProvider && isVideoConversation && generationMode === "video" && msg.image_url
+                                                            ? (() => {
+                                                                const idx = selectedKlingAssets.findIndex(a => a.url === msg.image_url);
+                                                                return idx >= 0 ? `asset${idx + 1}` : undefined;
+                                                            })()
+                                                            : undefined
+                                                    }
                                                     onImageSelect={handleConversationImageSelect}
+                                                    allowVideoSelection={!activeTab?.isArchived && !!msg.video_url && isKlingVideoProvider && isVideoConversation && generationMode === "video"}
+                                                    isVideoSelected={msg.video_url ? selectedKlingAssets.some(a => a.url === msg.video_url) : false}
+                                                    videoAssetLabel={
+                                                        msg.video_url
+                                                            ? (() => {
+                                                                const idx = selectedKlingAssets.findIndex(a => a.url === msg.video_url);
+                                                                return idx >= 0 ? `asset${idx + 1}` : undefined;
+                                                            })()
+                                                            : undefined
+                                                    }
+                                                    onVideoSelect={handleConversationVideoSelect}
                                                     onViewImage={msg.role === "model" && msg.image_url ? () => setViewingImageMessage(msg) : undefined}
                                                     onViewVideo={msg.role === "model" && msg.video_url ? () => setViewingVideoMessage(msg) : undefined}
                                                 />
@@ -4083,7 +4162,36 @@ export function ChatInterface() {
                                     onSend={(content, files, noContext) => {
                                         // Route based on generation type
                                         if (isVideoConversation && generationMode === "video") {
-                                            sendVideoMessage(content, selectedSeed || undefined);
+                                            // Build combined asset list: conversation-selected first, then new files
+                                            const allAssetFiles: AttachedFile[] = [];
+                                            let assetCounter = 1;
+
+                                            // Add conversation-selected assets (images/videos already on CDN)
+                                            for (const asset of selectedKlingAssets) {
+                                                allAssetFiles.push({
+                                                    dataUrl: asset.url, // Already a URL, not base64
+                                                    mimeType: asset.type === "video" ? "video/mp4" : "image/png",
+                                                    name: `conversation_${asset.type}`,
+                                                    type: asset.type,
+                                                    size: 0,
+                                                    assetId: `asset${assetCounter}`,
+                                                });
+                                                assetCounter++;
+                                            }
+
+                                            // Add newly attached files from disk
+                                            if (files) {
+                                                for (const file of files) {
+                                                    allAssetFiles.push({
+                                                        ...file,
+                                                        assetId: `asset${assetCounter}`,
+                                                    });
+                                                    assetCounter++;
+                                                }
+                                            }
+
+                                            sendVideoMessage(content, selectedSeed || undefined, allAssetFiles.length > 0 ? allAssetFiles : undefined);
+                                            setSelectedKlingAssets([]);
                                             // Clear selected seed and prompt after use
                                             if (selectedSeed) {
                                                 setSelectedSeed(null);
@@ -4117,14 +4225,23 @@ export function ChatInterface() {
                                         setReuseImages([]);
                                     }}
                                     disabled={isSending || !currentModelInfo?.id}
-                                    supportsFiles={isTextConversation || isImageConversation || (isVideoConversation && generationMode === "image")}
-                                    preselectedImages={[
-                                        ...reuseImages.map(url => ({ url })),
-                                        ...selectedConversationImages.map(url => ({ url })),
-                                    ]}
+                                    supportsFiles={isTextConversation || isImageConversation || (isVideoConversation && generationMode === "image") || (isVideoConversation && generationMode === "video" && isKlingVideoProvider)}
+                                    assetMode={isVideoConversation && generationMode === "video" && isKlingVideoProvider}
+                                    preselectedImages={
+                                        isVideoConversation && generationMode === "video" && isKlingVideoProvider
+                                            ? selectedKlingAssets.map((a, idx) => ({ url: a.url, assetLabel: `asset${idx + 1}` }))
+                                            : [
+                                                ...reuseImages.map(url => ({ url })),
+                                                ...selectedConversationImages.map(url => ({ url })),
+                                            ]
+                                    }
                                     onRemovePreselectedImage={(url) => {
-                                        setSelectedConversationImages(prev => prev.filter(u => u !== url));
-                                        setReuseImages(prev => prev.filter(u => u !== url));
+                                        if (isVideoConversation && generationMode === "video" && isKlingVideoProvider) {
+                                            setSelectedKlingAssets(prev => prev.filter(a => a.url !== url));
+                                        } else {
+                                            setSelectedConversationImages(prev => prev.filter(u => u !== url));
+                                            setReuseImages(prev => prev.filter(u => u !== url));
+                                        }
                                     }}
                                     initialValue={seedPrompt || reusePrompt || undefined}
                                     onInitialValueUsed={() => { setSeedPrompt(null); setReusePrompt(null); }}
@@ -4617,7 +4734,7 @@ export function ChatInterface() {
                                     negativePrompt={videoNegativePrompt}
                                     disabled={isSending}
                                     hasReferenceImages={videoReferenceImages.length > 0}
-                                    provider={isXaiVideoProvider ? "xai" : "google"}
+                                    provider={isKlingVideoProvider ? "kling" : isXaiVideoProvider ? "xai" : "google"}
                                     onChange={(settings) => {
                                         if (settings.duration !== undefined) {
                                             setVideoDuration(settings.duration);
@@ -4656,8 +4773,8 @@ export function ChatInterface() {
                                     onLastFrameChange={setVideoLastFrame}
                                     onReferenceImagesChange={setVideoReferenceImages}
                                     disabled={isSending}
-                                    supportsReferenceImages={true}
-                                    provider={isXaiVideoProvider ? "xai" : "google"}
+                                    supportsReferenceImages={!isKlingVideoProvider}
+                                    provider={isKlingVideoProvider ? "kling" : isXaiVideoProvider ? "xai" : "google"}
                                 />
                             </div>
                         )}

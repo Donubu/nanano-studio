@@ -13,7 +13,7 @@ import {
 import { useState } from "react";
 import { VideoDuration, VideoResolution, VideoAspectRatio } from "@/types/video";
 
-export type VideoProvider = "google" | "xai";
+export type VideoProvider = "google" | "xai" | "kling";
 
 interface VideoSettingsProps {
   duration: VideoDuration;
@@ -65,6 +65,17 @@ const XAI_ASPECT_RATIOS: { value: VideoAspectRatio; label: string }[] = [
   { value: "2:3", label: "2:3" },
 ];
 
+const KLING_RESOLUTIONS: { value: VideoResolution; label: string; note?: string }[] = [
+  { value: "720p", label: "720p", note: "Standard" },
+  { value: "1080p", label: "1080p", note: "Pro" },
+];
+
+const KLING_ASPECT_RATIOS: { value: VideoAspectRatio; label: string }[] = [
+  { value: "16:9", label: "16:9" },
+  { value: "9:16", label: "9:16" },
+  { value: "1:1", label: "1:1" },
+];
+
 export function VideoSettings({
   duration,
   resolution,
@@ -79,13 +90,16 @@ export function VideoSettings({
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const isXai = provider === "xai";
+  const isKling = provider === "kling";
 
-  const resolutions = isXai ? XAI_RESOLUTIONS : GOOGLE_RESOLUTIONS;
-  const aspectRatios = isXai ? XAI_ASPECT_RATIOS : GOOGLE_ASPECT_RATIOS;
+  const resolutions = isKling ? KLING_RESOLUTIONS : isXai ? XAI_RESOLUTIONS : GOOGLE_RESOLUTIONS;
+  const aspectRatios = isKling ? KLING_ASPECT_RATIOS : isXai ? XAI_ASPECT_RATIOS : GOOGLE_ASPECT_RATIOS;
+
+  // Google VEO: 1080p only available for 8s. Kling: 1080p (pro) available for all durations.
+  const has1080pRestriction = !isKling && !isXai;
 
   const handleDurationChange = (newDuration: VideoDuration) => {
-    // Si selecciona 1080p y la duración no es 8, ajustar
-    if (resolution === "1080p" && newDuration !== 8) {
+    if (has1080pRestriction && resolution === "1080p" && newDuration !== 8) {
       onChange({ duration: newDuration, resolution: "720p" });
     } else {
       onChange({ duration: newDuration });
@@ -93,8 +107,7 @@ export function VideoSettings({
   };
 
   const handleResolutionChange = (newResolution: VideoResolution) => {
-    // 1080p solo disponible para 8 segundos
-    if (newResolution === "1080p" && duration !== 8) {
+    if (has1080pRestriction && newResolution === "1080p" && duration !== 8) {
       onChange({ resolution: newResolution, duration: 8 });
     } else {
       onChange({ resolution: newResolution });
@@ -111,21 +124,21 @@ export function VideoSettings({
       {/* Duración */}
       <div className="space-y-2">
         <Label className="text-xs text-muted-foreground">
-          Duración {isXai && <span className="text-muted-foreground/60">({duration}s)</span>}
+          Duración {(isXai || isKling) && <span className="text-muted-foreground/60">({duration}s)</span>}
         </Label>
-        {isXai ? (
+        {(isXai || isKling) ? (
           <>
             <Slider
               value={[duration]}
               onValueChange={([val]) => onChange({ duration: val })}
-              min={1}
+              min={isKling ? 3 : 1}
               max={15}
               step={1}
               disabled={disabled}
               className="w-full"
             />
             <div className="flex justify-between text-[10px] text-muted-foreground/60">
-              <span>1s</span>
+              <span>{isKling ? "3s" : "1s"}</span>
               <span>15s</span>
             </div>
           </>
@@ -164,23 +177,31 @@ export function VideoSettings({
       <div className="space-y-2">
         <Label className="text-xs text-muted-foreground">Resolución</Label>
         <div className="flex gap-2">
-          {resolutions.map((r) => (
-            <button
-              key={r.value}
-              disabled={disabled || (r.value === "1080p" && duration !== 8)}
-              onClick={() => handleResolutionChange(r.value)}
-              className={`flex-1 py-2 px-3 text-sm rounded-md border transition-colors ${
-                resolution === r.value
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "bg-background border-border hover:bg-muted"
-              } ${disabled || (r.value === "1080p" && duration !== 8) ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-              title={r.note}
-            >
-              {r.label}
-            </button>
-          ))}
+          {resolutions.map((r) => {
+            const is1080pDisabled = has1080pRestriction && r.value === "1080p" && duration !== 8;
+            return (
+              <button
+                key={r.value}
+                disabled={disabled || is1080pDisabled}
+                onClick={() => handleResolutionChange(r.value)}
+                className={`flex-1 py-2 px-3 text-sm rounded-md border transition-colors ${
+                  resolution === r.value
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-background border-border hover:bg-muted"
+                } ${disabled || is1080pDisabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                title={r.note}
+              >
+                <div className="font-medium">{r.label}</div>
+                {r.note && (
+                  <div className={`text-xs ${resolution === r.value ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                    {r.note}
+                  </div>
+                )}
+              </button>
+            );
+          })}
         </div>
-        {resolution === "1080p" && duration !== 8 && (
+        {has1080pRestriction && resolution === "1080p" && duration !== 8 && (
           <p className="text-xs text-muted-foreground">
             1080p solo disponible para videos de 8 segundos
           </p>
@@ -190,7 +211,7 @@ export function VideoSettings({
       {/* Aspect Ratio */}
       <div className="space-y-2">
         <Label className="text-xs text-muted-foreground">Proporcion</Label>
-        <div className={`grid gap-2 ${isXai ? "grid-cols-4" : "grid-cols-2"}`}>
+        <div className={`grid gap-2 ${isXai ? "grid-cols-4" : isKling ? "grid-cols-3" : "grid-cols-2"}`}>
           {aspectRatios.map((ar) => (
             <button
               key={ar.value}
@@ -208,7 +229,7 @@ export function VideoSettings({
         </div>
       </div>
 
-      {/* Audio Toggle - only for Google (xAI does not support audio) */}
+      {/* Audio Toggle - Google and Kling support audio, xAI does not */}
       {!isXai && (
         <>
           <div className="flex items-center justify-between py-2">
@@ -227,12 +248,14 @@ export function VideoSettings({
             />
           </div>
           <p className="text-xs text-muted-foreground -mt-2">
-            VEO genera audio nativo (dialogos, efectos, ambiente)
+            {isKling
+              ? "Kling genera audio nativo sincronizado (dialogos, efectos)"
+              : "VEO genera audio nativo (dialogos, efectos, ambiente)"}
           </p>
         </>
       )}
 
-      {/* Opciones avanzadas - only for Google (negative prompt not supported by xAI) */}
+      {/* Opciones avanzadas - Google and Kling support negative prompt, xAI does not */}
       {!isXai && (
         <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
           <CollapsibleTrigger className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors w-full">

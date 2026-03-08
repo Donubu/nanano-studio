@@ -20,7 +20,7 @@ export interface ReferenceImage {
   type: ReferenceType;
 }
 
-export type VideoInputProvider = "google" | "xai";
+export type VideoInputProvider = "google" | "xai" | "kling";
 
 interface VideoInputFramesProps {
   projectId: number;
