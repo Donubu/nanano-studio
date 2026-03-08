@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
-import { Mic, Users, User, ChevronDown, Volume2, Loader2, Sparkles, Globe, Gauge, HelpCircle } from "lucide-react";
+import { Mic, Users, User, ChevronDown, Volume2, Loader2, Sparkles, Globe, Gauge, HelpCircle, Code, LayoutGrid, Palette } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -31,6 +31,21 @@ import {
   formatDialogueForAPI,
   extractSpeakersFromDialogue,
 } from "./dialogue-editor";
+import {
+  ChirpSegmentEditor,
+  ChirpSegment,
+  ChirpPreset,
+  CHIRP_PRESETS,
+  createDefaultSegments,
+  segmentsToSSML,
+  segmentsToPlainText,
+} from "./chirp-segment-editor";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 type QualityTier = "normal" | "hq" | "chirp";
 
@@ -149,6 +164,11 @@ export function TTSComposer({
   const [styleOpen, setStyleOpen] = useState(false);
   const [chirpHelpOpen, setChirpHelpOpen] = useState(false);
 
+  // Chirp visual editor state
+  const [chirpMode, setChirpMode] = useState<"visual" | "ssml">("visual");
+  const [chirpSegments, setChirpSegments] = useState<ChirpSegment[]>(() => createDefaultSegments());
+  const [chirpPreset, setChirpPreset] = useState<ChirpPreset | null>(null);
+
   // Handle restore data when it changes
   // Using refs to avoid stale closures and dependency issues
   const onSettingsChangeRef = useRef(onSettingsChange);
@@ -208,6 +228,13 @@ export function TTSComposer({
   const isChirp = ttsEngine === "chirp" && (chirpAvailable || lockedEngine);
   const maxBytes = isChirp ? 5000 : 4000;
 
+  // Chirp visual mode byte count
+  const chirpVisualByteCount = useMemo(() => {
+    if (!isChirp || chirpMode !== "visual") return 0;
+    const ssml = segmentsToSSML(chirpSegments);
+    return new Blob([ssml]).size;
+  }, [isChirp, chirpMode, chirpSegments]);
+
   // Auto-select quality tier when current selection has no model
   useEffect(() => {
     if (isChirp) return;
@@ -219,7 +246,10 @@ export function TTSComposer({
       onSettingsChange({ qualityTier: "normal" });
     }
   }, [normalModelName, hqModelName, qualityTier, isChirp, onSettingsChange]);
-  const currentByteCount = multiSpeaker ? dialogueByteCount : byteCount;
+
+  const currentByteCount = isChirp && chirpMode === "visual"
+    ? chirpVisualByteCount
+    : multiSpeaker ? dialogueByteCount : byteCount;
   const isOverLimit = currentByteCount > maxBytes;
 
   const handleGenerate = () => {
@@ -230,11 +260,34 @@ export function TTSComposer({
       if (formattedText.trim() && speakers.length >= 2) {
         onGenerate(formattedText, { speakers }, effectiveTier);
       }
+    } else if (isChirp && chirpMode === "visual") {
+      const ssml = segmentsToSSML(chirpSegments);
+      if (ssml.trim()) {
+        onGenerate(ssml, undefined, effectiveTier);
+      }
     } else {
       if (text.trim()) {
         onGenerate(text, undefined, effectiveTier);
       }
     }
+  };
+
+  const handleChirpModeSwitch = (mode: "visual" | "ssml") => {
+    if (mode === chirpMode) return;
+    if (mode === "ssml") {
+      // Visual → SSML: populate textarea with generated SSML
+      const ssml = segmentsToSSML(chirpSegments);
+      setText(ssml);
+    }
+    setChirpMode(mode);
+  };
+
+  const handlePresetSelect = (preset: ChirpPreset) => {
+    setChirpPreset(preset);
+    // Apply preset to all existing text segments
+    setChirpSegments(segments =>
+      segments.map(s => s.type === "text" ? { ...s, rate: preset.rate, pitch: preset.pitch } : s)
+    );
   };
 
   const handleModeChange = (isMulti: boolean) => {
@@ -247,9 +300,13 @@ export function TTSComposer({
     dialogueLines.filter(l => l.text.trim()).map(l => l.characterId)
   ).size;
 
+  const chirpVisualHasText = chirpSegments.some(s => s.type === "text" && s.text.trim());
+
   const canGenerate = multiSpeaker
     ? linesWithText >= 2 && uniqueSpeakersUsed >= 2 && !isOverLimit
-    : text.trim().length > 0 && !isOverLimit;
+    : isChirp && chirpMode === "visual"
+      ? chirpVisualHasText && !isOverLimit
+      : text.trim().length > 0 && !isOverLimit;
 
   return (
     <div className="p-6 space-y-6">
@@ -394,24 +451,96 @@ export function TTSComposer({
             />
           </div>
 
-          {/* Text Input */}
+          {/* Chirp: Mode Toggle (Visual / SSML) + Presets */}
+          {isChirp && (
+            <div className="flex items-center gap-2">
+              <div className="flex gap-1 p-0.5 bg-muted rounded-md">
+                <button
+                  onClick={() => handleChirpModeSwitch("visual")}
+                  disabled={disabled || isGenerating}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-all ${
+                    chirpMode === "visual"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  } ${disabled || isGenerating ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  <LayoutGrid className="w-3 h-3" />
+                  Visual
+                </button>
+                <button
+                  onClick={() => handleChirpModeSwitch("ssml")}
+                  disabled={disabled || isGenerating}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-all ${
+                    chirpMode === "ssml"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  } ${disabled || isGenerating ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  <Code className="w-3 h-3" />
+                  SSML
+                </button>
+              </div>
+
+              {/* Presets Dropdown */}
+              {chirpMode === "visual" && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      disabled={disabled || isGenerating}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-muted hover:bg-accent border border-border/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Palette className="w-3 h-3" />
+                      {chirpPreset ? chirpPreset.name : "Preset"}
+                      <ChevronDown className="w-3 h-3" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="min-w-[220px]">
+                    {CHIRP_PRESETS.map(preset => (
+                      <DropdownMenuItem key={preset.name} onClick={() => handlePresetSelect(preset)}>
+                        <div className="flex flex-col">
+                          <span className="font-medium">{preset.name}</span>
+                          <span className="text-[10px] text-muted-foreground">{preset.description}</span>
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          )}
+
+          {/* Text Input Area */}
           <div className="space-y-2">
             <div className="flex justify-between items-center">
-              <Label className="text-sm font-medium">Texto</Label>
+              <Label className="text-sm font-medium">
+                {isChirp && chirpMode === "visual" ? "Segmentos" : "Texto"}
+              </Label>
               <span className={`text-xs ${isOverLimit ? "text-destructive" : "text-muted-foreground"}`}>
                 {currentByteCount.toLocaleString()} / {maxBytes.toLocaleString()} bytes
               </span>
             </div>
-            <Textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder={isChirp
-                ? "Escribe el texto a convertir... Puedes usar [pause], [pause short], [pause long] o SSML con <speak>.</speak>"
-                : "Escribe el texto que quieres convertir a audio..."
-              }
-              disabled={disabled || isGenerating}
-              className="min-h-[200px] text-base resize-none"
-            />
+
+            {/* Chirp Visual Mode: Segment Editor */}
+            {isChirp && chirpMode === "visual" ? (
+              <ChirpSegmentEditor
+                segments={chirpSegments}
+                onSegmentsChange={setChirpSegments}
+                disabled={disabled || isGenerating}
+                defaultPreset={chirpPreset || undefined}
+              />
+            ) : (
+              /* Standard Textarea (Gemini or Chirp SSML mode) */
+              <Textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder={isChirp
+                  ? "Escribe SSML directamente. Ej: <speak><prosody rate=\"slow\">Texto lento</prosody></speak>"
+                  : "Escribe el texto que quieres convertir a audio..."
+                }
+                disabled={disabled || isGenerating}
+                className={`min-h-[200px] text-base resize-none ${isChirp ? "font-mono text-sm" : ""}`}
+              />
+            )}
           </div>
         </div>
       )}
@@ -438,133 +567,33 @@ export function TTSComposer({
         </div>
       )}
 
-      {/* Chirp HD Help (Collapsible, Chirp only) */}
-      {isChirp && (
+      {/* Chirp SSML mode help (only in SSML mode) */}
+      {isChirp && chirpMode === "ssml" && (
         <Collapsible open={chirpHelpOpen} onOpenChange={setChirpHelpOpen}>
           <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors w-full">
             <HelpCircle className="w-4 h-4" />
-            <span>Guía de formato avanzado (SSML y pausas)</span>
+            <span>Referencia SSML</span>
             <ChevronDown
               className={`w-4 h-4 ml-auto transition-transform ${chirpHelpOpen ? "rotate-180" : ""}`}
             />
           </CollapsibleTrigger>
           <CollapsibleContent className="pt-3">
-            <div className="space-y-4 text-xs text-muted-foreground bg-muted/30 rounded-lg p-4 border border-border/50">
-              {/* Markup shortcuts */}
-              <div>
-                <p className="font-medium text-foreground mb-1.5">Pausas rápidas (Markup)</p>
-                <p className="mb-1">Inserta directamente en el texto sin necesidad de SSML:</p>
-                <div className="space-y-1 font-mono bg-muted rounded-md p-2 text-[11px]">
-                  <p><span className="text-blue-600 dark:text-blue-400">[pause short]</span> — pausa breve (~300ms)</p>
-                  <p><span className="text-blue-600 dark:text-blue-400">[pause]</span> — pausa media (~750ms)</p>
-                  <p><span className="text-blue-600 dark:text-blue-400">[pause long]</span> — pausa larga (~1.5s)</p>
-                </div>
-                <div className="mt-2 bg-muted rounded-md p-2 font-mono text-[11px] leading-relaxed">
-                  <p className="text-foreground/70 mb-0.5">Ejemplo:</p>
-                  <p>Bienvenidos al podcast. <span className="text-blue-600 dark:text-blue-400">[pause long]</span> Hoy hablaremos sobre inteligencia artificial. <span className="text-blue-600 dark:text-blue-400">[pause]</span> ¿Están listos? <span className="text-blue-600 dark:text-blue-400">[pause short]</span> Comencemos.</p>
-                </div>
+            <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-4 border border-border/50 space-y-2">
+              <div className="grid grid-cols-1 gap-1.5 font-mono text-[11px]">
+                <p><span className="text-green-500">&lt;speak&gt;</span>...contenido...<span className="text-green-500">&lt;/speak&gt;</span> — Contenedor raíz</p>
+                <p><span className="text-green-500">&lt;break time=&quot;1s&quot;/&gt;</span> — Pausa (ms o s)</p>
+                <p><span className="text-green-500">&lt;prosody rate=&quot;slow&quot; pitch=&quot;-3st&quot;&gt;</span>...<span className="text-green-500">&lt;/prosody&gt;</span> — Velocidad/tono</p>
+                <p><span className="text-green-500">&lt;say-as interpret-as=&quot;cardinal&quot;&gt;</span>123<span className="text-green-500">&lt;/say-as&gt;</span> — Interpretación</p>
+                <p><span className="text-green-500">&lt;sub alias=&quot;texto completo&quot;&gt;</span>sigla<span className="text-green-500">&lt;/sub&gt;</span> — Sustitución</p>
+                <p><span className="text-green-500">&lt;phoneme alphabet=&quot;ipa&quot; ph=&quot;...&quot;&gt;</span>...<span className="text-green-500">&lt;/phoneme&gt;</span> — Fonético</p>
               </div>
-
-              {/* Break */}
-              <div>
-                <p className="font-medium text-foreground mb-1.5">&lt;break&gt; — Pausas exactas</p>
-                <p className="mb-1">Control preciso de pausas con duración específica.</p>
-                <div className="bg-muted rounded-md p-2 font-mono text-[11px] leading-relaxed">
-                  <p className="text-foreground/70 mb-0.5">Ejemplo:</p>
-                  <p>&lt;speak&gt;Y el ganador es <span className="text-green-600 dark:text-green-400">&lt;break time=&quot;2s&quot;/&gt;</span> María López. <span className="text-green-600 dark:text-green-400">&lt;break time=&quot;500ms&quot;/&gt;</span> ¡Felicidades!&lt;/speak&gt;</p>
-                </div>
-              </div>
-
-              {/* Prosody */}
-              <div>
-                <p className="font-medium text-foreground mb-1.5">&lt;prosody&gt; — Velocidad y tono</p>
-                <p className="mb-1">Controla la velocidad (<code className="bg-muted px-1 rounded">rate</code>) y el tono (<code className="bg-muted px-1 rounded">pitch</code>) de fragmentos.</p>
-                <div className="space-y-2">
-                  <div className="bg-muted rounded-md p-2 font-mono text-[11px] leading-relaxed">
-                    <p className="text-foreground/70 mb-0.5">Narración lenta y grave:</p>
-                    <p>&lt;speak&gt;<span className="text-green-600 dark:text-green-400">&lt;prosody rate=&quot;slow&quot; pitch=&quot;-3st&quot;&gt;</span>En un lugar de la Mancha, de cuyo nombre no quiero acordarme<span className="text-green-600 dark:text-green-400">&lt;/prosody&gt;</span>&lt;/speak&gt;</p>
-                  </div>
-                  <div className="bg-muted rounded-md p-2 font-mono text-[11px] leading-relaxed">
-                    <p className="text-foreground/70 mb-0.5">Mezcla de ritmos:</p>
-                    <p>&lt;speak&gt;Atención: <span className="text-green-600 dark:text-green-400">&lt;prosody rate=&quot;fast&quot;&gt;</span>oferta por tiempo limitado<span className="text-green-600 dark:text-green-400">&lt;/prosody&gt;</span>. <span className="text-green-600 dark:text-green-400">&lt;prosody rate=&quot;x-slow&quot; pitch=&quot;+2st&quot;&gt;</span>No te lo pierdas.<span className="text-green-600 dark:text-green-400">&lt;/prosody&gt;</span>&lt;/speak&gt;</p>
-                  </div>
-                </div>
-                <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px]">
-                  <p><span className="text-foreground">rate:</span> x-slow, slow, medium, fast, x-fast, 50%-200%</p>
-                  <p><span className="text-foreground">pitch:</span> x-low, low, medium, high, x-high, -10st a +10st</p>
-                </div>
-              </div>
-
-              {/* Say-as */}
-              <div>
-                <p className="font-medium text-foreground mb-1.5">&lt;say-as&gt; — Interpretación especial</p>
-                <p className="mb-1">Indica cómo pronunciar números, fechas, horas, etc.</p>
-                <div className="space-y-2">
-                  <div className="bg-muted rounded-md p-2 font-mono text-[11px] leading-relaxed space-y-1">
-                    <p><span className="text-foreground/70">Cardinal:</span> &lt;say-as interpret-as=&quot;<span className="text-green-600 dark:text-green-400">cardinal</span>&quot;&gt;1250&lt;/say-as&gt; → <span className="italic">&quot;mil doscientos cincuenta&quot;</span></p>
-                    <p><span className="text-foreground/70">Ordinal:</span> &lt;say-as interpret-as=&quot;<span className="text-green-600 dark:text-green-400">ordinal</span>&quot;&gt;3&lt;/say-as&gt; → <span className="italic">&quot;tercero&quot;</span></p>
-                    <p><span className="text-foreground/70">Caracteres:</span> &lt;say-as interpret-as=&quot;<span className="text-green-600 dark:text-green-400">characters</span>&quot;&gt;ABC&lt;/say-as&gt; → <span className="italic">&quot;a, be, ce&quot;</span></p>
-                    <p><span className="text-foreground/70">Fecha:</span> &lt;say-as interpret-as=&quot;<span className="text-green-600 dark:text-green-400">date</span>&quot; format=&quot;dmy&quot;&gt;18-02-2026&lt;/say-as&gt;</p>
-                    <p><span className="text-foreground/70">Hora:</span> &lt;say-as interpret-as=&quot;<span className="text-green-600 dark:text-green-400">time</span>&quot; format=&quot;hms24&quot;&gt;14:30:00&lt;/say-as&gt;</p>
-                    <p><span className="text-foreground/70">Teléfono:</span> &lt;say-as interpret-as=&quot;<span className="text-green-600 dark:text-green-400">telephone</span>&quot;&gt;+56912345678&lt;/say-as&gt;</p>
-                    <p><span className="text-foreground/70">Unidad:</span> &lt;say-as interpret-as=&quot;<span className="text-green-600 dark:text-green-400">unit</span>&quot;&gt;5km&lt;/say-as&gt; → <span className="italic">&quot;cinco kilómetros&quot;</span></p>
-                    <p><span className="text-foreground/70">Fracción:</span> &lt;say-as interpret-as=&quot;<span className="text-green-600 dark:text-green-400">fraction</span>&quot;&gt;3/4&lt;/say-as&gt; → <span className="italic">&quot;tres cuartos&quot;</span></p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Phoneme */}
-              <div>
-                <p className="font-medium text-foreground mb-1.5">&lt;phoneme&gt; — Pronunciación exacta</p>
-                <p className="mb-1">Fuerza una pronunciación específica usando el alfabeto fonético IPA.</p>
-                <div className="bg-muted rounded-md p-2 font-mono text-[11px] leading-relaxed">
-                  <p className="text-foreground/70 mb-0.5">Ejemplo:</p>
-                  <p>&lt;speak&gt;La marca <span className="text-green-600 dark:text-green-400">&lt;phoneme alphabet=&quot;ipa&quot; ph=&quot;ˈnaɪki&quot;&gt;</span>Nike<span className="text-green-600 dark:text-green-400">&lt;/phoneme&gt;</span> es muy popular.&lt;/speak&gt;</p>
-                </div>
-              </div>
-
-              {/* Sub */}
-              <div>
-                <p className="font-medium text-foreground mb-1.5">&lt;sub&gt; — Sustitución de texto</p>
-                <p className="mb-1">Reemplaza siglas o abreviaturas por su forma hablada.</p>
-                <div className="bg-muted rounded-md p-2 font-mono text-[11px] leading-relaxed">
-                  <p className="text-foreground/70 mb-0.5">Ejemplo:</p>
-                  <p>&lt;speak&gt;La <span className="text-green-600 dark:text-green-400">&lt;sub alias=&quot;Organización Mundial de la Salud&quot;&gt;</span>OMS<span className="text-green-600 dark:text-green-400">&lt;/sub&gt;</span> publicó un informe sobre el <span className="text-green-600 dark:text-green-400">&lt;sub alias=&quot;ácido desoxirribonucleico&quot;&gt;</span>ADN<span className="text-green-600 dark:text-green-400">&lt;/sub&gt;</span>.&lt;/speak&gt;</p>
-                </div>
-              </div>
-
-              {/* Párrafos y oraciones */}
-              <div>
-                <p className="font-medium text-foreground mb-1.5">&lt;p&gt; y &lt;s&gt; — Párrafos y oraciones</p>
-                <p className="mb-1">Estructura el texto para pausas naturales entre párrafos y oraciones.</p>
-                <div className="bg-muted rounded-md p-2 font-mono text-[11px] leading-relaxed">
-                  <p className="text-foreground/70 mb-0.5">Ejemplo:</p>
-                  <p>&lt;speak&gt;<br/>
-                    &nbsp;&nbsp;<span className="text-green-600 dark:text-green-400">&lt;p&gt;</span><br/>
-                    &nbsp;&nbsp;&nbsp;&nbsp;<span className="text-green-600 dark:text-green-400">&lt;s&gt;</span>Este es el primer punto.<span className="text-green-600 dark:text-green-400">&lt;/s&gt;</span><br/>
-                    &nbsp;&nbsp;&nbsp;&nbsp;<span className="text-green-600 dark:text-green-400">&lt;s&gt;</span>Y este es el segundo.<span className="text-green-600 dark:text-green-400">&lt;/s&gt;</span><br/>
-                    &nbsp;&nbsp;<span className="text-green-600 dark:text-green-400">&lt;/p&gt;</span><br/>
-                    &nbsp;&nbsp;<span className="text-green-600 dark:text-green-400">&lt;p&gt;</span>Ahora pasamos al siguiente tema.<span className="text-green-600 dark:text-green-400">&lt;/p&gt;</span><br/>
-                  &lt;/speak&gt;</p>
-                </div>
-              </div>
-
-              {/* Ejemplo completo */}
-              <div>
-                <p className="font-medium text-foreground mb-1.5">Ejemplo completo combinado</p>
-                <div className="bg-muted rounded-md p-2 font-mono text-[11px] leading-relaxed">
-                  <p>&lt;speak&gt;<br/>
-                    &nbsp;&nbsp;<span className="text-green-600 dark:text-green-400">&lt;p&gt;</span><br/>
-                    &nbsp;&nbsp;&nbsp;&nbsp;<span className="text-green-600 dark:text-green-400">&lt;prosody rate=&quot;slow&quot;&gt;</span>Bienvenidos al noticiero del día <span className="text-green-600 dark:text-green-400">&lt;say-as interpret-as=&quot;date&quot; format=&quot;dmy&quot;&gt;</span>18-02-2026<span className="text-green-600 dark:text-green-400">&lt;/say-as&gt;</span>.<span className="text-green-600 dark:text-green-400">&lt;/prosody&gt;</span><br/>
-                    &nbsp;&nbsp;&nbsp;&nbsp;<span className="text-green-600 dark:text-green-400">&lt;break time=&quot;1s&quot;/&gt;</span><br/>
-                    &nbsp;&nbsp;&nbsp;&nbsp;Hoy la <span className="text-green-600 dark:text-green-400">&lt;sub alias=&quot;Organización de las Naciones Unidas&quot;&gt;</span>ONU<span className="text-green-600 dark:text-green-400">&lt;/sub&gt;</span> anunció que <span className="text-green-600 dark:text-green-400">&lt;say-as interpret-as=&quot;cardinal&quot;&gt;</span>195<span className="text-green-600 dark:text-green-400">&lt;/say-as&gt;</span> países firmaron el acuerdo.<br/>
-                    &nbsp;&nbsp;<span className="text-green-600 dark:text-green-400">&lt;/p&gt;</span><br/>
-                    &nbsp;&nbsp;<span className="text-green-600 dark:text-green-400">&lt;p&gt;</span><br/>
-                    &nbsp;&nbsp;&nbsp;&nbsp;<span className="text-green-600 dark:text-green-400">&lt;prosody rate=&quot;fast&quot; pitch=&quot;+2st&quot;&gt;</span>¡Esto es histórico!<span className="text-green-600 dark:text-green-400">&lt;/prosody&gt;</span><br/>
-                    &nbsp;&nbsp;<span className="text-green-600 dark:text-green-400">&lt;/p&gt;</span><br/>
-                  &lt;/speak&gt;</p>
-                </div>
-              </div>
+              <p className="text-[10px] pt-1 border-t border-border/30">
+                <span className="text-foreground">say-as tipos:</span> cardinal, ordinal, characters, date, time, telephone, unit, fraction
+              </p>
+              <p className="text-[10px]">
+                <span className="text-foreground">rate:</span> x-slow, slow, medium, fast, x-fast &nbsp;|&nbsp;
+                <span className="text-foreground">pitch:</span> -10st a +10st
+              </p>
             </div>
           </CollapsibleContent>
         </Collapsible>
