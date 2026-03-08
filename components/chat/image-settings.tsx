@@ -8,7 +8,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export type ImagenAspectRatio = "1:1" | "3:4" | "4:3" | "9:16" | "16:9";
 export type ImagenResolution = "1K" | "2K" | "4K";
@@ -19,6 +19,7 @@ interface ImageSettingsProps {
   numberOfImages: number;
   negativePrompt?: string;
   disabled?: boolean;
+  modelId?: string;
   onChange: (settings: {
     aspectRatio?: ImagenAspectRatio;
     resolution?: ImagenResolution;
@@ -33,9 +34,22 @@ export function ImageSettings({
   numberOfImages,
   negativePrompt = "",
   disabled = false,
+  modelId,
   onChange,
 }: ImageSettingsProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  const isGrok = modelId?.includes("grok-imagine-image") ?? false;
+
+  // Auto-correct unsupported values when switching models
+  useEffect(() => {
+    if (isGrok && resolution === "4K") {
+      onChange({ resolution: "2K" });
+    }
+    if (isGrok && numberOfImages > 10) {
+      onChange({ numberOfImages: 10 });
+    }
+  }, [isGrok, resolution, numberOfImages, onChange]);
 
   const aspectRatios: { value: ImagenAspectRatio; label: string; icon: "square" | "portrait" | "landscape" }[] = [
     { value: "1:1", label: "1:1", icon: "square" },
@@ -45,11 +59,20 @@ export function ImageSettings({
     { value: "16:9", label: "16:9", icon: "landscape" },
   ];
 
-  const resolutions: { value: ImagenResolution; label: string; description: string }[] = [
+  const allResolutions: { value: ImagenResolution; label: string; description: string }[] = [
     { value: "1K", label: "1K", description: "1024px" },
     { value: "2K", label: "2K", description: "2048px" },
     { value: "4K", label: "4K", description: "4096px" },
   ];
+
+  // Grok only supports 1K and 2K
+  const resolutions = isGrok
+    ? allResolutions.filter(r => r.value !== "4K")
+    : allResolutions;
+
+  // Grok supports up to 10 images, Imagen 4 up to 4
+  const maxImages = isGrok ? 10 : 4;
+  const imageCountOptions = isGrok ? [1, 2, 4, 6, 10] : [1, 2, 3, 4];
 
   const getIconDimensions = (icon: "square" | "portrait" | "landscape") => {
     switch (icon) {
@@ -125,7 +148,7 @@ export function ImageSettings({
       <div className="space-y-2">
         <Label className="text-xs text-muted-foreground">Cantidad de imagenes</Label>
         <div className="flex gap-2">
-          {([1, 2, 3, 4] as const).map((n) => (
+          {imageCountOptions.map((n) => (
             <button
               key={n}
               disabled={disabled}
@@ -142,34 +165,36 @@ export function ImageSettings({
         </div>
       </div>
 
-      {/* Opciones avanzadas */}
-      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-        <CollapsibleTrigger className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors w-full">
-          <ChevronDown
-            className={`w-4 h-4 transition-transform ${
-              advancedOpen ? "rotate-180" : ""
-            }`}
-          />
-          <span>Opciones avanzadas</span>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="space-y-3 pt-3">
-          <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">
-              Prompt negativo
-            </Label>
-            <Textarea
-              value={negativePrompt}
-              onChange={(e) => onChange({ negativePrompt: e.target.value })}
-              placeholder="Describe lo que NO quieres en la imagen..."
-              className="min-h-[60px] text-sm resize-none"
-              disabled={disabled}
+      {/* Opciones avanzadas (only for models that support negative prompt) */}
+      {!isGrok && (
+        <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+          <CollapsibleTrigger className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors w-full">
+            <ChevronDown
+              className={`w-4 h-4 transition-transform ${
+                advancedOpen ? "rotate-180" : ""
+              }`}
             />
-            <p className="text-xs text-muted-foreground">
-              Contenido que deseas evitar en la imagen generada
-            </p>
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+            <span>Opciones avanzadas</span>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-3 pt-3">
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground">
+                Prompt negativo
+              </Label>
+              <Textarea
+                value={negativePrompt}
+                onChange={(e) => onChange({ negativePrompt: e.target.value })}
+                placeholder="Describe lo que NO quieres en la imagen..."
+                className="min-h-[60px] text-sm resize-none"
+                disabled={disabled}
+              />
+              <p className="text-xs text-muted-foreground">
+                Contenido que deseas evitar en la imagen generada
+              </p>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
     </div>
   );
 }

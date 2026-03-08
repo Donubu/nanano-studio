@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
-import { generateImagen, isImagenConfigured, ImagenAspectRatio, ImagenResolution, Labels } from "@/lib/google-ai-imagen";
+import { generateImagen, ImagenAspectRatio, ImagenResolution, Labels } from "@/lib/google-ai-imagen";
+import { generateXaiImage, XaiImageAspectRatio, XaiImageResolution } from "@/lib/xai-image";
 import { uploadToS3, generateFileName, isS3Configured } from "@/lib/s3";
 import { generateConversationTitle } from "@/lib/google-ai";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
+import { isRedisConfigured, createRedisConnection } from "@/lib/redis";
+import { getImagenQueue, jobChannel, ImagenJobEvent, IMAGEN_QUEUE_NAME, hasActiveWorkers } from "@/lib/queue";
 
 // Allow up to 5 minutes for image generation (retries can be slow)
 export const maxDuration = 300;
@@ -25,14 +28,13 @@ interface ConversationRow extends RowDataPacket {
   image_size: string;
   supports_image_generation: boolean;
   project_name: string | null;
-  // Cost fields from model
   cost_image_1k: number;
   cost_image_2k: number;
   cost_image_4k: number;
   model_api_backend: string | null;
 }
 
-// POST - Generar imagen con Imagen 4 (SSE stream con retry feedback)
+// POST - Generar imagen con Imagen 4 o Grok (worker con fallback directo)
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -42,10 +44,6 @@ export async function POST(
 
     if (!session?.user) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-    }
-
-    if (!isImagenConfigured()) {
-      return NextResponse.json({ error: "API de Imagen no configurada" }, { status: 500 });
     }
 
     if (!isS3Configured()) {
@@ -99,16 +97,87 @@ export async function POST(
 
     const conversation = conversations[0];
 
-    // Crear el stream SSE inmediatamente para enviar headers rápido
+    // Resolve effective model
+    let effectiveModelId = conversation.model_model_id;
+    let effectiveModelDbId = conversation.model_id;
+    let effectiveBackend = conversation.model_api_backend || undefined;
+    let effectiveCostImage1k = Number(conversation.cost_image_1k) || 0;
+    let effectiveCostImage2k = Number(conversation.cost_image_2k) || 0;
+    let effectiveCostImage4k = Number(conversation.cost_image_4k) || 0;
+    const generationType = generation_type_override || conversation.generation_type || "image";
+
+    if (conversation.project_id) {
+      const [projectModels] = await pool.execute<RowDataPacket[]>(`
+        SELECT
+          pgm.model_id,
+          pgm.is_default,
+          m.model_id as model_model_id,
+          m.api_backend as model_api_backend,
+          m.cost_image_1k,
+          m.cost_image_2k,
+          m.cost_image_4k
+        FROM project_generation_models pgm
+        JOIN models m ON pgm.model_id = m.id
+        JOIN project_generation_config pgc ON pgc.project_id = pgm.project_id AND pgc.generation_type = pgm.generation_type
+        WHERE pgm.project_id = ? AND pgm.generation_type = ? AND pgc.is_enabled = 1
+        ORDER BY pgm.sort_order ASC
+      `, [conversation.project_id, generationType]);
+
+      if (projectModels.length > 0) {
+        const chosen = projectModels.find((m: RowDataPacket) => selected_model_id && m.model_id === selected_model_id)
+          || projectModels.find((m: RowDataPacket) => m.is_default)
+          || projectModels[0];
+        effectiveModelId = chosen.model_model_id;
+        effectiveModelDbId = chosen.model_id;
+        effectiveBackend = chosen.model_api_backend || undefined;
+        effectiveCostImage1k = Number(chosen.cost_image_1k) || 0;
+        effectiveCostImage2k = Number(chosen.cost_image_2k) || 0;
+        effectiveCostImage4k = Number(chosen.cost_image_4k) || 0;
+      }
+    }
+
+    // Verificar que el modelo soporta generacion de imagenes dedicada
+    const isImagen4 = effectiveModelId.includes("imagen-4");
+    const isGrokImage = effectiveModelId.includes("grok-imagine-image");
+    if (!isImagen4 && !isGrokImage) {
+      return NextResponse.json({ error: "El modelo seleccionado no soporta generacion de imagenes dedicada" }, { status: 400 });
+    }
+
+    // Guardar mensaje del usuario
+    const [userMessageResult] = await pool.execute<ResultSetHeader>(
+      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)
+       VALUES (?, 'user', 'text', ?, ?)`,
+      [id, effectiveQualityTier, content]
+    );
+    const userMessageId = userMessageResult.insertId;
+
+    const needsTitle = conversation.title === "Nueva conversación" || !conversation.title;
+
+    await pool.execute(
+      "UPDATE conversations SET updated_at = NOW() WHERE id = ?",
+      [id]
+    );
+
+    const userIdentifier = session.user.email?.split("@")[0] || "unknown";
+    const labels: Labels = {
+      project_name: conversation.project_name || "sin_proyecto",
+      user_name: userIdentifier,
+    };
+
+    const aspectRatio: ImagenAspectRatio = (imageSettings?.aspectRatio ||
+      conversation.image_aspect_ratio || "16:9") as ImagenAspectRatio;
+    const resolution: ImagenResolution = (imageSettings?.resolution ||
+      conversation.image_size || "1K") as ImagenResolution;
+    const maxImages = isGrokImage ? 10 : 4;
+    const numberOfImages = Math.min(maxImages, Math.max(1, imageSettings?.numberOfImages || 1));
+
+    // SSE stream
     const encoder = new TextEncoder();
     let controllerClosed = false;
-    let heartbeat: ReturnType<typeof setInterval>;
 
     const stream = new ReadableStream({
       async start(controller) {
-
-        // Heartbeat cada 10s para mantener la conexión viva
-        heartbeat = setInterval(() => {
+        const heartbeat = setInterval(() => {
           if (!controllerClosed) {
             controller.enqueue(encoder.encode(`: ping\n\n`));
           } else {
@@ -118,120 +187,100 @@ export async function POST(
 
         const sendEvent = (data: Record<string, unknown>) => {
           if (!controllerClosed) {
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
-            );
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
           }
         };
 
+        // Send user message ID immediately
+        sendEvent({ type: "user_message", id: userMessageId });
+
+        // ============================================
+        // WORKER DELEGATION (when Redis is available)
+        // ============================================
+        const redisReady = isRedisConfigured();
+        const workersAvailable = redisReady && await hasActiveWorkers(IMAGEN_QUEUE_NAME);
+        console.log(`[Imagen] Redis configured: ${redisReady}, Workers available: ${workersAvailable}`);
+
+        if (redisReady && workersAvailable) {
+          try {
+            const queue = getImagenQueue();
+            const job = await queue.add("imagen", {
+              conversationId: id,
+              userMessageId,
+              content,
+              modelId: effectiveModelId,
+              modelDbId: effectiveModelDbId,
+              backend: effectiveBackend,
+              qualityTier: effectiveQualityTier,
+              aspectRatio,
+              resolution,
+              negativePrompt: imageSettings?.negativePrompt,
+              numberOfImages,
+              seed: imageSettings?.seed,
+              labels: {
+                project_name: conversation.project_name || "sin_proyecto",
+                user_name: userIdentifier,
+              },
+              needsTitle,
+              costImage1k: effectiveCostImage1k,
+              costImage2k: effectiveCostImage2k,
+              costImage4k: effectiveCostImage4k,
+            });
+
+            console.log(`[Imagen] Job ${job.id} enqueued to worker`);
+
+            // Subscribe to worker events via Redis pub/sub
+            const subRedis = createRedisConnection();
+            const channel = jobChannel(job.id!);
+
+            // Safety timeout: 10 minutes
+            const workerTimeout = setTimeout(() => {
+              if (!controllerClosed) {
+                sendEvent({ type: "error", message: "Worker timeout" });
+                clearInterval(heartbeat);
+                controllerClosed = true;
+                controller.close();
+                subRedis.unsubscribe();
+                subRedis.disconnect();
+              }
+            }, 600000);
+
+            await subRedis.subscribe(channel);
+            subRedis.on("message", (ch: string, message: string) => {
+              if (ch !== channel || controllerClosed) return;
+              try {
+                const event: ImagenJobEvent = JSON.parse(message);
+
+                if (event.type === "complete" || event.type === "error") {
+                  sendEvent(event as unknown as Record<string, unknown>);
+                  clearInterval(heartbeat);
+                  clearTimeout(workerTimeout);
+                  controllerClosed = true;
+                  controller.close();
+                  subRedis.unsubscribe();
+                  subRedis.disconnect();
+                } else {
+                  sendEvent(event as unknown as Record<string, unknown>);
+                }
+              } catch (err) {
+                console.error("[Imagen] Error parsing worker event:", err);
+              }
+            });
+
+            return; // Worker handles it
+          } catch (err) {
+            console.error("[Imagen] Error enqueuing to worker, falling back to direct:", err);
+            // Fall through to direct processing
+          }
+        }
+
+        // ============================================
+        // DIRECT PROCESSING (fallback when no workers)
+        // ============================================
         try {
-          // Get the correct model from project_generation_config based on quality_tier
-          let effectiveModelId = conversation.model_model_id;
-          let effectiveModelDbId = conversation.model_id;
-          let effectiveBackend = conversation.model_api_backend || undefined;
-          let effectiveCostImage1k = Number(conversation.cost_image_1k) || 0;
-          let effectiveCostImage2k = Number(conversation.cost_image_2k) || 0;
-          let effectiveCostImage4k = Number(conversation.cost_image_4k) || 0;
-          const generationType = generation_type_override || conversation.generation_type || "image";
-          if (generation_type_override) {
-            console.log(`[Imagen] Using generation_type_override: ${generation_type_override} (conversation type: ${conversation.generation_type})`);
-          }
+          console.log(`[Imagen] Processing directly (no workers available)`);
 
-          if (conversation.project_id) {
-            const [projectModels] = await pool.execute<RowDataPacket[]>(`
-              SELECT
-                pgm.model_id,
-                pgm.is_default,
-                m.model_id as model_model_id,
-                m.api_backend as model_api_backend,
-                m.cost_image_1k,
-                m.cost_image_2k,
-                m.cost_image_4k
-              FROM project_generation_models pgm
-              JOIN models m ON pgm.model_id = m.id
-              JOIN project_generation_config pgc ON pgc.project_id = pgm.project_id AND pgc.generation_type = pgm.generation_type
-              WHERE pgm.project_id = ? AND pgm.generation_type = ? AND pgc.is_enabled = 1
-              ORDER BY pgm.sort_order ASC
-            `, [conversation.project_id, generationType]);
-
-            if (projectModels.length > 0) {
-              const chosen = projectModels.find((m: RowDataPacket) => selected_model_id && m.model_id === selected_model_id)
-                || projectModels.find((m: RowDataPacket) => m.is_default)
-                || projectModels[0];
-              effectiveModelId = chosen.model_model_id;
-              effectiveModelDbId = chosen.model_id;
-              effectiveBackend = chosen.model_api_backend || undefined;
-              effectiveCostImage1k = Number(chosen.cost_image_1k) || 0;
-              effectiveCostImage2k = Number(chosen.cost_image_2k) || 0;
-              effectiveCostImage4k = Number(chosen.cost_image_4k) || 0;
-              console.log(`[Imagen] Using model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
-            }
-          }
-
-          // Verificar que el modelo es Imagen 4
-          if (!effectiveModelId.includes("imagen-4")) {
-            sendEvent({ type: "error", message: "El modelo seleccionado no es Imagen 4" });
-            clearInterval(heartbeat);
-            controllerClosed = true;
-            controller.close();
-            return;
-          }
-
-          // Guardar mensaje del usuario (con quality_tier)
-          const [userMessageResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)
-             VALUES (?, 'user', 'text', ?, ?)`,
-            [id, effectiveQualityTier, content]
-          );
-          const userMessageId = userMessageResult.insertId;
-
-          // Verificar si necesita generar titulo (aún tiene el titulo por defecto)
-          const needsTitle = conversation.title === "Nueva conversación" || !conversation.title;
-
-          // Actualizar timestamp de la conversacion
-          await pool.execute(
-            "UPDATE conversations SET updated_at = NOW() WHERE id = ?",
-            [id]
-          );
-
-          // Preparar labels para tracking
-          const userIdentifier = session.user.email?.split("@")[0] || "unknown";
-          const labels: Labels = {
-            project_name: conversation.project_name || "sin_proyecto",
-            user_name: userIdentifier,
-          };
-
-          // Configuracion de generacion de imagen (usa request settings, fallback a conversation settings)
-          const aspectRatio: ImagenAspectRatio = (imageSettings?.aspectRatio ||
-            conversation.image_aspect_ratio || "16:9") as ImagenAspectRatio;
-          const resolution: ImagenResolution = (imageSettings?.resolution ||
-            conversation.image_size || "1K") as ImagenResolution;
-
-          // Number of images to generate (clamp 1-4)
-          const numberOfImages = Math.min(4, Math.max(1, imageSettings?.numberOfImages || 1));
-
-          const backendLabel = effectiveBackend === 'vertex' ? 'Vertex AI' : effectiveBackend === 'gemini' ? 'Gemini API' : (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API");
-          console.log(`\n========== [IMAGEN 4 GENERATION REQUEST] (${backendLabel}) ==========`);
-          console.log("Model:", effectiveModelId);
-          console.log("Quality tier:", effectiveQualityTier);
-          console.log("Aspect Ratio:", aspectRatio);
-          console.log("Resolution:", resolution);
-          console.log("Number of images:", numberOfImages);
-          console.log("Prompt:", content);
-          if (imageSettings?.negativePrompt) {
-            console.log("Negative Prompt:", imageSettings.negativePrompt);
-          }
-          if (imageSettings?.seed) {
-            console.log("User-provided Seed:", imageSettings.seed);
-          }
-          console.log("====================================================\n");
-
-          // Enviar el ID del mensaje del usuario
-          sendEvent({ type: "user_message", id: userMessageId });
-
-          // Callback de retry para notificar al usuario
           const onProgress = (progress: { status: string; message: string }) => {
-            // Detectar si es un mensaje de retry y enviar con formato correcto para el frontend
             const retryMatch = progress.message.match(/Reintentando \((\d+)\/(\d+)\).*?(\d+)s/);
             if (retryMatch) {
               sendEvent({
@@ -243,21 +292,38 @@ export async function POST(
             }
           };
 
-          // Generar imagen
-          const generatedImages = await generateImagen(
-            effectiveModelId,
-            content,
-            {
-              aspectRatio,
-              resolution,
-              negativePrompt: imageSettings?.negativePrompt,
-              numberOfImages,
-              seed: imageSettings?.seed,
-            },
-            onProgress,
-            labels,
-            effectiveBackend
-          );
+          // Generate images using the appropriate provider
+          let generatedImages: Array<{ data: Buffer; mimeType: string; seed?: number }>;
+
+          if (effectiveBackend === "xai") {
+            const xaiResults = await generateXaiImage(
+              effectiveModelId,
+              content,
+              {
+                aspectRatio: aspectRatio as XaiImageAspectRatio,
+                resolution: (resolution?.toLowerCase() || "1k") as XaiImageResolution,
+                numberOfImages,
+              },
+              onProgress,
+            );
+            generatedImages = xaiResults;
+          } else {
+            const imagenResults = await generateImagen(
+              effectiveModelId,
+              content,
+              {
+                aspectRatio,
+                resolution,
+                negativePrompt: imageSettings?.negativePrompt,
+                numberOfImages,
+                seed: imageSettings?.seed,
+              },
+              onProgress,
+              labels,
+              effectiveBackend
+            );
+            generatedImages = imagenResults;
+          }
 
           if (generatedImages.length === 0) {
             throw new Error("No se genero ninguna imagen");
@@ -285,11 +351,9 @@ export async function POST(
           const imageMessages: Array<{ id: number; imageUrl: string }> = [];
           let totalCost = 0;
 
-          // Process each generated image
           for (let i = 0; i < generatedImages.length; i++) {
             const generatedImage = generatedImages[i];
 
-            // Upload to S3
             const extension = generatedImage.mimeType.split("/")[1] || "png";
             const fileName = generateFileName(id, extension);
             const uploadResult = await uploadToS3(
@@ -299,7 +363,6 @@ export async function POST(
               "generated"
             );
 
-            // Save to DB
             const [modelResult] = await pool.execute<ResultSetHeader>(
               `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, generation_seed, content, image_url, image_mime_type, estimated_cost)
                VALUES (?, 'model', 'image', ?, ?, ?, '', ?, ?, ?)`,
@@ -307,7 +370,7 @@ export async function POST(
                 id,
                 effectiveQualityTier,
                 effectiveModelDbId,
-                generatedImage.seed,
+                generatedImage.seed ?? null,
                 uploadResult.url,
                 generatedImage.mimeType,
                 costPerImage,
@@ -317,7 +380,6 @@ export async function POST(
             totalCost += costPerImage;
             imageMessages.push({ id: modelResult.insertId, imageUrl: uploadResult.url });
 
-            // Send SSE event for this image
             sendEvent({
               type: "image",
               imageUrl: uploadResult.url,
@@ -330,13 +392,11 @@ export async function POST(
 
           // Update total cost on conversation
           await pool.execute(
-            `UPDATE conversations
-             SET total_estimated_cost = total_estimated_cost + ?
-             WHERE id = ?`,
+            `UPDATE conversations SET total_estimated_cost = total_estimated_cost + ? WHERE id = ?`,
             [totalCost, id]
           );
 
-          // Send completion event with all image messages
+          // Send completion event
           sendEvent({
             type: "complete",
             id: imageMessages[0].id,
@@ -350,8 +410,7 @@ export async function POST(
           controllerClosed = true;
           controller.close();
 
-          // Generar titulo después de completar exitosamente (fire-and-forget)
-          // Se genera aquí para no competir por cuota API con la llamada principal
+          // Generate title (fire-and-forget)
           if (needsTitle) {
             generateConversationTitle(content, labels)
               .then(async (title) => {
@@ -370,7 +429,6 @@ export async function POST(
           console.error("[Imagen] Error generating image:", error);
           const errorMessage = error instanceof Error ? error.message : "Error desconocido";
 
-          // Guardar mensaje de error (con content_type 'error' para excluirlo del historial)
           try {
             const [modelResult] = await pool.execute<ResultSetHeader>(
               `INSERT INTO messages (conversation_id, role, content_type, content)
@@ -385,10 +443,7 @@ export async function POST(
             });
           } catch (dbError) {
             console.error("[Imagen] Error saving error message:", dbError);
-            sendEvent({
-              type: "error",
-              message: errorMessage,
-            });
+            sendEvent({ type: "error", message: errorMessage });
           }
 
           clearInterval(heartbeat);
@@ -397,7 +452,6 @@ export async function POST(
         }
       },
       cancel() {
-        clearInterval(heartbeat);
         controllerClosed = true;
       },
     });

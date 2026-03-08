@@ -78,6 +78,71 @@ export type StreamJobEvent =
   | { type: "complete"; id: number; tokens: { input: number; output: number }; totalTokens: { input: number; output: number }; estimatedCost: number; totalCost: number; imageUrl: string | null; imageMessages?: Array<{ id: number; imageUrl: string }> }
   | { type: "error"; message: string; id?: number };
 
+// ============================================
+// IMAGEN QUEUE (Imagen 4 image generation)
+// ============================================
+
+export const IMAGEN_QUEUE_NAME = "generation-imagen";
+
+export interface ImagenJobData {
+  conversationId: string;
+  userMessageId: number;
+  content: string;
+
+  // Model
+  modelId: string;
+  modelDbId: number;
+  backend?: string;
+  qualityTier: "normal" | "hq";
+
+  // Image generation config
+  aspectRatio: string;
+  resolution: string;
+  negativePrompt?: string;
+  numberOfImages: number;
+  seed?: number;
+
+  // Metadata
+  labels: {
+    project_name: string;
+    user_name: string;
+  };
+  needsTitle: boolean;
+
+  // Cost
+  costImage1k: number;
+  costImage2k: number;
+  costImage4k: number;
+
+  // Set by worker when processing
+  workerName?: string;
+}
+
+export type ImagenJobEvent =
+  | { type: "image"; imageUrl: string; mimeType: string; seed?: number; estimatedCost: number; imageIndex: number }
+  | { type: "retry"; attempt: number; maxAttempts: number; delaySeconds: number }
+  | { type: "title"; title: string }
+  | { type: "complete"; id: number; imageUrl: string; seed?: number; estimatedCost: number; imageMessages: Array<{ id: number; imageUrl: string }> }
+  | { type: "error"; message: string; id?: number };
+
+let imagenQueue: Queue | null = null;
+
+export function getImagenQueue(): Queue<ImagenJobData> {
+  if (!imagenQueue) {
+    imagenQueue = new Queue(IMAGEN_QUEUE_NAME, {
+      connection: getRedisConnection() as never,
+      defaultJobOptions: {
+        removeOnComplete: 100,
+        removeOnFail: 50,
+        attempts: 1,
+      },
+    });
+  }
+  return imagenQueue;
+}
+
+// ============================================
+
 let streamQueue: Queue | null = null;
 
 export function getStreamQueue(): Queue<StreamJobData> {
@@ -99,11 +164,11 @@ export function jobChannel(jobId: string): string {
   return `gen:${jobId}`;
 }
 
-// Check if any workers are connected to the queue
-export async function hasActiveWorkers(): Promise<boolean> {
+// Check if any workers are connected to a queue
+export async function hasActiveWorkers(queueName: string = STREAM_QUEUE_NAME): Promise<boolean> {
   try {
     const redis = getRedisConnection();
-    const queueNameB64 = Buffer.from(STREAM_QUEUE_NAME).toString("base64");
+    const queueNameB64 = Buffer.from(queueName).toString("base64");
     const clientList = await redis.client("LIST") as string;
     return clientList
       .split("\n")

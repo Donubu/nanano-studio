@@ -440,11 +440,11 @@ export function ChatInterface() {
     // Check if image models are available for video conversations
     const hasImageModelsForVideo = imageTypeConfig && imageTypeConfig.models.length > 0;
 
-    // Check if the current image model is Imagen 4
-    const isImagen4Model = (() => {
-        const imageModel = getSelectedModel(imageTypeConfig);
-        return imageModel?.model_id?.includes("imagen-4") ?? false;
-    })();
+    // Get the current image model ID string
+    const currentImageModelId = getSelectedModel(imageTypeConfig)?.model_id || "";
+
+    // Check if the current image model uses dedicated image generation endpoint (Imagen 4 or Grok)
+    const isImagen4Model = currentImageModelId.includes("imagen-4") || currentImageModelId.includes("grok-imagine-image");
 
     // Gemini native models that support multi-image via parallel requests
     const supportsMultiImage = (() => {
@@ -4504,8 +4504,9 @@ export function ChatInterface() {
                         {isImageConversation && !activeTab?.isArchived && (
                             <div className="space-y-4 p-4 bg-card rounded-lg border border-border/50">
                                 {isImagen4Model ? (
-                                    /* Imagen 4 specific settings with more options */
+                                    /* Dedicated image model settings (Imagen 4, Grok) */
                                     <ImageSettings
+                                        modelId={currentImageModelId}
                                         aspectRatio={imageAspectRatio as ImagenAspectRatio}
                                         resolution={imageSize as ImagenResolution}
                                         numberOfImages={numberOfImages}
@@ -4667,8 +4668,9 @@ export function ChatInterface() {
                         {isVideoConversation && !activeTab?.isArchived && generationMode === "image" && (
                             <div className="space-y-4 p-4 bg-card rounded-lg border border-border/50">
                                 {isImagen4Model ? (
-                                    /* Imagen 4 specific settings */
+                                    /* Dedicated image model settings (Imagen 4, Grok) */
                                     <ImageSettings
+                                        modelId={currentImageModelId}
                                         aspectRatio={imageAspectRatio as ImagenAspectRatio}
                                         resolution={imageSize as ImagenResolution}
                                         numberOfImages={numberOfImages}
