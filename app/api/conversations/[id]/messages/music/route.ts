@@ -26,6 +26,7 @@ interface ConversationRow extends RowDataPacket {
   system_instruction: string | null;
   supports_music_generation: boolean;
   project_name: string | null;
+  client_name: string | null;
   cost_music_per_minute: number;
   // Music settings from conversation
   music_prompts: string | null;
@@ -82,11 +83,12 @@ export async function POST(
     // Obtener conversacion con configuracion de musica
     const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, m.model_id as model_model_id, m.supports_music_generation, p.title as project_name,
+      `SELECT c.*, m.model_id as model_model_id, m.supports_music_generation, p.title as project_name, cl.name as client_name,
               m.cost_music_per_minute
        FROM conversations c
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
+       LEFT JOIN clients cl ON p.client_id = cl.id
        WHERE c.id = ? ${isAdmin ? "" : "AND c.user_id = ?"} AND c.deleted_at IS NULL`,
       isAdmin ? [id] : [id, session.user.id]
     );
@@ -315,7 +317,7 @@ export async function POST(
           if (needsTitle && promptSummary) {
             const userIdentifier = session.user.email?.split("@")[0] || "unknown";
             const titleLabels: AILabels = {
-              project_name: conversation.project_name || "sin_proyecto",
+              project_name: conversation.client_name ? `${conversation.client_name} > ${conversation.project_name}` : conversation.project_name || "sin_proyecto",
               user_name: userIdentifier,
             };
             generateConversationTitle(promptSummary, titleLabels)

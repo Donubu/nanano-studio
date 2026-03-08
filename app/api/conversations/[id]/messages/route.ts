@@ -31,6 +31,7 @@ interface ConversationRow extends RowDataPacket {
   image_size: string;
   supports_image_generation: boolean;
   project_name: string | null;
+  client_name: string | null;
   model_api_backend: string | null;
 }
 
@@ -121,10 +122,11 @@ export async function POST(
     // Obtener conversación con configuración y nombre del proyecto
     const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, m.api_backend as model_api_backend, p.title as project_name
+      `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, m.api_backend as model_api_backend, p.title as project_name, cl.name as client_name
        FROM conversations c
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
+       LEFT JOIN clients cl ON p.client_id = cl.id
        WHERE c.id = ? ${isAdmin ? "" : "AND c.user_id = ?"}`,
       isAdmin ? [id] : [id, session.user.id]
     );
@@ -180,7 +182,7 @@ export async function POST(
     // Usar solo la parte inicial del email para no exponer datos sensibles
     const userIdentifier = session.user.email?.split("@")[0] || "unknown";
     const labels: Labels = {
-      project_name: conversation.project_name || "sin_proyecto",
+      project_name: conversation.client_name ? `${conversation.client_name} > ${conversation.project_name}` : conversation.project_name || "sin_proyecto",
       user_name: userIdentifier,
     };
 

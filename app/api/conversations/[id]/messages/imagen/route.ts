@@ -29,6 +29,7 @@ interface ConversationRow extends RowDataPacket {
   image_size: string;
   supports_image_generation: boolean;
   project_name: string | null;
+  client_name: string | null;
   cost_image_1k: number;
   cost_image_2k: number;
   cost_image_4k: number;
@@ -83,11 +84,12 @@ export async function POST(
     // Obtener conversacion con configuracion de imagen y costos del modelo
     const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, m.api_backend as model_api_backend, p.title as project_name,
+      `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, m.api_backend as model_api_backend, p.title as project_name, cl.name as client_name,
               m.cost_image_1k, m.cost_image_2k, m.cost_image_4k
        FROM conversations c
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
+       LEFT JOIN clients cl ON p.client_id = cl.id
        WHERE c.id = ? ${isAdmin ? "" : "AND c.user_id = ?"} AND c.deleted_at IS NULL`,
       isAdmin ? [id] : [id, session.user.id]
     );
@@ -162,7 +164,7 @@ export async function POST(
 
     const userIdentifier = session.user.email?.split("@")[0] || "unknown";
     const labels: Labels = {
-      project_name: conversation.project_name || "sin_proyecto",
+      project_name: conversation.client_name ? `${conversation.client_name} > ${conversation.project_name}` : conversation.project_name || "sin_proyecto",
       user_name: userIdentifier,
     };
 
@@ -220,7 +222,7 @@ export async function POST(
               numberOfImages,
               seed: imageSettings?.seed,
               labels: {
-                project_name: conversation.project_name || "sin_proyecto",
+                project_name: conversation.client_name ? `${conversation.client_name} > ${conversation.project_name}` : conversation.project_name || "sin_proyecto",
                 user_name: userIdentifier,
               },
               needsTitle,

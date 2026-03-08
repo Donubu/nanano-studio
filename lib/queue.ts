@@ -47,7 +47,7 @@ export interface StreamJobData {
 
   // Metadata
   labels: {
-    project_name: string;
+    project_name: string; // May include client prefix: "ClientName > ProjectName"
     user_name: string;
   };
   needsTitle: boolean;
@@ -104,7 +104,7 @@ export interface ImagenJobData {
 
   // Metadata
   labels: {
-    project_name: string;
+    project_name: string; // May include client prefix: "ClientName > ProjectName"
     user_name: string;
   };
   needsTitle: boolean;

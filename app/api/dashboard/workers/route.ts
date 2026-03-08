@@ -78,12 +78,11 @@ export async function GET() {
         imagenQueue.getJobs(["completed"], 0, 19),
       ]);
 
-      const mapCompletedJob = (job: { id?: string; data?: { modelId?: string; generationType?: string; qualityTier?: string; labels?: { user_name?: string; project_name?: string }; workerName?: string }; finishedOn?: number; processedOn?: number }, queueLabel: string) => ({
+      const mapCompletedJob = (job: { id?: string; data?: { modelId?: string; generationType?: string; labels?: { user_name?: string; project_name?: string }; workerName?: string }; finishedOn?: number; processedOn?: number }, queueLabel: string) => ({
         id: job.id,
         queue: queueLabel,
         model: job.data?.modelId || "—",
         generationType: job.data?.generationType || queueLabel,
-        qualityTier: job.data?.qualityTier || "—",
         user: job.data?.labels?.user_name || "—",
         project: job.data?.labels?.project_name || "—",
         completedAt: job.finishedOn || null,
@@ -103,13 +102,13 @@ export async function GET() {
         imagenQueue.getJobs(["failed"], 0, 19),
       ]);
 
-      const mapFailedJob = (job: { id?: string; data?: { modelId?: string; generationType?: string; qualityTier?: string; labels?: { user_name?: string } }; failedReason?: string; finishedOn?: number }, queueLabel: string) => ({
+      const mapFailedJob = (job: { id?: string; data?: { modelId?: string; generationType?: string; qualityTier?: string; labels?: { user_name?: string; project_name?: string } }; failedReason?: string; finishedOn?: number }, queueLabel: string) => ({
         id: job.id,
         queue: queueLabel,
         model: job.data?.modelId || "—",
         generationType: job.data?.generationType || queueLabel,
-        qualityTier: job.data?.qualityTier || "—",
         user: job.data?.labels?.user_name || "—",
+        project: job.data?.labels?.project_name || "—",
         error: job.failedReason || "Unknown error",
         failedAt: job.finishedOn || null,
       });

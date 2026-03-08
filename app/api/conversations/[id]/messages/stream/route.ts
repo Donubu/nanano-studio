@@ -85,6 +85,7 @@ interface ConversationRow extends RowDataPacket {
   image_size: string;
   supports_image_generation: boolean;
   project_name: string | null;
+  client_name: string | null;
   // Cost fields from model
   cost_input_per_million: number;
   cost_output_per_million: number;
@@ -164,12 +165,13 @@ export async function POST(
     // Obtener conversación con configuración, nombre del proyecto y costos del modelo
     const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, c.generation_type, m.model_id as model_model_id, m.supports_image_generation, m.supports_google_search as model_supports_google_search, m.api_backend as model_api_backend, m.system_instruction as model_system_instruction, p.title as project_name,
+      `SELECT c.*, c.generation_type, m.model_id as model_model_id, m.supports_image_generation, m.supports_google_search as model_supports_google_search, m.api_backend as model_api_backend, m.system_instruction as model_system_instruction, p.title as project_name, cl.name as client_name,
               m.cost_input_per_million, m.cost_output_per_million,
               m.cost_image_1k, m.cost_image_2k, m.cost_image_4k, m.cost_video_per_second
        FROM conversations c
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
+       LEFT JOIN clients cl ON p.client_id = cl.id
        WHERE c.id = ? ${isAdmin ? "" : "AND c.user_id = ?"} AND c.deleted_at IS NULL`,
       isAdmin ? [id] : [id, session.user.id]
     );
@@ -461,7 +463,7 @@ export async function POST(
           // Usar solo la parte inicial del email para no exponer datos sensibles
           const userIdentifier = session.user.email?.split("@")[0] || "unknown";
           const labels: Labels = {
-            project_name: conversation.project_name || "sin_proyecto",
+            project_name: conversation.client_name ? `${conversation.client_name} > ${conversation.project_name}` : conversation.project_name || "sin_proyecto",
             user_name: userIdentifier,
           };
 

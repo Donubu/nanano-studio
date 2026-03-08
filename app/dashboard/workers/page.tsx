@@ -49,6 +49,7 @@ interface FailedJob {
   model: string;
   generationType: string;
   user: string;
+  project: string;
   error: string;
   failedAt: number | null;
 }
@@ -386,6 +387,7 @@ export default function WorkersPage() {
                     <TableHead>Modelo</TableHead>
                     <TableHead>Tipo</TableHead>
                     <TableHead>Usuario</TableHead>
+                    <TableHead>Proyecto</TableHead>
                     <TableHead>Error</TableHead>
                     <TableHead className="w-[160px]">Fecha</TableHead>
                   </TableRow>
@@ -405,6 +407,9 @@ export default function WorkersPage() {
                         </TableCell>
                         <TableCell>{job.generationType}</TableCell>
                         <TableCell>{job.user}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {job.project}
+                        </TableCell>
                         <TableCell className="text-sm text-red-400">
                           <div className="flex items-center gap-2 min-w-0">
                             {expandedErrors.has(job.id) ? (
@@ -423,7 +428,7 @@ export default function WorkersPage() {
                       </TableRow>
                       {expandedErrors.has(job.id) && (
                         <TableRow>
-                          <TableCell colSpan={6} className="p-0">
+                          <TableCell colSpan={7} className="p-0">
                             <pre className="text-xs text-red-300 bg-red-950/30 p-3 m-2 rounded overflow-x-auto whitespace-pre-wrap break-words">
                               {job.error}
                             </pre>
