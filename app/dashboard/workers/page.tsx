@@ -30,6 +30,7 @@ interface ActiveJob {
   conversationId: string;
   generationType: string;
   user: string;
+  project: string;
   worker: string;
   startedAt: number | null;
 }
@@ -285,6 +286,7 @@ export default function WorkersPage() {
                   <TableHead>Modelo</TableHead>
                   <TableHead>Tipo</TableHead>
                   <TableHead>Usuario</TableHead>
+                  <TableHead>Proyecto</TableHead>
                   <TableHead>Tiempo</TableHead>
                 </TableRow>
               </TableHeader>
@@ -304,6 +306,9 @@ export default function WorkersPage() {
                     </TableCell>
                     <TableCell>{job.generationType}</TableCell>
                     <TableCell>{job.user}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {job.project}
+                    </TableCell>
                     <TableCell className="font-mono text-xs">
                       {formatElapsed(job.startedAt)}
                     </TableCell>

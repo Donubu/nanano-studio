@@ -55,13 +55,13 @@ export async function GET() {
         imagenQueue.getJobs(["active"]),
       ]);
 
-      const mapActiveJob = (job: { id?: string; data: { modelId: string; conversationId: string; generationType?: string; qualityTier: string; labels?: { user_name?: string }; workerName?: string }; processedOn?: number }, queueLabel: string) => ({
+      const mapActiveJob = (job: { id?: string; data: { modelId: string; conversationId: string; generationType?: string; labels?: { user_name?: string; project_name?: string }; workerName?: string }; processedOn?: number }, queueLabel: string) => ({
         id: job.id,
         queue: queueLabel,
         model: job.data.modelId,
         conversationId: job.data.conversationId,
         generationType: job.data.generationType || queueLabel,
-        qualityTier: job.data.qualityTier,
+        project: job.data.labels?.project_name || "—",
         user: job.data.labels?.user_name || "—",
         worker: job.data.workerName || "—",
         startedAt: job.processedOn || null,
@@ -120,15 +120,18 @@ export async function GET() {
         .sort((a, b) => (b.failedAt || 0) - (a.failedAt || 0))
         .slice(0, 20);
 
-      // Count workers across both queues
+      // Count unique worker processes across both queues
+      // Each worker process creates 2 BullMQ Workers (stream + imagen), each with a bzpopmin connection
+      // So we count total bzpopmin connections and divide by 2 to get actual worker processes
       const clientList = await connection.client("LIST") as string;
       const clientLines = clientList.split("\n");
       const streamB64 = Buffer.from(STREAM_QUEUE_NAME).toString("base64");
       const imagenB64 = Buffer.from(IMAGEN_QUEUE_NAME).toString("base64");
-      const workerCount = clientLines.filter((line) =>
+      const bzpopminCount = clientLines.filter((line) =>
         (line.includes(`name=bull:${streamB64}`) || line.includes(`name=bull:${imagenB64}`))
         && line.includes("cmd=bzpopmin")
       ).length;
+      const workerCount = Math.ceil(bzpopminCount / 2);
 
       await streamQueue.close();
       await imagenQueue.close();
