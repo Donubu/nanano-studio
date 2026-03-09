@@ -90,8 +90,8 @@ export async function GET() {
       });
 
       const completedJobs = [
-        ...streamCompletedRaw.filter((j) => j.data).map((j) => mapCompletedJob(j, "stream")),
-        ...imagenCompletedRaw.filter((j) => j.data).map((j) => mapCompletedJob(j as never, "imagen")),
+        ...streamCompletedRaw.filter((j) => j?.data).map((j) => mapCompletedJob(j, "stream")),
+        ...imagenCompletedRaw.filter((j) => j?.data).map((j) => mapCompletedJob(j as never, "imagen")),
       ]
         .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0))
         .slice(0, 20);
@@ -114,8 +114,8 @@ export async function GET() {
       });
 
       const failedJobs = [
-        ...streamFailedRaw.filter((j) => j.data).map((j) => mapFailedJob(j, "stream")),
-        ...imagenFailedRaw.filter((j) => j.data).map((j) => mapFailedJob(j as never, "imagen")),
+        ...streamFailedRaw.filter((j) => j?.data).map((j) => mapFailedJob(j, "stream")),
+        ...imagenFailedRaw.filter((j) => j?.data).map((j) => mapFailedJob(j as never, "imagen")),
       ]
         .sort((a, b) => (b.failedAt || 0) - (a.failedAt || 0))
         .slice(0, 20);
