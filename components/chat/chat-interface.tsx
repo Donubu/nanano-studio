@@ -418,7 +418,8 @@ export function ChatInterface() {
     // Determine video provider
     const activeVideoModel = getSelectedModel(videoTypeConfig);
     const isXaiVideoProvider = activeVideoModel?.api_backend === "xai";
-    const isKlingVideoProvider = activeVideoModel?.api_backend === "kling" || activeVideoModel?.model_id?.includes("kling-v3-omni");
+    const isKlingVideoProvider = activeVideoModel?.api_backend === "kling" || activeVideoModel?.model_id?.includes("kling-v3-omni") || activeVideoModel?.model_id === "kling-v2-6";
+    const isKlingV26 = activeVideoModel?.model_id === "kling-v2-6";
 
     // Kling dynamic limits: max 7 images without video input, max 4 with video input, max 1 video
     const klingHasVideoInput = klingAssetList.some(a => a.type === "video") || selectedKlingAssets.some(a => a.type === "video");
@@ -4007,7 +4008,7 @@ export function ChatInterface() {
                                                             : undefined
                                                     }
                                                     onImageSelect={handleConversationImageSelect}
-                                                    allowVideoSelection={!activeTab?.isArchived && !!msg.video_url && isKlingVideoProvider && isVideoConversation && generationMode === "video"}
+                                                    allowVideoSelection={!activeTab?.isArchived && !!msg.video_url && isKlingVideoProvider && !isKlingV26 && isVideoConversation && generationMode === "video"}
                                                     isVideoSelected={msg.video_url ? selectedKlingAssets.some(a => a.url === msg.video_url) : false}
                                                     videoAssetLabel={
                                                         msg.video_url
@@ -4241,12 +4242,12 @@ export function ChatInterface() {
                                         setReuseImages([]);
                                     }}
                                     disabled={isSending || !currentModelInfo?.id}
-                                    supportsFiles={isTextConversation || isImageConversation || (isVideoConversation && generationMode === "image") || (isVideoConversation && generationMode === "video" && isKlingVideoProvider)}
-                                    assetMode={isVideoConversation && generationMode === "video" && isKlingVideoProvider}
-                                    maxFilesOverride={isVideoConversation && generationMode === "video" && isKlingVideoProvider ? klingMaxAssets : undefined}
-                                    onAssetsChange={isVideoConversation && generationMode === "video" && isKlingVideoProvider ? setKlingAssetList : undefined}
+                                    supportsFiles={isTextConversation || isImageConversation || (isVideoConversation && generationMode === "image") || (isVideoConversation && generationMode === "video" && isKlingVideoProvider && !isKlingV26)}
+                                    assetMode={isVideoConversation && generationMode === "video" && isKlingVideoProvider && !isKlingV26}
+                                    maxFilesOverride={isVideoConversation && generationMode === "video" && isKlingVideoProvider && !isKlingV26 ? klingMaxAssets : undefined}
+                                    onAssetsChange={isVideoConversation && generationMode === "video" && isKlingVideoProvider && !isKlingV26 ? setKlingAssetList : undefined}
                                     preselectedImages={
-                                        isVideoConversation && generationMode === "video" && isKlingVideoProvider
+                                        isVideoConversation && generationMode === "video" && isKlingVideoProvider && !isKlingV26
                                             ? selectedKlingAssets.map((a, idx) => ({ url: a.url, assetLabel: `asset${idx + 1}` }))
                                             : [
                                                 ...reuseImages.map(url => ({ url })),
@@ -4254,7 +4255,7 @@ export function ChatInterface() {
                                             ]
                                     }
                                     onRemovePreselectedImage={(url) => {
-                                        if (isVideoConversation && generationMode === "video" && isKlingVideoProvider) {
+                                        if (isVideoConversation && generationMode === "video" && isKlingVideoProvider && !isKlingV26) {
                                             setSelectedKlingAssets(prev => prev.filter(a => a.url !== url));
                                         } else {
                                             setSelectedConversationImages(prev => prev.filter(u => u !== url));
@@ -4752,9 +4753,10 @@ export function ChatInterface() {
                                     negativePrompt={videoNegativePrompt}
                                     disabled={isSending}
                                     hasReferenceImages={videoReferenceImages.length > 0}
-                                    hasVideoInput={isKlingVideoProvider && klingHasVideoInput}
+                                    hasVideoInput={isKlingVideoProvider && !isKlingV26 && klingHasVideoInput}
                                     provider={isKlingVideoProvider ? "kling" : isXaiVideoProvider ? "xai" : "google"}
-                                    imageAssets={isKlingVideoProvider ? klingImageAssets.map(a => ({ assetId: a.assetId, type: a.type as "image" | "video", label: a.label })) : undefined}
+                                    modelId={activeVideoModel?.model_id}
+                                    imageAssets={isKlingVideoProvider && !isKlingV26 ? klingImageAssets.map(a => ({ assetId: a.assetId, type: a.type as "image" | "video", label: a.label })) : undefined}
                                     voiceBindings={isKlingVideoProvider ? klingVoiceBindings : undefined}
                                     onVoiceBindingsChange={isKlingVideoProvider ? setKlingVoiceBindings : undefined}
                                     onChange={(settings) => {

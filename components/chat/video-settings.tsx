@@ -39,6 +39,7 @@ interface VideoSettingsProps {
   hasReferenceImages?: boolean;
   hasVideoInput?: boolean; // When true, Kling disables native audio (not supported with video input)
   provider?: VideoProvider;
+  modelId?: string; // e.g. "kling-v3-omni" or "kling-v2-6" — used to differentiate Kling versions
   imageAssets?: KlingAssetInfo[]; // Kling image assets for per-asset voice binding
   voiceBindings?: Record<string, VoiceBinding>; // assetId → voice audio
   onVoiceBindingsChange?: (bindings: Record<string, VoiceBinding>) => void;
@@ -94,6 +95,11 @@ const KLING_ASPECT_RATIOS: { value: VideoAspectRatio; label: string }[] = [
   { value: "1:1", label: "1:1" },
 ];
 
+const KLING_V26_DURATIONS: { value: VideoDuration; label: string }[] = [
+  { value: 5, label: "5s" },
+  { value: 10, label: "10s" },
+];
+
 export function VideoSettings({
   duration,
   resolution,
@@ -104,6 +110,7 @@ export function VideoSettings({
   hasReferenceImages = false,
   hasVideoInput = false,
   provider = "google",
+  modelId,
   imageAssets = [],
   voiceBindings = {},
   onVoiceBindingsChange,
@@ -115,6 +122,7 @@ export function VideoSettings({
 
   const isXai = provider === "xai";
   const isKling = provider === "kling";
+  const isKlingV26 = isKling && modelId === "kling-v2-6";
 
   const resolutions = isKling ? KLING_RESOLUTIONS : isXai ? XAI_RESOLUTIONS : GOOGLE_RESOLUTIONS;
   const aspectRatios = isKling ? KLING_ASPECT_RATIOS : isXai ? XAI_ASPECT_RATIOS : GOOGLE_ASPECT_RATIOS;
@@ -150,7 +158,24 @@ export function VideoSettings({
         <Label className="text-xs text-muted-foreground">
           Duración {(isXai || isKling) && <span className="text-muted-foreground/60">({duration}s)</span>}
         </Label>
-        {(isXai || isKling) ? (
+        {isKlingV26 ? (
+          <div className="flex gap-2">
+            {KLING_V26_DURATIONS.map((d) => (
+              <button
+                key={d.value}
+                disabled={disabled}
+                onClick={() => onChange({ duration: d.value })}
+                className={`flex-1 py-2 px-3 text-sm rounded-md border transition-colors ${
+                  duration === d.value
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-background border-border hover:bg-muted"
+                } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+        ) : (isXai || isKling) ? (
           <>
             <Slider
               value={[duration]}
@@ -267,24 +292,26 @@ export function VideoSettings({
               <Label className={`text-sm ${isKling && hasVideoInput ? "text-muted-foreground/50" : ""}`}>Audio nativo</Label>
             </div>
             <Switch
-              checked={isKling && hasVideoInput ? false : audioEnabled}
+              checked={isKling && hasVideoInput ? false : (isKlingV26 && resolution === "720p") ? false : audioEnabled}
               onCheckedChange={(checked) => onChange({ audioEnabled: checked })}
-              disabled={disabled || (isKling && hasVideoInput)}
+              disabled={disabled || (isKling && hasVideoInput) || (isKlingV26 && resolution === "720p")}
             />
           </div>
           <p className="text-xs text-muted-foreground -mt-2">
             {isKling && hasVideoInput
               ? "Audio no disponible cuando se usa un video como input"
-              : isKling
-                ? "Kling genera audio nativo sincronizado (dialogos, efectos)"
-                : "VEO genera audio nativo (dialogos, efectos, ambiente)"}
+              : isKlingV26 && resolution === "720p"
+                ? "Audio solo disponible en modo Pro (1080p) para Kling v2.6"
+                : isKling
+                  ? "Kling genera audio nativo sincronizado (dialogos, efectos)"
+                  : "VEO genera audio nativo (dialogos, efectos, ambiente)"}
           </p>
         </>
       )}
 
       {/* Per-asset voice binding - Kling only: each image asset can have a voice reference */}
       {/* Disabled when video input is present (Kling doesn't support audio/voice with video input) */}
-      {isKling && onVoiceBindingsChange && imageAssets.length > 0 && (
+      {isKling && !isKlingV26 && onVoiceBindingsChange && imageAssets.length > 0 && (
         <div className={cn("space-y-2", hasVideoInput && "opacity-50")}>
           <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
             <Music className="w-3 h-3" />

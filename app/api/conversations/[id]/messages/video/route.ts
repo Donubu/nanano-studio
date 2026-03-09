@@ -222,7 +222,7 @@ export async function POST(
 
           // Determine provider
           const isXaiProvider = effectiveBackend === 'xai';
-          const isKlingProvider = effectiveBackend === 'kling' || effectiveModelId.includes('kling-v3-omni');
+          const isKlingProvider = effectiveBackend === 'kling' || effectiveModelId.includes('kling-v3-omni') || effectiveModelId === 'kling-v2-6';
 
           // Validate that the appropriate video API is configured
           if (isKlingProvider) {
@@ -292,7 +292,8 @@ export async function POST(
           let generatedSeed: number;
 
           if (isKlingProvider) {
-            // ===== Kling v3 Omni Video =====
+            // ===== Kling Video (v3 Omni + v2.6) =====
+            const isKlingV26 = effectiveModelId === 'kling-v2-6';
             const klingMode = (videoSettings?.resolution === "1080p" ? "pro" : "std") as KlingVideoConfig["mode"];
             const klingConfig: KlingVideoConfig = {
               duration: videoSettings?.duration || conversation.video_duration || 5,
@@ -304,8 +305,8 @@ export async function POST(
                 : (conversation.video_audio_enabled ?? false),
             };
 
-            // Validate Kling-specific config
-            const validationError = validateKlingVideoConfig(klingConfig);
+            // Validate Kling-specific config (version-aware)
+            const validationError = validateKlingVideoConfig(klingConfig, effectiveModelId);
             if (validationError) {
               sendEvent({ type: "error", message: validationError });
               clearInterval(heartbeat);
@@ -314,9 +315,9 @@ export async function POST(
               return;
             }
 
-            // Upload per-asset voice bindings to S3 if provided
+            // Upload per-asset voice bindings to S3 if provided (v3 omni only)
             const voiceBindingUrls: Record<string, string> = {};
-            if (voiceBindings && Object.keys(voiceBindings).length > 0) {
+            if (!isKlingV26 && voiceBindings && Object.keys(voiceBindings).length > 0) {
               for (const [assetId, audioData] of Object.entries(voiceBindings)) {
                 if (audioData.startsWith("http")) {
                   voiceBindingUrls[assetId] = audioData;
@@ -356,8 +357,8 @@ export async function POST(
               return result.url;
             };
 
-            // Handle inline assets (from @ mention system)
-            if (inlineAssets && inlineAssets.length > 0) {
+            // Handle inline assets (from @ mention system) — v3 omni only
+            if (!isKlingV26 && inlineAssets && inlineAssets.length > 0) {
               // Validate Kling asset limits: max 1 video, max 7 images without video, max 4 images with video
               const videoAssets = inlineAssets.filter(a => a.type === "video");
               const imageAssets = inlineAssets.filter(a => a.type === "image");

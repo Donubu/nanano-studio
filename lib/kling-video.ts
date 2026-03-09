@@ -1,7 +1,10 @@
 /**
- * Kling v3 Omni Video integration
+ * Kling Video integration (v3 Omni + v2.6)
  * Supports text-to-video and image-to-video via Kling REST API
- * API: POST /v1/videos/omni-video (create) + GET /v1/videos/omni-video/{taskId} (poll)
+ *
+ * v3 Omni: POST /v1/videos/omni-video (unified endpoint, image_list, voice_list)
+ * v2.6:    POST /v1/videos/text2video  (text-only, no image_list)
+ *          POST /v1/videos/image2video  (with image/image_tail fields)
  */
 
 import { GeneratedVideo, VideoGenerationProgress } from "./google-ai-video";
@@ -27,13 +30,13 @@ export type KlingVideoAspectRatio = "16:9" | "9:16" | "1:1";
 export type KlingVideoMode = "std" | "pro";
 
 export interface KlingVideoConfig {
-  duration: number; // 3-15 seconds
+  duration: number;
   aspectRatio: KlingVideoAspectRatio;
   mode: KlingVideoMode; // std = 720p, pro = 1080p
   negativePrompt?: string;
-  cfgScale?: number; // 0-1
+  cfgScale?: number; // 0-1 (v3 only, v2.x does not support)
   generateAudio?: boolean;
-  voiceBindings?: Record<string, string>; // assetId → URL of voice reference audio (5-30s) per character
+  voiceBindings?: Record<string, string>; // assetId → URL of voice reference audio (v3 only)
 }
 
 export interface KlingImageInput {
@@ -56,6 +59,30 @@ interface KlingTaskResponse {
         duration: string;
       }>;
     };
+  };
+}
+
+// ============================================
+// VERSION HELPERS
+// ============================================
+
+/** Check if model is a legacy (pre-omni) version that uses text2video/image2video endpoints */
+function isLegacyModel(modelId: string): boolean {
+  return !modelId.includes("omni") && !modelId.includes("v3");
+}
+
+/** Get the correct API endpoints based on model version and whether images are provided */
+function getKlingEndpoints(modelId: string, hasImages: boolean): { create: string; poll: string } {
+  if (isLegacyModel(modelId)) {
+    const path = hasImages ? "image2video" : "text2video";
+    return {
+      create: `/v1/videos/${path}`,
+      poll: `/v1/videos/${path}`,
+    };
+  }
+  return {
+    create: "/v1/videos/omni-video",
+    poll: "/v1/videos/omni-video",
   };
 }
 
@@ -91,6 +118,10 @@ export async function generateKlingVideo(
     message: "Iniciando generacion de video con Kling...",
   });
 
+  const legacy = isLegacyModel(modelId);
+  const hasImages = !!(images && images.length > 0);
+  const endpoints = getKlingEndpoints(modelId, hasImages);
+
   // Build request body
   const requestBody: Record<string, unknown> = {
     model_name: modelId,
@@ -103,38 +134,66 @@ export async function generateKlingVideo(
   if (config.negativePrompt) {
     requestBody.negative_prompt = config.negativePrompt;
   }
-  if (config.cfgScale !== undefined) {
+
+  // cfg_scale: v2.x models do not support this parameter
+  if (!legacy && config.cfgScale !== undefined) {
     requestBody.cfg_scale = config.cfgScale;
   }
-  // sound: "on" or "off" (not generate_audio)
+
+  // sound: "on" or "off" — supported on v2.6+
+  // v2.6: audio only supported in pro mode, force off for std
+  if (legacy && config.mode === "std" && config.generateAudio) {
+    console.log("[Kling Video v2.6] Forcing audio off - not supported in std mode");
+    config.generateAudio = false;
+  }
   requestBody.sound = config.generateAudio ? "on" : "off";
 
-  // Per-asset voice bindings for voice cloning
-  if (config.voiceBindings && Object.keys(config.voiceBindings).length > 0) {
-    // Kling expects voice bindings as part of image_list entries or as a separate voice_list
-    // Map assetId (e.g., "asset1") to positional index for the image_list
-    const voiceList = Object.entries(config.voiceBindings).map(([assetId, url]) => {
-      const idx = parseInt(assetId.replace("asset", ""), 10) - 1; // 0-based index
-      return { image_index: idx, voice_url: url };
-    });
-    requestBody.voice_list = voiceList;
-    console.log(`[Kling Video] ${voiceList.length} voice binding(s) for assets: ${Object.keys(config.voiceBindings).join(", ")}`);
-  }
-
-  // Images: first_frame, end_frame, or reference images
-  // Format: array of { image_url, type? } objects
-  if (images && images.length > 0) {
-    requestBody.image_list = images.map(img => {
-      const entry: Record<string, string> = { image_url: img.url };
-      if (img.type) {
-        entry.type = img.type;
+  if (legacy) {
+    // ===== Legacy endpoints (v2.6, etc.) =====
+    if (hasImages) {
+      // image2video: uses `image` (first frame) and `image_tail` (end frame) as separate fields
+      const firstFrame = images!.find(i => i.type === "first_frame");
+      const endFrame = images!.find(i => i.type === "end_frame");
+      // If no typed frames, use first image as the main image input
+      const mainImage = firstFrame || images![0];
+      if (mainImage) {
+        requestBody.image = mainImage.url;
       }
-      return entry;
-    });
-    console.log(`[Kling Video] ${images.length} image(s): ${images.map(i => i.type || "reference").join(", ")}`);
+      if (endFrame) {
+        requestBody.image_tail = endFrame.url;
+      }
+      console.log(`[Kling Video v2.6] image2video - image: ${!!mainImage}, image_tail: ${!!endFrame}`);
+    }
+    // Legacy does not support voice_list or image_list array format
+  } else {
+    // ===== Omni endpoint (v3+) =====
+
+    // Per-asset voice bindings for voice cloning
+    if (config.voiceBindings && Object.keys(config.voiceBindings).length > 0) {
+      const voiceList = Object.entries(config.voiceBindings).map(([assetId, url]) => {
+        const idx = parseInt(assetId.replace("asset", ""), 10) - 1; // 0-based index
+        return { image_index: idx, voice_url: url };
+      });
+      requestBody.voice_list = voiceList;
+      console.log(`[Kling Video] ${voiceList.length} voice binding(s) for assets: ${Object.keys(config.voiceBindings).join(", ")}`);
+    }
+
+    // Images: first_frame, end_frame, or reference images as image_list array
+    if (hasImages) {
+      requestBody.image_list = images!.map(img => {
+        const entry: Record<string, string> = { image_url: img.url };
+        if (img.type) {
+          entry.type = img.type;
+        }
+        return entry;
+      });
+      console.log(`[Kling Video] ${images!.length} image(s): ${images!.map(i => i.type || "reference").join(", ")}`);
+    }
   }
 
-  console.log("[Kling Video] Request:", JSON.stringify({ ...requestBody, image_list: images?.length || 0 }, null, 2));
+  const versionLabel = legacy ? "v2.6" : "v3";
+  console.log(`[Kling Video ${versionLabel}] Endpoint: ${endpoints.create}`);
+  console.log(`[Kling Video ${versionLabel}] Request:`, JSON.stringify({ ...requestBody, image: requestBody.image ? "(set)" : undefined, image_list: hasImages && !legacy ? images!.length : undefined }, null, 2));
 
   onProgress?.({
     status: "processing",
@@ -149,7 +208,7 @@ export async function generateKlingVideo(
   for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
     const token = await getKlingAuthToken();
 
-    const response = await fetch(`${KLING_API_BASE}/v1/videos/omni-video`, {
+    const response = await fetch(`${KLING_API_BASE}${endpoints.create}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -187,7 +246,7 @@ export async function generateKlingVideo(
     retryDelay = Math.min(retryDelay * RETRY_CONFIG.backoffMultiplier, RETRY_CONFIG.maxDelayMs);
   }
 
-  console.log(`[Kling Video] Task created: ${taskId!}`);
+  console.log(`[Kling Video ${versionLabel}] Task created: ${taskId!}`);
 
   // Step 2: Poll for completion
   onProgress?.({
@@ -196,7 +255,7 @@ export async function generateKlingVideo(
     progress: 20,
   });
 
-  const video = await pollKlingVideoStatus(taskId!, config, onProgress);
+  const video = await pollKlingVideoStatus(taskId!, endpoints.poll, config, onProgress);
   return video;
 }
 
@@ -206,6 +265,7 @@ export async function generateKlingVideo(
 
 async function pollKlingVideoStatus(
   taskId: string,
+  pollPath: string,
   config: KlingVideoConfig,
   onProgress?: (progress: VideoGenerationProgress) => void,
 ): Promise<GeneratedVideo> {
@@ -238,7 +298,7 @@ async function pollKlingVideoStatus(
     try {
       const token = await getKlingAuthToken();
 
-      const response = await fetch(`${KLING_API_BASE}/v1/videos/omni-video/${taskId}`, {
+      const response = await fetch(`${KLING_API_BASE}${pollPath}/${taskId}`, {
         headers: {
           "Authorization": `Bearer ${token}`,
         },
@@ -308,9 +368,18 @@ async function pollKlingVideoStatus(
 const VALID_ASPECT_RATIOS: KlingVideoAspectRatio[] = ["16:9", "9:16", "1:1"];
 const VALID_MODES: KlingVideoMode[] = ["std", "pro"];
 
-export function validateKlingVideoConfig(config: KlingVideoConfig): string | null {
-  if (config.duration < 3 || config.duration > 15) {
-    return "La duracion debe ser entre 3 y 15 segundos";
+export function validateKlingVideoConfig(config: KlingVideoConfig, modelId?: string): string | null {
+  const legacy = modelId ? isLegacyModel(modelId) : false;
+
+  if (legacy) {
+    // v2.6: only 5 or 10 seconds
+    if (config.duration !== 5 && config.duration !== 10) {
+      return "La duracion debe ser 5 o 10 segundos para Kling v2.6";
+    }
+  } else {
+    if (config.duration < 3 || config.duration > 15) {
+      return "La duracion debe ser entre 3 y 15 segundos";
+    }
   }
 
   if (!VALID_ASPECT_RATIOS.includes(config.aspectRatio)) {
@@ -321,7 +390,8 @@ export function validateKlingVideoConfig(config: KlingVideoConfig): string | nul
     return `Modo invalido. Debe ser: ${VALID_MODES.join(", ")}`;
   }
 
-  if (config.cfgScale !== undefined && (config.cfgScale < 0 || config.cfgScale > 1)) {
+  // cfg_scale not supported on v2.x
+  if (!legacy && config.cfgScale !== undefined && (config.cfgScale < 0 || config.cfgScale > 1)) {
     return "cfg_scale debe ser entre 0 y 1";
   }
 
