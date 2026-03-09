@@ -68,8 +68,8 @@ export async function GET() {
       });
 
       const activeJobs = [
-        ...streamActiveRaw.map((j) => mapActiveJob(j, "stream")),
-        ...imagenActiveRaw.map((j) => mapActiveJob(j as never, "imagen")),
+        ...streamActiveRaw.filter((j) => j?.data).map((j) => mapActiveJob(j, "stream")),
+        ...imagenActiveRaw.filter((j) => j?.data).map((j) => mapActiveJob(j as never, "imagen")),
       ];
 
       // Completed jobs from both queues (most recent 20 combined)
