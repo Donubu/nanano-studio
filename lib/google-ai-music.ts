@@ -164,9 +164,12 @@ async function doGenerate(
           return;
         }
 
-        // Handle filtered prompts
+        // Handle filtered prompts - abort immediately
         if (message.filteredPrompt) {
-          console.warn("[Music] Prompt filtered:", message.filteredPrompt.text, "-", message.filteredPrompt.filteredReason);
+          const reason = message.filteredPrompt.filteredReason || "El prompt fue rechazado por el filtro de contenido";
+          console.warn("[Music] Prompt filtered:", message.filteredPrompt.text, "-", reason);
+          sessionError = new Error(`Prompt rechazado: ${reason}. Intenta con un prompt diferente.`);
+          rejectGeneration?.(sessionError);
           return;
         }
 
