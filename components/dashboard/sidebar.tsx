@@ -9,6 +9,7 @@ import {
     LayoutDashboard,
     MessageSquare,
     Settings,
+    LayoutTemplate,
     Building2,
     FolderKanban,
     Cpu,
@@ -31,6 +32,11 @@ const menuItems = [
         title: "Estadísticas",
         href: "/dashboard/analytics",
         icon: BarChart3,
+    },
+    {
+        title: "Conversaciones",
+        href: "/dashboard/conversations",
+        icon: MessageSquare,
     },
     {
         title: "Generaciones",
@@ -56,6 +62,11 @@ const menuItems = [
         title: "Modelos",
         href: "/dashboard/models",
         icon: Cpu,
+    },
+    {
+        title: "Templates",
+        href: "/dashboard/templates",
+        icon: LayoutTemplate,
     },
     {
         title: "Calculadora IA",

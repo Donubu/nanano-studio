@@ -32,6 +32,12 @@ import {
 import Image from "next/image";
 import { formatDateLocal } from "@/lib/utils";
 
+interface ProjectTemplate {
+  id: number;
+  name: string;
+  description: string | null;
+}
+
 interface Client {
   id: number;
   name: string;
@@ -70,6 +76,7 @@ export default function ProjectsPage() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
@@ -79,6 +86,7 @@ export default function ProjectsPage() {
     client_id: "",
     status: "active",
     hidden: false,
+    template_id: "",
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -109,14 +117,27 @@ export default function ProjectsPage() {
     }
   }, []);
 
+  const fetchTemplates = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/templates");
+      if (res.ok) {
+        const data = await res.json();
+        setTemplates(data);
+      }
+    } catch (err) {
+      console.error("Error fetching templates:", err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchProjects();
     fetchClients();
-  }, [fetchProjects, fetchClients]);
+    fetchTemplates();
+  }, [fetchProjects, fetchClients, fetchTemplates]);
 
   const openCreateDialog = () => {
     setEditingProject(null);
-    setFormData({ title: "", description: "", client_id: "", status: "active", hidden: false });
+    setFormData({ title: "", description: "", client_id: "", status: "active", hidden: false, template_id: "" });
     setError("");
     setIsDialogOpen(true);
   };
@@ -129,6 +150,7 @@ export default function ProjectsPage() {
       client_id: project.client_id?.toString() || "",
       status: project.status,
       hidden: !!project.hidden,
+      template_id: "",
     });
     setError("");
     setIsDialogOpen(true);
@@ -145,9 +167,10 @@ export default function ProjectsPage() {
         : "/api/projects";
       const method = editingProject ? "PUT" : "POST";
 
+      const { template_id, ...rest } = formData;
       const payload = {
-        ...formData,
-        client_id: formData.client_id ? Number(formData.client_id) : null,
+        ...rest,
+        client_id: rest.client_id ? Number(rest.client_id) : null,
       };
 
       const res = await fetch(url, {
@@ -161,6 +184,19 @@ export default function ProjectsPage() {
       if (!res.ok) {
         setError(data.error || "Error al guardar");
         return;
+      }
+
+      // Apply template if selected (only on create)
+      if (!editingProject && template_id) {
+        try {
+          await fetch(`/api/admin/templates/${template_id}/apply`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ project_id: data.id }),
+          });
+        } catch (err) {
+          console.error("Error applying template:", err);
+        }
       }
 
       setIsDialogOpen(false);
@@ -352,6 +388,28 @@ export default function ProjectsPage() {
                   className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm resize-none"
                 />
               </div>
+              {!editingProject && templates.length > 0 && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Template</label>
+                  <select
+                    className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
+                    value={formData.template_id}
+                    onChange={(e) =>
+                      setFormData({ ...formData, template_id: e.target.value })
+                    }
+                  >
+                    <option value="">Sin template (configurar manualmente)</option>
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}{t.description ? ` — ${t.description}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Aplica una configuración predefinida de tipos y modelos al proyecto.
+                  </p>
+                </div>
+              )}
               <div className="space-y-2">
                 <label className="text-sm font-medium">Cliente</label>
                 <select

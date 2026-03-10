@@ -124,8 +124,8 @@ async function withRetry<T>(
 let vertexClient: GoogleGenAI | null = null;
 let geminiClient: GoogleGenAI | null = null;
 
-// Timeout for imagen API calls (5 minutes)
-const IMAGEN_TIMEOUT_MS = Number(process.env.GOOGLE_AI_TIMEOUT_MS) || 300000;
+// Timeout for imagen API calls (10 minutes — 4K images can be slow)
+const IMAGEN_TIMEOUT_MS = Number(process.env.GOOGLE_AI_TIMEOUT_MS) || 600000;
 
 function getClient(backend?: string): GoogleGenAI {
   if (useVertexForBackend(backend)) {
