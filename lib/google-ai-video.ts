@@ -670,9 +670,18 @@ async function downloadVideo(video: { uri?: string; videoBytes?: string }): Prom
 
   // Si tenemos una URI, descargar el video
   if (video.uri) {
-    const response = await fetch(video.uri);
+    let downloadUrl = video.uri;
+
+    // Gemini API URIs require API key authentication
+    if (downloadUrl.includes("generativelanguage.googleapis.com") && process.env.GEMINI_API_KEY) {
+      const separator = downloadUrl.includes("?") ? "&" : "?";
+      downloadUrl = `${downloadUrl}${separator}key=${process.env.GEMINI_API_KEY}`;
+    }
+
+    console.log(`[Video] Downloading from: ${video.uri.substring(0, 100)}...`);
+    const response = await fetch(downloadUrl);
     if (!response.ok) {
-      throw new Error(`Failed to download video: ${response.statusText}`);
+      throw new Error(`Failed to download video: ${response.statusText} (${response.status})`);
     }
     const arrayBuffer = await response.arrayBuffer();
     return Buffer.from(arrayBuffer);
