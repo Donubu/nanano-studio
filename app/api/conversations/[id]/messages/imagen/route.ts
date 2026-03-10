@@ -61,6 +61,7 @@ export async function POST(
       quality_tier,
       selected_model_id,
       generation_type_override,
+      files,
     } = body as {
       content: string;
       imageSettings?: {
@@ -73,6 +74,13 @@ export async function POST(
       quality_tier?: QualityTier;
       selected_model_id?: number;
       generation_type_override?: "text" | "image" | "video" | "audio";
+      files?: Array<{
+        dataUrl: string;
+        mimeType: string;
+        name: string;
+        type: string;
+        url?: string; // S3/CDN URL for preselected images
+      }>;
     };
 
     const effectiveQualityTier: QualityTier = quality_tier === "hq" ? "hq" : "normal";
@@ -175,6 +183,21 @@ export async function POST(
     const maxImages = isKlingImage ? 9 : isGrokImage ? 10 : 4;
     const numberOfImages = Math.min(maxImages, Math.max(1, imageSettings?.numberOfImages || 1));
 
+    // Extract reference image URLs from attached files (for providers that support it)
+    const referenceImageUrls: string[] = [];
+    if (files && files.length > 0) {
+      for (const file of files) {
+        if (file.type === "image") {
+          // Prefer S3/CDN URL if available, otherwise use dataUrl (base64)
+          if (file.url) {
+            referenceImageUrls.push(file.url);
+          } else if (file.dataUrl) {
+            referenceImageUrls.push(file.dataUrl);
+          }
+        }
+      }
+    }
+
     // SSE stream
     const encoder = new TextEncoder();
     let controllerClosed = false;
@@ -226,6 +249,7 @@ export async function POST(
                 user_name: userIdentifier,
               },
               needsTitle,
+              referenceImageUrls: referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
               costImage1k: effectiveCostImage1k,
               costImage2k: effectiveCostImage2k,
               costImage4k: effectiveCostImage4k,
@@ -319,6 +343,7 @@ export async function POST(
                 aspectRatio: aspectRatio as XaiImageAspectRatio,
                 resolution: (resolution?.toLowerCase() || "1k") as XaiImageResolution,
                 numberOfImages,
+                imageUrls: referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
               },
               onProgress,
             );

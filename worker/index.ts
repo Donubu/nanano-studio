@@ -23,6 +23,13 @@ import { ResultSetHeader, RowDataPacket } from "mysql2";
 
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 const CONCURRENCY = Number(process.env.WORKER_CONCURRENCY) || 3;
+
+// Redis options for pub/sub connections inside jobs
+const REDIS_PUB_OPTIONS = {
+  keepAlive: 30000,
+  connectTimeout: 30000,
+  retryStrategy(times: number) { return Math.min(times * 500, 15000); },
+};
 import os from "os";
 const WORKER_NAME = process.env.WORKER_NAME || os.hostname() || `worker-${process.pid}`;
 
@@ -68,7 +75,7 @@ async function saveGeneratedImage(image: GeneratedImage, conversationId: string)
 
 async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
   const { data } = job;
-  const pubRedis = new Redis(REDIS_URL);
+  const pubRedis = new Redis(REDIS_URL, REDIS_PUB_OPTIONS);
   const channel = jobChannel(job.id!);
 
   const publish = (event: StreamJobEvent) => {
@@ -398,7 +405,7 @@ async function saveResultsToDB(
 
 async function processImagenJob(job: Job<ImagenJobData>): Promise<void> {
   const { data } = job;
-  const pubRedis = new Redis(REDIS_URL);
+  const pubRedis = new Redis(REDIS_URL, REDIS_PUB_OPTIONS);
   const channel = jobChannel(job.id!);
 
   const publish = (event: ImagenJobEvent) => {
@@ -455,6 +462,7 @@ async function processImagenJob(job: Job<ImagenJobData>): Promise<void> {
           aspectRatio: data.aspectRatio as XaiImageAspectRatio,
           resolution: (data.resolution?.toLowerCase() || "1k") as XaiImageResolution,
           numberOfImages: data.numberOfImages,
+          imageUrls: data.referenceImageUrls || undefined,
         },
         onProgress,
       );
@@ -600,8 +608,17 @@ const worker = new Worker<StreamJobData>(
   STREAM_QUEUE_NAME,
   processStreamJob,
   {
-    connection: new Redis(REDIS_URL, { maxRetriesPerRequest: null, enableReadyCheck: false }) as never,
+    connection: new Redis(REDIS_URL, {
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+      keepAlive: 30000,
+      connectTimeout: 30000,
+      retryStrategy(times: number) { return Math.min(times * 500, 15000); },
+    }) as never,
     concurrency: CONCURRENCY,
+    lockDuration: 120000,      // 2 min lock (default 30s too short for long generations)
+    lockRenewTime: 30000,      // Renew lock every 30s (default is lockDuration/2)
+    stalledInterval: 120000,   // Check stalled jobs every 2 min
   }
 );
 
@@ -622,8 +639,17 @@ const imagenWorker = new Worker<ImagenJobData>(
   IMAGEN_QUEUE_NAME,
   processImagenJob,
   {
-    connection: new Redis(REDIS_URL, { maxRetriesPerRequest: null, enableReadyCheck: false }) as never,
+    connection: new Redis(REDIS_URL, {
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+      keepAlive: 30000,
+      connectTimeout: 30000,
+      retryStrategy(times: number) { return Math.min(times * 500, 15000); },
+    }) as never,
     concurrency: CONCURRENCY,
+    lockDuration: 300000,      // 5 min lock (4K images can take several minutes)
+    lockRenewTime: 60000,      // Renew lock every 60s
+    stalledInterval: 300000,   // Check stalled jobs every 5 min
   }
 );
 

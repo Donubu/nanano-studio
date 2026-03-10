@@ -1819,6 +1819,7 @@ export function ChatInterface() {
                         seed: imageSettings?.seed,
                         numberOfImages: imageSettings?.numberOfImages,
                     },
+                    ...(filesToSend && filesToSend.length > 0 && { files: filesToSend }),
                     ...(generationTypeOverride && { generation_type_override: generationTypeOverride }),
                 }
                 : {

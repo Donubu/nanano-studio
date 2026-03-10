@@ -101,6 +101,7 @@ export interface ImagenJobData {
   negativePrompt?: string;
   numberOfImages: number;
   seed?: number;
+  referenceImageUrls?: string[];
 
   // Metadata
   labels: {

@@ -19,6 +19,7 @@ export interface XaiImageConfig {
   aspectRatio?: XaiImageAspectRatio;
   resolution?: XaiImageResolution;
   numberOfImages?: number;
+  imageUrls?: string[]; // Reference image URLs or data URIs for image editing
 }
 
 export interface XaiGeneratedImage {
@@ -72,17 +73,19 @@ export async function generateXaiImage(
 ): Promise<XaiGeneratedImage[]> {
   const apiKey = getApiKey();
   const numberOfImages = Math.min(10, Math.max(1, config.numberOfImages || 1));
+  const hasReferenceImages = config.imageUrls && config.imageUrls.length > 0;
 
   onProgress?.({
     status: "pending",
     message: "Iniciando generacion de imagen con xAI...",
   });
 
-  console.log(`\n========== [xAI IMAGE GENERATION REQUEST] ==========`);
+  console.log(`\n========== [xAI IMAGE ${hasReferenceImages ? "EDIT" : "GENERATION"} REQUEST] ==========`);
   console.log("Model:", modelId);
   console.log("Aspect Ratio:", config.aspectRatio || "auto");
   console.log("Resolution:", config.resolution || "1k");
   console.log("Number of images:", numberOfImages);
+  console.log("Reference images:", hasReferenceImages ? config.imageUrls!.length : 0);
   console.log("Prompt:", prompt.substring(0, 100) + (prompt.length > 100 ? "..." : ""));
   console.log("====================================================\n");
 
@@ -100,15 +103,32 @@ export async function generateXaiImage(
     requestBody.resolution = config.resolution;
   }
 
+  // Add reference images for image editing
+  if (hasReferenceImages) {
+    const imageUrls = config.imageUrls!;
+    if (imageUrls.length === 1) {
+      // Single image: use "image" parameter
+      requestBody.image = { url: imageUrls[0], type: "image_url" };
+    } else {
+      // Multiple images (up to 3): use "images" array
+      requestBody.images = imageUrls.slice(0, 3).map(url => ({ url, type: "image_url" }));
+    }
+  }
+
+  // Use /images/edits when reference images are provided, /images/generations otherwise
+  const endpoint = hasReferenceImages
+    ? `${XAI_API_BASE}/images/edits`
+    : `${XAI_API_BASE}/images/generations`;
+
   onProgress?.({
     status: "processing",
-    message: "Enviando solicitud a xAI...",
+    message: hasReferenceImages ? "Enviando solicitud de edicion a xAI..." : "Enviando solicitud a xAI...",
   });
 
   let retryDelay = RETRY_CONFIG.initialDelayMs;
 
   for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
-    const response = await fetch(`${XAI_API_BASE}/images/generations`, {
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
