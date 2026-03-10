@@ -164,7 +164,7 @@ function AudioHistoryItem({
         )}
         {onArchive && (
           <button
-            onClick={() => onArchive(message.id)}
+            onClick={() => { if (window.confirm("¿Archivar este audio? No aparecerá en tu historial.")) onArchive(message.id); }}
             className="p-1 rounded-full transition-all bg-card border border-border/50 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-red-400 hover:border-red-400/50"
             title="Archivar audio"
           >
