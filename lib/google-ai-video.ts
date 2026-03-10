@@ -331,7 +331,13 @@ export async function generateVideo(
           preparedFirstFrame = undefined;
           preparedLastFrame = undefined;
         }
-        // Reference images require 8s duration in Gemini API
+      }
+    }
+
+    // Gemini API: interpolation (first+last frame), reference images, 1080p/4k all require 8s
+    if (!isVertex && config.durationSeconds !== 8) {
+      if ((preparedFirstFrame && preparedLastFrame) || preparedReferenceImages || config.resolution !== "720p") {
+        console.log(`[Video] Gemini API: forcing 8s duration (was ${config.durationSeconds}s) — required for interpolation/references/high-res`);
         config.durationSeconds = 8;
       }
     }
