@@ -322,6 +322,18 @@ export async function generateVideo(
           type: refImg.type,
         }))
       );
+
+      // Gemini API: reference images cannot be combined with first/last frame (interpolation)
+      // Priority: reference images > interpolation frames
+      if (!isVertex) {
+        if (preparedFirstFrame || preparedLastFrame) {
+          console.log("[Video] Gemini API: dropping first/last frame (incompatible with reference images)");
+          preparedFirstFrame = undefined;
+          preparedLastFrame = undefined;
+        }
+        // Reference images require 8s duration in Gemini API
+        config.durationSeconds = 8;
+      }
     }
 
     // Construir la configuración de generación
