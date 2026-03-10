@@ -148,6 +148,19 @@ export async function GET() {
       await connection.quit();
     }
   } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    // Redis LOADING state is transient — return a clear message instead of 500
+    if (errMsg.includes("LOADING")) {
+      return NextResponse.json({
+        configured: true,
+        workers: 0,
+        queue: { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0 },
+        activeJobs: [],
+        completedJobs: [],
+        failedJobs: [],
+        warning: "Redis is restarting, stats will be available shortly",
+      });
+    }
     console.error("Error fetching worker stats:", error);
     return NextResponse.json(
       { error: "Error al obtener estado de workers" },

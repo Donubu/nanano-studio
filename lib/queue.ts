@@ -133,8 +133,8 @@ export function getImagenQueue(): Queue<ImagenJobData> {
     imagenQueue = new Queue(IMAGEN_QUEUE_NAME, {
       connection: getRedisConnection() as never,
       defaultJobOptions: {
-        removeOnComplete: 100,
-        removeOnFail: 50,
+        removeOnComplete: 20,
+        removeOnFail: 20,
         attempts: 1,
       },
     });
@@ -151,8 +151,8 @@ export function getStreamQueue(): Queue<StreamJobData> {
     streamQueue = new Queue(STREAM_QUEUE_NAME, {
       connection: getRedisConnection() as never,
       defaultJobOptions: {
-        removeOnComplete: 100,
-        removeOnFail: 50,
+        removeOnComplete: 20,
+        removeOnFail: 20,
         attempts: 1, // No auto-retry at queue level (we have retry logic in google-ai.ts)
       },
     });
