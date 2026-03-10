@@ -126,11 +126,11 @@ $COMPOSE stop puerto_studio_${ACTIVE}
 # ---- Rolling worker restart ----
 WORKERS=$(docker ps --format '{{.Names}}' | grep "puerto_worker_" | sort || true)
 if [ -n "$WORKERS" ]; then
-  log "Rolling restart of workers..."
+  log "Rolling restart of workers (reusing already-built image)..."
   for WORKER in $WORKERS; do
     WORKER_SERVICE=$(echo "$WORKER" | sed 's/puerto_//')
     log "  Restarting ${WORKER_SERVICE}..."
-    $COMPOSE up -d --build --no-deps "$WORKER_SERVICE"
+    $COMPOSE up -d --no-build --no-deps "$WORKER_SERVICE"
     # Wait for worker to be ready
     sleep 5
     log "  ${WORKER_SERVICE} restarted"
