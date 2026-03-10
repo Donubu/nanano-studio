@@ -396,7 +396,24 @@ export async function generateVideo(
     const builtLabels = buildLabels(labels, backend);
 
     // Iniciar la operación de generación de video (con retry)
-    console.log("[Video] Calling generateVideos API...");
+    const requestSummary = {
+      model: normalizedModelId,
+      backend: isVertex ? "vertex" : "gemini",
+      hasPrompt: !!input.prompt,
+      hasFirstFrame: !!preparedFirstFrame,
+      hasLastFrame: !!preparedLastFrame,
+      referenceImagesCount: preparedReferenceImages?.length || 0,
+      config: {
+        aspectRatio: config.aspectRatio,
+        durationSeconds: config.durationSeconds,
+        resolution: config.resolution,
+        personGeneration: !isVertex && hasImageInputs ? "allow_adult" : config.personGeneration,
+        generateAudio: isVertex ? config.generateAudio : "(native)",
+        seed: isVertex ? config.seed : "(not sent)",
+        negativePrompt: isVertex ? config.negativePrompt : "(not sent)",
+      },
+    };
+    console.log("[Video] Calling generateVideos API:", JSON.stringify(requestSummary, null, 2));
     const operationStartTime = Date.now();
     const operation = await withRetry(
       () => client.models.generateVideos({
