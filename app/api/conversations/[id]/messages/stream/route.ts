@@ -483,7 +483,7 @@ export async function POST(
             topP: Number(conversation.top_p),
             topK: conversation.top_k,
             maxOutputTokens: conversation.max_output_tokens,
-            ...(effectiveSupportsImageGeneration && {
+            ...(effectiveSupportsImageGeneration && generationType === "image" && {
               imageConfig: {
                 aspectRatio: effectiveImageAspectRatio as "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9",
                 imageSize: effectiveImageSize as "1K" | "2K" | "4K",

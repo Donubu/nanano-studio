@@ -2289,6 +2289,22 @@ export function ChatInterface() {
         }
     };
 
+    // Archive (soft delete) a message
+    const handleArchiveMessage = async (messageId: number) => {
+        if (!activeTabId) return;
+        try {
+            const res = await fetch(`/api/messages/${messageId}`, { method: "DELETE" });
+            if (res.ok) {
+                setTabMessages((prev) => ({
+                    ...prev,
+                    [activeTabId]: prev[activeTabId].filter((msg) => msg.id !== messageId),
+                }));
+            }
+        } catch (err) {
+            console.error("Error archiving message:", err);
+        }
+    };
+
     // Toggle ignore_in_context status for a message
     const handleToggleIgnoreContext = async (messageId: number) => {
         if (!activeTabId) return;
@@ -3649,6 +3665,7 @@ export function ChatInterface() {
                                     messages={tabMessages[activeTabId] || []}
                                     onRestore={(data) => setAudioRestoreData(data)}
                                     onToggleFavorite={handleToggleFavorite}
+                                    onArchive={handleArchiveMessage}
                                 />
                             </div>
                         </div>

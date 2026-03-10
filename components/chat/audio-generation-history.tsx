@@ -1,6 +1,6 @@
 "use client";
 
-import { Volume2, Clock, Loader2, Star, RotateCcw } from "lucide-react";
+import { Volume2, Clock, Loader2, Star, RotateCcw, Trash2 } from "lucide-react";
 import { AudioPlayer } from "./audio-player";
 import { AudioVoiceConfig, AudioSpeakerConfig } from "@/types/audio";
 
@@ -29,6 +29,7 @@ interface AudioGenerationHistoryProps {
   messages: AudioMessage[];
   onRestore?: (data: AudioRestoreData) => void;
   onToggleFavorite?: (messageId: number) => void;
+  onArchive?: (messageId: number) => void;
 }
 
 function parseVoiceConfig(config: AudioVoiceConfig | AudioSpeakerConfig | string | null | undefined): AudioVoiceConfig | AudioSpeakerConfig | null {
@@ -43,7 +44,7 @@ function parseVoiceConfig(config: AudioVoiceConfig | AudioSpeakerConfig | string
   return config;
 }
 
-export function AudioGenerationHistory({ messages, onRestore, onToggleFavorite }: AudioGenerationHistoryProps) {
+export function AudioGenerationHistory({ messages, onRestore, onToggleFavorite, onArchive }: AudioGenerationHistoryProps) {
   // Filter messages that have audio or are generating audio, most recent first
   const audioMessages = messages
     .filter((msg) => msg.role === "model" && (msg.audio_url || msg.isAudioGenerating))
@@ -78,7 +79,7 @@ export function AudioGenerationHistory({ messages, onRestore, onToggleFavorite }
 
       <div className="space-y-3">
         {audioMessages.map((msg) => (
-          <AudioHistoryItem key={msg.id} message={msg} onToggleFavorite={onToggleFavorite} onRestore={onRestore} />
+          <AudioHistoryItem key={msg.id} message={msg} onToggleFavorite={onToggleFavorite} onArchive={onArchive} onRestore={onRestore} />
         ))}
       </div>
     </div>
@@ -88,10 +89,12 @@ export function AudioGenerationHistory({ messages, onRestore, onToggleFavorite }
 function AudioHistoryItem({
   message,
   onToggleFavorite,
+  onArchive,
   onRestore,
 }: {
   message: AudioMessage;
   onToggleFavorite?: (messageId: number) => void;
+  onArchive?: (messageId: number) => void;
   onRestore?: (data: AudioRestoreData) => void;
 }) {
   // Parse voice config (might be JSON string from DB)
@@ -157,6 +160,15 @@ function AudioHistoryItem({
             title={message.is_favorite ? "Quitar de favoritos" : "Agregar a favoritos"}
           >
             <Star className={`h-4 w-4 ${message.is_favorite ? "fill-yellow-400" : ""}`} />
+          </button>
+        )}
+        {onArchive && (
+          <button
+            onClick={() => onArchive(message.id)}
+            className="p-1 rounded-full transition-all bg-card border border-border/50 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-red-400 hover:border-red-400/50"
+            title="Archivar audio"
+          >
+            <Trash2 className="h-4 w-4" />
           </button>
         )}
       </div>
