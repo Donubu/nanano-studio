@@ -195,9 +195,21 @@ export interface VideoGenerationProgress {
 /**
  * Normaliza el model ID para compatibilidad entre Gemini API y Vertex AI
  */
+// Map Vertex AI model IDs to Gemini API model IDs
+const VERTEX_TO_GEMINI_MODEL_MAP: Record<string, string> = {
+  "veo-3.1-generate-001": "veo-3.1-generate-preview",
+  "veo-3.1-fast-generate-001": "veo-3.1-fast-generate-preview",
+  "veo-3.0-generate-001": "veo-3.0-generate-preview",
+  "veo-3.0-fast-generate-001": "veo-3.0-fast-generate-preview",
+};
+
 function normalizeModelId(modelId: string, backend?: string): string {
   if (useVertexForBackend(backend) && modelId.startsWith("models/")) {
     return modelId.replace("models/", "");
+  }
+  // When using Gemini API, map Vertex-style IDs to Gemini-style IDs
+  if (!useVertexForBackend(backend) && VERTEX_TO_GEMINI_MODEL_MAP[modelId]) {
+    return VERTEX_TO_GEMINI_MODEL_MAP[modelId];
   }
   return modelId;
 }
@@ -328,13 +340,13 @@ export async function generateVideo(
       generateConfig.resolution = config.resolution;
     }
 
-    // Agregar negative prompt si existe (solo Vertex AI)
-    if (config.negativePrompt && isVertex) {
+    // Agregar negative prompt si existe
+    if (config.negativePrompt) {
       generateConfig.negativePrompt = config.negativePrompt;
     }
 
-    // Agregar seed si existe (solo Vertex AI, Gemini API no lo soporta)
-    if (config.seed !== undefined && isVertex) {
+    // Agregar seed si existe
+    if (config.seed !== undefined) {
       generateConfig.seed = config.seed;
     }
 
@@ -395,12 +407,11 @@ export async function generateVideo(
           aspectRatio: config.aspectRatio,
           durationSeconds: config.durationSeconds,
           numberOfVideos: 1,
-          // generateAudio solo soportado en Vertex AI
+          // generateAudio solo soportado en Vertex AI (Gemini API genera audio nativamente)
           ...(isVertex && { generateAudio: config.generateAudio }),
-          // negativePrompt solo soportado en Vertex AI
-          ...(config.negativePrompt && isVertex && { negativePrompt: config.negativePrompt }),
+          ...(config.negativePrompt && { negativePrompt: config.negativePrompt }),
           ...(config.personGeneration && { personGeneration: config.personGeneration }),
-          ...(config.seed !== undefined && isVertex && { seed: config.seed }),
+          ...(config.seed !== undefined && { seed: config.seed }),
           ...(preparedLastFrame && {
             lastFrame: {
               imageBytes: prepareImageInput(preparedLastFrame, detectMimeType(preparedLastFrame)).bytesBase64Encoded,
