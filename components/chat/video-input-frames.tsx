@@ -33,6 +33,7 @@ interface VideoInputFramesProps {
   disabled?: boolean;
   supportsReferenceImages?: boolean;
   provider?: VideoInputProvider;
+  isGeminiBackend?: boolean; // Gemini API: reference images and first/last frame are mutually exclusive
 }
 
 type ModalMode = "first" | "last" | "reference" | null;
@@ -49,9 +50,16 @@ export function VideoInputFrames({
   disabled = false,
   supportsReferenceImages = false,
   provider = "google",
+  isGeminiBackend = false,
 }: VideoInputFramesProps) {
   const isXai = provider === "xai";
   const [modalMode, setModalMode] = useState<ModalMode>(null);
+
+  // Gemini API: reference images and first/last frame are mutually exclusive
+  const hasFrames = !!(firstFrame || lastFrame);
+  const hasReferences = referenceImages.length > 0;
+  const framesDisabledByReferences = isGeminiBackend && hasReferences;
+  const referencesDisabledByFrames = isGeminiBackend && hasFrames;
   const [dragOverTarget, setDragOverTarget] = useState<DragTarget>(null);
   const [isUploading, setIsUploading] = useState(false);
 
@@ -235,10 +243,12 @@ export function VideoInputFrames({
         </div>
 
         {/* First Frame / Source Image */}
-        <div className="space-y-2">
+        <div className={cn("space-y-2", framesDisabledByReferences && "opacity-40 pointer-events-none")}>
           <Label className="text-xs text-muted-foreground flex items-center gap-1">
             {isXai ? "Imagen base" : "First Frame"}
-            <span className="text-muted-foreground/60">(opcional)</span>
+            <span className="text-muted-foreground/60">
+              {framesDisabledByReferences ? "(bloqueado por referencias)" : "(opcional)"}
+            </span>
           </Label>
           {firstFrame ? (
             <div
@@ -313,10 +323,12 @@ export function VideoInputFrames({
         </div>
 
         {/* Last Frame - not supported by xAI */}
-        {!isXai && <div className="space-y-2">
+        {!isXai && <div className={cn("space-y-2", framesDisabledByReferences && "opacity-40 pointer-events-none")}>
           <Label className="text-xs text-muted-foreground flex items-center gap-1">
             Last Frame
-            <span className="text-muted-foreground/60">(opcional)</span>
+            <span className="text-muted-foreground/60">
+              {framesDisabledByReferences ? "(bloqueado por referencias)" : "(opcional)"}
+            </span>
           </Label>
           {lastFrame ? (
             <div
@@ -397,11 +409,11 @@ export function VideoInputFrames({
 
         {/* Reference Images - not supported by xAI */}
         {supportsReferenceImages && !isXai && (
-          <div className="space-y-2">
+          <div className={cn("space-y-2", referencesDisabledByFrames && "opacity-40 pointer-events-none")}>
             <Label className="text-xs text-muted-foreground flex items-center gap-1">
               Imágenes de Referencia
               <span className="text-muted-foreground/60">
-                ({referenceImages.length}/3)
+                {referencesDisabledByFrames ? "(bloqueado por frames)" : `(${referenceImages.length}/3)`}
               </span>
             </Label>
             <div className="grid grid-cols-3 gap-2">

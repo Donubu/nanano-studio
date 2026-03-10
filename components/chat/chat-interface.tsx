@@ -4817,6 +4817,7 @@ export function ChatInterface() {
                                     disabled={isSending}
                                     supportsReferenceImages={!isKlingVideoProvider}
                                     provider={isKlingVideoProvider ? "kling" : isXaiVideoProvider ? "xai" : "google"}
+                                    isGeminiBackend={activeVideoModel?.api_backend === "gemini"}
                                 />
                             </div>
                         )}
