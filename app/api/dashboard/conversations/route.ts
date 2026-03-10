@@ -118,8 +118,8 @@ export async function GET(request: NextRequest) {
       LIMIT ? OFFSET ?
     `;
 
-    const queryParams = [...params, limit, offset];
-    const [rows] = await pool.execute<ConversationRow[]>(query, queryParams);
+    const queryParams = [...params, String(limit), String(offset)];
+    const [rows] = await pool.query<ConversationRow[]>(query, queryParams);
 
     // Count total
     const countQuery = `
@@ -130,7 +130,7 @@ export async function GET(request: NextRequest) {
       LEFT JOIN users u ON c.user_id = u.id
       ${whereClause}
     `;
-    const [countRows] = await pool.execute<CountRow[]>(countQuery, params);
+    const [countRows] = await pool.query<CountRow[]>(countQuery, params);
     const total = countRows[0].total;
 
     // Get filter options
