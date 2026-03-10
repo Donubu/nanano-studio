@@ -340,8 +340,8 @@ export async function generateVideo(
       generateConfig.resolution = config.resolution;
     }
 
-    // Agregar negative prompt si existe
-    if (config.negativePrompt) {
+    // Agregar negative prompt si existe (solo Vertex AI)
+    if (config.negativePrompt && isVertex) {
       generateConfig.negativePrompt = config.negativePrompt;
     }
 
@@ -350,9 +350,14 @@ export async function generateVideo(
       generateConfig.seed = config.seed;
     }
 
-    // Agregar personGeneration si existe
+    // personGeneration: Gemini API requires "allow_adult" when using images (first/last frame, reference images)
+    const hasImageInputs = !!(input.firstFrameImage || input.lastFrameImage || (input.referenceImages && input.referenceImages.length > 0));
     if (config.personGeneration) {
-      generateConfig.personGeneration = config.personGeneration;
+      if (!isVertex && hasImageInputs) {
+        generateConfig.personGeneration = "allow_adult";
+      } else {
+        generateConfig.personGeneration = config.personGeneration;
+      }
     }
 
     // Construir el input de la instancia
@@ -409,8 +414,8 @@ export async function generateVideo(
           numberOfVideos: 1,
           // generateAudio solo soportado en Vertex AI (Gemini API genera audio nativamente)
           ...(isVertex && { generateAudio: config.generateAudio }),
-          ...(config.negativePrompt && { negativePrompt: config.negativePrompt }),
-          ...(config.personGeneration && { personGeneration: config.personGeneration }),
+          ...(config.negativePrompt && isVertex && { negativePrompt: config.negativePrompt }),
+          ...(config.personGeneration && { personGeneration: !isVertex && hasImageInputs ? "allow_adult" : config.personGeneration }),
           ...(config.seed !== undefined && isVertex && { seed: config.seed }),
           ...(preparedLastFrame && {
             lastFrame: {
