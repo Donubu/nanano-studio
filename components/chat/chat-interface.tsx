@@ -56,6 +56,7 @@ import {
     ExternalLink,
     Music,
     AlertCircle,
+    Brain,
 } from "lucide-react";
 import {ChangelogModal} from "@/components/chat/changelog-modal";
 import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
@@ -79,6 +80,8 @@ import {VideoDuration, VideoResolution, VideoAspectRatio, VideoGenerationStatus}
 import {GenerationModeSelector, GenerationMode} from "./generation-mode-selector";
 import {GenerationTypeSelector, GenerationType, GenerationTypeBadge} from "./generation-type-selector";
 import {ModelSelector, ProjectModel as ConfigModel, QualityBadge, QualityTier} from "./quality-selector";
+import {ReasoningSelector, ThinkingLevel} from "./reasoning-selector";
+import {DeploymentBanner} from "./deployment-banner";
 import {ImageModelSelector} from "./image-model-selector";
 import {AudioSettings} from "./audio-settings";
 import {MusicSettings} from "./music-settings";
@@ -202,6 +205,7 @@ interface Message {
         imageSearchQueries?: string[];
     } | null;
     created_at: string;
+    thought?: string;
     isStreaming?: boolean;
     isRetrying?: boolean;
 }
@@ -381,8 +385,18 @@ export function ChatInterface() {
     }
     const [generationConfig, setGenerationConfig] = useState<GenerationConfigItem[]>([]);
 
-    // Selected model for generation (from project config)
-    const [selectedConfigModelId, setSelectedConfigModelId] = useState<number | null>(null);
+    // Selected model for generation (from project config) — per-tab
+    const [tabSelectedModelId, setTabSelectedModelId] = useState<Record<number, number | null>>({});
+    const selectedConfigModelId = activeTabId ? (tabSelectedModelId[activeTabId] ?? null) : null;
+    const setSelectedConfigModelId = (id: number | null) => {
+        if (activeTabId) {
+            setTabSelectedModelId(prev => ({ ...prev, [activeTabId]: id }));
+        }
+    };
+
+    // Thinking/reasoning level for models that support it
+    const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("none");
+    const [showThoughts, setShowThoughts] = useState(false);
 
     // Generation type for new conversations
     const [newConversationType, setNewConversationType] = useState<GenerationType>("text");
@@ -464,6 +478,14 @@ export function ChatInterface() {
     const supportsMultiImage = (() => {
         const imageModel = getSelectedModel(imageTypeConfig);
         return imageModel?.model_id === "gemini-3.1-flash-image-preview";
+    })();
+
+    // Check if the current text model supports thinking/reasoning (only gemini-3.1-pro variants)
+    const supportsThinking = (() => {
+        const textConfig = generationConfig.find(c => c.generation_type === "text");
+        const model = getSelectedModel(textConfig);
+        if (!model) return false;
+        return model.model_id.startsWith("gemini-3.1-pro");
     })();
 
     // Check if the current model supports Google Search grounding
@@ -887,10 +909,16 @@ export function ChatInterface() {
                     models: (data[type]?.models ?? []) as ConfigModel[],
                 }));
 
-                // If audio has a chirp-backend model, add "audio_hd" as a virtual generation type
+                // If audio has a chirp-backend model, split it into separate "audio_hd" type
                 const audioConfig = data["audio"];
                 const chirpModel = audioConfig?.models?.find((m: ConfigModel) => m.api_backend === "chirp");
                 if (chirpModel) {
+                    // Remove chirp model from regular audio config
+                    const audioEntry = configArray.find(c => c.generation_type === "audio");
+                    if (audioEntry) {
+                        audioEntry.models = audioEntry.models.filter(m => m.api_backend !== "chirp");
+                    }
+                    // Add "audio_hd" as a virtual generation type with only the chirp model
                     configArray.push({
                         generation_type: "audio_hd",
                         is_enabled: audioConfig.enabled ?? false,
@@ -1064,8 +1092,8 @@ export function ChatInterface() {
             // Clear archived conversations
             setArchivedConversations([]);
             setShowArchived(false);
-            // Reset selected model
-            setSelectedConfigModelId(null);
+            // Reset selected models for all tabs
+            setTabSelectedModelId({});
         } else {
             setProjectModels([]);
             setSelectedModelId(null);
@@ -1130,11 +1158,15 @@ export function ChatInterface() {
                 // Google Search - reset to off for each conversation (per-message now)
                 setGoogleSearchEnabled(false);
                 setGoogleImageSearchEnabled(false);
-                // Auto-select quality tier based on available models
+                // Auto-select model only if this tab doesn't already have one selected
                 const typeConf = generationConfig.find(c => c.generation_type === conv.generation_type);
                 if (typeConf && typeConf.models.length > 0) {
-                    const defaultModel = typeConf.models.find(m => m.is_default) || typeConf.models[0];
-                    setSelectedConfigModelId(defaultModel.id);
+                    const existingSelection = tabSelectedModelId[activeTabId!];
+                    const hasValidSelection = existingSelection && typeConf.models.some(m => m.id === existingSelection);
+                    if (!hasValidSelection) {
+                        const defaultModel = typeConf.models.find(m => m.is_default) || typeConf.models[0];
+                        setSelectedConfigModelId(defaultModel.id);
+                    }
                 }
             }
         }
@@ -1833,6 +1865,8 @@ export function ChatInterface() {
                     ...(imageSettings && { imageSettings: { aspectRatio: imageSettings.aspectRatio, size: imageSettings.size, numberOfImages: imageSettings.numberOfImages } }),
                     ...(generationTypeOverride && { generation_type_override: generationTypeOverride }),
                     ...(noContext && { no_context: noContext }),
+                    ...(thinkingLevel !== "none" && { thinking_level: thinkingLevel }),
+                    ...(thinkingLevel !== "none" && showThoughts && { include_thoughts: true }),
                 };
 
             const response = await fetch(endpoint, {
@@ -2027,6 +2061,16 @@ export function ChatInterface() {
                                             [tabId]: prev[tabId].map((m) =>
                                                 m.id === streamingMessageId
                                                     ? {...m, content: retryMessage, isRetrying: true}
+                                                    : m
+                                            ),
+                                        }));
+                                    } else if (data.type === "thought") {
+                                        // Accumulate thought content
+                                        setTabMessages((prev) => ({
+                                            ...prev,
+                                            [tabId]: prev[tabId].map((m) =>
+                                                m.id === streamingMessageId
+                                                    ? {...m, thought: (m.thought || "") + data.text}
                                                     : m
                                             ),
                                         }));
@@ -3091,6 +3135,7 @@ export function ChatInterface() {
 
     return (
         <div className="flex h-screen bg-background">
+            <DeploymentBanner />
             {/* Left Sidebar - Conversations */}
             {leftSidebarOpen && (
                 <div className="w-64 border-r border-border/50 bg-sidebar flex flex-col relative">
@@ -3988,6 +4033,18 @@ export function ChatInterface() {
                                                         <EyeOff className="h-3.5 w-3.5" />
                                                     </button>
                                                 )}
+                                                {/* Thinking/reasoning content */}
+                                                {msg.thought && msg.role === "model" && (
+                                                    <details className="mb-2 rounded-lg border border-purple-500/20 bg-purple-500/5 overflow-hidden">
+                                                        <summary className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-600 dark:text-purple-400 cursor-pointer hover:bg-purple-500/10 transition-colors select-none">
+                                                            <Brain className="w-3.5 h-3.5" />
+                                                            Razonamiento {msg.isStreaming && <span className="animate-pulse">...</span>}
+                                                        </summary>
+                                                        <div className="px-3 py-2 text-sm text-muted-foreground whitespace-pre-wrap border-t border-purple-500/20">
+                                                            {msg.thought}
+                                                        </div>
+                                                    </details>
+                                                )}
                                                 <MessageContent
                                                     content={msg.content}
                                                     contentType={msg.content_type}
@@ -4128,13 +4185,22 @@ export function ChatInterface() {
                                 )}
                                 {/* Model Selector */}
                                 {currentTypeConfig && currentTypeConfig.models.length > 0 && currentConversation?.generation_type && (
-                                    <div className="flex justify-center py-2 border-t border-border/50">
+                                    <div className="flex items-center justify-center gap-2 py-2 border-t border-border/50">
                                         <ModelSelector
                                             models={currentTypeConfig.models}
                                             selectedModelId={selectedConfigModelId}
                                             onSelect={setSelectedConfigModelId}
                                             disabled={isSending}
                                         />
+                                        {isTextConversation && supportsThinking && (
+                                            <ReasoningSelector
+                                                value={thinkingLevel}
+                                                onChange={setThinkingLevel}
+                                                showThoughts={showThoughts}
+                                                onShowThoughtsChange={setShowThoughts}
+                                                disabled={isSending}
+                                            />
+                                        )}
                                     </div>
                                 )}
                                 {/* Google Search Grounding - For text or gemini-3.1-flash-image-preview image conversations */}
@@ -4603,6 +4669,20 @@ export function ChatInterface() {
                                             La calidad no se puede cambiar después del primer mensaje
                                         </p>
                                     )}
+                                </div>
+                            )}
+
+                            {/* Reasoning Level - only for text conversations with thinking-capable models */}
+                            {!activeTab?.isArchived && isTextConversation && supportsThinking && (
+                                <div>
+                                    <label className="text-sm font-medium mb-2 block">Razonamiento</label>
+                                    <ReasoningSelector
+                                        value={thinkingLevel}
+                                        onChange={setThinkingLevel}
+                                        showThoughts={showThoughts}
+                                        onShowThoughtsChange={setShowThoughts}
+                                        disabled={isSending}
+                                    />
                                 </div>
                             )}
 

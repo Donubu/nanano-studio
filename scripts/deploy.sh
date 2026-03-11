@@ -83,6 +83,14 @@ fi
 log "Active slot: $ACTIVE"
 log "Deploying to: $NEW"
 
+# ---- Signal deployment start via Redis ----
+DEPLOY_START=$(date +%s)
+REDIS_CONTAINER=$(docker ps -q -f name=puerto_redis 2>/dev/null || true)
+if [ -n "$REDIS_CONTAINER" ]; then
+  docker exec "$REDIS_CONTAINER" redis-cli SET deployment:active "{\"startedAt\":${DEPLOY_START},\"estimatedSeconds\":300}" EX 300 > /dev/null 2>&1 || true
+  log "Deployment signal set in Redis"
+fi
+
 # ---- Build new image ----
 log "Building new image..."
 $COMPOSE --profile donotstart build puerto_studio_${NEW}
@@ -135,6 +143,12 @@ if [ -n "$WORKERS" ]; then
     sleep 5
     log "  ${WORKER_SERVICE} restarted"
   done
+fi
+
+# ---- Clear deployment signal ----
+if [ -n "$REDIS_CONTAINER" ]; then
+  docker exec "$REDIS_CONTAINER" redis-cli DEL deployment:active > /dev/null 2>&1 || true
+  log "Deployment signal cleared"
 fi
 
 log "Deploy complete! Active slot: ${NEW}"

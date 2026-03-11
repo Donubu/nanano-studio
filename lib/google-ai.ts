@@ -182,6 +182,8 @@ export interface ImageGenerationConfig {
   imageSize?: "1K" | "2K" | "4K";
 }
 
+export type ThinkingLevelSetting = "none" | "low" | "medium" | "high";
+
 export interface GenerationSettings {
   temperature?: number;
   topP?: number;
@@ -190,6 +192,8 @@ export interface GenerationSettings {
   imageConfig?: ImageGenerationConfig;
   googleSearchEnabled?: boolean;
   googleImageSearchEnabled?: boolean;
+  thinkingLevel?: ThinkingLevelSetting;
+  includeThoughts?: boolean;
 }
 
 export interface Labels {
@@ -214,6 +218,7 @@ export interface GroundingData {
 
 export interface StreamCallbacks {
   onChunk: (text: string) => void;
+  onThought?: (text: string) => void;
   onImage?: (image: GeneratedImage) => void;
   onGrounding?: (data: GroundingData) => void;
   onRetry?: (info: RetryInfo) => void;
@@ -327,11 +332,20 @@ function extractImagesFromParts(parts?: Part[]): GeneratedImage[] {
   return images;
 }
 
-// Extraer texto de las partes de respuesta
+// Extraer texto de las partes de respuesta (excluyendo thoughts)
 function extractTextFromParts(parts?: Part[]): string {
   if (!parts) return "";
   return parts
-    .filter((part) => part.text)
+    .filter((part) => part.text && !part.thought)
+    .map((part) => part.text)
+    .join("");
+}
+
+// Extraer texto de thoughts
+function extractThoughtsFromParts(parts?: Part[]): string {
+  if (!parts) return "";
+  return parts
+    .filter((part) => part.text && part.thought)
     .map((part) => part.text)
     .join("");
 }
@@ -378,6 +392,17 @@ export async function sendMessage(
       }
       return { tools: [{ googleSearch: {} }] };
     })()),
+    // Thinking/reasoning configuration
+    ...(settings.thinkingLevel && settings.thinkingLevel !== "none" && {
+      thinkingConfig: {
+        thinkingBudget: settings.thinkingLevel === "low" ? 1024 : settings.thinkingLevel === "medium" ? 8192 : 24576,
+      },
+    }),
+    ...(settings.thinkingLevel === "none" && {
+      thinkingConfig: {
+        thinkingBudget: 0,
+      },
+    }),
   };
 
   const response = await withRetry(
@@ -487,10 +512,19 @@ export async function sendMessageStream(
         }
         return { tools: [{ googleSearch: {} }] };
       })()),
+      // Thinking/reasoning configuration
+      ...(settings.thinkingLevel && settings.thinkingLevel !== "none" && {
+        thinkingConfig: {
+          thinkingBudget: settings.thinkingLevel === "low" ? 1024 : settings.thinkingLevel === "medium" ? 8192 : 24576,
+          ...(settings.includeThoughts && { includeThoughts: true }),
+        },
+      }),
+      ...(settings.thinkingLevel === "none" && {
+        thinkingConfig: {
+          thinkingBudget: 0,
+        },
+      }),
     };
-
-    // Nota: Gemini 2.5 Flash Image tiene un bug conocido donde ignora aspectRatio
-    // Ver: https://discuss.ai.google.dev/t/gemini-2-5-flash-nano-banana-auto-aspect-ratio-issue/108225
 
     // withRetry envuelve conexión + consumo completo del stream
     // Si falla mid-stream (429 durante iteración), se reintenta desde cero
@@ -510,11 +544,29 @@ export async function sendMessageStream(
         for await (const chunk of responseStream) {
           // Extraer texto del primer candidato
           const parts = chunk.candidates?.[0]?.content?.parts;
+
+          // Debug: log parts with thought field
+          if (parts && settings.includeThoughts) {
+            for (const p of parts) {
+              if (p.thought !== undefined) {
+                console.log(`[Google AI] Part thought=${p.thought}, text=${p.text?.substring(0, 80)}...`);
+              }
+            }
+          }
+
           const chunkText = extractTextFromParts(parts);
 
           if (chunkText) {
             fullText += chunkText;
             callbacks.onChunk(chunkText);
+          }
+
+          // Extract thought content if includeThoughts is enabled
+          if (callbacks.onThought) {
+            const thoughtText = extractThoughtsFromParts(parts);
+            if (thoughtText) {
+              callbacks.onThought(thoughtText);
+            }
           }
 
           // Extraer imágenes de todos los candidatos (para candidateCount > 1)

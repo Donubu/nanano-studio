@@ -131,8 +131,14 @@ export async function POST(
     }
 
     const { id } = await params;
+    if (!id || isNaN(Number(id))) {
+      return new Response(JSON.stringify({ error: "ID de conversación inválido" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     const body = await request.json();
-    const { content, files, useProjectSystemInstruction = true, modelIdOverride, imageSettings, quality_tier, selected_model_id, generation_type_override, no_context = false, skip_user_message = false, google_search_enabled: reqGoogleSearchEnabled, google_image_search_enabled: reqGoogleImageSearchEnabled } = body as {
+    const { content, files, useProjectSystemInstruction = true, modelIdOverride, imageSettings, quality_tier, selected_model_id, generation_type_override, no_context = false, skip_user_message = false, google_search_enabled: reqGoogleSearchEnabled, google_image_search_enabled: reqGoogleImageSearchEnabled, thinking_level, include_thoughts } = body as {
       content: string;
       files?: AttachedFile[];
       useProjectSystemInstruction?: boolean;
@@ -145,6 +151,8 @@ export async function POST(
       skip_user_message?: boolean;
       google_search_enabled?: boolean;
       google_image_search_enabled?: boolean;
+      thinking_level?: "none" | "low" | "medium" | "high";
+      include_thoughts?: boolean;
     };
 
     // quality_tier kept for legacy compat but selected_model_id takes precedence
@@ -491,6 +499,8 @@ export async function POST(
             }),
             ...(googleSearchEnabled && { googleSearchEnabled: true }),
             ...(googleImageSearchEnabled && { googleImageSearchEnabled: true }),
+            ...(thinking_level && { thinkingLevel: thinking_level }),
+            ...(include_thoughts && thinking_level && thinking_level !== "none" && { includeThoughts: true }),
           };
 
           // Construir objeto de request para debug y almacenamiento
@@ -808,6 +818,15 @@ export async function POST(
                   );
                 }
               },
+              ...(include_thoughts && thinking_level && thinking_level !== "none" && {
+                onThought: (text: string) => {
+                  if (!controllerClosed) {
+                    controller.enqueue(
+                      encoder.encode(`data: ${JSON.stringify({ type: "thought", text })}\n\n`)
+                    );
+                  }
+                },
+              }),
               onRetry: (info) => {
                 // Resetear estado acumulado para que el reintento empiece limpio
                 fullResponse = "";
@@ -914,8 +933,8 @@ export async function POST(
                   totalEstimatedCost += textCost;
 
                   const [modelResult] = await pool.execute<ResultSetHeader>(
-                    `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, tokens_input, tokens_output, estimated_cost, grounding_data)
-                     VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?)`,
+                    `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, tokens_input, tokens_output, estimated_cost, grounding_data)
+                     VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?, ?)`,
                     [id, effectiveQualityTier, effectiveModelDbId, text, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
                   );
                   modelMessageId = modelResult.insertId;
@@ -939,8 +958,8 @@ export async function POST(
                   totalEstimatedCost += imageCost;
 
                   const [imgResult] = await pool.execute<ResultSetHeader>(
-                    `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost)
-                     VALUES (?, 'model', 'image', ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost)
+                     VALUES (?, 'model', 'image', ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [id, effectiveQualityTier, effectiveModelDbId, img.url, img.mimeType, img.fileSize, imageAspectRatioToSave, imageSizeToSave,
                      isFirstMessage ? tokenCount.input : 0,
                      isFirstMessage ? tokenCount.output : 0,
@@ -970,8 +989,8 @@ export async function POST(
                   totalEstimatedCost += textCost;
 
                   const [modelResult] = await pool.execute<ResultSetHeader>(
-                    `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, tokens_input, tokens_output, estimated_cost)
-                     VALUES (?, 'model', 'text', ?, '', ?, ?, ?)`,
+                    `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, tokens_input, tokens_output, estimated_cost)
+                     VALUES (?, 'model', 'text', ?, ?, '', ?, ?, ?)`,
                     [id, effectiveQualityTier, effectiveModelDbId, tokenCount.input, tokenCount.output, textCost]
                   );
                   modelMessageId = modelResult.insertId;
