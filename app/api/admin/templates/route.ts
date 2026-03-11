@@ -16,8 +16,12 @@ interface TemplateRow extends RowDataPacket {
 export async function GET() {
   try {
     const session = await auth();
-    if (!session?.user || session.user.role !== "admin") {
+    if (!session?.user) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    }
+    // Allow admins and users with canCreateProjects to list templates
+    if (session.user.role !== "admin" && !session.user.canCreateProjects) {
+      return NextResponse.json({ error: "No autorizado" }, { status: 403 });
     }
 
     const [rows] = await pool.execute<TemplateRow[]>(

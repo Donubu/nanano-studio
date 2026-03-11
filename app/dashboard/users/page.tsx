@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, Loader2, Eye, Ban, RotateCcw, Zap, FolderOpen, Calculator } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Eye, Ban, RotateCcw, Zap, FolderOpen, FolderPlus, Calculator } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { formatDateLocal } from "@/lib/utils";
 
@@ -32,6 +32,7 @@ interface User {
   role: string;
   cargo: string;
   ai_calculator_access: number;
+  can_create_projects: number;
   blocked_at: string | null;
   deleted_at: string | null;
   created_at: string;
@@ -63,6 +64,7 @@ export default function UsersPage() {
     role: "user",
     cargo: "Sin definir",
     ai_calculator_access: false,
+    can_create_projects: false,
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -90,7 +92,7 @@ export default function UsersPage() {
 
   const openCreateDialog = () => {
     setEditingUser(null);
-    setFormData({ email: "", name: "", role: "user", cargo: "Sin definir", ai_calculator_access: false });
+    setFormData({ email: "", name: "", role: "user", cargo: "Sin definir", ai_calculator_access: false, can_create_projects: false });
     setError("");
     setIsDialogOpen(true);
   };
@@ -103,6 +105,7 @@ export default function UsersPage() {
       role: user.role,
       cargo: user.cargo || "Sin definir",
       ai_calculator_access: !!user.ai_calculator_access,
+      can_create_projects: !!user.can_create_projects,
     });
     setError("");
     setIsDialogOpen(true);
@@ -487,6 +490,21 @@ export default function UsersPage() {
                   Acceso a Calculadora IA
                 </label>
               </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="can_create_projects"
+                  checked={formData.can_create_projects}
+                  onChange={(e) =>
+                    setFormData({ ...formData, can_create_projects: e.target.checked })
+                  }
+                  className="h-4 w-4 rounded border-border/50"
+                />
+                <label htmlFor="can_create_projects" className="text-sm font-medium flex items-center gap-2">
+                  <FolderPlus className="h-4 w-4 text-primary" />
+                  Puede crear proyectos
+                </label>
+              </div>
             </div>
             <DialogFooter>
               <Button
@@ -583,7 +601,7 @@ export default function UsersPage() {
               </div>
 
               {/* Cargo y accesos */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div className="bg-muted rounded-lg p-3">
                   <div className="text-xs text-muted-foreground mb-1">Cargo</div>
                   <div className="text-sm font-medium">{selectedUser.cargo || "Sin definir"}</div>
@@ -593,6 +611,17 @@ export default function UsersPage() {
                   <div className="text-sm font-medium flex items-center gap-1.5">
                     <Calculator className="h-3.5 w-3.5" />
                     {selectedUser.ai_calculator_access ? (
+                      <span className="text-green-400">Activado</span>
+                    ) : (
+                      <span className="text-muted-foreground">Desactivado</span>
+                    )}
+                  </div>
+                </div>
+                <div className="bg-muted rounded-lg p-3">
+                  <div className="text-xs text-muted-foreground mb-1">Crear Proyectos</div>
+                  <div className="text-sm font-medium flex items-center gap-1.5">
+                    <FolderPlus className="h-3.5 w-3.5" />
+                    {selectedUser.can_create_projects ? (
                       <span className="text-green-400">Activado</span>
                     ) : (
                       <span className="text-muted-foreground">Desactivado</span>

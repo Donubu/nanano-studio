@@ -84,6 +84,7 @@ import {GenerationTypeSelector, GenerationType, GenerationTypeBadge} from "./gen
 import {ModelSelector, ProjectModel as ConfigModel, QualityBadge, QualityTier} from "./quality-selector";
 import {ReasoningSelector, ThinkingLevel} from "./reasoning-selector";
 import {DeploymentBanner} from "./deployment-banner";
+import {CreateProjectDialog} from "./create-project-dialog";
 import {ImageModelSelector} from "./image-model-selector";
 import {AudioSettings} from "./audio-settings";
 import {MusicSettings} from "./music-settings";
@@ -3204,7 +3205,12 @@ export function ChatInterface() {
                             ) : null;
                         })()}
 
-                        <label className="text-xs text-muted-foreground mb-1 block">Proyecto</label>
+                        <div className="flex items-center justify-between mb-1">
+                            <label className="text-xs text-muted-foreground">Proyecto</label>
+                            {(session?.user?.role === "admin" || session?.user?.canCreateProjects) && (
+                                <CreateProjectDialog onProjectCreated={() => fetchProjects(selectedClientId ?? undefined)} />
+                            )}
+                        </div>
                         <select
                             className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
                             value={selectedProjectId || ""}

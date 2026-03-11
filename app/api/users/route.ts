@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const includeDeleted = searchParams.get("includeDeleted") === "true";
 
-    let query = "SELECT id, email, name, image, role, cargo, ai_calculator_access, blocked_at, deleted_at, created_at FROM users";
+    let query = "SELECT id, email, name, image, role, cargo, ai_calculator_access, can_create_projects, blocked_at, deleted_at, created_at FROM users";
     if (!includeDeleted) {
       query += " WHERE deleted_at IS NULL";
     }
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { email, name, role = "user", cargo = "Sin definir", ai_calculator_access = false } = body;
+    const { email, name, role = "user", cargo = "Sin definir", ai_calculator_access = false, can_create_projects = false } = body;
 
     if (!email) {
       return NextResponse.json(
@@ -75,8 +75,8 @@ export async function POST(request: NextRequest) {
       if (existing[0].deleted_at) {
         // Restaurar usuario eliminado
         await pool.execute<ResultSetHeader>(
-          "UPDATE users SET name = ?, role = ?, cargo = ?, ai_calculator_access = ?, deleted_at = NULL, blocked_at = NULL WHERE id = ?",
-          [name || null, role, cargo, ai_calculator_access ? 1 : 0, existing[0].id]
+          "UPDATE users SET name = ?, role = ?, cargo = ?, ai_calculator_access = ?, can_create_projects = ?, deleted_at = NULL, blocked_at = NULL WHERE id = ?",
+          [name || null, role, cargo, ai_calculator_access ? 1 : 0, can_create_projects ? 1 : 0, existing[0].id]
         );
         return NextResponse.json(
           { id: existing[0].id, email, name, role, cargo, ai_calculator_access, restored: true },
@@ -90,8 +90,8 @@ export async function POST(request: NextRequest) {
     }
 
     const [result] = await pool.execute<ResultSetHeader>(
-      "INSERT INTO users (email, name, role, cargo, ai_calculator_access) VALUES (?, ?, ?, ?, ?)",
-      [email, name || null, role, cargo, ai_calculator_access ? 1 : 0]
+      "INSERT INTO users (email, name, role, cargo, ai_calculator_access, can_create_projects) VALUES (?, ?, ?, ?, ?, ?)",
+      [email, name || null, role, cargo, ai_calculator_access ? 1 : 0, can_create_projects ? 1 : 0]
     );
 
     return NextResponse.json(

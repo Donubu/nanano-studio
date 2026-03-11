@@ -10,8 +10,11 @@ export async function POST(
 ) {
   try {
     const session = await auth();
-    if (!session?.user || session.user.role !== "admin") {
+    if (!session?.user) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    }
+    if (session.user.role !== "admin" && !session.user.canCreateProjects) {
+      return NextResponse.json({ error: "No autorizado" }, { status: 403 });
     }
 
     const { id } = await params;

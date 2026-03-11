@@ -9,6 +9,7 @@ interface UserRow extends RowDataPacket {
   name: string | null;
   image: string | null;
   role: string;
+  can_create_projects: number;
 }
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
@@ -48,12 +49,13 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (account && user) {
         try {
           const [rows] = await pool.execute<UserRow[]>(
-            "SELECT id, role FROM users WHERE email = ?",
+            "SELECT id, role, can_create_projects FROM users WHERE email = ?",
             [user.email]
           );
           if (rows.length > 0) {
             token.id = rows[0].id;
             token.role = rows[0].role;
+            token.canCreateProjects = rows[0].can_create_projects === 1;
           }
         } catch (error) {
           console.error("Error en jwt callback:", error);
@@ -63,8 +65,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
     async session({ session, token }) {
       if (session.user) {
-        (session.user as { id: number; role: string }).id = token.id as number;
-        (session.user as { id: number; role: string }).role = token.role as string;
+        (session.user as { id: number; role: string; canCreateProjects: boolean }).id = token.id as number;
+        (session.user as { id: number; role: string; canCreateProjects: boolean }).role = token.role as string;
+        (session.user as { id: number; role: string; canCreateProjects: boolean }).canCreateProjects = (token.canCreateProjects as boolean) || false;
       }
       return session;
     },
