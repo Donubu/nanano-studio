@@ -118,7 +118,7 @@ export async function GET(request: NextRequest) {
       LIMIT ? OFFSET ?
     `;
 
-    const queryParams = [...params, String(limit), String(offset)];
+    const queryParams = [...params, Number(limit), Number(offset)];
     const [rows] = await pool.query<ConversationRow[]>(query, queryParams);
 
     // Count total
