@@ -122,6 +122,62 @@ export async function GET() {
         .sort((a, b) => (b.failedAt || 0) - (a.failedAt || 0))
         .slice(0, 20);
 
+      // Compute average duration stats from a larger sample of completed jobs
+      const [streamStatsRaw, imagenStatsRaw] = await Promise.all([
+        streamQueue.getJobs(["completed"], 0, 99),
+        imagenQueue.getJobs(["completed"], 0, 99),
+      ]);
+
+      interface StatEntry { totalMs: number; count: number; minMs: number; maxMs: number }
+      const statsMap: Record<string, Record<string, StatEntry>> = {
+        byModel: {},
+        byType: {},
+        byWorker: {},
+      };
+
+      const addStat = (group: Record<string, StatEntry>, key: string, durationMs: number) => {
+        if (!group[key]) group[key] = { totalMs: 0, count: 0, minMs: Infinity, maxMs: 0 };
+        group[key].totalMs += durationMs;
+        group[key].count++;
+        if (durationMs < group[key].minMs) group[key].minMs = durationMs;
+        if (durationMs > group[key].maxMs) group[key].maxMs = durationMs;
+      };
+
+      const allStatsJobs = [
+        ...streamStatsRaw.filter((j) => j?.data),
+        ...imagenStatsRaw.filter((j) => j?.data),
+      ];
+
+      for (const job of allStatsJobs) {
+        const duration = job.finishedOn && job.processedOn ? job.finishedOn - job.processedOn : null;
+        if (!duration || duration <= 0) continue;
+        const d = job.data as unknown as Record<string, unknown> | undefined;
+        const model = (d?.modelId as string) || "unknown";
+        const genType = (d?.generationType as string) || "imagen";
+        const worker = (d?.workerName as string) || "unknown";
+        addStat(statsMap.byModel, model, duration);
+        addStat(statsMap.byType, genType, duration);
+        addStat(statsMap.byWorker, worker, duration);
+      }
+
+      const formatStats = (group: Record<string, StatEntry>) =>
+        Object.entries(group)
+          .map(([key, s]) => ({
+            key,
+            count: s.count,
+            avgMs: Math.round(s.totalMs / s.count),
+            minMs: s.minMs === Infinity ? 0 : s.minMs,
+            maxMs: s.maxMs,
+          }))
+          .sort((a, b) => b.count - a.count);
+
+      const stats = {
+        byModel: formatStats(statsMap.byModel),
+        byType: formatStats(statsMap.byType),
+        byWorker: formatStats(statsMap.byWorker),
+        sampleSize: allStatsJobs.filter(j => j.finishedOn && j.processedOn).length,
+      };
+
       // Count unique worker processes across both queues
       // Each worker process creates 2 BullMQ Workers (stream + imagen), each with a bzpopmin connection
       // So we count total bzpopmin connections and divide by 2 to get actual worker processes
@@ -145,6 +201,7 @@ export async function GET() {
         activeJobs,
         completedJobs,
         failedJobs,
+        stats,
       });
     } finally {
       await connection.quit();

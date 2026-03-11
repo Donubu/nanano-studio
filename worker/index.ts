@@ -93,6 +93,9 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
   if (data.settings.googleSearchEnabled) console.log(`  Google Search: enabled`);
   if (data.settings.googleImageSearchEnabled) console.log(`  Image Search: enabled`);
   console.log(`  Temperature: ${data.settings.temperature ?? "—"} | TopP: ${data.settings.topP ?? "—"} | MaxTokens: ${data.settings.maxOutputTokens ?? "—"}`);
+  if (data.settings.thinkingLevel && data.settings.thinkingLevel !== "none") {
+    console.log(`  Thinking: ${data.settings.thinkingLevel} | IncludeThoughts: ${data.settings.includeThoughts ?? false}`);
+  }
   console.log(`  Content: ${data.content.substring(0, 100)}${data.content.length > 100 ? "..." : ""}`);
   console.log(`  Messages: ${data.messages.length} | NeedsTitle: ${data.needsTitle}`);
   console.log(`==========================================\n`);
@@ -125,6 +128,7 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
     let imageUploadPromises: Promise<void>[] = [];
     let groundingData: GroundingData | null = null;
     let fullResponse = "";
+    let fullThought = "";
 
     // Non-streaming path (image search or image generation)
     if (data.settings.googleImageSearchEnabled) {
@@ -164,7 +168,7 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
         }
       }
 
-      await saveResultsToDB(data, fullResponse, result.tokenCount, savedImages, groundingData, publish);
+      await saveResultsToDB(data, fullResponse, result.tokenCount, savedImages, groundingData, publish, null);
       return;
     }
 
@@ -180,8 +184,15 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
             fullResponse += text;
             publish({ type: "chunk", text });
           },
+          ...(data.settings.includeThoughts && data.settings.thinkingLevel && data.settings.thinkingLevel !== "none" && {
+            onThought: (text: string) => {
+              fullThought += text;
+              publish({ type: "thought", text });
+            },
+          }),
           onRetry: (info) => {
             fullResponse = "";
+            fullThought = "";
             savedImages = [];
             imageUploadPromises = [];
             groundingData = null;
@@ -234,7 +245,7 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
                 }
               }
 
-              await saveResultsToDB(data, text, tokenCount, savedImages, groundingData, publish);
+              await saveResultsToDB(data, text, tokenCount, savedImages, groundingData, publish, fullThought || null);
               resolveJob();
             } catch (err) {
               rejectJob(err);
@@ -290,7 +301,8 @@ async function saveResultsToDB(
   tokenCount: { input: number; output: number },
   savedImages: Array<{ url: string; fileSize: number; mimeType: string }>,
   groundingData: GroundingData | null,
-  publish: (event: StreamJobEvent) => void
+  publish: (event: StreamJobEvent) => void,
+  thought?: string | null
 ): Promise<void> {
   const validImages = savedImages.filter((img) => img.url);
   const hasImages = validImages.length > 0;
@@ -313,9 +325,9 @@ async function saveResultsToDB(
     });
     totalEstimatedCost += textCost;
     const [modelResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, tokens_input, tokens_output, estimated_cost, grounding_data)
-       VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?)`,
-      [data.conversationId, data.qualityTier, text, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
+      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, thought, tokens_input, tokens_output, estimated_cost, grounding_data)
+       VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?, ?)`,
+      [data.conversationId, data.qualityTier, text, thought || null, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
     );
     modelMessageId = modelResult.insertId;
   }

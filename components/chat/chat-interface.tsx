@@ -3,6 +3,8 @@
 import {useState, useEffect, useRef, useCallback} from "react";
 import {useSession, signOut} from "next-auth/react";
 import {useTheme} from "next-themes";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {cn, formatDateLocal, formatDateTimeLocal} from "@/lib/utils";
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
@@ -4040,8 +4042,10 @@ export function ChatInterface() {
                                                             <Brain className="w-3.5 h-3.5" />
                                                             Razonamiento {msg.isStreaming && <span className="animate-pulse">...</span>}
                                                         </summary>
-                                                        <div className="px-3 py-2 text-sm text-muted-foreground whitespace-pre-wrap border-t border-purple-500/20">
-                                                            {msg.thought}
+                                                        <div className="px-3 py-2 text-sm text-muted-foreground border-t border-purple-500/20 prose prose-sm dark:prose-invert prose-p:text-muted-foreground prose-headings:text-muted-foreground prose-strong:text-muted-foreground prose-code:text-muted-foreground max-w-none">
+                                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                                {msg.thought}
+                                                            </ReactMarkdown>
                                                         </div>
                                                     </details>
                                                 )}

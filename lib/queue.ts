@@ -29,6 +29,8 @@ export interface StreamJobData {
     };
     googleSearchEnabled?: boolean;
     googleImageSearchEnabled?: boolean;
+    thinkingLevel?: "none" | "low" | "medium" | "high";
+    includeThoughts?: boolean;
   };
 
   // Messages to send to Google AI
@@ -71,6 +73,7 @@ export interface StreamJobData {
 // Events published by worker via Redis pub/sub
 export type StreamJobEvent =
   | { type: "chunk"; text: string }
+  | { type: "thought"; text: string }
   | { type: "image"; imageUrl: string; mimeType: string; imageIndex: number }
   | { type: "grounding"; sources: unknown[]; searchEntryPointHtml?: string; webSearchQueries?: string[]; imageSearchQueries?: string[] }
   | { type: "retry"; attempt: number; maxAttempts: number; delaySeconds: number; error: string }

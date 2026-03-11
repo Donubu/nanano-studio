@@ -21,6 +21,7 @@ import {
   Server,
   ChevronDown,
   ChevronUp,
+  BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -57,6 +58,21 @@ interface FailedJob {
   failedAt: number | null;
 }
 
+interface StatEntry {
+  key: string;
+  count: number;
+  avgMs: number;
+  minMs: number;
+  maxMs: number;
+}
+
+interface WorkerStats {
+  byModel: StatEntry[];
+  byType: StatEntry[];
+  byWorker: StatEntry[];
+  sampleSize: number;
+}
+
 interface WorkerData {
   configured: boolean;
   workers: number;
@@ -70,6 +86,7 @@ interface WorkerData {
   activeJobs: ActiveJob[];
   completedJobs: CompletedJob[];
   failedJobs: FailedJob[];
+  stats?: WorkerStats;
 }
 
 function formatElapsed(startedAt: number | null): string {
@@ -101,6 +118,43 @@ function formatDate(timestamp: number | null): string {
     minute: "2-digit",
     second: "2-digit",
   });
+}
+
+function StatsTable({ title, entries }: { title: string; entries: StatEntry[] }) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-medium flex items-center gap-2">
+          <BarChart3 className="h-4 w-4" />
+          {title}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="text-xs">Nombre</TableHead>
+              <TableHead className="text-xs text-right">Jobs</TableHead>
+              <TableHead className="text-xs text-right">Prom.</TableHead>
+              <TableHead className="text-xs text-right">Min</TableHead>
+              <TableHead className="text-xs text-right">Max</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {entries.map((e) => (
+              <TableRow key={e.key}>
+                <TableCell className="text-xs font-mono truncate max-w-[140px]">{e.key}</TableCell>
+                <TableCell className="text-xs text-right">{e.count}</TableCell>
+                <TableCell className="text-xs text-right font-mono">{formatDuration(e.avgMs)}</TableCell>
+                <TableCell className="text-xs text-right font-mono text-muted-foreground">{formatDuration(e.minMs)}</TableCell>
+                <TableCell className="text-xs text-right font-mono text-muted-foreground">{formatDuration(e.maxMs)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function WorkersPage() {
@@ -266,6 +320,15 @@ export default function WorkersPage() {
         </Card>
       </div>
 
+      {/* Stats */}
+      {data.stats && data.stats.sampleSize > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <StatsTable title="Por Modelo" entries={data.stats.byModel} />
+          <StatsTable title="Por Tipo" entries={data.stats.byType} />
+          <StatsTable title="Por Worker" entries={data.stats.byWorker} />
+        </div>
+      )}
+
       {/* Active Jobs */}
       <Card>
         <CardHeader>
@@ -407,8 +470,8 @@ export default function WorkersPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data.failedJobs.map((job) => (
-                    <Fragment key={job.id}>
+                  {data.failedJobs.map((job, idx) => (
+                    <Fragment key={`${job.id}-${idx}`}>
                       <TableRow
                         className="cursor-pointer hover:bg-muted/50"
                         onClick={() => toggleError(job.id)}
