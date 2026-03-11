@@ -1,23 +1,21 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { Storage } from "@google-cloud/storage";
 
 // Lazy initialization to support worker process where env vars load after module init
-let s3Client: S3Client | null = null;
-function getS3Client(): S3Client {
-  if (!s3Client) {
-    s3Client = new S3Client({
-      region: process.env.AWS_REGION || "us-east-1",
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
-      },
-    });
+let storageClient: Storage | null = null;
+function getStorageClient(): Storage {
+  if (!storageClient) {
+    // Auto-detects credentials from GOOGLE_APPLICATION_CREDENTIALS env var or VM metadata
+    storageClient = new Storage();
   }
-  return s3Client;
+  return storageClient;
 }
 
-function getBucket() { return process.env.AWS_S3_BUCKET || ""; }
-function getFolder() { return (process.env.AWS_S3_FOLDER || "").replace(/^\/+|\/+$/g, ""); }
-function getCloudfrontDomain() { return (process.env.AWS_CLOUDFRONT_DOMAIN || "").replace(/^https?:\/\//, "").replace(/\/+$/, ""); }
+function getBucket() { return process.env.GCS_BUCKET || ""; }
+function getFolder() { return (process.env.GCS_FOLDER || "").replace(/^\/+|\/+$/g, ""); }
+function getBaseUrl() {
+  // Allow override for future CDN domain, otherwise use direct GCS URL
+  return (process.env.GCS_BASE_URL || `https://storage.googleapis.com/${getBucket()}`).replace(/\/+$/, "");
+}
 
 export interface UploadResult {
   url: string;
@@ -26,7 +24,7 @@ export interface UploadResult {
 }
 
 /**
- * Sube un archivo a S3 y retorna la URL de CloudFront
+ * Sube un archivo a GCS y retorna la URL pública
  */
 export async function uploadToS3(
   buffer: Buffer,
@@ -36,34 +34,27 @@ export async function uploadToS3(
 ): Promise<UploadResult> {
   const bucket = getBucket();
   const folder = getFolder();
-  const cloudfrontDomain = getCloudfrontDomain();
+  const baseUrl = getBaseUrl();
 
-  // Construir la key (ruta) en S3
+  // Construir la key (ruta) en GCS — misma estructura que S3
   const key = folder
     ? `${folder}/${subfolder}/${fileName}`
     : `${subfolder}/${fileName}`;
 
-  console.log("[S3] Uploading to bucket:", bucket);
-  console.log("[S3] Key:", key);
-  console.log("[S3] File size:", buffer.length, "bytes");
+  console.log("[GCS] Uploading to bucket:", bucket);
+  console.log("[GCS] Key:", key);
+  console.log("[GCS] File size:", buffer.length, "bytes");
 
-  // Subir a S3
-  await getS3Client().send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: buffer,
-      ContentType: mimeType,
-      CacheControl: "max-age=31536000", // Cache por 1 año
-    })
-  );
+  const file = getStorageClient().bucket(bucket).file(key);
+  await file.save(buffer, {
+    contentType: mimeType,
+    metadata: {
+      cacheControl: "public, max-age=31536000", // Cache por 1 año
+    },
+  });
 
-  // Construir URL de CloudFront
-  const url = cloudfrontDomain
-    ? `https://${cloudfrontDomain}/${key}`
-    : `https://${bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
-
-  console.log("[S3] Upload successful, URL:", url);
+  const url = `${baseUrl}/${key}`;
+  console.log("[GCS] Upload successful, URL:", url);
 
   return {
     url,
@@ -85,7 +76,7 @@ export function generateFileName(
 }
 
 /**
- * Sube un video a S3 y retorna la URL de CloudFront
+ * Sube un video a GCS
  * Usa el subfolder "videos" para organizar los archivos
  */
 export async function uploadVideoToS3(
@@ -107,7 +98,7 @@ export function generateVideoFileName(
 }
 
 /**
- * Sube una imagen subida por usuario a S3
+ * Sube una imagen subida por usuario a GCS
  * Usa el subfolder "uploads" para organizar los archivos
  */
 export async function uploadImageToS3(
@@ -119,7 +110,7 @@ export async function uploadImageToS3(
 }
 
 /**
- * Sube un audio a S3 y retorna la URL de CloudFront
+ * Sube un audio a GCS
  * Usa el subfolder "audio" para organizar los archivos
  */
 export async function uploadAudioToS3(
@@ -141,7 +132,7 @@ export function generateAudioFileName(
 }
 
 /**
- * Sube musica temporal a S3 (para preview antes de guardar)
+ * Sube musica temporal a GCS (para preview antes de guardar)
  * Usa el subfolder "music/temp" para archivos temporales
  */
 export async function uploadTempMusicToS3(
@@ -153,7 +144,7 @@ export async function uploadTempMusicToS3(
 }
 
 /**
- * Sube musica final a S3
+ * Sube musica final a GCS
  * Usa el subfolder "music" para archivos permanentes
  */
 export async function uploadMusicToS3(
@@ -187,24 +178,25 @@ export function generateUploadFileName(
 }
 
 /**
- * Verifica si S3 está configurado
+ * Verifica si GCS está configurado
  */
 export function isS3Configured(): boolean {
-  return !!(
-    process.env.AWS_ACCESS_KEY_ID &&
-    process.env.AWS_SECRET_ACCESS_KEY &&
-    process.env.AWS_S3_BUCKET
-  );
+  return !!process.env.GCS_BUCKET;
 }
 
 /**
- * Extrae la key de S3 desde una URL de CloudFront o S3
+ * Extrae la key desde una URL de GCS o CloudFront (legacy)
  */
 export function extractS3KeyFromUrl(url: string): string | null {
   try {
     const urlObj = new URL(url);
     // Remove leading slash
-    let path = urlObj.pathname.replace(/^\//, "");
+    const path = urlObj.pathname.replace(/^\//, "");
+    // For GCS URLs: storage.googleapis.com/BUCKET/key — remove bucket prefix
+    const bucket = getBucket();
+    if (path.startsWith(`${bucket}/`)) {
+      return path.substring(bucket.length + 1);
+    }
     return path || null;
   } catch {
     return null;
@@ -212,19 +204,14 @@ export function extractS3KeyFromUrl(url: string): string | null {
 }
 
 /**
- * Elimina un archivo de S3
+ * Elimina un archivo de GCS
  */
 export async function deleteFromS3(key: string): Promise<boolean> {
   try {
-    await getS3Client().send(
-      new DeleteObjectCommand({
-        Bucket: getBucket(),
-        Key: key,
-      })
-    );
+    await getStorageClient().bucket(getBucket()).file(key).delete();
     return true;
   } catch (error) {
-    console.error("[S3] Error deleting file:", error);
+    console.error("[GCS] Error deleting file:", error);
     return false;
   }
 }

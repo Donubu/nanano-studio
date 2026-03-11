@@ -17,6 +17,10 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "static.puer.to",
       },
+      {
+        protocol: "https",
+        hostname: "storage.googleapis.com",
+      },
     ],
     minimumCacheTTL: 2592000, // 30 days — avoid re-optimizing the same image
     deviceSizes: [640, 828, 1080, 1200, 1920],
