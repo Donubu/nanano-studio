@@ -526,6 +526,11 @@ export async function sendMessageStream(
       }),
     };
 
+    // Debug: log final SDK config when thinking is enabled
+    if (settings.thinkingLevel && settings.thinkingLevel !== "none") {
+      console.log(`[Google AI] Thinking config:`, JSON.stringify(config.thinkingConfig));
+    }
+
     // withRetry envuelve conexión + consumo completo del stream
     // Si falla mid-stream (429 durante iteración), se reintenta desde cero
     const result = await withRetry(
@@ -613,6 +618,11 @@ export async function sendMessageStream(
 
           if (chunk.usageMetadata) {
             usageMetadata = chunk.usageMetadata;
+            // Debug: log thinking token usage
+            const meta = chunk.usageMetadata as Record<string, unknown>;
+            if (meta.thoughtsTokenCount) {
+              console.log(`[Google AI] Thoughts tokens: ${meta.thoughtsTokenCount}, total: ${meta.totalTokenCount}`);
+            }
           }
         }
 

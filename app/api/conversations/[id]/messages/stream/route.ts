@@ -197,6 +197,7 @@ export async function POST(
     const encoder = new TextEncoder();
     let modelMessageId: number | null = null;
     let fullResponse = "";
+    let fullThought = "";
     let controllerClosed = false;
     let heartbeat: ReturnType<typeof setInterval>;
 
@@ -698,9 +699,9 @@ export async function POST(
                 });
                 totalEstimatedCost += textCost;
                 const [modelResult] = await pool.execute<ResultSetHeader>(
-                  `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, tokens_input, tokens_output, estimated_cost, grounding_data)
-                   VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?, ?)`,
-                  [id, effectiveQualityTier, effectiveModelDbId, fullResponse, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
+                  `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, thought, tokens_input, tokens_output, estimated_cost, grounding_data)
+                   VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  [id, effectiveQualityTier, effectiveModelDbId, fullResponse, fullThought || null, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
                 );
                 modelMessageId = modelResult.insertId;
               }
@@ -820,6 +821,7 @@ export async function POST(
               },
               ...(include_thoughts && thinking_level && thinking_level !== "none" && {
                 onThought: (text: string) => {
+                  fullThought += text;
                   if (!controllerClosed) {
                     controller.enqueue(
                       encoder.encode(`data: ${JSON.stringify({ type: "thought", text })}\n\n`)
@@ -830,6 +832,7 @@ export async function POST(
               onRetry: (info) => {
                 // Resetear estado acumulado para que el reintento empiece limpio
                 fullResponse = "";
+                fullThought = "";
                 savedImages = [];
                 imageUploadPromises = [];
                 groundingData = null;
@@ -933,9 +936,9 @@ export async function POST(
                   totalEstimatedCost += textCost;
 
                   const [modelResult] = await pool.execute<ResultSetHeader>(
-                    `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, tokens_input, tokens_output, estimated_cost, grounding_data)
-                     VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?, ?)`,
-                    [id, effectiveQualityTier, effectiveModelDbId, text, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
+                    `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, thought, tokens_input, tokens_output, estimated_cost, grounding_data)
+                     VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [id, effectiveQualityTier, effectiveModelDbId, text, fullThought || null, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
                   );
                   modelMessageId = modelResult.insertId;
                 }

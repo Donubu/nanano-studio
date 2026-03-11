@@ -41,6 +41,7 @@ interface CompletedJob {
   generationType: string;
   user: string;
   project: string;
+  worker: string;
   completedAt: number | null;
   duration: number | null;
 }
@@ -51,6 +52,7 @@ interface FailedJob {
   generationType: string;
   user: string;
   project: string;
+  worker: string;
   error: string;
   failedAt: number | null;
 }
@@ -338,6 +340,7 @@ export default function WorkersPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Job ID</TableHead>
+                  <TableHead>Worker</TableHead>
                   <TableHead>Modelo</TableHead>
                   <TableHead>Tipo</TableHead>
                   <TableHead>Usuario</TableHead>
@@ -351,6 +354,11 @@ export default function WorkersPage() {
                   <TableRow key={`${job.id}-${idx}`}>
                     <TableCell className="font-mono text-xs">
                       {job.id}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className="font-mono text-xs">
+                        {job.worker}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline">{job.model}</Badge>
@@ -389,6 +397,7 @@ export default function WorkersPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[80px]">Job ID</TableHead>
+                    <TableHead>Worker</TableHead>
                     <TableHead>Modelo</TableHead>
                     <TableHead>Tipo</TableHead>
                     <TableHead>Usuario</TableHead>
@@ -406,6 +415,11 @@ export default function WorkersPage() {
                       >
                         <TableCell className="font-mono text-xs">
                           {job.id}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className="font-mono text-xs">
+                            {job.worker}
+                          </Badge>
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline">{job.model}</Badge>
@@ -433,8 +447,8 @@ export default function WorkersPage() {
                       </TableRow>
                       {expandedErrors.has(job.id) && (
                         <TableRow>
-                          <TableCell colSpan={7} className="p-0">
-                            <pre className="text-xs text-red-300 bg-red-950/30 p-3 m-2 rounded overflow-x-auto whitespace-pre-wrap break-words">
+                          <TableCell colSpan={8} className="p-0">
+                            <pre className="text-xs text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-950/30 p-3 m-2 rounded overflow-x-auto whitespace-pre-wrap break-words">
                               {job.error}
                             </pre>
                           </TableCell>

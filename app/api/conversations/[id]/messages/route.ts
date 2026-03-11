@@ -64,7 +64,7 @@ export async function GET(
     }
 
     const [messages] = await pool.execute<MessageRow[]>(
-      `SELECT id, conversation_id, role, content_type, content, image_url, image_mime_type,
+      `SELECT id, conversation_id, role, content_type, content, thought, image_url, image_mime_type,
               tokens_input, tokens_output, grounding_data, created_at
        FROM messages
        WHERE conversation_id = ?
