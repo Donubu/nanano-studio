@@ -183,7 +183,7 @@ export function TTSComposer({
   useEffect(() => {
     if (!restoreData) return;
 
-    const { content, voiceConfig, isMultiSpeaker } = restoreData;
+    const { content, voiceConfig, isMultiSpeaker, stylePrompt: restoredStylePrompt } = restoreData;
 
     if (isMultiSpeaker && voiceConfig && "speakers" in voiceConfig) {
       // Multi-speaker mode: restore characters and dialogue lines
@@ -192,18 +192,19 @@ export function TTSComposer({
 
       setCharacters(restoredChars);
       setDialogueLines(restoredLines);
-      onSettingsChangeRef.current({ multiSpeaker: true });
+      onSettingsChangeRef.current({ multiSpeaker: true, ...(restoredStylePrompt !== undefined ? { stylePrompt: restoredStylePrompt } : {}) });
     } else if (voiceConfig && "voiceId" in voiceConfig) {
       // Single speaker mode: restore voice and text
       setText(content);
       onSettingsChangeRef.current({
         multiSpeaker: false,
-        voiceId: (voiceConfig as AudioVoiceConfig).voiceId
+        voiceId: (voiceConfig as AudioVoiceConfig).voiceId,
+        ...(restoredStylePrompt !== undefined ? { stylePrompt: restoredStylePrompt } : {})
       });
     } else {
       // Fallback: just set content as text
       setText(content);
-      onSettingsChangeRef.current({ multiSpeaker: false });
+      onSettingsChangeRef.current({ multiSpeaker: false, ...(restoredStylePrompt !== undefined ? { stylePrompt: restoredStylePrompt } : {}) });
     }
 
     // Notify parent that restore was handled

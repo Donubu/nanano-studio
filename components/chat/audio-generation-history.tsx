@@ -23,6 +23,7 @@ export interface AudioRestoreData {
   content: string;
   voiceConfig: AudioVoiceConfig | AudioSpeakerConfig | null;
   isMultiSpeaker: boolean;
+  stylePrompt?: string;
 }
 
 interface AudioGenerationHistoryProps {
@@ -129,10 +130,13 @@ function AudioHistoryItem({
 
   const handleRestore = () => {
     if (!onRestore || !message.content) return;
+    // Extract stylePrompt from voiceConfig if it was stored
+    const stylePrompt = voiceConfig && "stylePrompt" in voiceConfig ? (voiceConfig as Record<string, unknown>).stylePrompt as string : undefined;
     onRestore({
       content: message.content,
       voiceConfig,
       isMultiSpeaker,
+      stylePrompt,
     });
   };
 

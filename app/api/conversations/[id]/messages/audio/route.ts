@@ -304,10 +304,11 @@ export async function POST(
           }
           console.log("Output format:", outputFormat);
           console.log("Text length:", content.length, "characters,", textBytes, "bytes");
+          console.log("Text:", content.length > 200 ? content.substring(0, 200) + "..." : content);
           console.log("================================================\n");
 
           let generatedAudio;
-          let voiceConfig: AudioVoiceConfig | AudioSpeakerConfig;
+          let voiceConfig: (AudioVoiceConfig | AudioSpeakerConfig) & { stylePrompt?: string };
           let finalAudioBuffer: Buffer;
           let mimeType: string;
           let fileExtension: string;
@@ -340,7 +341,7 @@ export async function POST(
               }
             );
 
-            voiceConfig = { voiceId, engine: "chirp" };
+            voiceConfig = { voiceId, engine: "chirp", ...(stylePrompt ? { stylePrompt } : {}) };
 
             // Chirp returns encoded audio directly - no PCM conversion needed
             finalAudioBuffer = generatedAudio.data;
@@ -378,7 +379,7 @@ export async function POST(
                 labels,
                 effectiveBackend
               );
-              voiceConfig = speakerConfig;
+              voiceConfig = stylePrompt ? { ...speakerConfig, stylePrompt } : speakerConfig;
             } else {
               generatedAudio = await generateSingleSpeakerAudio(
                 effectiveModelId,
@@ -391,7 +392,7 @@ export async function POST(
                 labels,
                 effectiveBackend
               );
-              voiceConfig = { voiceId };
+              voiceConfig = { voiceId, ...(stylePrompt ? { stylePrompt } : {}) };
             }
 
             // Convertir audio PCM al formato solicitado
