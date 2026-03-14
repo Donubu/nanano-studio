@@ -402,6 +402,7 @@ export async function POST(
 
             // Kling requires public URLs for images - upload base64 to S3 if needed
             const klingImages: KlingImageInput[] = [];
+            let klingVideoUrl: string | undefined;
             const refImages = referenceImages || videoInputs?.referenceImages;
             const firstFrame = videoInputs?.firstFrame || firstFrameImage;
             const lastFrame = videoInputs?.lastFrame || lastFrameImage;
@@ -453,7 +454,12 @@ export async function POST(
               });
               for (const asset of inlineAssets) {
                 const url = await uploadBase64IfNeeded(asset.dataUrl);
-                klingImages.push({ url });
+                if (asset.type === "video") {
+                  // Video assets go to video_url (Kling Omni supports one video input)
+                  klingVideoUrl = url;
+                } else {
+                  klingImages.push({ url });
+                }
               }
               console.log(`[Kling] Uploaded ${inlineAssets.length} inline assets for <<<>>> references`);
             }
@@ -475,6 +481,7 @@ export async function POST(
             console.log("Mode:", klingConfig.mode, "Duration:", klingConfig.duration);
             console.log("Audio:", klingConfig.generateAudio);
             console.log("Images:", klingImages.map(i => i.type || "reference").join(", ") || "none");
+            console.log("Video URL:", klingVideoUrl ? "(set)" : "none");
             console.log("Inline assets:", inlineAssets?.length || 0);
             console.log("Input prompt:", content);
             console.log("================================================\n");
@@ -485,6 +492,7 @@ export async function POST(
               klingConfig,
               onProgress,
               klingImages.length > 0 ? klingImages : undefined,
+              klingVideoUrl,
             );
             generatedSeed = 0; // Kling does not support seeds
 
@@ -740,12 +748,16 @@ export async function POST(
           console.error("[Video] Error generating video:", error);
           const errorMessage = error instanceof Error ? error.message : "Error desconocido";
 
-          // Guardar mensaje de error (con content_type 'error' para excluirlo del historial)
+          // Guardar mensaje de error con metadata de la generación para poder reutilizar
           try {
+            const errorVideoAspectRatio = videoSettings?.aspectRatio || conversation.video_aspect_ratio || "16:9";
+            const errorVideoDuration = videoSettings?.duration || conversation.video_duration || 8;
+            const errorVideoHasAudio = videoSettings?.audioEnabled !== undefined ? videoSettings.audioEnabled : (conversation.video_audio_enabled !== false);
+            const errorModelId = conversation.model_id;
             const [modelResult] = await pool.execute<ResultSetHeader>(
-              `INSERT INTO messages (conversation_id, role, content_type, content)
-               VALUES (?, 'model', 'error', ?)`,
-              [id, `Error generando video: ${errorMessage}`]
+              `INSERT INTO messages (conversation_id, role, content_type, content, model_id, quality_tier, video_aspect_ratio, video_duration, video_has_audio)
+               VALUES (?, 'model', 'error', ?, ?, ?, ?, ?, ?)`,
+              [id, `Error generando video: ${errorMessage}`, errorModelId, effectiveQualityTier, errorVideoAspectRatio, errorVideoDuration, errorVideoHasAudio]
             );
 
             sendEvent({

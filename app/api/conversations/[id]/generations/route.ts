@@ -125,7 +125,8 @@ export async function GET(
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN users u ON c.user_id = u.id
       LEFT JOIN models mo ON m.model_id = mo.id
-      WHERE m.conversation_id = ? AND m.role = 'model' AND ${whereClause}
+      LEFT JOIN collection_items ci_excl ON ci_excl.message_id = m.id
+      WHERE m.conversation_id = ? AND m.role = 'model' AND ci_excl.id IS NULL AND ${whereClause}
       ORDER BY m.created_at DESC`,
       [conversationId]
     );

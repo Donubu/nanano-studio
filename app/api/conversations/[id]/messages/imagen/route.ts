@@ -504,11 +504,12 @@ export async function POST(
           console.error("[Imagen] Error generating image:", error);
           const errorMessage = error instanceof Error ? error.message : "Error desconocido";
 
+          // Guardar mensaje de error con metadata de la generación para poder reutilizar
           try {
             const [modelResult] = await pool.execute<ResultSetHeader>(
-              `INSERT INTO messages (conversation_id, role, content_type, content)
-               VALUES (?, 'model', 'error', ?)`,
-              [id, `Error generando imagen: ${errorMessage}`]
+              `INSERT INTO messages (conversation_id, role, content_type, content, model_id, quality_tier, image_aspect_ratio, image_size)
+               VALUES (?, 'model', 'error', ?, ?, ?, ?, ?)`,
+              [id, `Error generando imagen: ${errorMessage}`, effectiveModelDbId, effectiveQualityTier, aspectRatio, resolution]
             );
 
             sendEvent({

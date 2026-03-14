@@ -111,6 +111,7 @@ export async function generateKlingVideo(
   config: KlingVideoConfig,
   onProgress?: (progress: VideoGenerationProgress) => void,
   images?: KlingImageInput[],
+  videoUrl?: string,
 ): Promise<GeneratedVideo> {
 
   onProgress?.({
@@ -120,7 +121,8 @@ export async function generateKlingVideo(
 
   const legacy = isLegacyModel(modelId);
   const hasImages = !!(images && images.length > 0);
-  const endpoints = getKlingEndpoints(modelId, hasImages);
+  const hasMedia = hasImages || !!videoUrl;
+  const endpoints = getKlingEndpoints(modelId, hasMedia);
 
   // Build request body
   const requestBody: Record<string, unknown> = {
@@ -188,6 +190,12 @@ export async function generateKlingVideo(
         return entry;
       });
       console.log(`[Kling Video] ${images!.length} image(s): ${images!.map(i => i.type || "reference").join(", ")}`);
+    }
+
+    // Video input: video_url for video-to-video (v3 Omni only)
+    if (videoUrl) {
+      requestBody.video_url = videoUrl;
+      console.log(`[Kling Video] video_url set for video-to-video`);
     }
   }
 

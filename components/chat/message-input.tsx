@@ -576,7 +576,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   return (
     <div
       className={cn(
-        "border-t border-border/50 p-4 transition-colors",
+        "bg-white dark:bg-[#111] rounded-2xl  border p-4 transition-colors",
         isDragging && "bg-primary/5 border-primary/50",
         classNameProp
       )}
@@ -596,7 +596,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
                   key={`preselected-${index}`}
                   className={cn(
                     "relative group rounded-lg overflow-hidden border-2 bg-card",
-                    img.assetLabel ? "border-cyan-500/50" : "border-primary/50"
+                    img.assetLabel ? "border-cyan-600/50 dark:border-cyan-500/50" : "border-primary/50"
                   )}
                 >
                   <div className="w-20 h-20 relative">
@@ -653,10 +653,10 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
 
         {/* Asset mode hint */}
         {assetMode && (attachedFiles.length > 0 || preselectedImages.length > 0) && (
-          <div className="text-xs text-muted-foreground bg-cyan-950/30 border border-cyan-800/30 rounded-md px-3 py-1.5">
-            Usa <span className="font-mono text-cyan-400">@</span> en el prompt para referenciar assets. Ej: <span className="font-mono text-cyan-400">@asset1</span> caminando hacia <span className="font-mono text-cyan-400">@asset2</span>
+          <div className="text-xs text-muted-foreground bg-cyan-100 dark:bg-cyan-950/30 border border-cyan-300 dark:border-cyan-800/30 rounded-md px-3 py-1.5">
+            Usa <span className="font-mono text-cyan-700 dark:text-cyan-400 font-medium">@</span> en el prompt para referenciar assets. Ej: <span className="font-mono text-cyan-700 dark:text-cyan-400 font-medium">@asset1</span> caminando hacia <span className="font-mono text-cyan-700 dark:text-cyan-400 font-medium">@asset2</span>
             {attachedFiles.some(f => f.type === "video") || preselectedImages.some(img => img.url.includes("/video") || img.url.endsWith(".mp4")) ? (
-              <span className="block mt-1 text-amber-400/80">Max 4 imagenes + 1 video. Audio deshabilitado con video input.</span>
+              <span className="block mt-1 text-amber-700 dark:text-amber-400/80">Max 4 imagenes + 1 video. Audio deshabilitado con video input.</span>
             ) : null}
           </div>
         )}
@@ -763,7 +763,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
                         <Film className="h-3 w-3" />
                       )}
                     </span>
-                    <span className="font-mono text-cyan-400 font-medium">{asset.id}</span>
+                    <span className="font-mono text-cyan-700 dark:text-cyan-400 font-medium">{asset.id}</span>
                     <span className="text-muted-foreground text-xs truncate">
                       {asset.name}
                     </span>

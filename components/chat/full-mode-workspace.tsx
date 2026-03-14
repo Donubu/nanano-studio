@@ -6,7 +6,8 @@ import {
   LayoutGrid, ImageIcon, Video, Settings, Star, Download, Trash2,
   Undo2, ZoomIn, X, Loader2, ChevronLeft, ChevronRight, VolumeX,
   Upload, Clock, ChevronUp, RectangleHorizontal, RectangleVertical, Square,
-  AlertTriangle, Play, PanelLeft, PanelLeftClose, RotateCcw
+  AlertTriangle, Play, PanelLeft, PanelLeftClose, RotateCcw, SlidersHorizontal, Eye, EyeOff,
+  FolderPlus, Folder, ArrowLeft, Pencil, MoreHorizontal, Search
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MessageInput, AttachedFile, MessageInputHandle } from "./message-input";
@@ -21,7 +22,7 @@ import type { ImagenAspectRatio } from "./image-settings";
 
 // ---- Types ----
 
-type MediaFilter = "all" | "images" | "videos" | "deleted";
+type MediaFilter = "all" | "images" | "videos" | "favorites" | "deleted";
 type FullFormat = "image" | "video";
 type VideoMode = "none" | "keyframes" | "ingredients";
 
@@ -80,6 +81,17 @@ interface InProgressItem {
   progress?: number;
 }
 
+interface Collection {
+  id: number;
+  conversation_id: number;
+  name: string;
+  item_count: number;
+  thumbnail_image_url: string | null;
+  thumbnail_video_url: string | null;
+  created_at: string;
+  search_text: string | null;
+}
+
 interface GenerationConfigItem {
   generation_type: string;
   is_enabled: boolean;
@@ -99,6 +111,15 @@ interface FullModeWorkspaceProps {
     isVideoGenerating?: boolean;
     videoProgress?: { status: string; message: string; progress?: number };
     isStreaming?: boolean;
+    // Metadata for error reuse
+    model_id?: number | null;
+    quality_tier?: string | null;
+    image_aspect_ratio?: string | null;
+    image_size?: string | null;
+    video_aspect_ratio?: string | null;
+    video_duration?: number | null;
+    video_has_audio?: boolean | null;
+    images?: Array<{ url: string; mime_type: string | null }>;
   }>;
   isSending: boolean;
   generationConfig: GenerationConfigItem[];
@@ -205,12 +226,35 @@ export function FullModeWorkspace({
 
   // ---- State ----
   const [generations, setGenerations] = useState<Generation[]>([]);
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [activeCollectionId, setActiveCollectionId] = useState<number | null>(null);
+  const [collectionGenerations, setCollectionGenerations] = useState<Generation[]>([]);
+  const [dragOverCollectionId, setDragOverCollectionId] = useState<number | null>(null);
+  const [editingCollectionName, setEditingCollectionName] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<MediaFilter>("all");
   const [format, setFormat] = useState<FullFormat>("image");
   const [videoMode, setVideoMode] = useState<VideoMode>("none");
   const [numVariations, setNumVariations] = useState(1);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
+  const [gridSize, setGridSizeState] = useState<"S" | "M" | "L">(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("full-grid-size");
+      if (saved === "S" || saved === "M" || saved === "L") return saved;
+    }
+    return "M";
+  });
+  const [showLabels, setShowLabelsState] = useState(() => {
+    if (typeof window !== "undefined") return localStorage.getItem("full-show-labels") === "true";
+    return false;
+  });
+  const setGridSize = (v: "S" | "M" | "L") => { setGridSizeState(v); localStorage.setItem("full-grid-size", v); };
+  const setShowLabels = (v: boolean) => { setShowLabelsState(v); localStorage.setItem("full-show-labels", String(v)); };
+  const rowHeight = GRID_SIZES[gridSize];
   const [reuseWarning, setReuseWarning] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<Generation | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -385,25 +429,60 @@ export function FullModeWorkspace({
   // Error items from messages (failed generations)
   const errorItems = messages
     .filter(m => m.role === "model" && !m.isVideoGenerating && !m.isStreaming && !m.image_url && !m.video_url && m.content && m.content.startsWith("Error:"))
-    .map(m => ({
-      id: m.id,
-      type: (m.content_type === "video" ? "video" : "image") as "image" | "video",
-      message: m.content.replace(/^Error:\s*/, ""),
-    }));
+    .map(m => {
+      // Find the closest preceding user message (by id) to recover the prompt and references
+      const precedingUserMsg = messages
+        .filter(um => um.role === "user" && um.id < m.id)
+        .sort((a, b) => b.id - a.id)[0];
+      // Determine type from error metadata or content
+      const isVideo = m.video_aspect_ratio || m.video_duration || m.content.includes("video");
+      return {
+        id: m.id,
+        type: (isVideo ? "video" : "image") as "image" | "video",
+        message: m.content.replace(/^Error:\s*/, ""),
+        prompt: precedingUserMsg?.content || null,
+        model_id: m.model_id || null,
+        image_aspect_ratio: m.image_aspect_ratio || null,
+        image_size: m.image_size || null,
+        video_aspect_ratio: m.video_aspect_ratio || null,
+        video_duration: m.video_duration || null,
+        video_has_audio: m.video_has_audio,
+        reference_images: precedingUserMsg?.images || [],
+      };
+    });
 
   // Filtered generations
   const activeGenerations = generations.filter(g => !g.deleted_at);
   const deletedGenerations = generations.filter(g => !!g.deleted_at);
-  const filteredGenerations = filter === "deleted"
+  const searchLower = searchQuery.toLowerCase().trim();
+  const searchWords = searchLower ? searchLower.split(/\s+/).filter(Boolean) : [];
+
+  // Search scoring: 2 = exact phrase match, 1 = all words match, 0.5 = any word match, -1 = no match
+  const searchScore = (text: string | null | undefined): number => {
+    if (!searchLower || !text) return searchLower ? -1 : 0;
+    const lower = text.toLowerCase();
+    if (lower.includes(searchLower)) return 2; // exact phrase
+    if (searchWords.length > 1 && searchWords.every(w => lower.includes(w))) return 1; // all words
+    if (searchWords.some(w => lower.includes(w))) return 0.5; // any word
+    return -1;
+  };
+
+  const filteredGenerations = (filter === "deleted"
     ? deletedGenerations
     : activeGenerations.filter(g => {
         if (filter === "images") return g.type === "image";
         if (filter === "videos") return g.type === "video";
+        if (filter === "favorites") return g.is_favorite;
         return true;
-      });
+      })
+  ).filter(g => searchScore(g.content) >= 0);
 
-  const hasImages = activeGenerations.some(g => g.type === "image");
-  const hasVideos = activeGenerations.some(g => g.type === "video");
+  const imageCount = activeGenerations.filter(g => g.type === "image").length;
+  const videoCount = activeGenerations.filter(g => g.type === "video").length;
+  const favoriteCount = activeGenerations.filter(g => g.is_favorite).length;
+  const hasImages = imageCount > 0;
+  const hasVideos = videoCount > 0;
+  const hasFavorites = favoriteCount > 0;
   const hasDeleted = deletedGenerations.length > 0;
 
   // ---- Auto-correct settings when model changes ----
@@ -430,10 +509,17 @@ export function FullModeWorkspace({
   // ---- Data fetching ----
   const fetchGenerations = useCallback(async () => {
     try {
-      const res = await fetch(`/api/conversations/${conversationId}/generations`);
-      if (res.ok) {
-        const data = await res.json();
+      const [genRes, colRes] = await Promise.all([
+        fetch(`/api/conversations/${conversationId}/generations`),
+        fetch(`/api/conversations/${conversationId}/collections`),
+      ]);
+      if (genRes.ok) {
+        const data = await genRes.json();
         setGenerations(data);
+      }
+      if (colRes.ok) {
+        const data = await colRes.json();
+        setCollections(data.collections || []);
       }
     } catch (err) {
       console.error("Error fetching generations:", err);
@@ -441,6 +527,118 @@ export function FullModeWorkspace({
       setLoading(false);
     }
   }, [conversationId]);
+
+  const fetchCollectionItems = useCallback(async (colId: number) => {
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/collections/${colId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setCollectionGenerations(data.generations || []);
+      }
+    } catch (err) {
+      console.error("Error fetching collection items:", err);
+    }
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (activeCollectionId) {
+      fetchCollectionItems(activeCollectionId);
+    } else {
+      setCollectionGenerations([]);
+    }
+  }, [activeCollectionId, fetchCollectionItems]);
+
+  const handleCreateCollection = async () => {
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/collections`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Sin nombre" }),
+      });
+      if (res.ok) {
+        const col = await res.json();
+        setCollections(prev => [col, ...prev]);
+        setEditingCollectionName(col.id);
+      }
+    } catch (err) {
+      console.error("Error creating collection:", err);
+    }
+  };
+
+  const handleRenameCollection = async (colId: number, name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    try {
+      await fetch(`/api/conversations/${conversationId}/collections/${colId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      setCollections(prev => prev.map(c => c.id === colId ? { ...c, name: trimmed } : c));
+    } catch (err) {
+      console.error("Error renaming collection:", err);
+    }
+    setEditingCollectionName(null);
+  };
+
+  const handleDeleteCollection = async (colId: number) => {
+    const col = collections.find(c => c.id === colId);
+    if (!confirm(`¿Eliminar la colección "${col?.name || ""}"? Los items volverán a la grilla principal.`)) return;
+    try {
+      await fetch(`/api/conversations/${conversationId}/collections/${colId}`, { method: "DELETE" });
+      setCollections(prev => prev.filter(c => c.id !== colId));
+      if (activeCollectionId === colId) setActiveCollectionId(null);
+      // Re-fetch generations since items return to main grid
+      fetchGenerations();
+    } catch (err) {
+      console.error("Error deleting collection:", err);
+    }
+  };
+
+  const handleDropOnCollection = async (colId: number, generationId: number) => {
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/collections/${colId}/items`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageIds: [generationId] }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Get the generation's prompt for search_text update
+        const gen = generations.find(g => g.id === generationId);
+        const genContent = gen?.content || "";
+        // Remove from main grid
+        setGenerations(prev => prev.filter(g => g.id !== generationId));
+        // Update collection metadata
+        setCollections(prev => prev.map(c => c.id === colId ? {
+          ...c,
+          item_count: data.item_count,
+          thumbnail_image_url: data.thumbnail_image_url,
+          thumbnail_video_url: data.thumbnail_video_url,
+          search_text: c.search_text ? `${c.search_text} ${genContent}` : genContent,
+        } : c));
+      }
+    } catch (err) {
+      console.error("Error adding to collection:", err);
+    }
+  };
+
+  const handleRemoveFromCollection = async (colId: number, generationId: number) => {
+    try {
+      await fetch(`/api/conversations/${conversationId}/collections/${colId}/items`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageIds: [generationId] }),
+      });
+      setCollectionGenerations(prev => prev.filter(g => g.id !== generationId));
+      // Update collection count
+      setCollections(prev => prev.map(c => c.id === colId ? { ...c, item_count: Math.max(0, c.item_count - 1) } : c));
+      // Re-fetch to get the item back in main grid
+      fetchGenerations();
+    } catch (err) {
+      console.error("Error removing from collection:", err);
+    }
+  };
 
   useEffect(() => {
     if (conversationId > 0) {
@@ -594,10 +792,12 @@ export function FullModeWorkspace({
     e?.stopPropagation();
     onToggleFavorite(id);
     setGenerations(prev => prev.map(g => g.id === id ? { ...g, is_favorite: !g.is_favorite } : g));
+    if (selectedItem?.id === id) setSelectedItem(prev => prev ? { ...prev, is_favorite: !prev.is_favorite } : prev);
   };
 
   const handleDelete = async (id: number, e?: React.MouseEvent) => {
     e?.stopPropagation();
+    if (!confirm("¿Eliminar este elemento?")) return;
     onArchiveMessage(id);
     // Find the generation to get its URL and remove from references
     const gen = generations.find(g => g.id === id);
@@ -611,6 +811,7 @@ export function FullModeWorkspace({
       }
     }
     setGenerations(prev => prev.map(g => g.id === id ? { ...g, deleted_at: new Date().toISOString() } : g));
+    if (selectedItem?.id === id) setSelectedItem(prev => prev ? { ...prev, deleted_at: new Date().toISOString() } : prev);
   };
 
   const handleRestore = async (id: number, e?: React.MouseEvent) => {
@@ -623,6 +824,7 @@ export function FullModeWorkspace({
       });
       if (res.ok) {
         setGenerations(prev => prev.map(g => g.id === id ? { ...g, deleted_at: null } : g));
+        if (selectedItem?.id === id) setSelectedItem(prev => prev ? { ...prev, deleted_at: null } : prev);
       }
     } catch (err) {
       console.error("Error restoring message:", err);
@@ -762,6 +964,111 @@ export function FullModeWorkspace({
     }
   };
 
+  const handleReuseError = async (item: typeof errorItems[number]) => {
+    // 1. Switch format
+    setFormat(item.type);
+
+    // 2. Restore model selection
+    if (item.model_id) {
+      if (item.type === "image") {
+        const matchedModel = imageModels.find(m => m.id === item.model_id);
+        if (matchedModel) setSelectedImageModelId(matchedModel.id);
+      } else {
+        const matchedModel = videoModels.find(m => m.id === item.model_id);
+        if (matchedModel) setSelectedVideoModelId(matchedModel.id);
+      }
+    }
+
+    // 3. Restore settings
+    if (item.type === "image") {
+      const updates: Record<string, string | number> = {};
+      if (item.image_aspect_ratio) updates.aspectRatio = item.image_aspect_ratio;
+      if (item.image_size) updates.size = item.image_size;
+      if (Object.keys(updates).length > 0) onImageSettingsChange(updates);
+    } else {
+      const updates: Record<string, string | number | boolean> = {};
+      if (item.video_aspect_ratio) updates.aspectRatio = item.video_aspect_ratio;
+      if (item.video_duration) updates.duration = item.video_duration;
+      if (item.video_has_audio != null) updates.audioEnabled = item.video_has_audio;
+      if (Object.keys(updates).length > 0) onVideoSettingsChange(updates);
+    }
+
+    // 4. Restore reference images from preceding user message
+    messageInputRef.current?.clearFiles();
+    setVideoReferenceImages([]);
+    setVideoFirstFrame(null);
+    setVideoLastFrame(null);
+
+    const refImages = item.reference_images || [];
+    const unavailableRefs: string[] = [];
+
+    if (refImages.length > 0) {
+      const targetModel = item.type === "video"
+        ? (item.model_id ? videoModels.find(m => m.id === item.model_id) : null) || activeVideoModel
+        : (item.model_id ? imageModels.find(m => m.id === item.model_id) : null) || activeImageModel;
+      const targetBackend = item.type === "video" ? getVideoBackend(targetModel) : null;
+      const targetIsKlingOmni = targetBackend === "kling";
+
+      const loadedFiles: AttachedFile[] = [];
+      for (const ref of refImages) {
+        try {
+          const res = await fetch(ref.url);
+          if (!res.ok) throw new Error("not found");
+          const blob = await res.blob();
+          const base64 = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+          });
+          const isVideo = blob.type.startsWith("video/");
+          loadedFiles.push({
+            dataUrl: base64,
+            mimeType: blob.type || ref.mime_type || "image/png",
+            name: `ref_${loadedFiles.length + 1}.${blob.type.split("/")[1] || "png"}`,
+            type: isVideo ? "video" : "image",
+            size: blob.size,
+          });
+        } catch {
+          unavailableRefs.push(ref.url);
+        }
+      }
+
+      if (loadedFiles.length > 0) {
+        if (item.type === "image" || targetIsKlingOmni) {
+          requestAnimationFrame(() => messageInputRef.current?.addFiles(loadedFiles));
+        } else if (item.type === "video") {
+          const refs = loadedFiles
+            .filter(f => f.type === "image")
+            .slice(0, 3)
+            .map(f => ({ image: f.dataUrl, type: "ASSET" as const }));
+          if (refs.length > 0) {
+            setVideoReferenceImages(refs);
+            setVideoMode("ingredients");
+          }
+        }
+      }
+    }
+
+    // 5. Restore prompt
+    if (item.prompt) {
+      let prompt = item.prompt;
+      const targetModel = item.type === "video"
+        ? (item.model_id ? videoModels.find(m => m.id === item.model_id) : null) || activeVideoModel
+        : null;
+      const targetIsKlingOmni = targetModel ? getVideoBackend(targetModel) === "kling" : false;
+      if (targetIsKlingOmni) {
+        prompt = prompt.replace(/<<<(?:image|video)_(\d+)>>>/g, (_, num) => `@asset${num}`);
+      }
+      setInternalPrompt(prompt);
+    }
+
+    // 6. Show toast for unavailable references
+    if (unavailableRefs.length > 0) {
+      setReuseWarning(`${unavailableRefs.length} referencia(s) no disponible(s) (eliminadas o inaccesibles)`);
+      setTimeout(() => setReuseWarning(null), 5000);
+    }
+  };
+
   const openGeneration = (index: number, gen: Generation) => {
     setSettingsOpen(false);
     setSelectedItem(gen);
@@ -892,7 +1199,11 @@ export function FullModeWorkspace({
   const handleWorkspaceDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
     dragCounter.current++;
-    if (dragCounter.current === 1) setIsDragging(true);
+    if (dragCounter.current === 1) {
+      setIsDragging(true);
+      // Close settings dropdown so it doesn't block drop zones
+      if (settingsOpen) setSettingsOpen(false);
+    }
   };
 
   const handleWorkspaceDragLeave = (e: React.DragEvent) => {
@@ -1047,10 +1358,10 @@ export function FullModeWorkspace({
       onDragOver={handleWorkspaceDragOver}
       onDrop={handleWorkspaceDrop}
     >
-      {/* Main area: filter bar + grid */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* Main area: filter bar + grid (full height, prompt floats on top) */}
+      <div className="flex-1 flex overflow-hidden relative">
         {/* Left filter bar */}
-        <div className="w-10 flex flex-col items-center gap-1 py-2 border-r border-border/30 bg-card/30 shrink-0">
+        <div className={cn("w-10 flex flex-col items-center gap-1 py-2 border-r border-border/30 bg-card/30 shrink-0", viewSettingsOpen ? "z-[30]" : "z-10")}>
           <button
             onClick={onToggleLeftSidebar}
             className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors mb-1"
@@ -1059,24 +1370,136 @@ export function FullModeWorkspace({
             {leftSidebarOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeft className="h-4 w-4" />}
           </button>
           <div className="w-5 border-b border-border/50 my-1" />
-          <FilterButton active={filter === "all"} onClick={() => setFilter("all")} icon={<LayoutGrid className="h-4 w-4" />} title="Todos" />
-          {hasImages && <FilterButton active={filter === "images"} onClick={() => setFilter("images")} icon={<ImageIcon className="h-4 w-4" />} title="Imágenes" />}
-          {hasVideos && <FilterButton active={filter === "videos"} onClick={() => setFilter("videos")} icon={<Video className="h-4 w-4" />} title="Videos" />}
+          <FilterButton active={filter === "all"} onClick={() => setFilter("all")} icon={<LayoutGrid className="h-4 w-4" />} title={`Todos (${activeGenerations.length})`} />
+          {hasImages && <FilterButton active={filter === "images"} onClick={() => setFilter("images")} icon={<ImageIcon className="h-4 w-4" />} title={`Imágenes (${imageCount})`} />}
+          {hasVideos && <FilterButton active={filter === "videos"} onClick={() => setFilter("videos")} icon={<Video className="h-4 w-4" />} title={`Videos (${videoCount})`} />}
+          {hasFavorites && <FilterButton active={filter === "favorites"} onClick={() => setFilter("favorites")} icon={<Star className="h-4 w-4" />} title={`Favoritos (${favoriteCount})`} />}
+          <FilterButton active={searchOpen} onClick={() => { setSearchOpen(!searchOpen); if (!searchOpen) requestAnimationFrame(() => searchInputRef.current?.focus()); else setSearchQuery(""); }} icon={<Search className="h-4 w-4" />} title="Buscar" />
           {hasDeleted && (
             <>
               <div className="w-5 border-b border-border/50 my-1" />
-              <FilterButton active={filter === "deleted"} onClick={() => setFilter("deleted")} icon={<Trash2 className="h-4 w-4" />} title="Eliminados" />
+              <FilterButton active={filter === "deleted"} onClick={() => setFilter("deleted")} icon={<Trash2 className="h-4 w-4" />} title={`Eliminados (${deletedGenerations.length})`} />
             </>
           )}
+          {/* Create collection + Visual settings */}
+          <div className="mt-auto flex flex-col items-center gap-1">
+            {!activeCollectionId && (
+              <FilterButton active={false} onClick={handleCreateCollection} icon={<FolderPlus className="h-4 w-4" />} title="Nueva colección" />
+            )}
+          </div>
+          <div className="relative">
+            <FilterButton active={viewSettingsOpen} onClick={() => setViewSettingsOpen(!viewSettingsOpen)} icon={<SlidersHorizontal className="h-4 w-4" />} title="Vista" />
+            {viewSettingsOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setViewSettingsOpen(false)} />
+                <div className="absolute left-full bottom-0 ml-1 z-50 w-40 bg-card border border-border/50 rounded-lg shadow-xl p-2.5 space-y-2.5">
+                  {/* Grid size */}
+                  <div>
+                    <p className="text-[10px] text-muted-foreground font-medium mb-1.5">Tamaño</p>
+                    <div className="flex gap-1">
+                      {(["S", "M", "L"] as const).map(size => (
+                        <button
+                          key={size}
+                          onClick={() => setGridSize(size)}
+                          className={cn(
+                            "flex-1 py-1 rounded text-xs font-medium transition-colors",
+                            gridSize === size
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-muted text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          {size}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Show labels */}
+                  <div>
+                    <button
+                      onClick={() => setShowLabels(!showLabels)}
+                      className="flex items-center gap-2 w-full text-xs text-left"
+                    >
+                      {showLabels ? <Eye className="h-3.5 w-3.5 text-primary" /> : <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />}
+                      <span className={showLabels ? "text-foreground" : "text-muted-foreground"}>Mostrar prompts</span>
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Media grid */}
-        <div ref={gridRef} className="flex-1 overflow-y-auto p-4">
+        <div ref={gridRef} className="flex-1 overflow-y-auto p-4 pb-36">
+          {/* Search bar */}
+          {searchOpen && (
+            <div className="flex items-center gap-2 mb-3">
+              <div className="flex-1 flex items-center gap-2 bg-card border border-border/50 rounded-lg px-3 py-1.5">
+                <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <input
+                  ref={searchInputRef}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Buscar por prompt..."
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/50"
+                />
+                {searchQuery && (
+                  <button onClick={() => setSearchQuery("")} className="text-muted-foreground hover:text-foreground">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+              <button onClick={() => { setSearchOpen(false); setSearchQuery(""); }} className="text-xs text-muted-foreground hover:text-foreground">
+                Cerrar
+              </button>
+            </div>
+          )}
+          {/* Collection detail header */}
+          {activeCollectionId && (
+            <div className="flex items-center gap-2 mb-4">
+              <button onClick={() => setActiveCollectionId(null)} className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+              <div>
+                <p className="text-[10px] text-muted-foreground leading-none mb-0.5"><span className="font-bold">Colección</span> · {collectionGenerations.length} {collectionGenerations.length === 1 ? "item" : "items"}</p>
+                <CollectionNameEditor
+                  name={collections.find(c => c.id === activeCollectionId)?.name || ""}
+                  onRename={(name) => handleRenameCollection(activeCollectionId, name)}
+                />
+              </div>
+            </div>
+          )}
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             </div>
-          ) : filteredGenerations.length === 0 && inProgressItems.length === 0 && errorItems.length === 0 && uploadingItems.length === 0 ? (
+          ) : activeCollectionId ? (
+            /* Collection detail view */
+            collectionGenerations.length === 0 ? (
+              <div className="flex items-center justify-center h-64 text-muted-foreground">
+                <div className="text-center">
+                  <Folder className="h-12 w-12 mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">Arrastra items aquí para agregarlos</p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-3 content-start">
+                {collectionGenerations.map((gen, index) => (
+                  <div key={gen.id} className="relative group/col">
+                    <GridItem key={`${gen.type}-${gen.id}`} gen={gen} index={index} rowHeight={rowHeight} showLabels={showLabels} onOpen={openGeneration} onFavorite={handleToggleFavorite} onDelete={handleDelete} onRestore={handleRestore} onDownload={handleDownload} onReuse={handleReusePrompt} onDragStarted={setDraggedMediaType} onDragEnded={() => setDraggedMediaType(null)} />
+                    {/* Remove from collection button */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleRemoveFromCollection(activeCollectionId, gen.id); }}
+                      className="absolute top-2 left-2 p-1 rounded-md bg-black/50 hover:bg-red-600/70 transition-colors opacity-0 group-hover/col:opacity-100 z-[3]"
+                      title="Quitar de colección"
+                    >
+                      <X className="h-3.5 w-3.5 text-white/80" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : filteredGenerations.length === 0 && collections.length === 0 && inProgressItems.length === 0 && errorItems.length === 0 && uploadingItems.length === 0 ? (
             <div className="flex items-center justify-center h-full text-muted-foreground">
               <div className="text-center">
                 <LayoutGrid className="h-12 w-12 mx-auto mb-3 opacity-30" />
@@ -1089,7 +1512,7 @@ export function FullModeWorkspace({
             <div className="flex flex-wrap gap-3 content-start">
               {/* Upload placeholders */}
               {uploadingItems.map(item => (
-                <div key={item.tempId} className="group relative rounded-lg overflow-hidden bg-card border border-blue-500/30 animate-pulse" style={{ height: ROW_HEIGHT, width: ROW_HEIGHT }}>
+                <div key={item.tempId} className="group relative rounded-lg overflow-hidden bg-card border border-blue-500/30 animate-pulse" style={{ height: rowHeight, width: rowHeight }}>
                   <div className="flex flex-col items-center justify-center h-full gap-2 p-3">
                     <Upload className="h-6 w-6 animate-bounce text-blue-500" />
                     <p className="text-xs text-center text-muted-foreground line-clamp-2">Subiendo {item.name}...</p>
@@ -1098,7 +1521,7 @@ export function FullModeWorkspace({
               ))}
               {/* In-progress placeholders */}
               {inProgressItems.map(item => (
-                <div key={`progress-${item.id}`} className="group relative rounded-lg overflow-hidden bg-card border border-primary/30 animate-pulse" style={{ height: ROW_HEIGHT, width: ROW_HEIGHT }}>
+                <div key={`progress-${item.id}`} className="group relative rounded-lg overflow-hidden bg-card border border-primary/30 animate-pulse" style={{ height: rowHeight, width: rowHeight }}>
                   <div className="flex flex-col items-center justify-center h-full gap-2 p-3">
                     <Loader2 className="h-6 w-6 animate-spin text-primary" />
                     <p className="text-xs text-center text-muted-foreground line-clamp-2">{item.status}</p>
@@ -1112,41 +1535,85 @@ export function FullModeWorkspace({
               ))}
               {/* Error items */}
               {errorItems.map(item => (
-                <div key={`error-${item.id}`} className="group relative rounded-lg overflow-hidden bg-destructive/10 border border-destructive/30" style={{ height: ROW_HEIGHT, width: ROW_HEIGHT }}>
+                <div key={`error-${item.id}`} className="group relative rounded-lg overflow-hidden bg-destructive/10 border border-destructive/30" style={{ height: rowHeight, width: rowHeight }}>
                   <div className="flex flex-col items-center justify-center h-full gap-2 p-3">
                     <AlertTriangle className="h-6 w-6 text-destructive" />
                     <p className="text-xs text-center text-destructive line-clamp-3">{item.message}</p>
                   </div>
-                  {/* Full error on hover */}
+                  {/* Full error + actions on hover */}
                   <div className="absolute inset-0 bg-destructive/10 backdrop-blur-sm rounded-lg p-3 opacity-0 group-hover:opacity-100 transition-opacity overflow-y-auto flex flex-col items-center justify-center gap-2">
                     <AlertTriangle className="h-5 w-5 text-destructive shrink-0" />
                     <p className="text-[11px] text-center text-destructive leading-relaxed">{item.message}</p>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      {item.prompt && (
+                        <button
+                          onClick={() => handleReuseError(item)}
+                          className="flex items-center gap-1 px-2 py-1 rounded bg-primary/20 hover:bg-primary/30 text-primary text-[11px] transition-colors"
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                          Reutilizar
+                        </button>
+                      )}
+                      <button
+                        onClick={() => onArchiveMessage(item.id)}
+                        className="flex items-center gap-1 px-2 py-1 rounded bg-destructive/20 hover:bg-destructive/30 text-destructive text-[11px] transition-colors"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        Descartar
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
-              {/* Generated items */}
-              {filteredGenerations.map((gen, index) => (
-                <GridItem key={`${gen.type}-${gen.id}`} gen={gen} index={index} onOpen={openGeneration} onFavorite={handleToggleFavorite} onDelete={handleDelete} onRestore={handleRestore} onDownload={handleDownload} onReuse={handleReusePrompt} onDragStarted={setDraggedMediaType} onDragEnded={() => setDraggedMediaType(null)} />
-              ))}
+              {/* Generated items + collections interleaved by date */}
+              {(() => {
+                // Only show collections in "all" filter on main grid, filtered by search
+                const showCollections = filter === "all";
+                const visibleCollections = showCollections
+                  ? collections.filter(c => {
+                      if (!searchLower) return true;
+                      const nameScore = searchScore(c.name);
+                      const contentScore = searchScore(c.search_text);
+                      return Math.max(nameScore, contentScore) >= 0;
+                    })
+                  : [];
+                type GridEntry = { kind: "generation"; data: Generation; index: number; score: number } | { kind: "collection"; data: Collection; score: number };
+                const entries: GridEntry[] = [
+                  ...filteredGenerations.map((data, index) => ({ kind: "generation" as const, data, index, score: searchScore(data.content) })),
+                  ...visibleCollections.map(data => ({ kind: "collection" as const, data, score: Math.max(searchScore(data.name), searchScore(data.search_text)) })),
+                ];
+                // When searching, sort by relevance (score desc) then date; otherwise just by date
+                if (searchLower) {
+                  entries.sort((a, b) => b.score - a.score || new Date(b.data.created_at).getTime() - new Date(a.data.created_at).getTime());
+                } else {
+                  entries.sort((a, b) => new Date(b.data.created_at).getTime() - new Date(a.data.created_at).getTime());
+                }
+                return entries.map(entry => {
+                  if (entry.kind === "collection") {
+                    return <CollectionGridItem key={`col-${entry.data.id}`} collection={entry.data} rowHeight={rowHeight} isEditing={editingCollectionName === entry.data.id} onOpen={() => { setActiveCollectionId(entry.data.id); setFilter("all"); }} onDelete={() => handleDeleteCollection(entry.data.id)} onRename={(name) => handleRenameCollection(entry.data.id, name)} onStartEditing={() => setEditingCollectionName(entry.data.id)} onStopEditing={() => setEditingCollectionName(null)} dragOverCollectionId={dragOverCollectionId} onDragOver={() => setDragOverCollectionId(entry.data.id)} onDragLeave={() => setDragOverCollectionId(null)} onDrop={(genId) => { setDragOverCollectionId(null); handleDropOnCollection(entry.data.id, genId); }} />;
+                  }
+                  return <GridItem key={`${entry.data.type}-${entry.data.id}`} gen={entry.data} index={entry.index} rowHeight={rowHeight} showLabels={showLabels} onOpen={openGeneration} onFavorite={handleToggleFavorite} onDelete={handleDelete} onRestore={handleRestore} onDownload={handleDownload} onReuse={handleReusePrompt} onDragStarted={setDraggedMediaType} onDragEnded={() => setDraggedMediaType(null)} />;
+                });
+              })()}
             </div>
           )}
         </div>
-      </div>
 
-      {/* Warning toast for unavailable references */}
-      {reuseWarning && (
-        <div className="flex justify-center px-4 pb-1">
-          <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 rounded-lg px-3 py-1.5 text-xs">
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-            <span>{reuseWarning}</span>
-            <button onClick={() => setReuseWarning(null)} className="ml-1 hover:text-foreground"><X className="h-3 w-3" /></button>
-          </div>
-        </div>
-      )}
+        {/* Floating bottom prompt bar */}
+        <div className="absolute bottom-0 left-10 right-0 z-20 pointer-events-none">
+          {/* Warning toast for unavailable references */}
+          {reuseWarning && (
+            <div className="flex justify-center px-4 pb-1 pointer-events-auto">
+              <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 rounded-lg px-3 py-1.5 text-xs backdrop-blur-sm">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span>{reuseWarning}</span>
+                <button onClick={() => setReuseWarning(null)} className="ml-1 hover:text-foreground"><X className="h-3 w-3" /></button>
+              </div>
+            </div>
+          )}
 
-      {/* Bottom prompt bar */}
-      <div className="bg-background/95 backdrop-blur-sm">
-        <div className="max-w-4xl mx-auto px-4 py-3 relative">
+          <div className="pointer-events-auto">
+            <div className="max-w-4xl mx-auto px-4 py-3 relative">
           {/* Drop zones overlay (absolute, on top of prompt) — always rendered, visibility toggled via CSS to avoid DOM changes during drag */}
           <div className={cn(
             "absolute inset-0 z-10 px-4 py-3 flex items-stretch transition-opacity",
@@ -1429,6 +1896,8 @@ export function FullModeWorkspace({
             </div>
           </div>
         </div>
+        </div>
+        </div>
       </div>
 
       {/* Detail modal */}
@@ -1463,7 +1932,7 @@ export function FullModeWorkspace({
 
 // ---- Helpers ----
 
-const ROW_HEIGHT = 275;
+const GRID_SIZES = { S: 180, M: 275, L: 335 } as const;
 
 function getAspectRatio(gen: Generation): number {
   const raw = gen.image_aspect_ratio || gen.video_aspect_ratio;
@@ -1489,8 +1958,10 @@ function getAspectRatio(gen: Generation): number {
 
 // ---- Grid Item ----
 
-function GridItem({ gen, index, onOpen, onFavorite, onDelete, onRestore, onDownload, onReuse, onDragStarted, onDragEnded }: {
+function GridItem({ gen, index, rowHeight, showLabels, onOpen, onFavorite, onDelete, onRestore, onDownload, onReuse, onDragStarted, onDragEnded }: {
   gen: Generation; index: number;
+  rowHeight: number;
+  showLabels?: boolean;
   onOpen: (i: number, g: Generation) => void;
   onFavorite: (id: number, e?: React.MouseEvent) => void;
   onDelete: (id: number, e?: React.MouseEvent) => void;
@@ -1501,7 +1972,7 @@ function GridItem({ gen, index, onOpen, onFavorite, onDelete, onRestore, onDownl
   onDragEnded?: () => void;
 }) {
   const ratio = getAspectRatio(gen);
-  const itemWidth = Math.round(ROW_HEIGHT * ratio);
+  const itemWidth = Math.round(rowHeight * ratio);
 
   return (
     <div
@@ -1510,14 +1981,14 @@ function GridItem({ gen, index, onOpen, onFavorite, onDelete, onRestore, onDownl
       onDragStart={(e) => {
         const url = gen.image_url || gen.video_url;
         if (url) {
-          e.dataTransfer.setData("application/x-nanano-image", JSON.stringify({ type: "chat-image", url, mediaType: gen.type }));
+          e.dataTransfer.setData("application/x-nanano-image", JSON.stringify({ type: "chat-image", url, mediaType: gen.type, id: gen.id }));
           e.dataTransfer.setData("text/uri-list", url);
           e.dataTransfer.effectAllowed = "copy";
           onDragStarted?.(gen.type as "image" | "video");
         }
       }}
       onDragEnd={() => onDragEnded?.()}
-      style={{ height: ROW_HEIGHT, width: itemWidth }}
+      style={{ height: rowHeight, width: itemWidth }}
       className={cn(
         "group relative rounded-lg overflow-hidden cursor-pointer bg-card border transition-all shrink-0",
         gen.deleted_at ? "border-red-500/30 opacity-60" : "border-border/50 hover:border-primary/50",
@@ -1566,24 +2037,17 @@ function GridItem({ gen, index, onOpen, onFavorite, onDelete, onRestore, onDownl
         </button>
       )}
 
-      {/* Hover overlay */}
-      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-        {/* Top-right action buttons */}
-        <div className="absolute top-2 right-2 flex items-center gap-1 pointer-events-auto">
-          {!gen.deleted_at && gen.content && !gen.content.startsWith("Archivo subido:") && <button onClick={(e) => onReuse(gen, e)} className="p-1.5 rounded-md bg-black/50 hover:bg-black/70 transition-colors" title="Reutilizar prompt"><Undo2 className="h-3.5 w-3.5 text-white/80" /></button>}
-          <button onClick={(e) => { e.stopPropagation(); onDownload(gen); }} className="p-1.5 rounded-md bg-black/50 hover:bg-black/70 transition-colors" title="Descargar"><Download className="h-3.5 w-3.5 text-white/80" /></button>
-          {!gen.deleted_at && (
-            <button onClick={(e) => onFavorite(gen.id, e)} className="p-1.5 rounded-md bg-black/50 hover:bg-black/70 transition-colors" title="Favorito">
-              <Star className={`h-3.5 w-3.5 ${gen.is_favorite ? "fill-yellow-400 text-yellow-400" : "text-white/80"}`} />
-            </button>
-          )}
-          {gen.deleted_at ? (
-            <button onClick={(e) => onRestore(gen.id, e)} className="p-1.5 rounded-md bg-black/50 hover:bg-green-600/70 transition-colors" title="Restaurar"><RotateCcw className="h-3.5 w-3.5 text-white/80" /></button>
-          ) : (
-            <button onClick={(e) => onDelete(gen.id, e)} className="p-1.5 rounded-md bg-black/50 hover:bg-red-900/70 transition-colors" title="Eliminar"><Trash2 className="h-3.5 w-3.5 text-white/80" /></button>
-          )}
-          <div className="p-1.5 rounded-md bg-black/50" title="Ver detalle"><ZoomIn className="h-3.5 w-3.5 text-white/80" /></div>
+      {/* Always-visible label strip (when showLabels is on) */}
+      {showLabels && gen.content && (
+        <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-2 py-1 pointer-events-none z-[1]">
+          <p className="text-[10px] text-white/80 truncate">{gen.content}</p>
         </div>
+      )}
+
+      {/* Hover overlay */}
+      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-[2]">
+        {/* Top-right action buttons — compact when narrow */}
+        <GridItemActions gen={gen} itemWidth={itemWidth} onFavorite={onFavorite} onDownload={onDownload} onReuse={onReuse} onDelete={onDelete} onRestore={onRestore} />
         {/* Bottom prompt strip */}
         <div className="absolute bottom-0 left-0 right-0 bg-black/80 backdrop-blur-sm px-2 py-1.5 pointer-events-auto">
           <p className="text-[10px] text-white/80 truncate">{gen.content || ""}</p>
@@ -1595,6 +2059,13 @@ function GridItem({ gen, index, onOpen, onFavorite, onDelete, onRestore, onDownl
 
 // ---- Detail Modal ----
 
+interface TopazResult {
+  id: number;
+  url: string;
+  label: string;
+  fileSize: number | null;
+}
+
 function DetailModal({ item, index, total, onClose, onPrev, onNext, onFavorite, onDelete, onRestore, onDownload, onReuse, onTopaz, onTopazVideo }: {
   item: Generation; index: number | null; total: number;
   onClose: () => void; onPrev: () => void; onNext: () => void;
@@ -1605,6 +2076,64 @@ function DetailModal({ item, index, total, onClose, onPrev, onNext, onFavorite, 
   onReuse: (g: Generation) => void;
   onTopaz: () => void; onTopazVideo: () => void;
 }) {
+  const [topazResults, setTopazResults] = useState<TopazResult[]>([]);
+
+  useEffect(() => {
+    const fetchTopaz = async () => {
+      try {
+        if (item.type === "image" && item.image_url) {
+          const res = await fetch(`/api/images/topaz-studio/history/${item.id}`);
+          if (res.ok) {
+            const data = await res.json();
+            setTopazResults(
+              (data.edits || [])
+                .filter((e: Record<string, unknown>) => e.result_url)
+                .map((e: Record<string, unknown>) => ({
+                  id: e.id as number,
+                  url: e.result_url as string,
+                  label: `${e.output_width}×${e.output_height} (${e.scale_factor}x)`,
+                  fileSize: e.output_file_size as number | null,
+                }))
+            );
+          }
+        } else if (item.type === "video" && item.video_url) {
+          const res = await fetch(`/api/videos/topaz-studio/history/${item.id}`);
+          if (res.ok) {
+            const data = await res.json();
+            setTopazResults(
+              (data.edits || [])
+                .filter((e: Record<string, unknown>) => e.resultUrl && e.status === "completed")
+                .map((e: Record<string, unknown>) => ({
+                  id: e.id as number,
+                  url: e.resultUrl as string,
+                  label: `${e.outputWidth}×${e.outputHeight} ${e.modelName || ""}`.trim(),
+                  fileSize: e.outputFileSize as number | null,
+                }))
+            );
+          }
+        }
+      } catch { /* ignore */ }
+    };
+    setTopazResults([]);
+    fetchTopaz();
+  }, [item.id, item.type, item.image_url, item.video_url]);
+
+  const downloadTopazResult = async (result: TopazResult) => {
+    try {
+      const res = await fetch(result.url);
+      const blob = await res.blob();
+      const ext = item.type === "video" ? "mp4" : "png";
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `topaz_${item.id}_${result.id}.${ext}`;
+      a.click();
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      window.open(result.url, "_blank");
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center" onClick={onClose}>
       {index !== null && index > 0 && (
@@ -1631,7 +2160,13 @@ function DetailModal({ item, index, total, onClose, onPrev, onNext, onFavorite, 
                 <Star className={cn("h-5 w-5", item.is_favorite && "fill-current")} />
               </button>
             )}
-            <button onClick={() => onDownload(item)} className="p-2 rounded-lg hover:bg-accent text-muted-foreground"><Download className="h-5 w-5" /></button>
+            <button onClick={() => onDownload(item)} className="p-2 rounded-lg hover:bg-accent text-muted-foreground" title="Descargar original"><Download className="h-5 w-5" /></button>
+            {topazResults.map(tr => (
+              <button key={tr.id} onClick={() => downloadTopazResult(tr)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-accent text-muted-foreground text-xs" title={`Descargar Topaz: ${tr.label}`}>
+                <Download className="h-4 w-4 text-emerald-500" />
+                <span className="text-emerald-600 dark:text-emerald-400 font-medium">{tr.label}</span>
+              </button>
+            ))}
             {!item.deleted_at && item.content && !item.content.startsWith("Archivo subido:") && <button onClick={() => onReuse(item)} className="p-2 rounded-lg hover:bg-accent text-muted-foreground" title="Reutilizar prompt"><Undo2 className="h-5 w-5" /></button>}
             {item.type === "image" && item.image_url && <Button variant="outline" size="sm" onClick={onTopaz}>Topaz Studio</Button>}
             {item.type === "video" && item.video_url && <Button variant="outline" size="sm" onClick={onTopazVideo}>Topaz Studio</Button>}
@@ -1745,6 +2280,205 @@ function CompactFrameSlot({ image, label, onSet, onClear, disabled, projectId }:
 }
 
 // ---- Filter Button ----
+
+// ---- Grid Item Actions (responsive) ----
+
+function GridItemActions({ gen, itemWidth, onFavorite, onDownload, onReuse, onDelete, onRestore }: {
+  gen: Generation; itemWidth: number;
+  onFavorite: (id: number, e?: React.MouseEvent) => void;
+  onDownload: (g: Generation) => void;
+  onReuse: (g: Generation, e?: React.MouseEvent) => void;
+  onDelete: (id: number, e?: React.MouseEvent) => void;
+  onRestore: (id: number, e?: React.MouseEvent) => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  // ~30px per button + 4px gap; with padding right-2. Compact if fewer than 4 buttons fit.
+  const compact = itemWidth < 150;
+  const btnClass = "p-1.5 rounded-md bg-black/50 hover:bg-black/70 transition-colors";
+
+  const canReuse = !gen.deleted_at && gen.content && !gen.content.startsWith("Archivo subido:");
+
+  if (compact) {
+    return (
+      <div className="absolute top-2 right-2 flex flex-col items-end gap-1 pointer-events-auto">
+        {!gen.deleted_at && (
+          <button onClick={(e) => onFavorite(gen.id, e)} className={btnClass} title="Favorito">
+            <Star className={`h-3.5 w-3.5 ${gen.is_favorite ? "fill-yellow-400 text-yellow-400" : "text-white/80"}`} />
+          </button>
+        )}
+        <button onClick={(e) => { e.stopPropagation(); onDownload(gen); }} className={btnClass} title="Descargar">
+          <Download className="h-3.5 w-3.5 text-white/80" />
+        </button>
+        <div className="relative">
+          <button onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }} className={btnClass} title="Más opciones">
+            <MoreHorizontal className="h-3.5 w-3.5 text-white/80" />
+          </button>
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); }} />
+              <div className="absolute right-0 top-full mt-1 z-50 flex flex-col gap-1 items-end">
+                {canReuse && <button onClick={(e) => { onReuse(gen, e); setMenuOpen(false); }} className={btnClass} title="Reutilizar"><Undo2 className="h-3.5 w-3.5 text-white/80" /></button>}
+                {gen.deleted_at ? (
+                  <button onClick={(e) => { onRestore(gen.id, e); setMenuOpen(false); }} className={cn(btnClass, "hover:!bg-green-600/70")} title="Restaurar"><RotateCcw className="h-3.5 w-3.5 text-white/80" /></button>
+                ) : (
+                  <button onClick={(e) => { onDelete(gen.id, e); setMenuOpen(false); }} className={cn(btnClass, "hover:!bg-red-900/70")} title="Eliminar"><Trash2 className="h-3.5 w-3.5 text-white/80" /></button>
+                )}
+                <button onClick={(e) => { e.stopPropagation(); setMenuOpen(false); }} className={btnClass} title="Ver detalle"><ZoomIn className="h-3.5 w-3.5 text-white/80" /></button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="absolute top-2 right-2 flex items-center gap-1 pointer-events-auto">
+      {canReuse && <button onClick={(e) => onReuse(gen, e)} className={btnClass} title="Reutilizar prompt"><Undo2 className="h-3.5 w-3.5 text-white/80" /></button>}
+      <button onClick={(e) => { e.stopPropagation(); onDownload(gen); }} className={btnClass} title="Descargar"><Download className="h-3.5 w-3.5 text-white/80" /></button>
+      {!gen.deleted_at && (
+        <button onClick={(e) => onFavorite(gen.id, e)} className={btnClass} title="Favorito">
+          <Star className={`h-3.5 w-3.5 ${gen.is_favorite ? "fill-yellow-400 text-yellow-400" : "text-white/80"}`} />
+        </button>
+      )}
+      {gen.deleted_at ? (
+        <button onClick={(e) => onRestore(gen.id, e)} className={cn(btnClass, "hover:!bg-green-600/70")} title="Restaurar"><RotateCcw className="h-3.5 w-3.5 text-white/80" /></button>
+      ) : (
+        <button onClick={(e) => onDelete(gen.id, e)} className={cn(btnClass, "hover:!bg-red-900/70")} title="Eliminar"><Trash2 className="h-3.5 w-3.5 text-white/80" /></button>
+      )}
+      <div className={btnClass} title="Ver detalle"><ZoomIn className="h-3.5 w-3.5 text-white/80" /></div>
+    </div>
+  );
+}
+
+// ---- Collection Grid Item ----
+
+function CollectionGridItem({ collection, rowHeight, isEditing, onOpen, onDelete, onRename, onStartEditing, onStopEditing, dragOverCollectionId, onDragOver, onDragLeave, onDrop }: {
+  collection: Collection; rowHeight: number; isEditing: boolean;
+  onOpen: () => void; onDelete: () => void;
+  onRename: (name: string) => void;
+  onStartEditing: () => void; onStopEditing: () => void;
+  dragOverCollectionId: number | null;
+  onDragOver: () => void; onDragLeave: () => void;
+  onDrop: (generationId: number) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const isDragOver = dragOverCollectionId === collection.id;
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const nanonoData = e.dataTransfer.getData("application/x-nanano-image");
+    if (nanonoData) {
+      try {
+        const parsed = JSON.parse(nanonoData);
+        if (parsed.id) {
+          onDrop(parsed.id);
+          return;
+        }
+      } catch { /* ignore */ }
+    }
+    onDragLeave();
+  };
+
+  const thumbImage = collection.thumbnail_image_url;
+  const thumbVideo = !thumbImage ? collection.thumbnail_video_url : null;
+  const hasThumb = !!(thumbImage || thumbVideo);
+
+  return (
+    <div
+      onClick={onOpen}
+      onDragOver={(e) => { e.preventDefault(); onDragOver(); }}
+      onDragLeave={onDragLeave}
+      onDrop={handleDrop}
+      style={{ height: rowHeight, width: rowHeight }}
+      className={cn(
+        "group relative rounded-lg overflow-hidden cursor-pointer bg-card border-2 transition-all shrink-0",
+        isDragOver ? "border-primary bg-primary/10 scale-105" : "border-border/50 hover:border-primary/50"
+      )}
+    >
+      {/* Thumbnail or empty state */}
+      {thumbImage ? (
+        <img src={thumbImage} alt="" className="absolute inset-0 w-full h-full object-cover opacity-70" loading="lazy" draggable={false} />
+      ) : thumbVideo ? (
+        <video src={thumbVideo} className="absolute inset-0 w-full h-full object-cover opacity-70" preload="metadata" muted playsInline />
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center bg-muted/30">
+          <Folder className="h-12 w-12 text-muted-foreground/30" />
+        </div>
+      )}
+
+      {/* Overlay with folder icon + count */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent flex flex-col justify-end p-3">
+        <div className="flex items-center gap-1.5">
+          <Folder className="h-4 w-4 text-white/60 shrink-0" />
+          <span className="text-[10px] text-white/60"><span className="font-bold">Colección</span> · {collection.item_count} {collection.item_count === 1 ? "item" : "items"}</span>
+        </div>
+        {isEditing ? (
+          <input
+            ref={inputRef}
+            defaultValue={collection.name}
+            className="bg-transparent text-white text-xs font-medium border-b border-white/50 outline-none w-full"
+            onBlur={(e) => { onRename(e.target.value); onStopEditing(); }}
+            onKeyDown={(e) => { if (e.key === "Enter") { onRename((e.target as HTMLInputElement).value); onStopEditing(); } if (e.key === "Escape") onStopEditing(); }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <p className="text-xs text-white font-medium truncate">{collection.name}</p>
+        )}
+      </div>
+
+      {/* Hover actions */}
+      <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button onClick={(e) => { e.stopPropagation(); onStartEditing(); }} className="p-1.5 rounded-md bg-black/50 hover:bg-black/70 transition-colors" title="Renombrar">
+          <Pencil className="h-3.5 w-3.5 text-white/80" />
+        </button>
+        <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-1.5 rounded-md bg-black/50 hover:bg-red-900/70 transition-colors" title="Eliminar colección">
+          <Trash2 className="h-3.5 w-3.5 text-white/80" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---- Collection Name Editor (for detail header) ----
+
+function CollectionNameEditor({ name, onRename }: { name: string; onRename: (name: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editing]);
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        defaultValue={name}
+        className="text-sm font-medium bg-transparent border-b border-primary outline-none"
+        onBlur={(e) => { onRename(e.target.value); setEditing(false); }}
+        onKeyDown={(e) => { if (e.key === "Enter") { onRename((e.target as HTMLInputElement).value); setEditing(false); } if (e.key === "Escape") setEditing(false); }}
+      />
+    );
+  }
+
+  return (
+    <button onClick={() => setEditing(true)} className="text-sm font-medium hover:text-primary transition-colors flex items-center gap-1.5">
+      {name}
+      <Pencil className="h-3 w-3 text-muted-foreground" />
+    </button>
+  );
+}
 
 function FilterButton({ active, onClick, icon, title }: { active: boolean; onClick: () => void; icon: React.ReactNode; title: string }) {
   return (

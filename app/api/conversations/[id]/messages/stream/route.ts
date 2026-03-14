@@ -325,10 +325,12 @@ export async function POST(
 
           // Concatenar system instructions: modelo + proyecto + conversación
           const systemParts: string[] = [];
-          if (conversation.generation_type === "full") {
-            // Full/Studio mode: override system instruction to avoid model generating extra images
-            systemParts.push("Genera exactamente UNA imagen por solicitud. No generes múltiples imágenes. Sé conciso, usa solo el prompt del usuario.");
-          } else {
+          const isNanoBanana = effectiveModelId.includes("image-preview");
+          if (isNanoBanana) {
+            // Nano Banana models: force single image generation, no collages
+            systemParts.push("Generate exactly ONE single image per request. Do NOT create collages, grids, multi-panel compositions, or multiple images combined into one unless the user explicitly asks for it. Be concise, use only the user's prompt.");
+          }
+          if (conversation.generation_type !== "full") {
             if (conversation.model_system_instruction) systemParts.push(conversation.model_system_instruction);
             if (projectSystemInstruction) systemParts.push(projectSystemInstruction);
             if (conversation.system_instruction) systemParts.push(conversation.system_instruction);
