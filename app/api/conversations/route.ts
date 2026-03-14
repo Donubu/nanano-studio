@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 
-type GenerationType = "text" | "image" | "video" | "audio" | "music";
+type GenerationType = "text" | "image" | "video" | "audio" | "music" | "full";
 // quality_tier kept in type for legacy DB column references
 type QualityTier = "normal" | "hq" | "chirp";
 
@@ -141,9 +141,9 @@ export async function POST(request: NextRequest) {
     } = body;
 
     // Validar generation_type
-    if (!["text", "image", "video", "audio", "music"].includes(generation_type)) {
+    if (!["text", "image", "video", "audio", "music", "full"].includes(generation_type)) {
       return NextResponse.json(
-        { error: "generation_type invalido. Debe ser: text, image, video, audio o music" },
+        { error: "generation_type invalido. Debe ser: text, image, video, audio, music o full" },
         { status: 400 }
       );
     }
@@ -152,6 +152,40 @@ export async function POST(request: NextRequest) {
 
     // Si hay proyecto, obtener modelo desde la configuracion del proyecto
     if (project_id) {
+      // For "full" type, check that both image AND video are enabled, use image models
+      if (generation_type === "full") {
+        const [imgCheck] = await pool.execute<EnabledRow[]>(
+          `SELECT is_enabled FROM project_generation_config WHERE project_id = ? AND generation_type = 'image'`,
+          [project_id]
+        );
+        const [vidCheck] = await pool.execute<EnabledRow[]>(
+          `SELECT is_enabled FROM project_generation_config WHERE project_id = ? AND generation_type = 'video'`,
+          [project_id]
+        );
+        if (!imgCheck[0]?.is_enabled || !vidCheck[0]?.is_enabled) {
+          return NextResponse.json(
+            { error: "El tipo 'full' requiere que tanto imagen como video estén habilitados" },
+            { status: 400 }
+          );
+        }
+        // Use image models for the conversation's default model
+        const [projectModels] = await pool.execute<ProjectModelRow[]>(
+          `SELECT model_id, is_default FROM project_generation_models
+           WHERE project_id = ? AND generation_type = 'image'
+           ORDER BY sort_order ASC`,
+          [project_id]
+        );
+        if (projectModels.length === 0) {
+          return NextResponse.json(
+            { error: "No hay modelos de imagen configurados para este proyecto" },
+            { status: 400 }
+          );
+        }
+        const chosen = projectModels.find(m => selected_model_id && m.model_id === selected_model_id)
+          || projectModels.find(m => m.is_default)
+          || projectModels[0];
+        model_id = chosen.model_id;
+      } else {
       // Verificar que el tipo esta habilitado para el proyecto
       const [enabledCheck] = await pool.execute<EnabledRow[]>(
         `SELECT is_enabled FROM project_generation_config WHERE project_id = ? AND generation_type = ?`,
@@ -186,6 +220,7 @@ export async function POST(request: NextRequest) {
         || projectModels[0];
 
       model_id = chosen.model_id;
+      }
     } else if (!model_id) {
       // Si no hay proyecto ni model_id, es error
       return NextResponse.json(

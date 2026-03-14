@@ -50,7 +50,7 @@ interface MessageRow extends RowDataPacket {
   ignore_in_context: number;
 }
 
-type GenerationType = "text" | "image" | "video" | "audio";
+type GenerationType = "text" | "image" | "video" | "audio" | "full";
 type QualityTier = "normal" | "hq";
 
 interface ProjectModelRow extends RowDataPacket {
@@ -325,9 +325,14 @@ export async function POST(
 
           // Concatenar system instructions: modelo + proyecto + conversación
           const systemParts: string[] = [];
-          if (conversation.model_system_instruction) systemParts.push(conversation.model_system_instruction);
-          if (projectSystemInstruction) systemParts.push(projectSystemInstruction);
-          if (conversation.system_instruction) systemParts.push(conversation.system_instruction);
+          if (conversation.generation_type === "full") {
+            // Full/Studio mode: override system instruction to avoid model generating extra images
+            systemParts.push("Genera exactamente UNA imagen por solicitud. No generes múltiples imágenes. Sé conciso, usa solo el prompt del usuario.");
+          } else {
+            if (conversation.model_system_instruction) systemParts.push(conversation.model_system_instruction);
+            if (projectSystemInstruction) systemParts.push(projectSystemInstruction);
+            if (conversation.system_instruction) systemParts.push(conversation.system_instruction);
+          }
           const finalSystemInstruction: string | null = systemParts.length > 0 ? systemParts.join("\n\n") : null;
 
 
@@ -668,8 +673,9 @@ export async function POST(
                 );
               }
 
-              // Save and emit images
-              for (const img of result.images) {
+              // Save and emit images (limit to 1 per parallel request to avoid extras)
+              const imagesToSave = skip_user_message ? result.images.slice(0, 1) : result.images;
+              for (const img of imagesToSave) {
                 try {
                   const saved = await saveGeneratedImage(img, id);
                   savedImages.push({ url: saved.url, fileSize: saved.fileSize, mimeType: img.mimeType });
@@ -866,6 +872,9 @@ export async function POST(
               onImage: async (image: GeneratedImage) => {
                 const imageIndex = imageUploadPromises.length;
 
+                // Limit to 1 image per parallel request to avoid extras
+                if (skip_user_message && imageIndex >= 1) return;
+
                 // Guardar la promesa para que onComplete pueda esperarlas todas
                 const uploadPromise = (async () => {
                   try {
@@ -894,8 +903,9 @@ export async function POST(
                 }
 
                 // Si no hubo uploads durante streaming pero llegaron imágenes en onComplete, guardarlas ahora
-                if (imageUploadPromises.length === 0 && images && images.length > 0) {
-                  for (const img of images) {
+                const finalImages = (skip_user_message && images && images.length > 1) ? images.slice(0, 1) : images;
+                if (imageUploadPromises.length === 0 && finalImages && finalImages.length > 0) {
+                  for (const img of finalImages) {
                     try {
                       const saved = await saveGeneratedImage(img, id);
                       savedImages.push({

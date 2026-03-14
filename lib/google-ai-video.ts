@@ -119,11 +119,15 @@ async function withRetry<T>(
 // Timeout for video API calls (10 minutes — video generation can be very slow)
 const VIDEO_API_TIMEOUT_MS = Number(process.env.GOOGLE_AI_VIDEO_TIMEOUT_MS) || 600000;
 
-// Lazy dual-client support for per-model backend selection
+// Pool type for overflow support
+export type VeoPool = "primary" | "overflow";
+
+// Lazy client support: vertex, gemini primary, gemini overflow
 let vertexClient: GoogleGenAI | null = null;
 let geminiClient: GoogleGenAI | null = null;
+let geminiOverflowClient: GoogleGenAI | null = null;
 
-function getClient(backend?: string): GoogleGenAI {
+function getClient(backend?: string, pool: VeoPool = "primary"): GoogleGenAI {
   if (useVertexForBackend(backend)) {
     if (!vertexClient) {
       vertexClient = new GoogleGenAI({
@@ -135,6 +139,16 @@ function getClient(backend?: string): GoogleGenAI {
     }
     return vertexClient;
   }
+  if (pool === "overflow" && process.env.GEMINI_API_KEY_OVERFLOW) {
+    if (!geminiOverflowClient) {
+      geminiOverflowClient = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY_OVERFLOW,
+        vertexai: false,
+        httpOptions: { timeout: VIDEO_API_TIMEOUT_MS },
+      });
+    }
+    return geminiOverflowClient;
+  }
   if (!geminiClient) {
     geminiClient = new GoogleGenAI({
       apiKey: process.env.GEMINI_API_KEY,
@@ -143,6 +157,14 @@ function getClient(backend?: string): GoogleGenAI {
     });
   }
   return geminiClient;
+}
+
+/**
+ * Get the API key for a given pool (used for authenticated video downloads)
+ */
+function getApiKeyForPool(pool: VeoPool): string | undefined {
+  if (pool === "overflow") return process.env.GEMINI_API_KEY_OVERFLOW;
+  return process.env.GEMINI_API_KEY;
 }
 
 // ============================================
@@ -283,11 +305,12 @@ export async function generateVideo(
   config: VideoGenerationConfig,
   onProgress?: (progress: VideoGenerationProgress) => void,
   labels?: Labels,
-  backend?: string
+  backend?: string,
+  pool: VeoPool = "primary"
 ): Promise<GeneratedVideo> {
   const normalizedModelId = normalizeModelId(modelId, backend);
   const isVertex = useVertexForBackend(backend);
-  const client = getClient(backend);
+  const client = getClient(backend, pool);
 
   // Notificar inicio
   onProgress?.({
@@ -489,14 +512,14 @@ export async function generateVideo(
     // Si la operación ya tiene el resultado (el SDK esperó internamente)
     const immediateVideo = extractVideoFromResponse(operation?.response);
     if (immediateVideo) {
-      console.log(`[Video] SDK returned completed video immediately (waited ${operationElapsed}s internally)`);
+      console.log(`[Video] SDK returned completed video immediately (waited ${operationElapsed}s internally, pool=${pool})`);
       onProgress?.({
         status: "completed",
         message: "Video generado, descargando...",
         progress: 90,
       });
 
-      const videoData = await downloadVideo(immediateVideo);
+      const videoData = await downloadVideo(immediateVideo, pool);
 
       onProgress?.({
         status: "completed",
@@ -521,7 +544,7 @@ export async function generateVideo(
     });
 
     // Polling para esperar a que complete (si el SDK no esperó)
-    const video = await pollVideoOperation(client, operation, config, onProgress);
+    const video = await pollVideoOperation(client, operation, config, onProgress, pool);
 
     return {
       ...video,
@@ -540,7 +563,8 @@ async function pollVideoOperation(
   aiClient: GoogleGenAI,
   initialOperation: Awaited<ReturnType<GoogleGenAI["models"]["generateVideos"]>>,
   config: VideoGenerationConfig,
-  onProgress?: (progress: VideoGenerationProgress) => void
+  onProgress?: (progress: VideoGenerationProgress) => void,
+  pool: VeoPool = "primary"
 ): Promise<GeneratedVideo> {
   const startTime = Date.now();
   let progressPercent = 20;
@@ -596,7 +620,7 @@ async function pollVideoOperation(
       progress: 95,
     });
 
-    const videoData = await downloadVideo(videoInfo);
+    const videoData = await downloadVideo(videoInfo, pool);
 
     onProgress?.({
       status: "completed",
@@ -662,7 +686,7 @@ function extractVideoFromResponse(response: unknown): { uri?: string; videoBytes
 /**
  * Descarga el video desde la respuesta de la API
  */
-async function downloadVideo(video: { uri?: string; videoBytes?: string }): Promise<Buffer> {
+async function downloadVideo(video: { uri?: string; videoBytes?: string }, pool: VeoPool = "primary"): Promise<Buffer> {
   // Si tenemos los bytes directamente
   if (video.videoBytes) {
     return Buffer.from(video.videoBytes, "base64");
@@ -672,13 +696,14 @@ async function downloadVideo(video: { uri?: string; videoBytes?: string }): Prom
   if (video.uri) {
     let downloadUrl = video.uri;
 
-    // Gemini API URIs require API key authentication
-    if (downloadUrl.includes("generativelanguage.googleapis.com") && process.env.GEMINI_API_KEY) {
+    // Gemini API URIs require API key authentication — use the key from the correct pool
+    const apiKey = getApiKeyForPool(pool);
+    if (downloadUrl.includes("generativelanguage.googleapis.com") && apiKey) {
       const separator = downloadUrl.includes("?") ? "&" : "?";
-      downloadUrl = `${downloadUrl}${separator}key=${process.env.GEMINI_API_KEY}`;
+      downloadUrl = `${downloadUrl}${separator}key=${apiKey}`;
     }
 
-    console.log(`[Video] Downloading from: ${video.uri.substring(0, 100)}...`);
+    console.log(`[Video] Downloading from (${pool}): ${video.uri.substring(0, 100)}...`);
     const response = await fetch(downloadUrl);
     if (!response.ok) {
       throw new Error(`Failed to download video: ${response.statusText} (${response.status})`);

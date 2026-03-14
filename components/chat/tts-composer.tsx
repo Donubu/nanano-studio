@@ -67,7 +67,8 @@ interface TTSComposerProps {
   isGenerating: boolean;
   generationProgress?: { status: string; message: string };
   restoreData?: AudioRestoreData | null;
-  onGenerate: (text: string, speakers?: AudioSpeakerConfig, qualityTier?: QualityTier) => void;
+  numVariations?: number;
+  onGenerate: (text: string, speakers?: AudioSpeakerConfig, qualityTier?: QualityTier, numVariations?: number) => void;
   onSettingsChange: (settings: {
     voiceId?: AudioVoiceId;
     stylePrompt?: string;
@@ -78,6 +79,7 @@ interface TTSComposerProps {
     ttsEngine?: AudioTTSEngine;
     speakingRate?: number;
     locale?: string;
+    numVariations?: number;
   }) => void;
   onRestoreHandled?: () => void;
 }
@@ -144,6 +146,7 @@ export function TTSComposer({
   hqModelName,
   speakingRate = 1.0,
   locale = "es-US",
+  numVariations = 1,
   disabled,
   isGenerating,
   generationProgress,
@@ -255,20 +258,21 @@ export function TTSComposer({
 
   const handleGenerate = () => {
     const effectiveTier = isChirp ? "chirp" : qualityTier;
+    const variations = numVariations > 1 ? numVariations : undefined;
     if (multiSpeaker && !isChirp) {
       const formattedText = formatDialogueForAPI(characters, dialogueLines);
       const speakers = extractSpeakersFromDialogue(characters, dialogueLines);
       if (formattedText.trim() && speakers.length >= 2) {
-        onGenerate(formattedText, { speakers }, effectiveTier);
+        onGenerate(formattedText, { speakers }, effectiveTier, variations);
       }
     } else if (isChirp && chirpMode === "visual") {
       const ssml = segmentsToSSML(chirpSegments);
       if (ssml.trim()) {
-        onGenerate(ssml, undefined, effectiveTier);
+        onGenerate(ssml, undefined, effectiveTier, variations);
       }
     } else {
       if (text.trim()) {
-        onGenerate(text, undefined, effectiveTier);
+        onGenerate(text, undefined, effectiveTier, variations);
       }
     }
   };
@@ -699,25 +703,46 @@ export function TTSComposer({
           )}
         </div>
 
-        {/* Generate Button */}
-        <Button
-          onClick={handleGenerate}
-          disabled={disabled || isGenerating || !canGenerate}
-          className="w-full"
-          size="lg"
-        >
-          {isGenerating ? (
-            <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Generando...
-            </>
-          ) : (
-            <>
-              <Volume2 className="w-4 h-4 mr-2" />
-              Generar Audio
-            </>
-          )}
-        </Button>
+        {/* Variations + Generate Button */}
+        <div className="flex gap-2 items-stretch">
+          {/* Variations Selector */}
+          <div className="flex items-center border border-border/50 rounded-lg overflow-hidden shrink-0">
+            {[1, 2, 3, 4].map((n) => (
+              <button
+                key={n}
+                onClick={() => onSettingsChange({ numVariations: n })}
+                disabled={disabled || isGenerating}
+                className={`px-2.5 py-2 text-xs font-medium transition-colors ${
+                  numVariations === n
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted"
+                } ${disabled || isGenerating ? "opacity-50 cursor-not-allowed" : ""}`}
+                title={`Generar ${n} variación${n > 1 ? "es" : ""}`}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+
+          <Button
+            onClick={handleGenerate}
+            disabled={disabled || isGenerating || !canGenerate}
+            className="flex-1"
+            size="lg"
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Generando{numVariations > 1 ? ` ${numVariations} variaciones` : ""}...
+              </>
+            ) : (
+              <>
+                <Volume2 className="w-4 h-4 mr-2" />
+                Generar{numVariations > 1 ? ` ${numVariations} variaciones` : " Audio"}
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Progress indicator */}

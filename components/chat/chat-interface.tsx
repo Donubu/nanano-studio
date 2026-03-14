@@ -59,6 +59,7 @@ import {
     Music,
     AlertCircle,
     Brain,
+    LayoutGrid,
 } from "lucide-react";
 import {ChangelogModal} from "@/components/chat/changelog-modal";
 import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
@@ -96,6 +97,7 @@ import {AudioGenerationHistory, AudioRestoreData} from "./audio-generation-histo
 import {AudioVoiceId, AudioOutputFormat, AudioSpeakerConfig, AudioGenerationStatus, AudioVoiceConfig} from "@/types/audio";
 import {type MusicGenerationSettings, type MusicGenerationStatus, DEFAULT_MUSIC_SETTINGS} from "@/types/music";
 import {useNavigation, generateSlug} from "@/contexts/navigation-context";
+import {FullModeWorkspace} from "./full-mode-workspace";
 
 // Helper function to get the icon for a conversation based on its generation type
 function getConversationIcon(generationType: string | undefined, className: string) {
@@ -110,6 +112,8 @@ function getConversationIcon(generationType: string | undefined, className: stri
             return <Mic className={className} />;
         case "music":
             return <Music className={className} />;
+        case "full":
+            return <LayoutGrid className={className} />;
         case "text":
         default:
             return <MessageSquare className={className} />;
@@ -329,6 +333,11 @@ export function ChatInterface() {
     const [audioTTSEngine, setAudioTTSEngine] = useState<"gemini" | "chirp">("gemini");
     const [audioSpeakingRate, setAudioSpeakingRate] = useState(1.0);
     const [audioLocale, setAudioLocale] = useState("es-US");
+    const [audioNumVariations, setAudioNumVariations] = useState(1);
+
+    // Video parallel generation
+    const [videoNumVariations, setVideoNumVariations] = useState(1);
+    const [veoAvailableSlots, setVeoAvailableSlots] = useState<number | null>(null);
 
     // Music generation settings
     const [musicSettings, setMusicSettings] = useState<MusicGenerationSettings>({...DEFAULT_MUSIC_SETTINGS});
@@ -451,6 +460,7 @@ export function ChatInterface() {
     const isVideoConversation = currentConversation?.generation_type === "video";
     const isAudioConversation = currentConversation?.generation_type === "audio" || currentConversation?.generation_type === "audio_hd";
     const isMusicConversation = currentConversation?.generation_type === "music";
+    const isFullConversation = currentConversation?.generation_type === "full";
 
     // Get current model based on conversation type, generation mode, and quality tier
     // For video conversations in image mode, use the image model
@@ -480,7 +490,9 @@ export function ChatInterface() {
     // Gemini native models that support multi-image via parallel requests
     const supportsMultiImage = (() => {
         const imageModel = getSelectedModel(imageTypeConfig);
-        return imageModel?.model_id === "gemini-3.1-flash-image-preview";
+        if (!imageModel) return false;
+        // All Gemini native image generation models support parallel generation
+        return imageModel.model_id.includes("image-preview") || imageModel.model_id.includes("flash-image");
     })();
 
     // Check if the current text model supports thinking/reasoning (only gemini-3.1-pro variants)
@@ -507,6 +519,14 @@ export function ChatInterface() {
     useEffect(() => {
         setMounted(true);
     }, []);
+
+    // Auto-collapse both sidebars for full (estudio) conversations
+    useEffect(() => {
+        if (isFullConversation) {
+            setLeftSidebarOpen(false);
+            setRightSidebarOpen(false);
+        }
+    }, [isFullConversation]);
 
     // Fetch pending changelog on mount
     useEffect(() => {
@@ -708,6 +728,31 @@ export function ChatInterface() {
     useEffect(() => {
         setAudioMultiSpeaker(false);
     }, [selectedModelId]);
+
+    // Poll VEO available slots when in video conversation with VEO provider
+    const isVeoProvider = isVideoConversation && generationMode === "video" && !isKlingVideoProvider && !isXaiVideoProvider;
+    useEffect(() => {
+        if (!isVeoProvider) {
+            setVeoAvailableSlots(null);
+            return;
+        }
+        const fetchSlots = async () => {
+            try {
+                const res = await fetch("/api/veo-slots");
+                if (res.ok) {
+                    const data = await res.json();
+                    setVeoAvailableSlots(data.available);
+                    // Auto-reduce selection if current exceeds available
+                    if (data.available > 0 && videoNumVariations > data.available) {
+                        setVideoNumVariations(data.available);
+                    }
+                }
+            } catch { /* ignore */ }
+        };
+        fetchSlots();
+        const interval = setInterval(fetchSlots, 10000); // Poll every 10s
+        return () => clearInterval(interval);
+    }, [isVeoProvider]);
 
     // Restore tabs from localStorage after conversations are loaded
     useEffect(() => {
@@ -929,9 +974,21 @@ export function ChatInterface() {
                     });
                 }
 
+                // Synthesize "full" (Estudio) type when both image AND video are enabled
+                const imgConfig = configArray.find(c => c.generation_type === "image");
+                const vidConfig = configArray.find(c => c.generation_type === "video");
+                if (imgConfig?.is_enabled && imgConfig.models.length > 0 && vidConfig?.is_enabled && vidConfig.models.length > 0) {
+                    configArray.push({
+                        generation_type: "full" as GenerationType,
+                        is_enabled: true,
+                        models: [...imgConfig.models, ...vidConfig.models],
+                    });
+                }
+
                 setGenerationConfig(configArray);
-                // Auto-select first enabled type
-                const firstEnabled = configArray.find((c) => c.is_enabled);
+                // Auto-select default type: prefer "full" (Estudio) if available, otherwise first enabled
+                const fullConfig = configArray.find((c) => c.generation_type === "full" && c.is_enabled);
+                const firstEnabled = fullConfig || configArray.find((c) => c.is_enabled);
                 if (firstEnabled) {
                     setNewConversationType(firstEnabled.generation_type);
                 }
@@ -1917,6 +1974,34 @@ export function ChatInterface() {
             // Multi-image support: track temporary image message IDs
             const tempImageMessageIds: number[] = [];
 
+            // For Imagen4: add N-1 visual placeholders (API generates all in one request)
+            const imagen4ExtraCount = (useImagenEndpoint && imageSettings?.numberOfImages && imageSettings.numberOfImages > 1)
+                ? imageSettings.numberOfImages - 1
+                : 0;
+
+            if (imagen4ExtraCount > 0) {
+                const imagen4PlaceholderIds: number[] = [];
+                for (let i = 0; i < imagen4ExtraCount; i++) {
+                    imagen4PlaceholderIds.push(Date.now() + 200 + i);
+                }
+                setTabMessages((prev) => ({
+                    ...prev,
+                    [tabId]: [
+                        ...prev[tabId],
+                        ...imagen4PlaceholderIds.map((pid) => ({
+                            id: pid,
+                            role: "model" as const,
+                            content: "",
+                            content_type: "image" as const,
+                            created_at: new Date().toISOString(),
+                            isStreaming: true,
+                        })),
+                    ],
+                }));
+                // Track these so SSE image events update them instead of adding new messages
+                tempImageMessageIds.push(...imagen4PlaceholderIds);
+            }
+
             // Fire N-1 additional parallel requests for non-Imagen4 multi-image generation
             const extraImageCount = (!useImagenEndpoint && imageSettings?.numberOfImages && imageSettings.numberOfImages > 1)
                 ? imageSettings.numberOfImages - 1
@@ -2089,22 +2174,37 @@ export function ChatInterface() {
                                             ),
                                         }));
                                     } else if (data.type === "image") {
-                                        // Cada imagen genera un mensaje visual separado
-                                        const tempImgId = Date.now() + 100 + (data.imageIndex || tempImageMessageIds.length);
-                                        tempImageMessageIds.push(tempImgId);
-                                        const imgMessage: Message = {
-                                            id: tempImgId,
-                                            role: "model",
-                                            content: "",
-                                            content_type: "image",
-                                            image_url: data.imageUrl,
-                                            created_at: new Date().toISOString(),
-                                            isStreaming: true,
-                                        };
-                                        setTabMessages((prev) => ({
-                                            ...prev,
-                                            [tabId]: [...prev[tabId], imgMessage],
-                                        }));
+                                        // Check if there's an existing placeholder to update
+                                        const imageIndex = data.imageIndex ?? tempImageMessageIds.length;
+                                        const existingPlaceholderId = tempImageMessageIds[imageIndex];
+                                        if (existingPlaceholderId) {
+                                            // Update existing placeholder with the image
+                                            setTabMessages((prev) => ({
+                                                ...prev,
+                                                [tabId]: prev[tabId].map((m) =>
+                                                    m.id === existingPlaceholderId
+                                                        ? { ...m, image_url: data.imageUrl, content_type: "image" as const, isStreaming: true }
+                                                        : m
+                                                ),
+                                            }));
+                                        } else {
+                                            // No placeholder — add as new message
+                                            const tempImgId = Date.now() + 100 + imageIndex;
+                                            tempImageMessageIds.push(tempImgId);
+                                            const imgMessage: Message = {
+                                                id: tempImgId,
+                                                role: "model",
+                                                content: "",
+                                                content_type: "image",
+                                                image_url: data.imageUrl,
+                                                created_at: new Date().toISOString(),
+                                                isStreaming: true,
+                                            };
+                                            setTabMessages((prev) => ({
+                                                ...prev,
+                                                [tabId]: [...prev[tabId], imgMessage],
+                                            }));
+                                        }
                                     } else if (data.type === "grounding") {
                                         // Attach grounding data to the streaming message
                                         setTabMessages((prev) => ({
@@ -2387,8 +2487,133 @@ export function ChatInterface() {
         return transformed;
     };
 
+    // Process a single video SSE stream, mapping events to a specific placeholder message
+    const processVideoSSEStream = async (
+        response: Response,
+        tabId: number,
+        placeholderId: number,
+        tempUserMessageId: number | null,
+        conversationId: number,
+    ) => {
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+
+        if (reader) {
+            let sseBuffer = "";
+            while (true) {
+                const {done, value} = await reader.read();
+                if (done) break;
+
+                sseBuffer += decoder.decode(value, { stream: true });
+                const lines = sseBuffer.split("\n");
+                sseBuffer = lines.pop() || "";
+
+                for (const line of lines) {
+                    if (line.startsWith("data: ")) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+
+                            if (data.type === "user_message" && tempUserMessageId) {
+                                const realId = data.id;
+                                setTabMessages((prev) => ({
+                                    ...prev,
+                                    [tabId]: prev[tabId].map((m) =>
+                                        m.id === tempUserMessageId ? {...m, id: realId} : m
+                                    ),
+                                }));
+                            } else if (data.type === "progress") {
+                                setTabMessages((prev) => ({
+                                    ...prev,
+                                    [tabId]: prev[tabId].map((m) =>
+                                        m.id === placeholderId
+                                            ? {
+                                                ...m,
+                                                videoProgress: {
+                                                    status: data.status,
+                                                    message: data.message,
+                                                    progress: data.progress,
+                                                },
+                                            }
+                                            : m
+                                    ),
+                                }));
+                            } else if (data.type === "video") {
+                                setTabMessages((prev) => ({
+                                    ...prev,
+                                    [tabId]: prev[tabId].map((m) =>
+                                        m.id === placeholderId
+                                            ? {
+                                                ...m,
+                                                video_url: data.videoUrl,
+                                                video_duration: data.duration,
+                                                video_has_audio: data.hasAudio,
+                                                video_aspect_ratio: data.aspectRatio,
+                                                generation_seed: data.seed,
+                                                isVideoGenerating: false,
+                                                videoProgress: undefined,
+                                            }
+                                            : m
+                                    ),
+                                }));
+                            } else if (data.type === "complete") {
+                                const realId = data.id;
+                                setTabMessages((prev) => ({
+                                    ...prev,
+                                    [tabId]: prev[tabId].map((m) =>
+                                        m.id === placeholderId
+                                            ? {
+                                                ...m,
+                                                id: realId,
+                                                video_url: data.videoUrl,
+                                                video_duration: data.duration,
+                                                video_has_audio: data.hasAudio,
+                                                video_aspect_ratio: data.aspectRatio,
+                                                generation_seed: data.seed,
+                                                isVideoGenerating: false,
+                                                videoProgress: undefined,
+                                            }
+                                            : m
+                                    ),
+                                }));
+                            } else if (data.type === "title") {
+                                const newTitle = data.title;
+                                setOpenTabs((prev) =>
+                                    prev.map((t) => t.id === tabId ? {...t, title: newTitle} : t)
+                                );
+                                setTabConversations((prev) => ({
+                                    ...prev,
+                                    [tabId]: {...prev[tabId], title: newTitle},
+                                }));
+                                setConversations((prev) =>
+                                    prev.map((c) => c.id === conversationId ? {...c, title: newTitle} : c)
+                                );
+                            } else if (data.type === "error") {
+                                setTabMessages((prev) => ({
+                                    ...prev,
+                                    [tabId]: prev[tabId].map((m) =>
+                                        m.id === placeholderId
+                                            ? {
+                                                ...m,
+                                                id: data.id || m.id,
+                                                content: `Error: ${data.message}`,
+                                                isVideoGenerating: false,
+                                                videoProgress: undefined,
+                                            }
+                                            : m
+                                    ),
+                                }));
+                            }
+                        } catch {
+                            // Ignore parse errors for incomplete chunks
+                        }
+                    }
+                }
+            }
+        }
+    };
+
     // Send video generation message
-    const sendVideoMessage = async (content: string, seed?: number, assetFiles?: AttachedFile[]) => {
+    const sendVideoMessage = async (content: string, seed?: number, assetFiles?: AttachedFile[], numVariations: number = 1, videoInputsOverride?: { firstFrame?: string | null; lastFrame?: string | null; referenceImages?: import("./video-input-frames").ReferenceImage[] }) => {
         if (!activeTabId || !content.trim()) return;
 
         let tabId = activeTabId;
@@ -2417,6 +2642,7 @@ export function ChatInterface() {
             duration: videoDuration,
             resolution: videoResolution,
             aspectRatio: videoAspectRatio,
+            numVariations,
         });
 
         // Add optimistic user message
@@ -2430,262 +2656,259 @@ export function ChatInterface() {
             created_at: new Date().toISOString(),
         };
 
-        setTabMessages((prev) => ({
-            ...prev,
-            [tabId]: [...(prev[tabId] || []), tempUserMessage],
-        }));
-
-        // Add video generating placeholder for model response
-        const videoMessageId = Date.now() + 1;
-        const videoMessage: Message = {
-            id: videoMessageId,
-            role: "model",
+        // Create placeholder messages for all variations
+        const baseTime = Date.now() + 1;
+        const placeholderIds = Array.from({ length: numVariations }, (_, i) => baseTime + i);
+        const placeholderMessages: Message[] = placeholderIds.map((phId) => ({
+            id: phId,
+            role: "model" as const,
             content: "",
-            content_type: "video",
+            content_type: "video" as const,
             created_at: new Date().toISOString(),
             isVideoGenerating: true,
             videoProgress: {
                 status: "pending",
-                message: "Iniciando generación de video...",
+                message: numVariations > 1 ? "Esperando inicio..." : "Iniciando generación de video...",
             },
-        };
+        }));
 
         setTabMessages((prev) => ({
             ...prev,
-            [tabId]: [...(prev[tabId] || []), videoMessage],
+            [tabId]: [...(prev[tabId] || []), tempUserMessage, ...placeholderMessages],
         }));
 
-        try {
-            // Transform prompt for Kling inline assets
-            const finalContent = (assetFiles && assetFiles.length > 0)
-                ? transformKlingPrompt(content, assetFiles)
-                : content;
+        // Transform prompt for Kling inline assets
+        const finalContent = (assetFiles && assetFiles.length > 0)
+            ? transformKlingPrompt(content, assetFiles)
+            : content;
 
-            // Build inline assets array for API
-            const inlineAssets = assetFiles?.filter(f => f.assetId).map(f => ({
-                assetId: f.assetId!,
-                dataUrl: f.dataUrl,
-                mimeType: f.mimeType,
-                type: f.type as "image" | "video",
-            }));
+        // Build inline assets array for API
+        const inlineAssets = assetFiles?.filter(f => f.assetId).map(f => ({
+            assetId: f.assetId!,
+            dataUrl: f.dataUrl,
+            mimeType: f.mimeType,
+            type: f.type as "image" | "video",
+        }));
 
-            const response = await fetch(`/api/conversations/${conversationId}/messages/video`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({
-                    content: finalContent,
-                    selected_model_id: selectedConfigModelId,
-                    videoSettings: {
-                        duration: videoDuration,
-                        resolution: videoResolution,
-                        aspectRatio: videoAspectRatio,
-                        // Kling: force audio off when video input is present (not supported)
-                        audioEnabled: (isKlingVideoProvider && assetFiles?.some(f => f.type === "video")) ? false : videoAudioEnabled,
-                        negativePrompt: videoNegativePrompt || undefined,
-                        seed: seed,
-                    },
-                    videoInputs: {
-                        firstFrame: videoFirstFrame,
-                        lastFrame: videoLastFrame,
-                        referenceImages: videoReferenceImages.length > 0 ? videoReferenceImages : undefined,
-                    },
-                    referenceImages: videoReferenceImages.length > 0 ? videoReferenceImages : undefined,
-                    ...(inlineAssets && inlineAssets.length > 0 && { inlineAssets }),
-                    ...(Object.keys(klingVoiceBindings).length > 0 && {
-                        voiceBindings: Object.fromEntries(
-                            Object.entries(klingVoiceBindings).map(([assetId, v]) => [assetId, v.dataUrl])
-                        ),
-                    }),
-                }),
-            });
+        const basePayload = {
+            content: finalContent,
+            selected_model_id: selectedConfigModelId,
+            videoSettings: {
+                duration: videoDuration,
+                resolution: videoResolution,
+                aspectRatio: videoAspectRatio,
+                audioEnabled: (isKlingVideoProvider && assetFiles?.some(f => f.type === "video")) ? false : videoAudioEnabled,
+                negativePrompt: videoNegativePrompt || undefined,
+                seed: seed,
+            },
+            videoInputs: {
+                firstFrame: videoInputsOverride?.firstFrame ?? videoFirstFrame,
+                lastFrame: videoInputsOverride?.lastFrame ?? videoLastFrame,
+                referenceImages: videoInputsOverride?.referenceImages ?? (videoReferenceImages.length > 0 ? videoReferenceImages : undefined),
+            },
+            referenceImages: videoInputsOverride?.referenceImages ?? (videoReferenceImages.length > 0 ? videoReferenceImages : undefined),
+            ...(inlineAssets && inlineAssets.length > 0 && { inlineAssets }),
+            ...(Object.keys(klingVoiceBindings).length > 0 && {
+                voiceBindings: Object.fromEntries(
+                    Object.entries(klingVoiceBindings).map(([assetId, v]) => [assetId, v.dataUrl])
+                ),
+            }),
+        };
 
-            if (!response.ok) {
-                let errorMessage = "";
-                try {
-                    const errorData = await response.json();
-                    errorMessage = errorData.error || "";
-                } catch { /* Respuesta no-JSON */ }
-                if (!errorMessage) {
-                    if (response.status === 413) {
-                        errorMessage = "El contenido enviado es demasiado grande. Intenta con archivos más pequeños.";
-                    } else if (response.status === 429) {
-                        errorMessage = "Demasiadas solicitudes. Espera un momento e intenta de nuevo.";
-                    } else {
-                        errorMessage = `Error del servidor (${response.status})`;
-                    }
+        // Track how many requests have completed
+        let completedCount = 0;
+        const onRequestDone = () => {
+            completedCount++;
+            if (completedCount >= numVariations) {
+                setSendingTabs((prev) => ({...prev, [tabId]: false}));
+                // Clear video frames after all generations complete
+                setVideoFirstFrame(null);
+                setVideoLastFrame(null);
+                setVideoReferenceImages([]);
+                fetchConversations();
+                if (selectedProjectId) {
+                    fetchProjectUsage(selectedProjectId);
+                    fetchProjectStats(selectedProjectId);
                 }
+            }
+        };
+
+        // Helper to fire a single video request and process its SSE stream
+        const fireVideoRequest = async (placeholderId: number, skipUserMessage: boolean) => {
+            try {
+                const response = await fetch(`/api/conversations/${conversationId}/messages/video`, {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({
+                        ...basePayload,
+                        skip_user_message: skipUserMessage,
+                    }),
+                });
+
+                if (!response.ok) {
+                    let errorMessage = "";
+                    try {
+                        const errorData = await response.json();
+                        errorMessage = errorData.error || "";
+                    } catch { /* Respuesta no-JSON */ }
+                    if (!errorMessage) {
+                        if (response.status === 413) {
+                            errorMessage = "El contenido enviado es demasiado grande. Intenta con archivos más pequeños.";
+                        } else if (response.status === 429) {
+                            errorMessage = "Demasiadas solicitudes. Espera un momento e intenta de nuevo.";
+                        } else {
+                            errorMessage = `Error del servidor (${response.status})`;
+                        }
+                    }
+                    setTabMessages((prev) => ({
+                        ...prev,
+                        [tabId]: prev[tabId].map((m) =>
+                            m.id === placeholderId
+                                ? { ...m, content: `Error: ${errorMessage}`, isVideoGenerating: false, videoProgress: undefined }
+                                : m
+                        ),
+                    }));
+                    return;
+                }
+
+                await processVideoSSEStream(
+                    response,
+                    tabId,
+                    placeholderId,
+                    skipUserMessage ? null : tempUserMessage.id,
+                    conversationId!,
+                );
+            } catch (err) {
+                console.error("Error generating video:", err);
+                const isNetworkError = err instanceof TypeError || (err instanceof Error && /network|fetch|abort/i.test(err.message));
+                const errorMsg = isNetworkError
+                    ? "Error de conexión. La generación puede haber tardado demasiado. Intenta de nuevo."
+                    : `Error: ${err instanceof Error ? err.message : "Error inesperado al generar video"}`;
                 setTabMessages((prev) => ({
                     ...prev,
                     [tabId]: prev[tabId].map((m) =>
-                        m.id === videoMessageId
-                            ? { ...m, content: `Error: ${errorMessage}`, isVideoGenerating: false, videoProgress: undefined }
+                        m.id === placeholderId
+                            ? { ...m, content: errorMsg, content_type: "error" as const, isVideoGenerating: false, videoProgress: undefined }
                             : m
                     ),
                 }));
-                setSendingTabs((prev) => ({...prev, [tabId]: false}));
-                return;
+            } finally {
+                onRequestDone();
             }
+        };
 
-            const reader = response.body?.getReader();
-            const decoder = new TextDecoder();
-            let realUserMessageId: number | null = null;
-            let realModelMessageId: number | null = null;
+        // Fire all requests in parallel: first one creates user message, rest skip it
+        const requests = placeholderIds.map((phId, i) =>
+            fireVideoRequest(phId, i > 0)
+        );
+        // Don't await — they run in parallel and each calls onRequestDone when finished
+        Promise.all(requests).catch(() => {});
+    };
 
-            if (reader) {
-                let sseBuffer = "";
-                while (true) {
-                    const {done, value} = await reader.read();
-                    if (done) break;
+    // Send audio generation message
+    // Process a single audio SSE stream, mapping events to a specific placeholder message
+    const processAudioSSEStream = async (
+        response: Response,
+        tabId: number,
+        placeholderId: number,
+        tempUserMessageId: number | null,
+        conversationId: number,
+    ) => {
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
 
-                    sseBuffer += decoder.decode(value, { stream: true });
-                    const lines = sseBuffer.split("\n");
-                    sseBuffer = lines.pop() || "";
+        if (reader) {
+            let sseBuffer = "";
+            while (true) {
+                const {done, value} = await reader.read();
+                if (done) break;
 
-                    for (const line of lines) {
-                        if (line.startsWith("data: ")) {
-                            try {
-                                const data = JSON.parse(line.slice(6));
+                sseBuffer += decoder.decode(value, { stream: true });
+                const lines = sseBuffer.split("\n");
+                sseBuffer = lines.pop() || "";
 
-                                if (data.type === "user_message") {
-                                    realUserMessageId = data.id;
-                                    setTabMessages((prev) => ({
-                                        ...prev,
-                                        [tabId]: prev[tabId].map((m) =>
-                                            m.id === tempUserMessage.id ? {...m, id: realUserMessageId!} : m
-                                        ),
-                                    }));
-                                } else if (data.type === "progress") {
-                                    setTabMessages((prev) => ({
-                                        ...prev,
-                                        [tabId]: prev[tabId].map((m) =>
-                                            m.id === videoMessageId
-                                                ? {
-                                                    ...m,
-                                                    videoProgress: {
-                                                        status: data.status,
-                                                        message: data.message,
-                                                        progress: data.progress,
-                                                    },
-                                                }
-                                                : m
-                                        ),
-                                    }));
-                                } else if (data.type === "video") {
-                                    setTabMessages((prev) => ({
-                                        ...prev,
-                                        [tabId]: prev[tabId].map((m) =>
-                                            m.id === videoMessageId
-                                                ? {
-                                                    ...m,
-                                                    video_url: data.videoUrl,
-                                                    video_duration: data.duration,
-                                                    video_has_audio: data.hasAudio,
-                                                    video_aspect_ratio: data.aspectRatio,
-                                                    generation_seed: data.seed,
-                                                    isVideoGenerating: false,
-                                                    videoProgress: undefined,
-                                                }
-                                                : m
-                                        ),
-                                    }));
-                                } else if (data.type === "complete") {
-                                    realModelMessageId = data.id;
-                                    setTabMessages((prev) => ({
-                                        ...prev,
-                                        [tabId]: prev[tabId].map((m) =>
-                                            m.id === videoMessageId
-                                                ? {
-                                                    ...m,
-                                                    id: realModelMessageId!,
-                                                    video_url: data.videoUrl,
-                                                    video_duration: data.duration,
-                                                    video_has_audio: data.hasAudio,
-                                                    video_aspect_ratio: data.aspectRatio,
-                                                    generation_seed: data.seed,
-                                                    isVideoGenerating: false,
-                                                    videoProgress: undefined,
-                                                }
-                                                : m
-                                        ),
-                                    }));
-                                } else if (data.type === "title") {
-                                    const newTitle = data.title;
-                                    setOpenTabs((prev) =>
-                                        prev.map((t) =>
-                                            t.id === tabId ? {...t, title: newTitle} : t
-                                        )
-                                    );
-                                    setTabConversations((prev) => ({
-                                        ...prev,
-                                        [tabId]: {...prev[tabId], title: newTitle},
-                                    }));
-                                    setConversations((prev) =>
-                                        prev.map((c) =>
-                                            c.id === conversationId ? {...c, title: newTitle} : c
-                                        )
-                                    );
-                                } else if (data.type === "error") {
-                                    realModelMessageId = data.id;
-                                    setTabMessages((prev) => ({
-                                        ...prev,
-                                        [tabId]: prev[tabId].map((m) =>
-                                            m.id === videoMessageId
-                                                ? {
-                                                    ...m,
-                                                    id: realModelMessageId!,
-                                                    content: `Error: ${data.message}`,
-                                                    isVideoGenerating: false,
-                                                    videoProgress: undefined,
-                                                }
-                                                : m
-                                        ),
-                                    }));
-                                }
-                            } catch (e) {
-                                // Ignore parse errors for incomplete chunks
+                for (const line of lines) {
+                    if (line.startsWith("data: ")) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+
+                            if (data.type === "user_message" && tempUserMessageId) {
+                                const realId = data.id;
+                                setTabMessages((prev) => ({
+                                    ...prev,
+                                    [tabId]: prev[tabId].map((m) =>
+                                        m.id === tempUserMessageId ? {...m, id: realId} : m
+                                    ),
+                                }));
+                            } else if (data.type === "progress") {
+                                setTabMessages((prev) => ({
+                                    ...prev,
+                                    [tabId]: prev[tabId].map((m) =>
+                                        m.id === placeholderId
+                                            ? { ...m, audioProgress: { status: data.status, message: data.message } }
+                                            : m
+                                    ),
+                                }));
+                            } else if (data.type === "audio") {
+                                setTabMessages((prev) => ({
+                                    ...prev,
+                                    [tabId]: prev[tabId].map((m) =>
+                                        m.id === placeholderId
+                                            ? {
+                                                ...m,
+                                                content: data.content || m.content,
+                                                audio_url: data.audioUrl,
+                                                audio_duration: data.duration,
+                                                audio_mime_type: data.mimeType,
+                                                audio_voice_config: data.voiceConfig,
+                                                isAudioGenerating: false,
+                                                audioProgress: undefined,
+                                            }
+                                            : m
+                                    ),
+                                }));
+                            } else if (data.type === "complete") {
+                                const realId = data.messageId;
+                                setTabMessages((prev) => ({
+                                    ...prev,
+                                    [tabId]: prev[tabId].map((m) =>
+                                        m.id === placeholderId
+                                            ? { ...m, id: realId, isAudioGenerating: false, audioProgress: undefined }
+                                            : m
+                                    ),
+                                }));
+                            } else if (data.type === "title") {
+                                const newTitle = data.title;
+                                setOpenTabs((prev) =>
+                                    prev.map((t) => t.id === tabId ? {...t, title: newTitle} : t)
+                                );
+                                setTabConversations((prev) => ({
+                                    ...prev,
+                                    [tabId]: {...prev[tabId], title: newTitle},
+                                }));
+                                setConversations((prev) =>
+                                    prev.map((c) => c.id === conversationId ? {...c, title: newTitle} : c)
+                                );
+                            } else if (data.type === "error") {
+                                setTabMessages((prev) => ({
+                                    ...prev,
+                                    [tabId]: prev[tabId].map((m) =>
+                                        m.id === placeholderId
+                                            ? { ...m, id: data.id || m.id, content: `Error: ${data.message}`, isAudioGenerating: false, audioProgress: undefined }
+                                            : m
+                                    ),
+                                }));
                             }
+                        } catch {
+                            // Ignore parse errors for incomplete chunks
                         }
                     }
                 }
             }
-
-            // Clear video frames after successful generation
-            setVideoFirstFrame(null);
-            setVideoLastFrame(null);
-            setVideoReferenceImages([]);
-
-            fetchConversations();
-            if (selectedProjectId) {
-                fetchProjectUsage(selectedProjectId);
-                fetchProjectStats(selectedProjectId);
-            }
-        } catch (err) {
-            console.error("Error generating video:", err);
-            const isNetworkError = err instanceof TypeError || (err instanceof Error && /network|fetch|abort/i.test(err.message));
-            const errorMsg = isNetworkError
-                ? "Error de conexión. La generación puede haber tardado demasiado. Por favor intenta de nuevo."
-                : `Error: ${err instanceof Error ? err.message : "Error inesperado al generar video"}`;
-            setTabMessages((prev) => ({
-                ...prev,
-                [tabId]: prev[tabId].map((m) =>
-                    m.id === videoMessageId
-                        ? {
-                            ...m,
-                            content: errorMsg,
-                            content_type: "error" as const,
-                            isVideoGenerating: false,
-                            videoProgress: undefined,
-                        }
-                        : m
-                ),
-            }));
-        } finally {
-            setSendingTabs((prev) => ({...prev, [tabId]: false}));
         }
     };
 
-    // Send audio generation message
-    const sendAudioMessage = async (content: string, qualityTier: "normal" | "hq" | "chirp" = "normal", overrideSpeakerConfig?: AudioSpeakerConfig, modelId?: number | null) => {
+    const sendAudioMessage = async (content: string, qualityTier: "normal" | "hq" | "chirp" = "normal", overrideSpeakerConfig?: AudioSpeakerConfig, modelId?: number | null, numVariations: number = 1) => {
         if (!activeTabId || !content.trim()) return;
 
         let tabId = activeTabId;
@@ -2714,7 +2937,19 @@ export function ChatInterface() {
             multiSpeaker: audioMultiSpeaker,
             outputFormat: audioOutputFormat,
             qualityTier,
+            numVariations,
         });
+
+        const audioSettingsPayload = {
+            voiceId: audioVoiceId,
+            stylePrompt: audioStylePrompt || undefined,
+            multiSpeaker: audioTTSEngine === "chirp" ? false : audioMultiSpeaker,
+            speakerConfig: audioMultiSpeaker && audioTTSEngine !== "chirp" ? (overrideSpeakerConfig || audioSpeakerConfig) : undefined,
+            outputFormat: audioOutputFormat,
+            ttsEngine: audioTTSEngine,
+            speakingRate: audioTTSEngine === "chirp" ? audioSpeakingRate : undefined,
+            locale: audioTTSEngine === "chirp" ? audioLocale : undefined,
+        };
 
         // Add optimistic user message
         const tempUserMessage: Message = {
@@ -2725,223 +2960,109 @@ export function ChatInterface() {
             created_at: new Date().toISOString(),
         };
 
-        setTabMessages((prev) => ({
-            ...prev,
-            [tabId]: [...(prev[tabId] || []), tempUserMessage],
-        }));
-
-        // Add audio generating placeholder for model response
-        const audioMessageId = Date.now() + 1;
-        const audioMessage: Message = {
-            id: audioMessageId,
-            role: "model",
+        // Create placeholder messages for all variations
+        const baseTime = Date.now() + 1;
+        const placeholderIds = Array.from({ length: numVariations }, (_, i) => baseTime + i);
+        const placeholderMessages: Message[] = placeholderIds.map((phId) => ({
+            id: phId,
+            role: "model" as const,
             content: "",
-            content_type: "audio",
+            content_type: "audio" as const,
             created_at: new Date().toISOString(),
             isAudioGenerating: true,
             audioProgress: {
                 status: "pending",
-                message: "Iniciando generación de audio...",
+                message: numVariations > 1 ? "Esperando inicio..." : "Iniciando generación de audio...",
             },
-        };
+        }));
 
         setTabMessages((prev) => ({
             ...prev,
-            [tabId]: [...(prev[tabId] || []), audioMessage],
+            [tabId]: [...(prev[tabId] || []), tempUserMessage, ...placeholderMessages],
         }));
 
-        try {
-            const response = await fetch(`/api/conversations/${conversationId}/messages/audio`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({
-                    content,
-                    selected_model_id: modelId ?? selectedConfigModelId,
-                    audioSettings: {
-                        voiceId: audioVoiceId,
-                        stylePrompt: audioStylePrompt || undefined,
-                        multiSpeaker: audioTTSEngine === "chirp" ? false : audioMultiSpeaker,
-                        speakerConfig: audioMultiSpeaker && audioTTSEngine !== "chirp" ? (overrideSpeakerConfig || audioSpeakerConfig) : undefined,
-                        outputFormat: audioOutputFormat,
-                        ttsEngine: audioTTSEngine,
-                        speakingRate: audioTTSEngine === "chirp" ? audioSpeakingRate : undefined,
-                        locale: audioTTSEngine === "chirp" ? audioLocale : undefined,
-                    },
-                }),
-            });
-
-            if (!response.ok) {
-                let errorMessage = "";
-                try {
-                    const errorData = await response.json();
-                    errorMessage = errorData.error || "";
-                } catch { /* Respuesta no-JSON */ }
-                if (!errorMessage) {
-                    if (response.status === 413) {
-                        errorMessage = "El contenido enviado es demasiado grande. Intenta con archivos más pequeños.";
-                    } else if (response.status === 429) {
-                        errorMessage = "Demasiadas solicitudes. Espera un momento e intenta de nuevo.";
-                    } else {
-                        errorMessage = `Error del servidor (${response.status})`;
-                    }
+        // Track how many requests have completed
+        let completedCount = 0;
+        const onRequestDone = () => {
+            completedCount++;
+            if (completedCount >= numVariations) {
+                setSendingTabs((prev) => ({...prev, [tabId]: false}));
+                fetchConversations();
+                if (selectedProjectId) {
+                    fetchProjectUsage(selectedProjectId);
+                    fetchProjectStats(selectedProjectId);
                 }
+            }
+        };
+
+        // Helper to fire a single audio request and process its SSE stream
+        const fireAudioRequest = async (placeholderId: number, skipUserMessage: boolean) => {
+            try {
+                const response = await fetch(`/api/conversations/${conversationId}/messages/audio`, {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({
+                        content,
+                        selected_model_id: modelId ?? selectedConfigModelId,
+                        audioSettings: audioSettingsPayload,
+                        skip_user_message: skipUserMessage,
+                    }),
+                });
+
+                if (!response.ok) {
+                    let errorMessage = "";
+                    try {
+                        const errorData = await response.json();
+                        errorMessage = errorData.error || "";
+                    } catch { /* Respuesta no-JSON */ }
+                    if (!errorMessage) {
+                        if (response.status === 413) errorMessage = "El contenido enviado es demasiado grande.";
+                        else if (response.status === 429) errorMessage = "Demasiadas solicitudes. Espera un momento.";
+                        else errorMessage = `Error del servidor (${response.status})`;
+                    }
+                    setTabMessages((prev) => ({
+                        ...prev,
+                        [tabId]: prev[tabId].map((m) =>
+                            m.id === placeholderId
+                                ? { ...m, content: `Error: ${errorMessage}`, isAudioGenerating: false, audioProgress: undefined }
+                                : m
+                        ),
+                    }));
+                    return;
+                }
+
+                await processAudioSSEStream(
+                    response,
+                    tabId,
+                    placeholderId,
+                    skipUserMessage ? null : tempUserMessage.id,
+                    conversationId!,
+                );
+            } catch (err) {
+                console.error("Error generating audio:", err);
+                const isNetworkError = err instanceof TypeError || (err instanceof Error && /network|fetch|abort/i.test(err.message));
+                const errorMsg = isNetworkError
+                    ? "Error de conexión. Intenta de nuevo."
+                    : `Error: ${err instanceof Error ? err.message : "Error inesperado"}`;
                 setTabMessages((prev) => ({
                     ...prev,
                     [tabId]: prev[tabId].map((m) =>
-                        m.id === audioMessageId
-                            ? { ...m, content: `Error: ${errorMessage}`, isAudioGenerating: false, audioProgress: undefined }
+                        m.id === placeholderId
+                            ? { ...m, content: errorMsg, content_type: "error" as const, isAudioGenerating: false, audioProgress: undefined }
                             : m
                     ),
                 }));
-                setSendingTabs((prev) => ({...prev, [tabId]: false}));
-                return;
+            } finally {
+                onRequestDone();
             }
+        };
 
-            const reader = response.body?.getReader();
-            const decoder = new TextDecoder();
-            let realUserMessageId: number | null = null;
-            let realModelMessageId: number | null = null;
-
-            if (reader) {
-                let sseBuffer = "";
-                while (true) {
-                    const {done, value} = await reader.read();
-                    if (done) break;
-
-                    sseBuffer += decoder.decode(value, { stream: true });
-                    const lines = sseBuffer.split("\n");
-                    sseBuffer = lines.pop() || "";
-
-                    for (const line of lines) {
-                        if (line.startsWith("data: ")) {
-                            try {
-                                const data = JSON.parse(line.slice(6));
-
-                                if (data.type === "user_message") {
-                                    realUserMessageId = data.id;
-                                    setTabMessages((prev) => ({
-                                        ...prev,
-                                        [tabId]: prev[tabId].map((m) =>
-                                            m.id === tempUserMessage.id ? {...m, id: realUserMessageId!} : m
-                                        ),
-                                    }));
-                                } else if (data.type === "progress") {
-                                    setTabMessages((prev) => ({
-                                        ...prev,
-                                        [tabId]: prev[tabId].map((m) =>
-                                            m.id === audioMessageId
-                                                ? {
-                                                    ...m,
-                                                    audioProgress: {
-                                                        status: data.status,
-                                                        message: data.message,
-                                                    },
-                                                }
-                                                : m
-                                        ),
-                                    }));
-                                } else if (data.type === "audio") {
-                                    setTabMessages((prev) => ({
-                                        ...prev,
-                                        [tabId]: prev[tabId].map((m) =>
-                                            m.id === audioMessageId
-                                                ? {
-                                                    ...m,
-                                                    content: data.content || m.content, // Guardar texto original para restauración
-                                                    audio_url: data.audioUrl,
-                                                    audio_duration: data.duration,
-                                                    audio_mime_type: data.mimeType,
-                                                    audio_voice_config: data.voiceConfig,
-                                                    isAudioGenerating: false,
-                                                    audioProgress: undefined,
-                                                }
-                                                : m
-                                        ),
-                                    }));
-                                } else if (data.type === "complete") {
-                                    realModelMessageId = data.messageId;
-                                    setTabMessages((prev) => ({
-                                        ...prev,
-                                        [tabId]: prev[tabId].map((m) =>
-                                            m.id === audioMessageId
-                                                ? {
-                                                    ...m,
-                                                    id: realModelMessageId!,
-                                                    isAudioGenerating: false,
-                                                    audioProgress: undefined,
-                                                }
-                                                : m
-                                        ),
-                                    }));
-                                } else if (data.type === "title") {
-                                    const newTitle = data.title;
-                                    setOpenTabs((prev) =>
-                                        prev.map((t) =>
-                                            t.id === tabId ? {...t, title: newTitle} : t
-                                        )
-                                    );
-                                    setTabConversations((prev) => ({
-                                        ...prev,
-                                        [tabId]: {...prev[tabId], title: newTitle},
-                                    }));
-                                    setConversations((prev) =>
-                                        prev.map((c) =>
-                                            c.id === conversationId ? {...c, title: newTitle} : c
-                                        )
-                                    );
-                                } else if (data.type === "error") {
-                                    realModelMessageId = data.id;
-                                    setTabMessages((prev) => ({
-                                        ...prev,
-                                        [tabId]: prev[tabId].map((m) =>
-                                            m.id === audioMessageId
-                                                ? {
-                                                    ...m,
-                                                    id: realModelMessageId!,
-                                                    content: `Error: ${data.message}`,
-                                                    isAudioGenerating: false,
-                                                    audioProgress: undefined,
-                                                }
-                                                : m
-                                        ),
-                                    }));
-                                }
-                            } catch (e) {
-                                // Ignore parse errors for incomplete chunks
-                            }
-                        }
-                    }
-                }
-            }
-
-            fetchConversations();
-            if (selectedProjectId) {
-                fetchProjectUsage(selectedProjectId);
-                fetchProjectStats(selectedProjectId);
-            }
-        } catch (err) {
-            console.error("Error generating audio:", err);
-            const isNetworkError = err instanceof TypeError || (err instanceof Error && /network|fetch|abort/i.test(err.message));
-            const errorMsg = isNetworkError
-                ? "Error de conexión. La generación puede haber tardado demasiado. Por favor intenta de nuevo."
-                : `Error: ${err instanceof Error ? err.message : "Error inesperado al generar audio"}`;
-            setTabMessages((prev) => ({
-                ...prev,
-                [tabId]: prev[tabId].map((m) =>
-                    m.id === audioMessageId
-                        ? {
-                            ...m,
-                            content: errorMsg,
-                            content_type: "error" as const,
-                            isAudioGenerating: false,
-                            audioProgress: undefined,
-                        }
-                        : m
-                ),
-            }));
-        } finally {
-            setSendingTabs((prev) => ({...prev, [tabId]: false}));
-        }
+        // Fire all requests in parallel: first one creates user message, rest skip it
+        const requests = placeholderIds.map((phId, i) =>
+            fireAudioRequest(phId, i > 0)
+        );
+        // Don't await — they run in parallel and each calls onRequestDone when finished
+        Promise.all(requests).catch(() => {});
     };
 
     // ==========================================
@@ -3583,7 +3704,7 @@ export function ChatInterface() {
                             onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
                             className={cn(
                                 "absolute top-2 left-2 z-20 h-8 w-8 bg-background/80 backdrop-blur-sm border border-border/50 shadow-sm",
-                                leftSidebarOpen && "hidden"
+                                (leftSidebarOpen || isFullConversation) && "hidden"
                             )}
                             title="Abrir panel izquierdo"
                         >
@@ -3591,7 +3712,7 @@ export function ChatInterface() {
                         </Button>
 
                         {/* Floating toggle for right sidebar */}
-                        {activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && !isMusicConversation && (
+                        {activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && !isMusicConversation && !isFullConversation && (
                             <Button
                                 variant="ghost"
                                 size="icon"
@@ -3635,6 +3756,45 @@ export function ChatInterface() {
                                 }}
                             />
                         </div>
+                    ) : isFullConversation && activeTabId !== null ? (
+                        /* Full Mode (Estudio) Workspace */
+                        <FullModeWorkspace
+                            conversationId={tabConversations[activeTabId]?.id || 0}
+                            projectId={selectedProjectId!}
+                            messages={messages}
+                            isSending={isSending}
+                            generationConfig={generationConfig}
+                            selectedConfigModelId={selectedConfigModelId}
+                            onSelectConfigModel={setSelectedConfigModelId}
+                            onSendImage={sendMessage}
+                            onSendVideo={sendVideoMessage}
+                            onToggleFavorite={handleToggleFavorite}
+                            onArchiveMessage={handleArchiveMessage}
+                            videoDuration={videoDuration}
+                            videoAspectRatio={videoAspectRatio}
+                            videoAudioEnabled={videoAudioEnabled}
+                            videoNegativePrompt={videoNegativePrompt}
+                            onVideoSettingsChange={(s) => {
+                                if (s.duration !== undefined) setVideoDuration(s.duration);
+                                if (s.aspectRatio !== undefined) setVideoAspectRatio(s.aspectRatio as VideoAspectRatio);
+                                if (s.audioEnabled !== undefined) setVideoAudioEnabled(s.audioEnabled);
+                                if (s.negativePrompt !== undefined) setVideoNegativePrompt(s.negativePrompt);
+                            }}
+                            imageAspectRatio={imageAspectRatio}
+                            imageSize={imageSize}
+                            imageNegativePrompt={imageNegativePrompt}
+                            numberOfImages={numberOfImages}
+                            onImageSettingsChange={(s) => {
+                                if (s.aspectRatio !== undefined) setImageAspectRatio(s.aspectRatio as ImagenAspectRatio);
+                                if (s.size !== undefined) setImageSize(s.size as ImagenResolution);
+                                if (s.negativePrompt !== undefined) setImageNegativePrompt(s.negativePrompt);
+                                if (s.numberOfImages !== undefined) setNumberOfImages(s.numberOfImages);
+                            }}
+                            reusePrompt={reusePrompt}
+                            onReusePromptUsed={() => setReusePrompt(null)}
+                            leftSidebarOpen={leftSidebarOpen}
+                            onToggleLeftSidebar={() => setLeftSidebarOpen(!leftSidebarOpen)}
+                        />
                     ) : isAudioConversation && activeTabId !== null ? (
                         /* TTS Composer View - Split layout with history column (expanded since no right sidebar) */
                         <div className="flex-1 flex overflow-hidden">
@@ -3665,13 +3825,14 @@ export function ChatInterface() {
                                         return generatingMsg?.audioProgress;
                                     })()}
                                     restoreData={audioRestoreData}
-                                    onGenerate={(text, speakers, qualityTier) => {
+                                    numVariations={audioNumVariations}
+                                    onGenerate={(text, speakers, qualityTier, numVariations) => {
                                         if (speakers) {
                                             // Multi-speaker mode
                                             setAudioSpeakerConfig(speakers);
                                             setAudioMultiSpeaker(true);
                                         }
-                                        sendAudioMessage(text, qualityTier || audioQualityTier, speakers || undefined, selectedConfigModelId);
+                                        sendAudioMessage(text, qualityTier || audioQualityTier, speakers || undefined, selectedConfigModelId, numVariations);
                                     }}
                                     onSettingsChange={(settings) => {
                                         if (settings.voiceId !== undefined) {
@@ -3708,6 +3869,9 @@ export function ChatInterface() {
                                         if (settings.locale !== undefined) {
                                             setAudioLocale(settings.locale);
                                             handleSettingChange("audio_locale", settings.locale);
+                                        }
+                                        if (settings.numVariations !== undefined) {
+                                            setAudioNumVariations(settings.numVariations);
                                         }
                                     }}
                                     onRestoreHandled={() => setAudioRestoreData(null)}
@@ -4165,8 +4329,8 @@ export function ChatInterface() {
                         </div>
                     )}
 
-                    {/* Input Area - Hidden for gallery, archived, and audio conversations (TTSComposer handles audio) */}
-                    {activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && !isMusicConversation && (
+                    {/* Input Area - Hidden for gallery, archived, audio, and full conversations */}
+                    {activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && !isMusicConversation && !isFullConversation && (
                         activeTab?.isArchived ? (
                             <div className="p-4 border-t border-border/50 bg-orange-500/5">
                                 <div className="flex items-center justify-center gap-2 text-orange-400 text-sm">
@@ -4301,7 +4465,7 @@ export function ChatInterface() {
                                                 }
                                             }
 
-                                            sendVideoMessage(content, selectedSeed || undefined, allAssetFiles.length > 0 ? allAssetFiles : undefined);
+                                            sendVideoMessage(content, selectedSeed || undefined, allAssetFiles.length > 0 ? allAssetFiles : undefined, videoNumVariations);
                                             setSelectedKlingAssets([]);
                                             // Clear selected seed and prompt after use
                                             if (selectedSeed) {
@@ -4633,7 +4797,7 @@ export function ChatInterface() {
             )}
 
             {/* Right Sidebar - Settings (solo visible con conversación activa, no galería, no audio) */}
-            {selectedProjectId && rightSidebarOpen && activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && !isMusicConversation && (
+            {selectedProjectId && rightSidebarOpen && activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && !isMusicConversation && !isFullConversation && (
                 <div className="w-72 border-l border-border/50 bg-sidebar overflow-y-auto relative">
                     {/* Close button */}
                     <Button
@@ -4778,7 +4942,7 @@ export function ChatInterface() {
                                     <>
                                         <div className="flex items-center gap-2 text-sm font-medium">
                                             <ImageIcon className="h-4 w-4 text-primary"/>
-                                            Generacion de Imagenes
+                                            Generacion de Imágenes
                                         </div>
 
                                         {/* Aspect Ratio */}
@@ -4890,6 +5054,41 @@ export function ChatInterface() {
                                         }
                                     }}
                                 />
+                                {/* VEO parallel variations selector */}
+                                {isVeoProvider && (
+                                    <div className="mt-3 pt-3 border-t border-border/30">
+                                        <label className="text-xs text-muted-foreground mb-1.5 block">
+                                            Variaciones
+                                            {veoAvailableSlots !== null && veoAvailableSlots < 4 && (
+                                                <span className="ml-1 text-yellow-600 dark:text-yellow-400">
+                                                    ({veoAvailableSlots} disponible{veoAvailableSlots !== 1 ? "s" : ""})
+                                                </span>
+                                            )}
+                                        </label>
+                                        <div className="flex gap-1">
+                                            {[1, 2, 3, 4].map((n) => {
+                                                const disabled = isSending || (veoAvailableSlots !== null && n > veoAvailableSlots);
+                                                return (
+                                                    <button
+                                                        key={n}
+                                                        onClick={() => setVideoNumVariations(n)}
+                                                        disabled={disabled}
+                                                        className={cn(
+                                                            "flex-1 px-3 py-1.5 text-sm rounded-lg border transition-colors",
+                                                            videoNumVariations === n
+                                                                ? "bg-primary text-primary-foreground border-primary"
+                                                                : disabled
+                                                                    ? "bg-muted/50 border-border/30 text-muted-foreground/40 cursor-not-allowed"
+                                                                    : "bg-muted border-border/50 hover:border-primary/50"
+                                                        )}
+                                                    >
+                                                        {n}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
 

@@ -163,6 +163,38 @@ export async function POST(
     );
     const userMessageId = userMessageResult.insertId;
 
+    // Save reference images to message_images table
+    if (files && files.length > 0) {
+      const imageFiles = files.filter(f => f.type === "image");
+      for (let i = 0; i < imageFiles.length; i++) {
+        try {
+          const imgFile = imageFiles[i];
+          // Use S3 URL if available, otherwise upload the base64 data
+          let imgUrl = imgFile.url;
+          if (!imgUrl && imgFile.dataUrl) {
+            const { uploadToS3 } = await import("@/lib/s3");
+            const base64Data = imgFile.dataUrl.split(",")[1];
+            const ext = imgFile.mimeType?.split("/")[1] || "png";
+            const result = await uploadToS3(
+              Buffer.from(base64Data, "base64"),
+              `conversations/${id}/ref_${userMessageId}_${i}.${ext}`,
+              imgFile.mimeType || "image/png"
+            );
+            imgUrl = result.url;
+          }
+          if (imgUrl) {
+            const fileSize = imgFile.dataUrl ? Buffer.from(imgFile.dataUrl.split(",")[1], "base64").length : null;
+            await pool.execute(
+              `INSERT INTO message_images (message_id, image_url, mime_type, file_size, sort_order) VALUES (?, ?, ?, ?, ?)`,
+              [userMessageId, imgUrl, imgFile.mimeType, fileSize, i]
+            );
+          }
+        } catch (err) {
+          console.error(`Error guardando imagen ref ${i} en message_images:`, err);
+        }
+      }
+    }
+
     const needsTitle = conversation.title === "Nueva conversación" || !conversation.title;
 
     await pool.execute(
@@ -405,8 +437,8 @@ export async function POST(
             );
 
             const [modelResult] = await pool.execute<ResultSetHeader>(
-              `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, generation_seed, content, image_url, image_mime_type, estimated_cost)
-               VALUES (?, 'model', 'image', ?, ?, ?, '', ?, ?, ?)`,
+              `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, generation_seed, content, image_url, image_mime_type, image_aspect_ratio, image_size, estimated_cost)
+               VALUES (?, 'model', 'image', ?, ?, ?, '', ?, ?, ?, ?, ?)`,
               [
                 id,
                 effectiveQualityTier,
@@ -414,6 +446,8 @@ export async function POST(
                 generatedImage.seed ?? null,
                 uploadResult.url,
                 generatedImage.mimeType,
+                aspectRatio,
+                resolution,
                 costPerImage,
               ]
             );

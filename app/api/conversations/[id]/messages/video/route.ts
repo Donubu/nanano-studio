@@ -8,6 +8,8 @@ import { generateKlingVideo, isKlingConfigured, KlingVideoConfig, validateKlingV
 import { uploadVideoToS3, generateVideoFileName, isS3Configured, uploadToS3, generateFileName } from "@/lib/s3";
 import { generateConversationTitle, Labels } from "@/lib/google-ai";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
+import { acquireSlot, releaseSlot, waitForSlot } from "@/lib/veo-semaphore";
+import { isRedisConfigured } from "@/lib/redis";
 
 type QualityTier = "normal" | "hq";
 
@@ -93,6 +95,7 @@ export async function POST(
       selected_model_id,
       inlineAssets,
       voiceBindings,
+      skip_user_message = false,
     } = body as {
       content: string;
       firstFrameImage?: string;
@@ -114,7 +117,8 @@ export async function POST(
       quality_tier?: QualityTier;
       selected_model_id?: number;
       inlineAssets?: InlineAsset[];
-      voiceBindings?: Record<string, string>; // assetId → base64 audio data URL for per-asset voice cloning
+      voiceBindings?: Record<string, string>;
+      skip_user_message?: boolean;
     };
 
     const effectiveQualityTier: QualityTier = quality_tier === "hq" ? "hq" : "normal";
@@ -152,8 +156,8 @@ export async function POST(
 
     const conversation = conversations[0];
 
-    // Verificar que el modelo soporta video
-    if (!conversation.supports_video_generation) {
+    // Verificar que el modelo soporta video (skip for "full" mode which uses image model as default)
+    if (!conversation.supports_video_generation && conversation.generation_type !== "full") {
       return new Response(JSON.stringify({ error: "El modelo seleccionado no soporta generación de video" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
@@ -191,7 +195,8 @@ export async function POST(
           let effectiveModelDbId = conversation.model_id;
           let effectiveBackend = conversation.model_api_backend || undefined;
           let effectiveCostVideoPerSecond = Number(conversation.cost_video_per_second) || 0;
-          const generationType = conversation.generation_type || "video";
+          // For "full" mode, use "video" config since full doesn't have its own model rows
+          const generationType = conversation.generation_type === "full" ? "video" : (conversation.generation_type || "video");
 
           if (conversation.project_id) {
             const [projectModels] = await pool.execute<RowDataPacket[]>(`
@@ -251,22 +256,77 @@ export async function POST(
             }
           }
 
-          // Guardar mensaje del usuario (con quality_tier)
-          const [userMessageResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)
-             VALUES (?, 'user', 'text', ?, ?)`,
-            [id, effectiveQualityTier, content]
-          );
-          const userMessageId = userMessageResult.insertId;
+          // Guardar mensaje del usuario (con quality_tier) - skip for parallel variation requests
+          let userMessageId: number | null = null;
+          if (!skip_user_message) {
+            const [userMessageResult] = await pool.execute<ResultSetHeader>(
+              `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)
+               VALUES (?, 'user', 'text', ?, ?)`,
+              [id, effectiveQualityTier, content]
+            );
+            userMessageId = userMessageResult.insertId;
+
+            // Save reference images/frames/assets to message_images for reuse tracking
+            try {
+              const { uploadToS3 } = await import("@/lib/s3");
+              let sortOrder = 0;
+
+              const saveRefImage = async (base64OrUrl: string, mimeType: string = "image/png") => {
+                let imgUrl = base64OrUrl;
+                if (base64OrUrl.startsWith("data:")) {
+                  const base64Data = base64OrUrl.split(",")[1];
+                  const ext = mimeType.split("/")[1] || "png";
+                  const result = await uploadToS3(
+                    Buffer.from(base64Data, "base64"),
+                    `conversations/${id}/ref_${userMessageId}_${sortOrder}.${ext}`,
+                    mimeType
+                  );
+                  imgUrl = result.url;
+                }
+                const fileSize = base64OrUrl.startsWith("data:") ? Buffer.from(base64OrUrl.split(",")[1], "base64").length : null;
+                await pool.execute(
+                  `INSERT INTO message_images (message_id, image_url, mime_type, file_size, sort_order) VALUES (?, ?, ?, ?, ?)`,
+                  [userMessageId, imgUrl, mimeType, fileSize, sortOrder++]
+                );
+              };
+
+              // Frames
+              const firstFrame = videoInputs?.firstFrame || firstFrameImage;
+              const lastFrame = videoInputs?.lastFrame || lastFrameImage;
+              if (firstFrame) await saveRefImage(firstFrame);
+              if (lastFrame) await saveRefImage(lastFrame);
+
+              // Reference images (VEO ingredients)
+              const refImgs = referenceImages || videoInputs?.referenceImages;
+              if (refImgs) {
+                for (const ref of refImgs) {
+                  if (ref.image) await saveRefImage(ref.image);
+                }
+              }
+
+              // Inline assets (Kling)
+              if (inlineAssets) {
+                for (const asset of inlineAssets) {
+                  if (asset.dataUrl) {
+                    await saveRefImage(asset.dataUrl, asset.mimeType || "image/png");
+                  }
+                }
+              }
+            } catch (err) {
+              console.error("Error guardando referencias en message_images:", err);
+            }
+          }
 
           // Verificar si necesita generar titulo (aún tiene el titulo por defecto)
-          const needsTitle = conversation.title === "Nueva conversación" || !conversation.title;
+          const needsTitle = !skip_user_message && (conversation.title === "Nueva conversación" || !conversation.title);
 
           // Actualizar timestamp de la conversación
-          await pool.execute(
-            "UPDATE conversations SET updated_at = NOW() WHERE id = ?",
-            [id]
-          );
+          if (!skip_user_message) {
+            await pool.execute(
+              "UPDATE conversations SET updated_at = NOW() WHERE id = ?",
+              [id]
+            );
+          }
 
           // Preparar labels para tracking
           const userIdentifier = session.user.email?.split("@")[0] || "unknown";
@@ -276,7 +336,9 @@ export async function POST(
           };
 
           // Enviar el ID del mensaje del usuario
-          sendEvent({ type: "user_message", id: userMessageId });
+          if (!skip_user_message && userMessageId) {
+            sendEvent({ type: "user_message", id: userMessageId });
+          }
 
           // Callback de progreso
           const onProgress = (progress: VideoGenerationProgress) => {
@@ -510,14 +572,58 @@ export async function POST(
             }
             console.log("================================================\n");
 
-            generatedVideo = await generateVideo(
-              effectiveModelId,
-              videoInput,
-              videoConfig,
-              onProgress,
-              labels,
-              effectiveBackend
-            );
+            // Acquire VEO semaphore slot (rate limiting across all users)
+            let veoSlotId: string | null = null;
+            let veoPool: "primary" | "overflow" = "primary";
+            if (isRedisConfigured()) {
+              const slot = await acquireSlot();
+              if (!slot) {
+                sendEvent({
+                  type: "progress",
+                  status: "queued",
+                  message: "Esperando slot de generación disponible...",
+                  progress: 0,
+                });
+                const waitedSlot = await waitForSlot(5 * 60 * 1000, 5000, () => {
+                  sendEvent({
+                    type: "progress",
+                    status: "queued",
+                    message: "En cola, esperando que termine otra generación...",
+                    progress: 0,
+                  });
+                });
+                if (!waitedSlot) {
+                  sendEvent({ type: "error", message: "Tiempo de espera agotado. Demasiadas generaciones en curso. Intenta en unos minutos." });
+                  clearInterval(heartbeat);
+                  controllerClosed = true;
+                  controller.close();
+                  return;
+                }
+                veoSlotId = waitedSlot.slotId;
+                veoPool = waitedSlot.pool;
+              } else {
+                veoSlotId = slot.slotId;
+                veoPool = slot.pool;
+              }
+              console.log(`[VEO] Acquired slot: ${veoSlotId} (pool: ${veoPool})`);
+            }
+
+            try {
+              generatedVideo = await generateVideo(
+                effectiveModelId,
+                videoInput,
+                videoConfig,
+                onProgress,
+                labels,
+                effectiveBackend,
+                veoPool
+              );
+            } finally {
+              if (veoSlotId) {
+                await releaseSlot(veoSlotId, veoPool);
+                console.log(`[VEO] Released slot: ${veoSlotId} (pool: ${veoPool})`);
+              }
+            }
           }
 
           // Guardar video en S3
@@ -611,25 +717,24 @@ export async function POST(
             seed: generatedSeed,
           });
 
+          // Generar título antes de cerrar el stream para notificar al frontend
+          if (needsTitle) {
+            try {
+              const title = await generateConversationTitle(content, labels);
+              await pool.execute(
+                "UPDATE conversations SET title = ? WHERE id = ?",
+                [title, id]
+              );
+              console.log("[Video] Generated title:", title);
+              sendEvent({ type: "title", title });
+            } catch (err) {
+              console.error("[Video] Error generating title:", err);
+            }
+          }
+
           clearInterval(heartbeat);
           controllerClosed = true;
           controller.close();
-
-          // Generar título después de completar exitosamente (fire-and-forget)
-          // Se genera aquí para no competir por cuota API con la llamada principal
-          if (needsTitle) {
-            generateConversationTitle(content, labels)
-              .then(async (title) => {
-                await pool.execute(
-                  "UPDATE conversations SET title = ? WHERE id = ?",
-                  [title, id]
-                );
-                console.log("[Video] Generated title:", title);
-              })
-              .catch((err) => {
-                console.error("[Video] Error generating title:", err);
-              });
-          }
 
         } catch (error) {
           console.error("[Video] Error generating video:", error);
@@ -670,8 +775,10 @@ export async function POST(
     return new Response(stream, {
       headers: {
         "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
+        "Cache-Control": "no-cache, no-transform",
         "Connection": "keep-alive",
+        "Content-Encoding": "none",
+        "X-Accel-Buffering": "no",
       },
     });
 

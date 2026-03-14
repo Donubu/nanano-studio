@@ -95,6 +95,7 @@ export async function POST(
       audioSettings,
       quality_tier,
       selected_model_id,
+      skip_user_message = false,
     } = body as {
       content: string;
       audioSettings?: {
@@ -109,6 +110,7 @@ export async function POST(
       };
       quality_tier?: QualityTier;
       selected_model_id?: number;
+      skip_user_message?: boolean;
     };
 
     const validTiers: QualityTier[] = ["normal", "hq", "chirp"];
@@ -243,22 +245,27 @@ export async function POST(
             }
           }
 
-          // Guardar mensaje del usuario (con quality_tier)
-          const [userMessageResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)
-             VALUES (?, 'user', 'text', ?, ?)`,
-            [id, effectiveQualityTier, content]
-          );
-          const userMessageId = userMessageResult.insertId;
+          // Guardar mensaje del usuario (con quality_tier) - skip for parallel variation requests
+          let userMessageId: number | null = null;
+          if (!skip_user_message) {
+            const [userMessageResult] = await pool.execute<ResultSetHeader>(
+              `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)
+               VALUES (?, 'user', 'text', ?, ?)`,
+              [id, effectiveQualityTier, content]
+            );
+            userMessageId = userMessageResult.insertId;
+          }
 
           // Verificar si necesita generar titulo (aún tiene el titulo por defecto)
-          const needsTitle = conversation.title === "Nueva conversación" || !conversation.title;
+          const needsTitle = !skip_user_message && (conversation.title === "Nueva conversación" || !conversation.title);
 
           // Actualizar timestamp de la conversación
-          await pool.execute(
-            "UPDATE conversations SET updated_at = NOW() WHERE id = ?",
-            [id]
-          );
+          if (!skip_user_message) {
+            await pool.execute(
+              "UPDATE conversations SET updated_at = NOW() WHERE id = ?",
+              [id]
+            );
+          }
 
           // Preparar labels para tracking
           const userIdentifier = session.user.email?.split("@")[0] || "unknown";
@@ -268,7 +275,9 @@ export async function POST(
           };
 
           // Enviar el ID del mensaje del usuario
-          sendEvent({ type: "user_message", id: userMessageId });
+          if (!skip_user_message && userMessageId) {
+            sendEvent({ type: "user_message", id: userMessageId });
+          }
 
           // Configuración de generación de audio (usa request settings, fallback a conversation settings)
           const voiceId = audioSettings?.voiceId || conversation.audio_voice_id || "Kore";
@@ -496,29 +505,28 @@ export async function POST(
             estimatedCost,
           });
 
-          clearInterval(heartbeat);
-          controllerClosed = true;
-          controller.close();
-
-          // Generar título después de completar exitosamente (fire-and-forget)
-          // Se genera aquí para no competir por cuota API con la llamada principal
+          // Generar título antes de cerrar el stream para notificar al frontend
           if (needsTitle) {
             const titleLabels: AILabels = {
               project_name: conversation.client_name ? `${conversation.client_name} > ${conversation.project_name}` : conversation.project_name || "sin_proyecto",
               user_name: userIdentifier,
             };
-            generateConversationTitle(content, titleLabels)
-              .then(async (title) => {
-                await pool.execute(
-                  "UPDATE conversations SET title = ? WHERE id = ?",
-                  [title, id]
-                );
-                console.log("[Audio] Generated title:", title);
-              })
-              .catch((err) => {
-                console.error("[Audio] Error generating title:", err);
-              });
+            try {
+              const title = await generateConversationTitle(content, titleLabels);
+              await pool.execute(
+                "UPDATE conversations SET title = ? WHERE id = ?",
+                [title, id]
+              );
+              console.log("[Audio] Generated title:", title);
+              sendEvent({ type: "title", title });
+            } catch (err) {
+              console.error("[Audio] Error generating title:", err);
+            }
           }
+
+          clearInterval(heartbeat);
+          controllerClosed = true;
+          controller.close();
 
         } catch (error) {
           console.error("[Audio] Error generating audio:", error);

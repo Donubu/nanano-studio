@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, useImperativeHandle, forwardRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Send, Paperclip, X, Loader2, FileText, Music, Image as ImageIcon, Film } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,7 @@ export interface AttachedFile {
   type: "image" | "document" | "audio" | "video";
   size: number;
   assetId?: string; // e.g., "asset1", "asset2" - only set in asset mode
+  sourceUrl?: string; // original CDN URL when dragged from grid
 }
 
 export interface PreselectedImage {
@@ -33,6 +34,17 @@ interface MessageInputProps {
   assetMode?: boolean; // When true, files get auto-incremental asset IDs and @ mentions are enabled
   maxFilesOverride?: number; // Override max files limit (e.g., dynamic Kling limits)
   onAssetsChange?: (assets: { assetId: string; type: string; label: string }[]) => void; // Notify parent of full asset list
+  className?: string;
+  minimal?: boolean; // Strip borders/bg from textarea for embedding inside a custom wrapper
+  extraActions?: React.ReactNode; // Rendered next to the send button
+  onExternalFileAdded?: (file: AttachedFile) => void; // Called when user adds a file from file picker/paste (NOT from addFiles imperative)
+}
+
+export interface MessageInputHandle {
+  addFiles: (files: AttachedFile[]) => void;
+  clearFiles: () => void;
+  getFiles: () => AttachedFile[];
+  removeFileByUrl: (url: string) => void;
 }
 
 const MAX_FILES = 5;
@@ -74,7 +86,7 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function MessageInput({
+export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function MessageInput({
   onSend,
   disabled = false,
   placeholder = "Escribe un mensaje...",
@@ -87,7 +99,11 @@ export function MessageInput({
   assetMode = false,
   maxFilesOverride,
   onAssetsChange,
-}: MessageInputProps) {
+  className: classNameProp,
+  minimal = false,
+  extraActions,
+  onExternalFileAdded,
+}, ref) {
   const [message, setMessage] = useState("");
   const [noContext, setNoContext] = useState(false);
 
@@ -99,6 +115,7 @@ export function MessageInput({
     }
   }, [initialValue, onInitialValueUsed]);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -126,6 +143,47 @@ export function MessageInput({
   }, [attachedFiles.length, assetMode, preselectedImages]);
 
   const maxFiles = maxFilesOverride ?? (assetMode ? MAX_FILES_ASSET_MODE : MAX_FILES);
+
+  // Expose imperative method to inject files from outside
+  useImperativeHandle(ref, () => ({
+    addFiles: (files: AttachedFile[]) => {
+      setAttachedFiles(prev => {
+        const totalCurrent = prev.length + preselectedImages.length;
+        const remainingSlots = maxFiles - totalCurrent;
+        if (remainingSlots <= 0) return prev;
+
+        // If adding into an empty list, reset counter to ensure sequential IDs from 1
+        if (assetMode && prev.length === 0 && preselectedImages.length === 0) {
+          nextAssetId.current = 1;
+        }
+
+        const filesToAdd: AttachedFile[] = [];
+        for (const f of files) {
+          if (filesToAdd.length >= remainingSlots) break;
+          if (assetMode && f.type === "video") {
+            const existingVideos = prev.filter(x => x.type === "video").length + filesToAdd.filter(x => x.type === "video").length;
+            const preselectedVideos = preselectedImages.filter(img => img.url.includes("/video") || img.url.endsWith(".mp4")).length;
+            if (existingVideos + preselectedVideos >= 1) continue; // max 1 video
+          }
+          const newFile = { ...f };
+          if (assetMode && !newFile.assetId) {
+            newFile.assetId = `asset${nextAssetId.current}`;
+            nextAssetId.current++;
+          }
+          filesToAdd.push(newFile);
+        }
+        return filesToAdd.length > 0 ? [...prev, ...filesToAdd] : prev;
+      });
+    },
+    clearFiles: () => {
+      setAttachedFiles([]);
+      nextAssetId.current = 1;
+    },
+    getFiles: () => attachedFiles,
+    removeFileByUrl: (url: string) => {
+      setAttachedFiles(prev => prev.filter(f => f.dataUrl !== url && f.sourceUrl !== url));
+    },
+  }), [assetMode, maxFiles, preselectedImages, attachedFiles]);
 
   // Notify parent about full asset list (for voice bindings, limits, etc.)
   const prevAssetKeyRef = useRef("");
@@ -259,7 +317,14 @@ export function MessageInput({
 
     setAttachedFiles((prev) => [...prev, ...newFiles]);
     setIsProcessing(false);
-  }, [attachedFiles.length, preselectedImages.length, assetMode, maxFiles]);
+
+    // Notify parent about externally added files (file picker, paste, desktop drag)
+    if (onExternalFileAdded) {
+      for (const f of newFiles) {
+        onExternalFileAdded(f);
+      }
+    }
+  }, [attachedFiles.length, preselectedImages.length, assetMode, maxFiles, onExternalFileAdded]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -512,7 +577,8 @@ export function MessageInput({
     <div
       className={cn(
         "border-t border-border/50 p-4 transition-colors",
-        isDragging && "bg-primary/5 border-primary/50"
+        isDragging && "bg-primary/5 border-primary/50",
+        classNameProp
       )}
       onDragOver={supportsFiles ? handleDragOver : undefined}
       onDragLeave={supportsFiles ? handleDragLeave : undefined}
@@ -638,22 +704,24 @@ export function MessageInput({
                 : placeholder
               }
               disabled={disabled}
-              rows={3}
+              rows={minimal ? 2 : 3}
               className={cn(
-                "w-full bg-card border border-border/50 rounded-lg px-4 py-2.5 text-sm resize-none",
-                "focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50",
+                "w-full text-sm resize-none",
+                minimal
+                  ? "bg-transparent border-none px-3 py-1.5 focus:outline-none focus:ring-0"
+                  : "bg-card border border-border/50 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50",
                 "placeholder:text-muted-foreground",
-                "min-h-[132px] max-h-[300px]",
+                minimal ? "min-h-[44px] max-h-[200px]" : "min-h-[132px] max-h-[300px]",
                 disabled && "opacity-50 cursor-not-allowed"
               )}
               style={{
                 height: "auto",
-                minHeight: "132px",
+                minHeight: minimal ? "44px" : "132px",
               }}
               onInput={(e) => {
                 const target = e.target as HTMLTextAreaElement;
                 target.style.height = "auto";
-                target.style.height = `${Math.min(target.scrollHeight, 300)}px`;
+                target.style.height = `${Math.min(target.scrollHeight, minimal ? 200 : 300)}px`;
               }}
               onBlur={() => {
                 // Delay hiding to allow click on mention item
@@ -743,6 +811,8 @@ export function MessageInput({
             </div>
           )}
 
+          {extraActions}
+
           {/* Botón enviar */}
           <Button
             onClick={handleSend}
@@ -782,4 +852,4 @@ export function MessageInput({
       </div>
     </div>
   );
-}
+});

@@ -45,11 +45,25 @@ export function MusicPlayer({
     }
   }, [duration]);
 
+  // Pause this player when another player starts playing
+  useEffect(() => {
+    const handleOtherPlay = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail !== audioRef.current && audioRef.current) {
+        audioRef.current.pause();
+        setIsPlaying(false);
+      }
+    };
+    document.addEventListener("audio-player-play", handleOtherPlay);
+    return () => document.removeEventListener("audio-player-play", handleOtherPlay);
+  }, []);
+
   const handlePlayPause = () => {
     if (audioRef.current) {
       if (isPlaying) {
         audioRef.current.pause();
       } else {
+        document.dispatchEvent(new CustomEvent("audio-player-play", { detail: audioRef.current }));
         audioRef.current.play();
       }
       setIsPlaying(!isPlaying);

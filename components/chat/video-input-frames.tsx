@@ -18,6 +18,7 @@ export type ReferenceType = "ASSET" | "STYLE";
 export interface ReferenceImage {
   image: string;
   type: ReferenceType;
+  sourceUrl?: string;
 }
 
 export type VideoInputProvider = "google" | "xai" | "kling";
