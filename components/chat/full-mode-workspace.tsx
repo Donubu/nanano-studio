@@ -7,7 +7,7 @@ import {
   Undo2, ZoomIn, X, Loader2, ChevronLeft, ChevronRight, VolumeX,
   Upload, Clock, ChevronUp, RectangleHorizontal, RectangleVertical, Square,
   AlertTriangle, Play, PanelLeft, PanelLeftClose, RotateCcw, SlidersHorizontal, Eye, EyeOff,
-  FolderPlus, Folder, ArrowLeft, Pencil, MoreHorizontal, Search
+  FolderPlus, Folder, ArrowLeft, Pencil, MoreHorizontal, Search, Volume2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MessageInput, AttachedFile, MessageInputHandle } from "./message-input";
@@ -252,8 +252,13 @@ export function FullModeWorkspace({
     if (typeof window !== "undefined") return localStorage.getItem("full-show-labels") === "true";
     return false;
   });
+  const [hoverAudio, setHoverAudioState] = useState(() => {
+    if (typeof window !== "undefined") return localStorage.getItem("full-hover-audio") === "true";
+    return false;
+  });
   const setGridSize = (v: "S" | "M" | "L") => { setGridSizeState(v); localStorage.setItem("full-grid-size", v); };
   const setShowLabels = (v: boolean) => { setShowLabelsState(v); localStorage.setItem("full-show-labels", String(v)); };
+  const setHoverAudio = (v: boolean) => { setHoverAudioState(v); localStorage.setItem("full-hover-audio", String(v)); };
   const rowHeight = GRID_SIZES[gridSize];
   const [reuseWarning, setReuseWarning] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<Generation | null>(null);
@@ -1423,6 +1428,16 @@ export function FullModeWorkspace({
                       <span className={showLabels ? "text-foreground" : "text-muted-foreground"}>Mostrar prompts</span>
                     </button>
                   </div>
+                  {/* Hover audio */}
+                  <div>
+                    <button
+                      onClick={() => setHoverAudio(!hoverAudio)}
+                      className="flex items-center gap-2 w-full text-xs text-left"
+                    >
+                      {hoverAudio ? <Volume2 className="h-3.5 w-3.5 text-primary" /> : <VolumeX className="h-3.5 w-3.5 text-muted-foreground" />}
+                      <span className={hoverAudio ? "text-foreground" : "text-muted-foreground"}>Audio en hover</span>
+                    </button>
+                  </div>
                 </div>
               </>
             )}
@@ -1486,7 +1501,7 @@ export function FullModeWorkspace({
               <div className="flex flex-wrap gap-3 content-start">
                 {collectionGenerations.map((gen, index) => (
                   <div key={gen.id} className="relative group/col">
-                    <GridItem key={`${gen.type}-${gen.id}`} gen={gen} index={index} rowHeight={rowHeight} showLabels={showLabels} onOpen={openGeneration} onFavorite={handleToggleFavorite} onDelete={handleDelete} onRestore={handleRestore} onDownload={handleDownload} onReuse={handleReusePrompt} onDragStarted={setDraggedMediaType} onDragEnded={() => setDraggedMediaType(null)} />
+                    <GridItem key={`${gen.type}-${gen.id}`} gen={gen} index={index} rowHeight={rowHeight} showLabels={showLabels} hoverAudio={hoverAudio} onOpen={openGeneration} onFavorite={handleToggleFavorite} onDelete={handleDelete} onRestore={handleRestore} onDownload={handleDownload} onReuse={handleReusePrompt} onDragStarted={setDraggedMediaType} onDragEnded={() => setDraggedMediaType(null)} />
                     {/* Remove from collection button */}
                     <button
                       onClick={(e) => { e.stopPropagation(); handleRemoveFromCollection(activeCollectionId, gen.id); }}
@@ -1592,7 +1607,7 @@ export function FullModeWorkspace({
                   if (entry.kind === "collection") {
                     return <CollectionGridItem key={`col-${entry.data.id}`} collection={entry.data} rowHeight={rowHeight} isEditing={editingCollectionName === entry.data.id} onOpen={() => { setActiveCollectionId(entry.data.id); setFilter("all"); }} onDelete={() => handleDeleteCollection(entry.data.id)} onRename={(name) => handleRenameCollection(entry.data.id, name)} onStartEditing={() => setEditingCollectionName(entry.data.id)} onStopEditing={() => setEditingCollectionName(null)} dragOverCollectionId={dragOverCollectionId} onDragOver={() => setDragOverCollectionId(entry.data.id)} onDragLeave={() => setDragOverCollectionId(null)} onDrop={(genId) => { setDragOverCollectionId(null); handleDropOnCollection(entry.data.id, genId); }} />;
                   }
-                  return <GridItem key={`${entry.data.type}-${entry.data.id}`} gen={entry.data} index={entry.index} rowHeight={rowHeight} showLabels={showLabels} onOpen={openGeneration} onFavorite={handleToggleFavorite} onDelete={handleDelete} onRestore={handleRestore} onDownload={handleDownload} onReuse={handleReusePrompt} onDragStarted={setDraggedMediaType} onDragEnded={() => setDraggedMediaType(null)} />;
+                  return <GridItem key={`${entry.data.type}-${entry.data.id}`} gen={entry.data} index={entry.index} rowHeight={rowHeight} showLabels={showLabels} hoverAudio={hoverAudio} onOpen={openGeneration} onFavorite={handleToggleFavorite} onDelete={handleDelete} onRestore={handleRestore} onDownload={handleDownload} onReuse={handleReusePrompt} onDragStarted={setDraggedMediaType} onDragEnded={() => setDraggedMediaType(null)} />;
                 });
               })()}
             </div>
@@ -1958,10 +1973,11 @@ function getAspectRatio(gen: Generation): number {
 
 // ---- Grid Item ----
 
-function GridItem({ gen, index, rowHeight, showLabels, onOpen, onFavorite, onDelete, onRestore, onDownload, onReuse, onDragStarted, onDragEnded }: {
+function GridItem({ gen, index, rowHeight, showLabels, hoverAudio, onOpen, onFavorite, onDelete, onRestore, onDownload, onReuse, onDragStarted, onDragEnded }: {
   gen: Generation; index: number;
   rowHeight: number;
   showLabels?: boolean;
+  hoverAudio?: boolean;
   onOpen: (i: number, g: Generation) => void;
   onFavorite: (id: number, e?: React.MouseEvent) => void;
   onDelete: (id: number, e?: React.MouseEvent) => void;
@@ -1994,8 +2010,8 @@ function GridItem({ gen, index, rowHeight, showLabels, onOpen, onFavorite, onDel
         gen.deleted_at ? "border-red-500/30 opacity-60" : "border-border/50 hover:border-primary/50",
         (gen.image_url || gen.video_url) && "cursor-grab active:cursor-grabbing"
       )}
-      onMouseEnter={(e) => { if (gen.type === "video") { const v = e.currentTarget.querySelector("video"); v?.play(); } }}
-      onMouseLeave={(e) => { if (gen.type === "video") { const v = e.currentTarget.querySelector("video"); if (v) { v.pause(); v.currentTime = 0; } } }}
+      onMouseEnter={(e) => { if (gen.type === "video") { const v = e.currentTarget.querySelector("video"); if (v) { if (hoverAudio) v.muted = false; v.play(); } } }}
+      onMouseLeave={(e) => { if (gen.type === "video") { const v = e.currentTarget.querySelector("video"); if (v) { v.pause(); v.currentTime = 0; v.muted = true; } } }}
     >
       {gen.type === "image" && gen.image_url ? (
         <img src={gen.image_url} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" draggable={false} />
