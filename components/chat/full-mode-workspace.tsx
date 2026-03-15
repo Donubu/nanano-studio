@@ -1636,7 +1636,7 @@ export function FullModeWorkspace({
           )}
 
           <div className="pointer-events-auto">
-            <div className="max-w-4xl mx-auto px-4 py-3 relative">
+            <div className="max-w-2xl mx-auto px-4 py-3 relative">
           {/* Drop zones overlay (absolute, on top of prompt) — always rendered, visibility toggled via CSS to avoid DOM changes during drag */}
           <div className={cn(
             "absolute inset-0 z-10 px-4 py-3 flex items-stretch transition-opacity",
@@ -1816,14 +1816,14 @@ export function FullModeWorkspace({
                     {settingsOpen && (
                       <>
                         <div className="fixed inset-0 z-40" onClick={() => setSettingsOpen(false)} />
-                        <div className="absolute bottom-full right-0 mb-1 z-50 w-auto min-w-[300px] bg-card border border-border/50 rounded-lg shadow-xl p-3 space-y-3">
+                        <div className="absolute bottom-full right-0 mb-1 z-50  w-[260px] bg-card border border-border/50 rounded-lg shadow-xl p-3 space-y-3">
                         {/* Row 1: Format + Model */}
-                        <div className="flex items-center gap-3">
-                          <div className="flex gap-1 p-0.5 bg-muted rounded-md">
-                            <button onClick={() => setFormat("image")} className={cn("flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors", format === "image" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <div className="w-full flex gap-1 p-0.5 bg-muted rounded-md">
+                            <button onClick={() => setFormat("image")} className={cn("flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors w-1/2", format === "image" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
                               <ImageIcon className="h-3 w-3" /> Imagen
                             </button>
-                            <button onClick={() => setFormat("video")} className={cn("flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors", format === "video" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+                            <button onClick={() => setFormat("video")} className={cn("flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors w-1/2", format === "video" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
                               <Video className="h-3 w-3" /> Video
                             </button>
                           </div>
@@ -1831,7 +1831,7 @@ export function FullModeWorkspace({
                             <select
                               value={(format === "image" ? activeImageModel?.id : activeVideoModel?.id) || ""}
                               onChange={(e) => handleSelectModel(Number(e.target.value))}
-                              className="text-xs bg-muted border-none rounded-md px-2 py-1.5 text-foreground focus:ring-1 focus:ring-primary"
+                              className="w-full text-xs bg-muted border-none rounded-md px-2 py-1.5 text-foreground focus:ring-1 focus:ring-primary"
                             >
                               {(format === "image" ? imageModels : videoModels).map(m => (
                                 <option key={m.id} value={m.id}>{m.display_name}</option>
@@ -1841,14 +1841,14 @@ export function FullModeWorkspace({
                         </div>
 
                         {format === "image" ? (
-                          <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-4 flex-wrap">
                             <div className="flex items-center gap-2">
-                              <label className="text-xs text-muted-foreground">Aspecto</label>
                               <div className="flex gap-0.5">
                                 {(["16:9", "9:16", "1:1", "4:3", "3:4"] as ImagenAspectRatio[]).map(ar => (
                                   <button key={ar} onClick={() => onImageSettingsChange({ aspectRatio: ar })} className={cn("px-1.5 py-1 rounded text-xs font-medium transition-colors", imageAspectRatio === ar ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground")}>{ar}</button>
                                 ))}
                               </div>
+
                             </div>
                             <div className="flex items-center gap-2">
                               <label className="text-xs text-muted-foreground">Cant.</label>
@@ -1861,9 +1861,9 @@ export function FullModeWorkspace({
                           </div>
                         ) : (
                           <>
-                            <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-4 flex-wrap">
                               <div className="flex items-center gap-2">
-                                <label className="text-xs text-muted-foreground">Duracion</label>
+
                                 <div className="flex gap-0.5">
                                   {supportedDurations.map(d => (
                                     <button key={d} onClick={() => onVideoSettingsChange({ duration: d })} className={cn("px-1.5 py-1 rounded text-xs font-medium transition-colors", videoDuration === d ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground")}>{d}s</button>
@@ -1871,7 +1871,7 @@ export function FullModeWorkspace({
                                 </div>
                               </div>
                               <div className="flex items-center gap-2">
-                                <label className="text-xs text-muted-foreground">Aspecto</label>
+
                                 <div className="flex gap-0.5">
                                   {supportedVideoAR.map(ar => (
                                     <button key={ar} onClick={() => onVideoSettingsChange({ aspectRatio: ar })} className={cn("px-1.5 py-1 rounded text-xs font-medium transition-colors", videoAspectRatio === ar ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground")}>{ar}</button>

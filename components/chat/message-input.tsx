@@ -811,6 +811,9 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
             </div>
           )}
 
+        </div>
+
+        <div className="flex gap-2 justify-end">
           {extraActions}
 
           {/* Botón enviar */}
