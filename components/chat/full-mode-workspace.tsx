@@ -901,6 +901,9 @@ export function FullModeWorkspace({
     }
   };
 
+  const projectTagsRef = useRef(projectTags);
+  projectTagsRef.current = projectTags;
+
   const handleToggleTag = async (genId: number, tagId: number) => {
     const gen = generations.find(g => g.id === genId) || collectionGenerations.find(g => g.id === genId);
     if (!gen) return;
@@ -919,20 +922,16 @@ export function FullModeWorkspace({
           body: JSON.stringify({ tag_id: tagId }),
         });
       }
-      // Look up in current projectTags state (use callback to get latest)
-      setProjectTags(currentTags => {
-        const tag = currentTags.find(t => t.id === tagId);
-        if (!tag) return currentTags;
-        const updateTags = (g: Generation) => {
-          if (g.id !== genId) return g;
-          const newTags = hasTag ? g.tags.filter(t => t.id !== tagId) : [...g.tags, { id: tag.id, name: tag.name, color: tag.color }];
-          return { ...g, tags: newTags };
-        };
-        setGenerations(prev => prev.map(updateTags));
-        setCollectionGenerations(prev => prev.map(updateTags));
-        if (selectedItem?.id === genId) setSelectedItem(prev => prev ? updateTags(prev) : prev);
-        return currentTags; // don't modify projectTags
-      });
+      const tag = projectTagsRef.current.find(t => t.id === tagId);
+      if (!tag) return;
+      const updateTags = (g: Generation) => {
+        if (g.id !== genId) return g;
+        const newTags = hasTag ? g.tags.filter(t => t.id !== tagId) : [...g.tags, { id: tag.id, name: tag.name, color: tag.color }];
+        return { ...g, tags: newTags };
+      };
+      setGenerations(prev => prev.map(updateTags));
+      setCollectionGenerations(prev => prev.map(updateTags));
+      setSelectedItem(prev => prev && prev.id === genId ? updateTags(prev) : prev);
     } catch (err) {
       console.error("Error toggling tag:", err);
     }
@@ -1236,18 +1235,21 @@ export function FullModeWorkspace({
     setShowTopazVideo(false);
   };
 
+  // Navigable list: collection items when inside a collection, otherwise filtered generations
+  const navigableList = activeCollectionId ? collectionGenerations : filteredGenerations;
+
   const goToPrev = () => {
     if (selectedIndex !== null && selectedIndex > 0) {
       const newIdx = selectedIndex - 1;
-      setSelectedItem(filteredGenerations[newIdx]);
+      setSelectedItem(navigableList[newIdx]);
       setSelectedIndex(newIdx);
     }
   };
 
   const goToNext = () => {
-    if (selectedIndex !== null && selectedIndex < filteredGenerations.length - 1) {
+    if (selectedIndex !== null && selectedIndex < navigableList.length - 1) {
       const newIdx = selectedIndex + 1;
-      setSelectedItem(filteredGenerations[newIdx]);
+      setSelectedItem(navigableList[newIdx]);
       setSelectedIndex(newIdx);
     }
   };
@@ -1312,7 +1314,7 @@ export function FullModeWorkspace({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [selectedItem, selectedIndex, filteredGenerations.length]);
+  }, [selectedItem, selectedIndex, navigableList.length]);
 
   // ---- Drag-and-drop handlers ----
   // Determine what drop zones to show based on current format/mode
@@ -1710,7 +1712,7 @@ export function FullModeWorkspace({
                     {/* Remove from collection button */}
                     <button
                       onClick={(e) => { e.stopPropagation(); handleRemoveFromCollection(activeCollectionId, gen.id); }}
-                      className="absolute top-2 left-2 p-1 rounded-md bg-black/70 hover:bg-red-600 transition-colors opacity-0 group-hover/col:opacity-100 z-[3]"
+                      className="absolute top-8 left-2 p-1 rounded-md bg-black/70 hover:bg-red-600 transition-colors opacity-0 group-hover/col:opacity-100 z-[3]"
                       title="Quitar de colección"
                     >
                       <X className="h-3.5 w-3.5 text-white/80" />
@@ -2199,7 +2201,7 @@ export function FullModeWorkspace({
         <DetailModal
           item={selectedItem}
           index={selectedIndex}
-          total={filteredGenerations.length}
+          total={navigableList.length}
           projectTags={projectTags}
           onClose={handleCloseModal}
           onPrev={goToPrev}
@@ -2336,11 +2338,14 @@ const GridItem = memo(function GridItem({ gen, index, rowHeight, showLabels, hov
 
       {/* Tags */}
       {gen.tags.length > 0 && (
-        <div className="absolute top-2 left-2 flex gap-1 flex-wrap max-w-[80%] z-10">
-          {gen.tags.slice(0, 2).map(tag => (
+        <div className="absolute bottom-7 left-2 flex gap-1 flex-wrap max-w-[90%] z-[1] group/tags">
+          {gen.tags.slice(0, 1).map(tag => (
             <span key={tag.id} className="px-1.5 py-0.5 rounded text-[10px] font-medium shadow-sm" style={{ backgroundColor: `${tag.color}cc`, color: "white" }}>{tag.name}</span>
           ))}
-          {gen.tags.length > 2 && <span className="px-1.5 py-0.5 rounded text-[10px] bg-black/60 text-white">+{gen.tags.length - 2}</span>}
+          {gen.tags.length > 1 && <span className="px-1.5 py-0.5 rounded text-[10px] bg-black/60 text-white group-hover/tags:hidden">+{gen.tags.length - 1}</span>}
+          {gen.tags.slice(1).map(tag => (
+            <span key={tag.id} className="hidden group-hover/tags:inline px-1.5 py-0.5 rounded text-[10px] font-medium shadow-sm" style={{ backgroundColor: `${tag.color}cc`, color: "white" }}>{tag.name}</span>
+          ))}
         </div>
       )}
 
@@ -2504,11 +2509,17 @@ function DetailModal({ item, index, total, projectTags, onClose, onPrev, onNext,
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-auto flex items-center justify-center p-4 min-h-0">
+        <div className="flex-1 overflow-hidden flex items-center justify-center p-4" style={{ minHeight: 0 }}>
           {item.type === "image" && item.image_url ? (
-            <img src={item.image_url} alt="" className="max-w-full max-h-[70vh] object-contain rounded" />
+            <img src={item.image_url} alt="" className="max-w-full object-contain rounded" style={{ maxHeight: "calc(90vh - 200px)" }} />
           ) : item.type === "video" && item.video_url ? (
-            <VideoPlayer videoUrl={item.video_url} hasAudio={item.video_has_audio ?? false} duration={item.video_duration || undefined} aspectRatio={item.video_aspect_ratio || undefined} size="large" />
+            <video
+              src={item.video_url}
+              controls
+              autoPlay
+              className="rounded-lg object-contain"
+              style={{ maxHeight: "calc(90vh - 200px)", maxWidth: "100%", aspectRatio: (item.video_aspect_ratio || "16:9").replace(":", " / ") }}
+            />
           ) : null}
         </div>
 
