@@ -262,6 +262,10 @@ const STORAGE_KEY_ACTIVE_TAB = "nanano_active_tab";
 const STORAGE_KEY_CLIENT = "nanano_selected_client";
 const STORAGE_KEY_PROJECT = "nanano_selected_project";
 
+// Unique negative IDs for temp messages to avoid collisions with parallel requests
+let _tempIdCounter = -1;
+function nextTempId(): number { return _tempIdCounter--; }
+
 export function ChatInterface() {
     const {data: session} = useSession();
     const {theme, setTheme} = useTheme();
@@ -1854,7 +1858,7 @@ export function ChatInterface() {
         // Add optimistic user message
         const imageFiles = files?.filter(f => f.type === "image") || [];
         const tempUserMessage: Message = {
-            id: Date.now(),
+            id: nextTempId(),
             role: "user",
             content,
             content_type: hasFiles ? "mixed" : "text",
@@ -1868,8 +1872,8 @@ export function ChatInterface() {
             [tabId]: [...(prev[tabId] || []), tempUserMessage],
         }));
 
-        // Add streaming placeholder for model response
-        const streamingMessageId = Date.now() + 1;
+        // Add streaming placeholder for model response + extra placeholders for multi-image
+        const streamingMessageId = nextTempId();
         const streamingMessage: Message = {
             id: streamingMessageId,
             role: "model",
@@ -1879,9 +1883,37 @@ export function ChatInterface() {
             isStreaming: true,
         };
 
+        // Pre-create all extra placeholders upfront so they appear immediately
+        const useImagenEndpointCheck = imageSettings?.isImagen4 === true;
+        const earlyExtraCount = (!useImagenEndpointCheck && imageSettings?.numberOfImages && imageSettings.numberOfImages > 1)
+            ? imageSettings.numberOfImages - 1 : 0;
+        const imagen4EarlyCount = (useImagenEndpointCheck && imageSettings?.numberOfImages && imageSettings.numberOfImages > 1)
+            ? imageSettings.numberOfImages - 1 : 0;
+        const earlyExtraPlaceholderIds: number[] = Array.from({ length: earlyExtraCount }, () => nextTempId());
+        const earlyImagen4PlaceholderIds: number[] = Array.from({ length: imagen4EarlyCount }, () => nextTempId());
+
         setTabMessages((prev) => ({
             ...prev,
-            [tabId]: [...(prev[tabId] || []), streamingMessage],
+            [tabId]: [
+                ...(prev[tabId] || []),
+                streamingMessage,
+                ...earlyExtraPlaceholderIds.map((pid) => ({
+                    id: pid,
+                    role: "model" as const,
+                    content: "",
+                    content_type: "image" as const,
+                    created_at: new Date().toISOString(),
+                    isStreaming: true,
+                })),
+                ...earlyImagen4PlaceholderIds.map((pid) => ({
+                    id: pid,
+                    role: "model" as const,
+                    content: "",
+                    content_type: "image" as const,
+                    created_at: new Date().toISOString(),
+                    isStreaming: true,
+                })),
+            ],
         }));
 
         try {
@@ -1974,67 +2006,20 @@ export function ChatInterface() {
             // Multi-image support: track temporary image message IDs
             const tempImageMessageIds: number[] = [];
 
-            // For Imagen4: add N-1 visual placeholders (API generates all in one request)
-            const imagen4ExtraCount = (useImagenEndpoint && imageSettings?.numberOfImages && imageSettings.numberOfImages > 1)
-                ? imageSettings.numberOfImages - 1
-                : 0;
-
-            if (imagen4ExtraCount > 0) {
-                const imagen4PlaceholderIds: number[] = [];
-                for (let i = 0; i < imagen4ExtraCount; i++) {
-                    imagen4PlaceholderIds.push(Date.now() + 200 + i);
-                }
-                setTabMessages((prev) => ({
-                    ...prev,
-                    [tabId]: [
-                        ...prev[tabId],
-                        ...imagen4PlaceholderIds.map((pid) => ({
-                            id: pid,
-                            role: "model" as const,
-                            content: "",
-                            content_type: "image" as const,
-                            created_at: new Date().toISOString(),
-                            isStreaming: true,
-                        })),
-                    ],
-                }));
-                // Track these so SSE image events update them instead of adding new messages
-                tempImageMessageIds.push(...imagen4PlaceholderIds);
+            // For Imagen4: use pre-created placeholders for SSE image events
+            if (earlyImagen4PlaceholderIds.length > 0) {
+                tempImageMessageIds.push(...earlyImagen4PlaceholderIds);
             }
 
             // Fire N-1 additional parallel requests for non-Imagen4 multi-image generation
-            const extraImageCount = (!useImagenEndpoint && imageSettings?.numberOfImages && imageSettings.numberOfImages > 1)
-                ? imageSettings.numberOfImages - 1
-                : 0;
-
-            if (extraImageCount > 0) {
-                // Add loading placeholders for each extra image
-                const extraPlaceholderIds: number[] = [];
-                for (let i = 0; i < extraImageCount; i++) {
-                    const placeholderId = Date.now() + 300 + i;
-                    extraPlaceholderIds.push(placeholderId);
-                }
-                setTabMessages((prev) => ({
-                    ...prev,
-                    [tabId]: [
-                        ...prev[tabId],
-                        ...extraPlaceholderIds.map((pid) => ({
-                            id: pid,
-                            role: "model" as const,
-                            content: "",
-                            content_type: "image" as const,
-                            created_at: new Date().toISOString(),
-                            isStreaming: true,
-                        })),
-                    ],
-                }));
-
+            // Placeholders were already created upfront (earlyExtraPlaceholderIds)
+            if (earlyExtraPlaceholderIds.length > 0) {
                 const extraRequestBody = {
                     ...requestBody,
                     skip_user_message: true,
                 };
-                for (let i = 0; i < extraImageCount; i++) {
-                    const placeholderId = extraPlaceholderIds[i];
+                for (let i = 0; i < earlyExtraPlaceholderIds.length; i++) {
+                    const placeholderId = earlyExtraPlaceholderIds[i];
                     // Fire-and-forget: each extra request processes its own SSE and updates its placeholder
                     (async () => {
                         try {
@@ -2189,7 +2174,7 @@ export function ChatInterface() {
                                             }));
                                         } else {
                                             // No placeholder — add as new message
-                                            const tempImgId = Date.now() + 100 + imageIndex;
+                                            const tempImgId = nextTempId();
                                             tempImageMessageIds.push(tempImgId);
                                             const imgMessage: Message = {
                                                 id: tempImgId,
@@ -2648,7 +2633,7 @@ export function ChatInterface() {
         // Add optimistic user message
         const assetImageFiles = assetFiles?.filter(f => f.type === "image") || [];
         const tempUserMessage: Message = {
-            id: Date.now(),
+            id: nextTempId(),
             role: "user",
             content,
             content_type: assetImageFiles.length > 0 ? "mixed" : "text",
@@ -2657,8 +2642,7 @@ export function ChatInterface() {
         };
 
         // Create placeholder messages for all variations
-        const baseTime = Date.now() + 1;
-        const placeholderIds = Array.from({ length: numVariations }, (_, i) => baseTime + i);
+        const placeholderIds = Array.from({ length: numVariations }, () => nextTempId());
         const placeholderMessages: Message[] = placeholderIds.map((phId) => ({
             id: phId,
             role: "model" as const,
@@ -2953,7 +2937,7 @@ export function ChatInterface() {
 
         // Add optimistic user message
         const tempUserMessage: Message = {
-            id: Date.now(),
+            id: nextTempId(),
             role: "user",
             content,
             content_type: "text",
@@ -2961,8 +2945,7 @@ export function ChatInterface() {
         };
 
         // Create placeholder messages for all variations
-        const baseTime = Date.now() + 1;
-        const placeholderIds = Array.from({ length: numVariations }, (_, i) => baseTime + i);
+        const placeholderIds = Array.from({ length: numVariations }, () => nextTempId());
         const placeholderMessages: Message[] = placeholderIds.map((phId) => ({
             id: phId,
             role: "model" as const,
@@ -3091,7 +3074,7 @@ export function ChatInterface() {
         }
 
         // Create a temporary generating message
-        const tempMusicMessageId = Date.now();
+        const tempMusicMessageId = nextTempId();
         const musicMessageId = tempMusicMessageId + 1;
 
         setSendingTabs((prev) => ({...prev, [tabId]: true}));
@@ -3762,7 +3745,7 @@ export function ChatInterface() {
                             conversationId={tabConversations[activeTabId]?.id || 0}
                             projectId={selectedProjectId!}
                             messages={messages}
-                            isSending={isSending}
+                            isSending={false}
                             generationConfig={generationConfig}
                             selectedConfigModelId={selectedConfigModelId}
                             onSelectConfigModel={setSelectedConfigModelId}

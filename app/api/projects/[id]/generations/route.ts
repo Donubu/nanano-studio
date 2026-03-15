@@ -68,6 +68,7 @@ export async function GET(
     const dateFrom = searchParams.get("from");
     const dateTo = searchParams.get("to");
     const includeDeleted = searchParams.get("include_deleted") === "true";
+    const favoritesOnly = searchParams.get("favorites") === "true";
     const limit = Math.min(Number(searchParams.get("limit")) || 100, 500);
     const offset = Number(searchParams.get("offset")) || 0;
 
@@ -97,6 +98,11 @@ export async function GET(
     // Soft delete filter
     if (!includeDeleted) {
       conditions.push("m.deleted_at IS NULL");
+    }
+
+    // Favorites filter
+    if (favoritesOnly) {
+      conditions.push("m.is_favorite = 1");
     }
 
     // Search filter (in conversation title or message content)

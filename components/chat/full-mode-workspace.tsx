@@ -79,6 +79,7 @@ interface InProgressItem {
   type: "image" | "video";
   status: string;
   progress?: number;
+  ratio: number;
 }
 
 interface Collection {
@@ -424,12 +425,19 @@ export function FullModeWorkspace({
   // In-progress items from messages
   const inProgressItems: InProgressItem[] = messages
     .filter(m => m.role === "model" && (m.isVideoGenerating || m.isStreaming) && !m.image_url && !m.video_url)
-    .map(m => ({
-      id: m.id,
-      type: m.content_type === "video" || m.isVideoGenerating ? "video" as const : "image" as const,
-      status: m.videoProgress?.message || (m.isStreaming ? "Generando imagen..." : "Procesando..."),
-      progress: m.videoProgress?.progress,
-    }));
+    .map(m => {
+      const isVideo = m.content_type === "video" || !!m.isVideoGenerating;
+      const ar = isVideo ? videoAspectRatio : imageAspectRatio;
+      const parts = ar.split(":");
+      const ratio = parts.length === 2 ? parseFloat(parts[0]) / parseFloat(parts[1]) : 1;
+      return {
+        id: m.id,
+        type: isVideo ? "video" as const : "image" as const,
+        status: m.videoProgress?.message || (m.isStreaming ? "Generando imagen..." : "Procesando..."),
+        progress: m.videoProgress?.progress,
+        ratio,
+      };
+    });
 
   // Error items from messages (failed generations)
   const errorItems = messages
@@ -1505,7 +1513,7 @@ export function FullModeWorkspace({
                     {/* Remove from collection button */}
                     <button
                       onClick={(e) => { e.stopPropagation(); handleRemoveFromCollection(activeCollectionId, gen.id); }}
-                      className="absolute top-2 left-2 p-1 rounded-md bg-black/50 hover:bg-red-600/70 transition-colors opacity-0 group-hover/col:opacity-100 z-[3]"
+                      className="absolute top-2 left-2 p-1 rounded-md bg-black/70 hover:bg-red-600 transition-colors opacity-0 group-hover/col:opacity-100 z-[3]"
                       title="Quitar de colección"
                     >
                       <X className="h-3.5 w-3.5 text-white/80" />
@@ -1536,7 +1544,7 @@ export function FullModeWorkspace({
               ))}
               {/* In-progress placeholders */}
               {inProgressItems.map(item => (
-                <div key={`progress-${item.id}`} className="group relative rounded-lg overflow-hidden bg-card border border-primary/30 animate-pulse" style={{ height: rowHeight, width: rowHeight }}>
+                <div key={`progress-${item.id}`} className="group relative rounded-lg overflow-hidden bg-card border border-primary/30 animate-pulse" style={{ height: rowHeight, width: Math.round(rowHeight * item.ratio) }}>
                   <div className="flex flex-col items-center justify-center h-full gap-2 p-3">
                     <Loader2 className="h-6 w-6 animate-spin text-primary" />
                     <p className="text-xs text-center text-muted-foreground line-clamp-2">{item.status}</p>
@@ -1713,6 +1721,7 @@ export function FullModeWorkspace({
                       onClear={() => setVideoFirstFrame(null)}
                       disabled={isSending}
                       projectId={projectId}
+
                     />
                     {videoBackend !== "xai" && (
                       <CompactFrameSlot
@@ -1722,6 +1731,7 @@ export function FullModeWorkspace({
                         onClear={() => setVideoLastFrame(null)}
                         disabled={isSending}
                         projectId={projectId}
+  
                       />
                     )}
                   </>
@@ -1741,6 +1751,7 @@ export function FullModeWorkspace({
                         }}
                         disabled={isSending}
                         projectId={projectId}
+  
                       />
                     ))}
                     {videoReferenceImages.length < 3 && (
@@ -1751,6 +1762,7 @@ export function FullModeWorkspace({
                         onClear={() => {}}
                         disabled={isSending}
                         projectId={projectId}
+  
                       />
                     )}
                   </>
@@ -2233,24 +2245,17 @@ function DetailModal({ item, index, total, onClose, onPrev, onNext, onFavorite, 
 
 // ---- Compact Frame Slot ----
 
-function CompactFrameSlot({ image, label, onSet, onClear, disabled, projectId }: {
+function CompactFrameSlot({ image, label, onSet, onClear, disabled, projectId, acceptVideo }: {
   image: string | null; label: string;
   onSet: (img: string) => void; onClear: () => void;
   disabled: boolean; projectId: number;
+  acceptVideo?: boolean;
 }) {
-  const [showPicker, setShowPicker] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const handleFile = async (file: File) => {
-    const reader = new FileReader();
-    reader.onloadend = () => onSet(reader.result as string);
-    reader.readAsDataURL(file);
-  };
+  const [showGallery, setShowGallery] = useState(false);
 
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     if (disabled) return;
-    // Check for nanano image data
     const nanonoData = e.dataTransfer.getData("application/x-nanano-image");
     if (nanonoData) {
       const { url } = JSON.parse(nanonoData);
@@ -2262,7 +2267,25 @@ function CompactFrameSlot({ image, label, onSet, onClear, disabled, projectId }:
       return;
     }
     const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith("image/")) handleFile(file);
+    if (file && file.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onloadend = () => onSet(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleGallerySelect = async (gen: { image_url?: string | null; video_url?: string | null }) => {
+    const url = gen.image_url || gen.video_url;
+    if (!url) return;
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const reader = new FileReader();
+      reader.onloadend = () => { onSet(reader.result as string); setShowGallery(false); };
+      reader.readAsDataURL(blob);
+    } catch {
+      setShowGallery(false);
+    }
   };
 
   if (image) {
@@ -2280,7 +2303,7 @@ function CompactFrameSlot({ image, label, onSet, onClear, disabled, projectId }:
   return (
     <>
       <button
-        onClick={() => fileRef.current?.click()}
+        onClick={() => setShowGallery(true)}
         onDragOver={(e) => { e.preventDefault(); }}
         onDrop={handleDrop}
         disabled={disabled}
@@ -2290,8 +2313,156 @@ function CompactFrameSlot({ image, label, onSet, onClear, disabled, projectId }:
         <Upload className="h-3 w-3" />
         <span className="text-[8px] leading-3 mt-0.5">{label}</span>
       </button>
-      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
+      {showGallery && (
+        <GalleryPickerModal
+          projectId={projectId}
+          acceptVideo={acceptVideo}
+          onSelect={handleGallerySelect}
+          onClose={() => setShowGallery(false)}
+        />
+      )}
     </>
+  );
+}
+
+// ---- Gallery Picker Modal ----
+
+function GalleryPickerModal({ projectId, acceptVideo, onSelect, onClose }: {
+  projectId: number;
+  acceptVideo?: boolean;
+  onSelect: (gen: { image_url?: string | null; video_url?: string | null; type: string }) => void;
+  onClose: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | "images" | "videos" | "favorites">("all");
+  const [items, setItems] = useState<Array<{ id: number; type: string; image_url: string | null; video_url: string | null; content: string | null; ratio: number; is_favorite: boolean }>>([]);
+  const [loading, setLoading] = useState(true);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout>>(null);
+
+  const fetchItems = useCallback(async (query: string, filter: string) => {
+    setLoading(true);
+    try {
+      let typeParam = "";
+      let favParam = "";
+      if (!acceptVideo || filter === "images") typeParam = "&type=images";
+      else if (filter === "videos") typeParam = "&type=videos";
+      if (filter === "favorites") favParam = "&favorites=true";
+      const searchParam = query ? `&search=${encodeURIComponent(query)}` : "";
+      const res = await fetch(`/api/projects/${projectId}/generations?limit=200${typeParam}${favParam}${searchParam}`);
+      if (res.ok) {
+        const data = await res.json();
+        setItems((data.data || data.generations || []).map((g: Record<string, unknown>) => {
+          const ar = (g.video_url ? g.video_aspect_ratio : g.image_aspect_ratio) as string | null;
+          const parts = ar?.split(":") || [];
+          const ratio = parts.length === 2 ? parseFloat(parts[0]) / parseFloat(parts[1]) : 1;
+          return {
+            id: g.id as number,
+            type: g.video_url ? "video" : "image",
+            image_url: (g.image_url as string) || null,
+            video_url: (g.video_url as string) || null,
+            content: (g.content as string) || null,
+            ratio: isNaN(ratio) ? 1 : ratio,
+            is_favorite: !!(g.is_favorite),
+          };
+        }));
+      }
+    } catch { /* ignore */ }
+    setLoading(false);
+  }, [projectId, acceptVideo]);
+
+  useEffect(() => { fetchItems("", typeFilter); }, [fetchItems, typeFilter]);
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => fetchItems(value.trim(), typeFilter), 300);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-8" onClick={onClose}>
+      <div className="bg-card rounded-xl border border-border/50 shadow-2xl w-full max-w-3xl max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-border/50">
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-medium">Galería del proyecto</h3>
+            <div className="flex gap-0.5 p-0.5 bg-muted rounded-md">
+              {([
+                { key: "all", label: "Todos", icon: <LayoutGrid className="h-3 w-3" /> },
+                { key: "images", label: "Imágenes", icon: <ImageIcon className="h-3 w-3" /> },
+                ...(acceptVideo ? [{ key: "videos", label: "Videos", icon: <Video className="h-3 w-3" /> }] : []),
+                { key: "favorites", label: "Favoritos", icon: <Star className="h-3 w-3" /> },
+              ] as const).map(f => (
+                <button
+                  key={f.key}
+                  onClick={() => setTypeFilter(f.key as typeof typeFilter)}
+                  className={cn(
+                    "flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors",
+                    typeFilter === f.key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {f.icon}
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 bg-muted rounded-lg px-2.5 py-1">
+              <Search className="h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                placeholder="Buscar..."
+                className="bg-transparent text-xs outline-none w-32 placeholder:text-muted-foreground/50"
+                autoFocus
+              />
+              {search && <button onClick={() => { setSearch(""); fetchItems("", typeFilter); }}><X className="h-3 w-3 text-muted-foreground" /></button>}
+            </div>
+            <button onClick={onClose} className="p-1.5 rounded-md hover:bg-accent text-muted-foreground">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+        {/* Grid */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {loading ? (
+            <div className="flex items-center justify-center h-32">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : items.length === 0 ? (
+            <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
+              No hay {acceptVideo ? "imágenes o videos" : "imágenes"} disponibles
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2 content-start">
+              {items.map(gen => {
+                const h = 120;
+                const w = Math.round(h * gen.ratio);
+                return (
+                  <button
+                    key={gen.id}
+                    onClick={() => onSelect(gen)}
+                    style={{ height: h, width: w }}
+                    className="relative rounded-lg overflow-hidden border-2 border-border/50 hover:border-primary hover:ring-2 hover:ring-primary/30 transition-all shrink-0"
+                  >
+                    {gen.type === "image" && gen.image_url ? (
+                      <img src={gen.image_url} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    ) : gen.type === "video" && gen.video_url ? (
+                      <video src={gen.video_url} className="w-full h-full object-cover" preload="metadata" muted />
+                    ) : null}
+                    {gen.content && (
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/70 px-1.5 py-0.5">
+                        <p className="text-[9px] text-white/80 truncate">{gen.content}</p>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2310,7 +2481,7 @@ function GridItemActions({ gen, itemWidth, onFavorite, onDownload, onReuse, onDe
   const [menuOpen, setMenuOpen] = useState(false);
   // ~30px per button + 4px gap; with padding right-2. Compact if fewer than 4 buttons fit.
   const compact = itemWidth < 150;
-  const btnClass = "p-1.5 rounded-md bg-black/50 hover:bg-black/70 transition-colors";
+  const btnClass = "p-1.5 rounded-md bg-black/70 hover:bg-black transition-colors";
 
   const canReuse = !gen.deleted_at && gen.content && !gen.content.startsWith("Archivo subido:");
 
@@ -2452,10 +2623,10 @@ function CollectionGridItem({ collection, rowHeight, isEditing, onOpen, onDelete
 
       {/* Hover actions */}
       <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button onClick={(e) => { e.stopPropagation(); onStartEditing(); }} className="p-1.5 rounded-md bg-black/50 hover:bg-black/70 transition-colors" title="Renombrar">
+        <button onClick={(e) => { e.stopPropagation(); onStartEditing(); }} className="p-1.5 rounded-md bg-black/70 hover:bg-black transition-colors" title="Renombrar">
           <Pencil className="h-3.5 w-3.5 text-white/80" />
         </button>
-        <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-1.5 rounded-md bg-black/50 hover:bg-red-900/70 transition-colors" title="Eliminar colección">
+        <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-1.5 rounded-md bg-black/70 hover:bg-red-600 transition-colors" title="Eliminar colección">
           <Trash2 className="h-3.5 w-3.5 text-white/80" />
         </button>
       </div>
