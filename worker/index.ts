@@ -82,7 +82,8 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
     pubRedis.publish(channel, JSON.stringify(event));
   };
 
-  console.log(`\n========== [${WORKER_NAME}] Job ${job.id} ==========`);
+  const jobStartTime = Date.now();
+  console.log(`\n========== [${WORKER_NAME}] Job ${job.id} START @ ${new Date().toISOString()} ==========`);
   console.log(`  Model: ${data.modelId} (${data.backend || "default"})`);
   console.log(`  Type: ${data.generationType} | Quality: ${data.qualityTier}`);
   console.log(`  Conversation: ${data.conversationId} | User: ${data.labels?.user_name || "—"}`);
@@ -635,7 +636,7 @@ const worker = new Worker<StreamJobData>(
 );
 
 worker.on("completed", (job) => {
-  console.log(`[${WORKER_NAME}] ✓ Job ${job.id} completed`);
+  console.log(`[${WORKER_NAME}] ✓ Job ${job.id} COMPLETED @ ${new Date().toISOString()}`);
 });
 
 worker.on("failed", (job, err) => {

@@ -1961,58 +1961,7 @@ export function ChatInterface() {
                     ...(thinkingLevel !== "none" && showThoughts && { include_thoughts: true }),
                 };
 
-            const response = await fetch(endpoint, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify(requestBody),
-            });
-
-            if (!response.ok) {
-                // Leer el error real del backend en vez de descartarlo
-                let errorMessage = "";
-                try {
-                    const errorData = await response.json();
-                    errorMessage = errorData.error || "";
-                } catch {
-                    // Respuesta no-JSON (ej: página 413 de nginx)
-                }
-                if (!errorMessage) {
-                    if (response.status === 413) {
-                        errorMessage = "El contenido enviado es demasiado grande. Intenta con imágenes más pequeñas.";
-                    } else if (response.status === 429) {
-                        errorMessage = "Demasiadas solicitudes. Espera un momento e intenta de nuevo.";
-                    } else {
-                        errorMessage = `Error del servidor (${response.status})`;
-                    }
-                }
-                // Mostrar error en el mensaje streaming en vez de descartarlo silenciosamente
-                setTabMessages((prev) => ({
-                    ...prev,
-                    [tabId]: prev[tabId].map((m) =>
-                        m.id === streamingMessageId
-                            ? { ...m, content: `Error: ${errorMessage}`, content_type: "error" as const, isStreaming: false }
-                            : m
-                    ),
-                }));
-                setSendingTabs((prev) => ({...prev, [tabId]: false}));
-                return;
-            }
-
-            const reader = response.body?.getReader();
-            const decoder = new TextDecoder();
-            let fullContent = "";
-            let realUserMessageId: number | null = null;
-            let realModelMessageId: number | null = null;
-            // Multi-image support: track temporary image message IDs
-            const tempImageMessageIds: number[] = [];
-
-            // For Imagen4: use pre-created placeholders for SSE image events
-            if (earlyImagen4PlaceholderIds.length > 0) {
-                tempImageMessageIds.push(...earlyImagen4PlaceholderIds);
-            }
-
-            // Fire N-1 additional parallel requests for non-Imagen4 multi-image generation
-            // Placeholders were already created upfront (earlyExtraPlaceholderIds)
+            // Fire N-1 additional parallel requests BEFORE the main fetch so they run truly in parallel
             if (earlyExtraPlaceholderIds.length > 0) {
                 const extraRequestBody = {
                     ...requestBody,
@@ -2047,8 +1996,6 @@ export function ChatInterface() {
                                     try {
                                         const data = JSON.parse(line.slice(6));
                                         if (data.type === "image") {
-                                            // Update placeholder with actual image
-                                            tempImageMessageIds.push(placeholderId);
                                             setTabMessages((prev) => ({
                                                 ...prev,
                                                 [tabId]: prev[tabId].map((m) =>
@@ -2062,7 +2009,6 @@ export function ChatInterface() {
                                             if (serverImgs.length > 0) {
                                                 setTabMessages((prev) => {
                                                     let msgs = prev[tabId];
-                                                    // Finalize placeholder with server ID
                                                     const serverImg = serverImgs[0];
                                                     if (serverImg) {
                                                         msgs = msgs.map(m => m.id === placeholderId
@@ -2070,7 +2016,6 @@ export function ChatInterface() {
                                                             : m
                                                         );
                                                     }
-                                                    // Add any additional images from this request
                                                     for (let j = 1; j < serverImgs.length; j++) {
                                                         msgs = [...msgs, {
                                                             id: serverImgs[j].id,
@@ -2091,7 +2036,6 @@ export function ChatInterface() {
                             }
                         } catch (err) {
                             console.error("[Extra image request] Error:", err);
-                            // Remove placeholder on error
                             setTabMessages((prev) => ({
                                 ...prev,
                                 [tabId]: prev[tabId].filter((m) => m.id !== placeholderId),
@@ -2099,6 +2043,52 @@ export function ChatInterface() {
                         }
                     })();
                 }
+            }
+
+            // Main request (runs in parallel with extras above)
+            const response = await fetch(endpoint, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(requestBody),
+            });
+
+            if (!response.ok) {
+                let errorMessage = "";
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.error || "";
+                } catch { /* non-JSON response */ }
+                if (!errorMessage) {
+                    if (response.status === 413) {
+                        errorMessage = "El contenido enviado es demasiado grande. Intenta con imágenes más pequeñas.";
+                    } else if (response.status === 429) {
+                        errorMessage = "Demasiadas solicitudes. Espera un momento e intenta de nuevo.";
+                    } else {
+                        errorMessage = `Error del servidor (${response.status})`;
+                    }
+                }
+                setTabMessages((prev) => ({
+                    ...prev,
+                    [tabId]: prev[tabId].map((m) =>
+                        m.id === streamingMessageId
+                            ? { ...m, content: `Error: ${errorMessage}`, content_type: "error" as const, isStreaming: false }
+                            : m
+                    ),
+                }));
+                setSendingTabs((prev) => ({...prev, [tabId]: false}));
+                return;
+            }
+
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+            let fullContent = "";
+            let realUserMessageId: number | null = null;
+            let realModelMessageId: number | null = null;
+            const tempImageMessageIds: number[] = [];
+
+            // For Imagen4: use pre-created placeholders for SSE image events
+            if (earlyImagen4PlaceholderIds.length > 0) {
+                tempImageMessageIds.push(...earlyImagen4PlaceholderIds);
             }
 
             if (reader) {
@@ -3755,11 +3745,13 @@ export function ChatInterface() {
                             onArchiveMessage={handleArchiveMessage}
                             videoDuration={videoDuration}
                             videoAspectRatio={videoAspectRatio}
+                            videoResolution={videoResolution}
                             videoAudioEnabled={videoAudioEnabled}
                             videoNegativePrompt={videoNegativePrompt}
                             onVideoSettingsChange={(s) => {
                                 if (s.duration !== undefined) setVideoDuration(s.duration);
                                 if (s.aspectRatio !== undefined) setVideoAspectRatio(s.aspectRatio as VideoAspectRatio);
+                                if (s.resolution !== undefined) setVideoResolution(s.resolution as VideoResolution);
                                 if (s.audioEnabled !== undefined) setVideoAudioEnabled(s.audioEnabled);
                                 if (s.negativePrompt !== undefined) setVideoNegativePrompt(s.negativePrompt);
                             }}

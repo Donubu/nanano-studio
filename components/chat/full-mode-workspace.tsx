@@ -134,9 +134,10 @@ interface FullModeWorkspaceProps {
   onArchiveMessage: (messageId: number) => void;
   videoDuration: number;
   videoAspectRatio: string;
+  videoResolution: string;
   videoAudioEnabled: boolean;
   videoNegativePrompt: string;
-  onVideoSettingsChange: (settings: { duration?: number; aspectRatio?: string; audioEnabled?: boolean; negativePrompt?: string }) => void;
+  onVideoSettingsChange: (settings: { duration?: number; aspectRatio?: string; resolution?: string; audioEnabled?: boolean; negativePrompt?: string }) => void;
   imageAspectRatio: string;
   imageSize: string;
   imageNegativePrompt: string;
@@ -156,6 +157,26 @@ function getVideoBackend(model: ConfigModel | undefined): "veo" | "xai" | "kling
   if (model.model_id === "kling-v2-6") return "kling26";
   if (model.api_backend === "kling" || model.model_id?.includes("kling")) return "kling";
   return "veo";
+}
+
+function getImageBackend(model: ConfigModel | undefined): "imagen4" | "grok" | "kling" | "nanoBanana" | null {
+  if (!model) return null;
+  if (model.api_backend === "xai" || model.model_id?.includes("grok")) return "grok";
+  if (model.api_backend === "kling" || model.model_id?.includes("kling")) return "kling";
+  if (model.model_id?.includes("image-preview") || model.model_id?.includes("flash-image")) return "nanoBanana";
+  return "imagen4";
+}
+
+function getSupportedImageResolutions(backend: ReturnType<typeof getImageBackend>): string[] {
+  if (backend === "grok" || backend === "kling") return ["1K", "2K"];
+  // Imagen4 and Nano Banana support all three
+  return ["1K", "2K", "4K"];
+}
+
+function getSupportedVideoResolutions(backend: ReturnType<typeof getVideoBackend>): string[] {
+  if (backend === "xai") return ["480p", "720p"];
+  // VEO and Kling support 720p and 1080p
+  return ["720p", "1080p"];
 }
 
 function getSupportedDurations(backend: ReturnType<typeof getVideoBackend>): number[] {
@@ -210,6 +231,7 @@ export function FullModeWorkspace({
   onArchiveMessage,
   videoDuration,
   videoAspectRatio,
+  videoResolution,
   videoAudioEnabled,
   videoNegativePrompt,
   onVideoSettingsChange,
@@ -498,6 +520,11 @@ export function FullModeWorkspace({
   const hasFavorites = favoriteCount > 0;
   const hasDeleted = deletedGenerations.length > 0;
 
+  // Supported resolutions per model
+  const imageBackend = getImageBackend(activeImageModel);
+  const supportedImageResolutions = getSupportedImageResolutions(imageBackend);
+  const supportedVideoResolutions = getSupportedVideoResolutions(videoBackend);
+
   // ---- Auto-correct settings when model changes ----
   useEffect(() => {
     if (format === "video") {
@@ -506,6 +533,9 @@ export function FullModeWorkspace({
       }
       if (!supportedVideoAR.includes(videoAspectRatio)) {
         onVideoSettingsChange({ aspectRatio: supportedVideoAR[0] });
+      }
+      if (!supportedVideoResolutions.includes(videoResolution)) {
+        onVideoSettingsChange({ resolution: supportedVideoResolutions[supportedVideoResolutions.length - 1] });
       }
       if (numVariations > maxVideoVariations) {
         setNumVariations(maxVideoVariations);
@@ -518,6 +548,12 @@ export function FullModeWorkspace({
       }
     }
   }, [activeVideoModel?.id, format]);
+
+  useEffect(() => {
+    if (format === "image" && !supportedImageResolutions.includes(imageSize)) {
+      onImageSettingsChange({ size: supportedImageResolutions[supportedImageResolutions.length - 1] });
+    }
+  }, [activeImageModel?.id, format]);
 
   // ---- Data fetching ----
   const fetchGenerations = useCallback(async () => {
@@ -1352,10 +1388,12 @@ export function FullModeWorkspace({
     const parts: string[] = [];
     if (format === "image") {
       parts.push(imageAspectRatio);
+      parts.push(imageSize);
       if (currentModel) parts.push(currentModel.display_name);
     } else {
       parts.push(`${videoDuration}s`);
       parts.push(videoAspectRatio);
+      parts.push(videoResolution);
       if (currentModel) parts.push(currentModel.display_name);
     }
     if (numVariations > 1) parts.push(`x${numVariations}`);
@@ -1808,6 +1846,8 @@ export function FullModeWorkspace({
                           : ar === "9:16" || ar === "3:4" ? <RectangleVertical className="h-3 w-3" />
                           : <Square className="h-3 w-3" />;
                       })()}
+                      <span className="text-muted-foreground/70">·</span>
+                      <span>{format === "image" ? imageSize : videoResolution}</span>
                       {numVariations > 1 && <><span className="text-muted-foreground/70">·</span><span>x{numVariations}</span></>}
                       <ChevronUp className={cn("h-3 w-3 transition-transform ml-0.5", settingsOpen ? "" : "rotate-180")} />
                     </button>
@@ -1848,7 +1888,14 @@ export function FullModeWorkspace({
                                   <button key={ar} onClick={() => onImageSettingsChange({ aspectRatio: ar })} className={cn("px-1.5 py-1 rounded text-xs font-medium transition-colors", imageAspectRatio === ar ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground")}>{ar}</button>
                                 ))}
                               </div>
-
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <label className="text-xs text-muted-foreground">Res.</label>
+                              <div className="flex gap-0.5">
+                                {supportedImageResolutions.map(r => (
+                                  <button key={r} onClick={() => onImageSettingsChange({ size: r })} className={cn("px-1.5 py-1 rounded text-xs font-medium transition-colors", imageSize === r ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground")}>{r}</button>
+                                ))}
+                              </div>
                             </div>
                             <div className="flex items-center gap-2">
                               <label className="text-xs text-muted-foreground">Cant.</label>
@@ -1871,10 +1918,17 @@ export function FullModeWorkspace({
                                 </div>
                               </div>
                               <div className="flex items-center gap-2">
-
                                 <div className="flex gap-0.5">
                                   {supportedVideoAR.map(ar => (
                                     <button key={ar} onClick={() => onVideoSettingsChange({ aspectRatio: ar })} className={cn("px-1.5 py-1 rounded text-xs font-medium transition-colors", videoAspectRatio === ar ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground")}>{ar}</button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <label className="text-xs text-muted-foreground">Res.</label>
+                                <div className="flex gap-0.5">
+                                  {supportedVideoResolutions.map(r => (
+                                    <button key={r} onClick={() => onVideoSettingsChange({ resolution: r })} className={cn("px-1.5 py-1 rounded text-xs font-medium transition-colors", videoResolution === r ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground")}>{r}</button>
                                   ))}
                                 </div>
                               </div>

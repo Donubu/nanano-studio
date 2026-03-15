@@ -137,6 +137,10 @@ export async function POST(
         headers: { "Content-Type": "application/json" },
       });
     }
+    const reqId = `REQ-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    console.log(`\n[Stream][${reqId}] ========== REQUEST START ==========`);
+    console.log(`[Stream][${reqId}] Time: ${new Date().toISOString()}`);
+
     const body = await request.json();
     const { content, files, useProjectSystemInstruction = true, modelIdOverride, imageSettings, quality_tier, selected_model_id, generation_type_override, no_context = false, skip_user_message = false, google_search_enabled: reqGoogleSearchEnabled, google_image_search_enabled: reqGoogleImageSearchEnabled, thinking_level, include_thoughts } = body as {
       content: string;
@@ -154,6 +158,8 @@ export async function POST(
       thinking_level?: "none" | "low" | "medium" | "high";
       include_thoughts?: boolean;
     };
+
+    console.log(`[Stream][${reqId}] Prompt: "${content?.slice(0, 50)}..." | skip_user_message: ${skip_user_message} | imageSize: ${imageSettings?.size || "default"} | numberOfImages: ${imageSettings?.numberOfImages || 1}`);
 
     // quality_tier kept for legacy compat but selected_model_id takes precedence
     const effectiveQualityTier: QualityTier = quality_tier === "hq" ? "hq" : "normal";
@@ -544,6 +550,7 @@ export async function POST(
           // ============================================
           if (isRedisConfigured() && await hasActiveWorkers()) {
             try {
+              console.log(`[Stream][${reqId}] Delegating to WORKER @ ${new Date().toISOString()} | Model: ${effectiveModelId} | ImageSize: ${effectiveImageSize}`);
               const queue = getStreamQueue();
               const job = await queue.add("stream", {
                 conversationId: id,
@@ -628,6 +635,7 @@ export async function POST(
           // ============================================
           // DIRECT PROCESSING (fallback when no Redis)
           // ============================================
+          console.log(`[Stream][${reqId}] DIRECT processing start @ ${new Date().toISOString()} | Model: ${effectiveModelId} | ImageSize: ${effectiveImageSize}`);
 
           // Variables para trackear múltiples imágenes generadas durante streaming
           interface SavedImage {
@@ -1033,6 +1041,8 @@ export async function POST(
                 };
 
                 const totalCost = Number(totalsResult[0]?.total_estimated_cost) || 0;
+
+                console.log(`[Stream][${reqId}] COMPLETE @ ${new Date().toISOString()} | Images: ${validImages.length} | Tokens: ${tokenCount.input}/${tokenCount.output}`);
 
                 // Enviar evento de finalización
                 if (!controllerClosed) {
