@@ -173,7 +173,7 @@ function getApiKeyForPool(pool: VeoPool): string | undefined {
 
 export interface VideoGenerationConfig {
   durationSeconds: 4 | 6 | 8;
-  resolution: "720p" | "1080p";
+  resolution: "720p" | "1080p" | "4K";
   aspectRatio: "16:9" | "9:16";
   generateAudio: boolean;
   negativePrompt?: string;
@@ -359,8 +359,8 @@ export async function generateVideo(
 
     // Gemini API: interpolation (first+last frame), reference images, 1080p/4k all require 8s
     if (!isVertex && config.durationSeconds !== 8) {
-      if ((preparedFirstFrame && preparedLastFrame) || preparedReferenceImages || config.resolution !== "720p") {
-        console.log(`[Video] Gemini API: forcing 8s duration (was ${config.durationSeconds}s) — required for interpolation/references/high-res`);
+      if ((preparedFirstFrame && preparedLastFrame) || preparedReferenceImages || (config.resolution !== "720p")) {
+        console.log(`[Video] Gemini API: forcing 8s duration (was ${config.durationSeconds}s) — required for interpolation/references/high-res (${config.resolution})`);
         config.durationSeconds = 8;
       }
     }
@@ -739,9 +739,9 @@ export function isVideoConfigured(): boolean {
 /**
  * Obtiene la duración máxima permitida según la resolución
  */
-export function getMaxDuration(resolution: "720p" | "1080p"): 4 | 6 | 8 {
-  // 1080p solo está disponible para videos de 8 segundos
-  return resolution === "1080p" ? 8 : 8;
+export function getMaxDuration(resolution: "720p" | "1080p" | "4K"): 4 | 6 | 8 {
+  // 1080p and 4K only available for 8-second videos
+  return (resolution === "1080p" || resolution === "4K") ? 8 : 8;
 }
 
 /**
@@ -754,8 +754,8 @@ export function validateVideoConfig(config: VideoGenerationConfig): string | nul
   }
 
   // Validar resolución
-  if (!["720p", "1080p"].includes(config.resolution)) {
-    return "La resolución debe ser 720p o 1080p";
+  if (!["720p", "1080p", "4K"].includes(config.resolution)) {
+    return "La resolución debe ser 720p, 1080p o 4K";
   }
 
   // Validar aspect ratio
@@ -763,9 +763,9 @@ export function validateVideoConfig(config: VideoGenerationConfig): string | nul
     return "El aspect ratio debe ser 16:9 o 9:16";
   }
 
-  // 1080p solo disponible para 8 segundos
-  if (config.resolution === "1080p" && config.durationSeconds !== 8) {
-    return "La resolución 1080p solo está disponible para videos de 8 segundos";
+  // 1080p and 4K solo disponible para 8 segundos
+  if ((config.resolution === "1080p" || config.resolution === "4K") && config.durationSeconds !== 8) {
+    return `La resolución ${config.resolution} solo está disponible para videos de 8 segundos`;
   }
 
   return null;

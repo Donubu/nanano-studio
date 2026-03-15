@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, memo } from "react";
 import NextImage from "next/image";
 import {
   LayoutGrid, ImageIcon, Video, Settings, Star, Download, Trash2,
   Undo2, ZoomIn, X, Loader2, ChevronLeft, ChevronRight, VolumeX,
   Upload, Clock, ChevronUp, RectangleHorizontal, RectangleVertical, Square,
   AlertTriangle, Play, PanelLeft, PanelLeftClose, RotateCcw, SlidersHorizontal, Eye, EyeOff,
-  FolderPlus, Folder, ArrowLeft, Pencil, MoreHorizontal, Search, Volume2
+  FolderPlus, Folder, ArrowLeft, Pencil, MoreHorizontal, Search, Volume2, Tag
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MessageInput, AttachedFile, MessageInputHandle } from "./message-input";
@@ -175,8 +175,9 @@ function getSupportedImageResolutions(backend: ReturnType<typeof getImageBackend
 
 function getSupportedVideoResolutions(backend: ReturnType<typeof getVideoBackend>): string[] {
   if (backend === "xai") return ["480p", "720p"];
-  // VEO and Kling support 720p and 1080p
-  return ["720p", "1080p"];
+  if (backend === "kling" || backend === "kling26") return ["720p", "1080p"];
+  // VEO 3.1 supports 720p, 1080p, and 4K
+  return ["720p", "1080p", "4K"];
 }
 
 function getSupportedDurations(backend: ReturnType<typeof getVideoBackend>): number[] {
@@ -254,6 +255,8 @@ export function FullModeWorkspace({
   const [collectionGenerations, setCollectionGenerations] = useState<Generation[]>([]);
   const [dragOverCollectionId, setDragOverCollectionId] = useState<number | null>(null);
   const [editingCollectionName, setEditingCollectionName] = useState<number | null>(null);
+  const [projectTags, setProjectTags] = useState<Array<{ id: number; name: string; color: string }>>([]);
+  const [activeTagId, setActiveTagId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -510,7 +513,8 @@ export function FullModeWorkspace({
         if (filter === "favorites") return g.is_favorite;
         return true;
       })
-  ).filter(g => searchScore(g.content) >= 0);
+  ).filter(g => searchScore(g.content) >= 0)
+   .filter(g => !activeTagId || g.tags.some(t => t.id === activeTagId));
 
   const imageCount = activeGenerations.filter(g => g.type === "image").length;
   const videoCount = activeGenerations.filter(g => g.type === "video").length;
@@ -519,6 +523,10 @@ export function FullModeWorkspace({
   const hasVideos = videoCount > 0;
   const hasFavorites = favoriteCount > 0;
   const hasDeleted = deletedGenerations.length > 0;
+
+  // Tags in use across visible generations (main grid or active collection)
+  const visibleGens = activeCollectionId ? collectionGenerations : activeGenerations;
+  const usedTags = projectTags.filter(t => visibleGens.some(g => g.tags.some(gt => gt.id === t.id)));
 
   // Supported resolutions per model
   const imageBackend = getImageBackend(activeImageModel);
@@ -558,9 +566,10 @@ export function FullModeWorkspace({
   // ---- Data fetching ----
   const fetchGenerations = useCallback(async () => {
     try {
-      const [genRes, colRes] = await Promise.all([
+      const [genRes, colRes, tagRes] = await Promise.all([
         fetch(`/api/conversations/${conversationId}/generations`),
         fetch(`/api/conversations/${conversationId}/collections`),
+        fetch(`/api/projects/${projectId}/tags`),
       ]);
       if (genRes.ok) {
         const data = await genRes.json();
@@ -569,6 +578,10 @@ export function FullModeWorkspace({
       if (colRes.ok) {
         const data = await colRes.json();
         setCollections(data.collections || []);
+      }
+      if (tagRes.ok) {
+        const data = await tagRes.json();
+        setProjectTags(data || []);
       }
     } catch (err) {
       console.error("Error fetching generations:", err);
@@ -645,6 +658,7 @@ export function FullModeWorkspace({
   };
 
   const handleDropOnCollection = async (colId: number, generationId: number) => {
+    setDragOverCollectionId(null);
     try {
       const res = await fetch(`/api/conversations/${conversationId}/collections/${colId}/items`, {
         method: "POST",
@@ -653,12 +667,9 @@ export function FullModeWorkspace({
       });
       if (res.ok) {
         const data = await res.json();
-        // Get the generation's prompt for search_text update
         const gen = generations.find(g => g.id === generationId);
         const genContent = gen?.content || "";
-        // Remove from main grid
         setGenerations(prev => prev.filter(g => g.id !== generationId));
-        // Update collection metadata
         setCollections(prev => prev.map(c => c.id === colId ? {
           ...c,
           item_count: data.item_count,
@@ -674,16 +685,24 @@ export function FullModeWorkspace({
 
   const handleRemoveFromCollection = async (colId: number, generationId: number) => {
     try {
-      await fetch(`/api/conversations/${conversationId}/collections/${colId}/items`, {
+      const res = await fetch(`/api/conversations/${conversationId}/collections/${colId}/items`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messageIds: [generationId] }),
       });
-      setCollectionGenerations(prev => prev.filter(g => g.id !== generationId));
-      // Update collection count
-      setCollections(prev => prev.map(c => c.id === colId ? { ...c, item_count: Math.max(0, c.item_count - 1) } : c));
-      // Re-fetch to get the item back in main grid
-      fetchGenerations();
+      if (res.ok) {
+        setCollectionGenerations(prev => prev.filter(g => g.id !== generationId));
+        // Update collection count and thumbnail
+        const remaining = collectionGenerations.filter(g => g.id !== generationId);
+        const firstRemaining = remaining[0];
+        setCollections(prev => prev.map(c => c.id === colId ? {
+          ...c,
+          item_count: Math.max(0, c.item_count - 1),
+          thumbnail_image_url: firstRemaining?.image_url || null,
+          thumbnail_video_url: firstRemaining?.video_url || null,
+        } : c));
+        fetchGenerations();
+      }
     } catch (err) {
       console.error("Error removing from collection:", err);
     }
@@ -706,7 +725,8 @@ export function FullModeWorkspace({
     prevInProgressCount.current = inProgressItems.length;
   }, [inProgressItems.length, fetchGenerations]);
 
-  // Poll VEO slots
+  // Poll VEO slots — only when video is generating or format is video (initial fetch)
+  const hasVideoGenerating = messages.some(m => m.isVideoGenerating);
   useEffect(() => {
     if (!isVeoProvider) { setVeoAvailableSlots(null); return; }
     const fetchSlots = async () => {
@@ -720,9 +740,10 @@ export function FullModeWorkspace({
       } catch { /* ignore */ }
     };
     fetchSlots();
+    if (!hasVideoGenerating) return; // only poll continuously when generating
     const interval = setInterval(fetchSlots, 10000);
     return () => clearInterval(interval);
-  }, [isVeoProvider]);
+  }, [isVeoProvider, hasVideoGenerating]);
 
   // ---- Handlers ----
 
@@ -880,6 +901,89 @@ export function FullModeWorkspace({
     }
   };
 
+  const handleToggleTag = async (genId: number, tagId: number) => {
+    const gen = generations.find(g => g.id === genId) || collectionGenerations.find(g => g.id === genId);
+    if (!gen) return;
+    const hasTag = gen.tags.some(t => t.id === tagId);
+    try {
+      if (hasTag) {
+        await fetch(`/api/messages/${genId}/tags`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tag_id: tagId }),
+        });
+      } else {
+        await fetch(`/api/messages/${genId}/tags`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tag_id: tagId }),
+        });
+      }
+      // Look up in current projectTags state (use callback to get latest)
+      setProjectTags(currentTags => {
+        const tag = currentTags.find(t => t.id === tagId);
+        if (!tag) return currentTags;
+        const updateTags = (g: Generation) => {
+          if (g.id !== genId) return g;
+          const newTags = hasTag ? g.tags.filter(t => t.id !== tagId) : [...g.tags, { id: tag.id, name: tag.name, color: tag.color }];
+          return { ...g, tags: newTags };
+        };
+        setGenerations(prev => prev.map(updateTags));
+        setCollectionGenerations(prev => prev.map(updateTags));
+        if (selectedItem?.id === genId) setSelectedItem(prev => prev ? updateTags(prev) : prev);
+        return currentTags; // don't modify projectTags
+      });
+    } catch (err) {
+      console.error("Error toggling tag:", err);
+    }
+  };
+
+  const handleCreateTag = async (name: string, color: string): Promise<{ id: number; name: string; color: string } | null> => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/tags`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, color }),
+      });
+      if (res.ok) {
+        const tag = await res.json();
+        setProjectTags(prev => [...prev, { id: tag.id, name: tag.name, color: tag.color }]);
+        return { id: tag.id, name: tag.name, color: tag.color };
+      }
+    } catch (err) {
+      console.error("Error creating tag:", err);
+    }
+    return null;
+  };
+
+  const handleApplyConfig = (gen: Generation) => {
+    // Switch format
+    setFormat(gen.type);
+    // Restore model
+    if (gen.model_id) {
+      if (gen.type === "image") {
+        const m = imageModels.find(m => m.id === gen.model_id);
+        if (m) setSelectedImageModelId(m.id);
+      } else {
+        const m = videoModels.find(m => m.id === gen.model_id);
+        if (m) setSelectedVideoModelId(m.id);
+      }
+    }
+    // Restore settings
+    if (gen.type === "image") {
+      const updates: Record<string, string | number> = {};
+      if (gen.image_aspect_ratio) updates.aspectRatio = gen.image_aspect_ratio;
+      if (gen.image_size) updates.size = gen.image_size;
+      if (Object.keys(updates).length > 0) onImageSettingsChange(updates);
+    } else {
+      const updates: Record<string, string | number | boolean> = {};
+      if (gen.video_aspect_ratio) updates.aspectRatio = gen.video_aspect_ratio;
+      if (gen.video_duration) updates.duration = gen.video_duration;
+      if (gen.video_has_audio != null) updates.audioEnabled = gen.video_has_audio;
+      if (Object.keys(updates).length > 0) onVideoSettingsChange(updates);
+    }
+  };
+
   const handleDownload = async (gen: Generation) => {
     const url = gen.image_url || gen.video_url;
     if (!url) return;
@@ -1004,10 +1108,10 @@ export function FullModeWorkspace({
     }
 
     setInternalPrompt(prompt);
+    requestAnimationFrame(() => messageInputRef.current?.focus());
 
     // 6. Show toast for unavailable references
     if (unavailableRefs.length > 0) {
-      // Use a simple approach: set a temporary state for notification
       setReuseWarning(`${unavailableRefs.length} referencia(s) no disponible(s) (eliminadas o inaccesibles)`);
       setTimeout(() => setReuseWarning(null), 5000);
     }
@@ -1109,6 +1213,7 @@ export function FullModeWorkspace({
         prompt = prompt.replace(/<<<(?:image|video)_(\d+)>>>/g, (_, num) => `@asset${num}`);
       }
       setInternalPrompt(prompt);
+      requestAnimationFrame(() => messageInputRef.current?.focus());
     }
 
     // 6. Show toast for unavailable references
@@ -1515,6 +1620,31 @@ export function FullModeWorkspace({
               </button>
             </div>
           )}
+          {/* Tag filter bar */}
+          {usedTags.length > 0 && (
+            <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+              {activeTagId && (
+                <button onClick={() => setActiveTagId(null)} className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-muted text-muted-foreground hover:text-foreground transition-colors">
+                  <X className="h-2.5 w-2.5" /> Todos
+                </button>
+              )}
+              {usedTags.map(tag => (
+                <button
+                  key={tag.id}
+                  onClick={() => setActiveTagId(activeTagId === tag.id ? null : tag.id)}
+                  className={cn(
+                    "px-2 py-0.5 rounded-full text-[11px] font-medium transition-all",
+                    activeTagId === tag.id
+                      ? "text-white ring-2 ring-offset-1 ring-offset-background"
+                      : "text-white/80 opacity-70 hover:opacity-100"
+                  )}
+                  style={{ backgroundColor: tag.color, ...(activeTagId === tag.id ? { ringColor: tag.color } : {}) }}
+                >
+                  {tag.name}
+                </button>
+              ))}
+            </div>
+          )}
           {/* Collection detail header */}
           {activeCollectionId && (
             <div className="flex items-center gap-2 mb-4">
@@ -1528,6 +1658,31 @@ export function FullModeWorkspace({
                   onRename={(name) => handleRenameCollection(activeCollectionId, name)}
                 />
               </div>
+              {collectionGenerations.length > 0 && (
+                <button
+                  onClick={async () => {
+                    for (const gen of collectionGenerations) {
+                      const url = gen.image_url || gen.video_url;
+                      if (!url) continue;
+                      try {
+                        const res = await fetch(url);
+                        const blob = await res.blob();
+                        const ext = gen.image_mime_type?.split("/")[1] || gen.video_mime_type?.split("/")[1] || (gen.type === "video" ? "mp4" : "png");
+                        const blobUrl = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = blobUrl;
+                        a.download = `${gen.type}_${gen.id}.${ext}`;
+                        a.click();
+                        URL.revokeObjectURL(blobUrl);
+                      } catch { /* skip */ }
+                    }
+                  }}
+                  className="ml-auto p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                  title="Descargar todo"
+                >
+                  <Download className="h-4 w-4" />
+                </button>
+              )}
             </div>
           )}
           {loading ? (
@@ -1536,7 +1691,11 @@ export function FullModeWorkspace({
             </div>
           ) : activeCollectionId ? (
             /* Collection detail view */
-            collectionGenerations.length === 0 ? (
+            (() => {
+              const filteredColGens = activeTagId
+                ? collectionGenerations.filter(g => g.tags.some(t => t.id === activeTagId))
+                : collectionGenerations;
+              return filteredColGens.length === 0 ? (
               <div className="flex items-center justify-center h-64 text-muted-foreground">
                 <div className="text-center">
                   <Folder className="h-12 w-12 mx-auto mb-3 opacity-30" />
@@ -1545,7 +1704,7 @@ export function FullModeWorkspace({
               </div>
             ) : (
               <div className="flex flex-wrap gap-3 content-start">
-                {collectionGenerations.map((gen, index) => (
+                {filteredColGens.map((gen, index) => (
                   <div key={gen.id} className="relative group/col">
                     <GridItem key={`${gen.type}-${gen.id}`} gen={gen} index={index} rowHeight={rowHeight} showLabels={showLabels} hoverAudio={hoverAudio} onOpen={openGeneration} onFavorite={handleToggleFavorite} onDelete={handleDelete} onRestore={handleRestore} onDownload={handleDownload} onReuse={handleReusePrompt} onDragStarted={setDraggedMediaType} onDragEnded={() => setDraggedMediaType(null)} />
                     {/* Remove from collection button */}
@@ -1559,7 +1718,8 @@ export function FullModeWorkspace({
                   </div>
                 ))}
               </div>
-            )
+            );
+            })()
           ) : filteredGenerations.length === 0 && collections.length === 0 && inProgressItems.length === 0 && errorItems.length === 0 && uploadingItems.length === 0 ? (
             <div className="flex items-center justify-center h-full text-muted-foreground">
               <div className="text-center">
@@ -1826,6 +1986,7 @@ export function FullModeWorkspace({
                 onExternalFileAdded={handleExternalFileAdded}
                 minimal
                 extraActions={
+                  <>
                   <div className="shrink-0 relative">
                     <button
                       onClick={() => setSettingsOpen(!settingsOpen)}
@@ -1849,6 +2010,9 @@ export function FullModeWorkspace({
                       <span className="text-muted-foreground/70">·</span>
                       <span>{format === "image" ? imageSize : videoResolution}</span>
                       {numVariations > 1 && <><span className="text-muted-foreground/70">·</span><span>x{numVariations}</span></>}
+                      {((format === "image" && imageNegativePrompt) || (format === "video" && videoNegativePrompt)) && (
+                        <span className="text-amber-500" title={format === "image" ? imageNegativePrompt : videoNegativePrompt}>⊘</span>
+                      )}
                       <ChevronUp className={cn("h-3 w-3 transition-transform ml-0.5", settingsOpen ? "" : "rotate-180")} />
                     </button>
 
@@ -1968,10 +2132,59 @@ export function FullModeWorkspace({
                             )}
                           </>
                         )}
+
+                        {/* Negative prompt (both formats) */}
+                        <div>
+                          <textarea
+                            value={format === "image" ? imageNegativePrompt : videoNegativePrompt}
+                            onChange={(e) => format === "image"
+                              ? onImageSettingsChange({ negativePrompt: e.target.value })
+                              : onVideoSettingsChange({ negativePrompt: e.target.value })
+                            }
+                            placeholder="Negative prompt (opcional)"
+                            rows={2}
+                            className="w-full text-xs bg-muted rounded-md px-2 py-1.5 text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-1 focus:ring-primary resize-none"
+                          />
+                        </div>
+
+                        {/* VEO slots indicator */}
+                        {format === "video" && isVeoProvider && veoAvailableSlots !== null && (
+                          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                            <div className={cn("w-2 h-2 rounded-full", veoAvailableSlots > 3 ? "bg-green-500" : veoAvailableSlots > 0 ? "bg-amber-500" : "bg-red-500")} />
+                            {veoAvailableSlots > 0 ? `${veoAvailableSlots} slots disponibles` : "Sin slots disponibles"}
+                          </div>
+                        )}
                       </div>
                     </>
                   )}
                   </div>
+
+                  {/* Quick variation cycle button */}
+                  <button
+                    onClick={() => {
+                      const maxVar = format === "video" ? maxVideoVariations : 4;
+                      const next = numVariations >= maxVar ? 1 : numVariations + 1;
+                      setNumVariations(next);
+                    }}
+                    className={cn(
+                      "shrink-0 w-10 h-10 rounded-lg text-xs font-bold border transition-colors",
+                      numVariations > 1
+                        ? "bg-primary/10 text-primary border-primary/30"
+                        : "bg-card text-muted-foreground border-border/50 hover:text-foreground hover:border-border"
+                    )}
+                    title={`Cantidad: x${numVariations} (click para cambiar)`}
+                  >
+                    x{numVariations}
+                  </button>
+
+                  {/* In-progress counter */}
+                  {inProgressItems.length > 0 && (
+                    <div className="shrink-0 flex items-center gap-1.5 px-2 h-10 rounded-lg bg-primary/10 border border-primary/30 text-primary text-xs font-medium">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      {inProgressItems.length}
+                    </div>
+                  )}
+                  </>
                 }
               />
             </div>
@@ -1987,6 +2200,7 @@ export function FullModeWorkspace({
           item={selectedItem}
           index={selectedIndex}
           total={filteredGenerations.length}
+          projectTags={projectTags}
           onClose={handleCloseModal}
           onPrev={goToPrev}
           onNext={goToNext}
@@ -1995,6 +2209,24 @@ export function FullModeWorkspace({
           onRestore={handleRestore}
           onDownload={handleDownload}
           onReuse={(gen) => { handleReusePrompt(gen); handleCloseModal(); }}
+          onApplyConfig={(gen) => { handleApplyConfig(gen); handleCloseModal(); }}
+          onToggleTag={handleToggleTag}
+          onCreateTag={handleCreateTag}
+          onRegenerate={(prompt, type) => {
+            if (type === "image") {
+              const imgSettings = {
+                aspectRatio: imageAspectRatio,
+                size: imageSize,
+                negativePrompt: imageNegativePrompt || undefined,
+                isImagen4: !!isImagen4,
+                numberOfImages: 1,
+                supportsMultiImage: !!supportsMultiImage,
+              };
+              onSendImage(prompt, undefined, undefined, imgSettings, "image", true);
+            } else {
+              onSendVideo(prompt);
+            }
+          }}
           onTopaz={() => setShowTopaz(true)}
           onTopazVideo={() => setShowTopazVideo(true)}
         />
@@ -2039,7 +2271,7 @@ function getAspectRatio(gen: Generation): number {
 
 // ---- Grid Item ----
 
-function GridItem({ gen, index, rowHeight, showLabels, hoverAudio, onOpen, onFavorite, onDelete, onRestore, onDownload, onReuse, onDragStarted, onDragEnded }: {
+const GridItem = memo(function GridItem({ gen, index, rowHeight, showLabels, hoverAudio, onOpen, onFavorite, onDelete, onRestore, onDownload, onReuse, onDragStarted, onDragEnded }: {
   gen: Generation; index: number;
   rowHeight: number;
   showLabels?: boolean;
@@ -2070,7 +2302,7 @@ function GridItem({ gen, index, rowHeight, showLabels, hoverAudio, onOpen, onFav
         }
       }}
       onDragEnd={() => onDragEnded?.()}
-      style={{ height: rowHeight, width: itemWidth }}
+      style={{ height: rowHeight, width: itemWidth, contentVisibility: "auto", containIntrinsicSize: `${itemWidth}px ${rowHeight}px` }}
       className={cn(
         "group relative rounded-lg overflow-hidden cursor-pointer bg-card border transition-all shrink-0",
         gen.deleted_at ? "border-red-500/30 opacity-60" : "border-border/50 hover:border-primary/50",
@@ -2137,7 +2369,7 @@ function GridItem({ gen, index, rowHeight, showLabels, hoverAudio, onOpen, onFav
       </div>
     </div>
   );
-}
+});
 
 // ---- Detail Modal ----
 
@@ -2148,17 +2380,27 @@ interface TopazResult {
   fileSize: number | null;
 }
 
-function DetailModal({ item, index, total, onClose, onPrev, onNext, onFavorite, onDelete, onRestore, onDownload, onReuse, onTopaz, onTopazVideo }: {
+function DetailModal({ item, index, total, projectTags, onClose, onPrev, onNext, onFavorite, onDelete, onRestore, onDownload, onReuse, onApplyConfig, onRegenerate, onToggleTag, onCreateTag, onTopaz, onTopazVideo }: {
   item: Generation; index: number | null; total: number;
+  projectTags: Array<{ id: number; name: string; color: string }>;
   onClose: () => void; onPrev: () => void; onNext: () => void;
   onFavorite: (id: number, e?: React.MouseEvent) => void;
   onDelete: (id: number, e?: React.MouseEvent) => void;
   onRestore: (id: number, e?: React.MouseEvent) => void;
   onDownload: (g: Generation) => void;
   onReuse: (g: Generation) => void;
+  onApplyConfig: (g: Generation) => void;
+  onRegenerate: (prompt: string, type: "image" | "video") => void;
+  onToggleTag: (genId: number, tagId: number) => void;
+  onCreateTag: (name: string, color: string) => Promise<{ id: number; name: string; color: string } | null>;
   onTopaz: () => void; onTopazVideo: () => void;
 }) {
   const [topazResults, setTopazResults] = useState<TopazResult[]>([]);
+  const [editingPrompt, setEditingPrompt] = useState(false);
+  const [editedPromptText, setEditedPromptText] = useState("");
+  const [showTagPicker, setShowTagPicker] = useState(false);
+  const [newTagName, setNewTagName] = useState("");
+  const [newTagColor, setNewTagColor] = useState("#6366f1");
 
   useEffect(() => {
     const fetchTopaz = async () => {
@@ -2266,13 +2508,39 @@ function DetailModal({ item, index, total, onClose, onPrev, onNext, onFavorite, 
           {item.type === "image" && item.image_url ? (
             <img src={item.image_url} alt="" className="max-w-full max-h-[70vh] object-contain rounded" />
           ) : item.type === "video" && item.video_url ? (
-            <VideoPlayer videoUrl={item.video_url} hasAudio={item.video_has_audio ?? false} duration={item.video_duration || undefined} aspectRatio={item.video_aspect_ratio || undefined} />
+            <VideoPlayer videoUrl={item.video_url} hasAudio={item.video_has_audio ?? false} duration={item.video_duration || undefined} aspectRatio={item.video_aspect_ratio || undefined} size="large" />
           ) : null}
         </div>
 
         {/* Footer */}
         <div className="p-4 border-t border-border/50 space-y-2">
-          {item.content && <p className="text-sm text-foreground line-clamp-3">{item.content}</p>}
+          {/* Editable prompt */}
+          {item.content && (
+            editingPrompt ? (
+              <div className="flex gap-2">
+                <input
+                  value={editedPromptText}
+                  onChange={(e) => setEditedPromptText(e.target.value)}
+                  className="flex-1 text-sm bg-muted rounded-md px-3 py-1.5 outline-none focus:ring-1 focus:ring-primary"
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === "Enter" && editedPromptText.trim()) { onRegenerate(editedPromptText.trim(), item.type); setEditingPrompt(false); onClose(); } if (e.key === "Escape") setEditingPrompt(false); }}
+                />
+                <button
+                  onClick={() => { if (editedPromptText.trim()) { onRegenerate(editedPromptText.trim(), item.type); setEditingPrompt(false); onClose(); } }}
+                  className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90"
+                >
+                  Generar
+                </button>
+                <button onClick={() => setEditingPrompt(false)} className="px-2 py-1.5 rounded-md hover:bg-accent text-muted-foreground text-xs">
+                  Cancelar
+                </button>
+              </div>
+            ) : (
+              <p className="text-sm text-foreground line-clamp-3 cursor-pointer hover:text-primary transition-colors" onClick={() => { setEditedPromptText(item.content || ""); setEditingPrompt(true); }} title="Click para editar y regenerar">
+                {item.content}
+              </p>
+            )
+          )}
           {item.reference_images.length > 0 && (
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground shrink-0">Referencias:</span>
@@ -2283,13 +2551,93 @@ function DetailModal({ item, index, total, onClose, onPrev, onNext, onFavorite, 
               </div>
             </div>
           )}
-          <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-            {item.model_name && <span>{item.model_name}</span>}
-            {item.image_aspect_ratio && <span>{item.image_aspect_ratio}</span>}
-            {item.video_aspect_ratio && <span>{item.video_aspect_ratio}</span>}
-            {item.video_duration && <span>{item.video_duration}s</span>}
-            {item.generation_seed && <span>Seed: {item.generation_seed}</span>}
+          {/* Tags */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {item.tags.map(tag => (
+              <button key={tag.id} onClick={() => onToggleTag(item.id, tag.id)} className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium text-white hover:opacity-80 transition-opacity" style={{ backgroundColor: tag.color }}>
+                {tag.name}
+                <X className="h-2.5 w-2.5" />
+              </button>
+            ))}
+            <div className="relative">
+              <button onClick={() => setShowTagPicker(!showTagPicker)} className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-dashed border-border hover:border-primary text-muted-foreground hover:text-foreground transition-colors">
+                <Tag className="h-3 w-3" />
+                {item.tags.length === 0 ? "Agregar tag" : "+"}
+              </button>
+              {showTagPicker && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowTagPicker(false)} />
+                  <div className="absolute bottom-full left-0 mb-1 z-50 bg-card border border-border/50 rounded-lg shadow-xl p-1.5 min-w-[180px]">
+                    {/* Existing tags */}
+                    {projectTags.filter(t => !item.tags.some(it => it.id === t.id)).map(tag => (
+                      <button key={tag.id} onClick={() => { onToggleTag(item.id, tag.id); setShowTagPicker(false); }} className="flex items-center gap-1.5 w-full px-2 py-1 rounded text-xs hover:bg-accent transition-colors">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+                        {tag.name}
+                      </button>
+                    ))}
+                    {/* Divider */}
+                    {projectTags.filter(t => !item.tags.some(it => it.id === t.id)).length > 0 && (
+                      <div className="border-t border-border/50 my-1" />
+                    )}
+                    {/* Create new tag */}
+                    <div className="px-2 py-1 space-y-1.5">
+                      <p className="text-[10px] text-muted-foreground font-medium">Crear tag</p>
+                      <div className="flex gap-1">
+                        <input
+                          value={newTagName}
+                          onChange={(e) => setNewTagName(e.target.value.toUpperCase())}
+                          placeholder="NOMBRE"
+                          className="flex-1 text-[11px] bg-muted rounded px-1.5 py-1 outline-none w-20 placeholder:text-muted-foreground/40"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && newTagName.trim()) {
+                              onCreateTag(newTagName.trim(), newTagColor).then(tag => {
+                                if (tag) { onToggleTag(item.id, tag.id); setNewTagName(""); setShowTagPicker(false); }
+                              });
+                            }
+                          }}
+                        />
+                        <input
+                          type="color"
+                          value={newTagColor}
+                          onChange={(e) => setNewTagColor(e.target.value)}
+                          className="w-6 h-6 rounded cursor-pointer border-0 p-0"
+                        />
+                        <button
+                          onClick={() => {
+                            if (!newTagName.trim()) return;
+                            onCreateTag(newTagName.trim(), newTagColor).then(tag => {
+                              if (tag) { onToggleTag(item.id, tag.id); setNewTagName(""); setShowTagPicker(false); }
+                            });
+                          }}
+                          disabled={!newTagName.trim()}
+                          className="px-1.5 py-1 rounded bg-primary text-primary-foreground text-[10px] font-medium disabled:opacity-30"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            {item.model_name && <span className="bg-muted px-1.5 py-0.5 rounded">{item.model_name}</span>}
+            {item.image_aspect_ratio && <span className="bg-muted px-1.5 py-0.5 rounded">{item.image_aspect_ratio}</span>}
+            {item.image_size && <span className="bg-muted px-1.5 py-0.5 rounded">{item.image_size}</span>}
+            {item.video_aspect_ratio && <span className="bg-muted px-1.5 py-0.5 rounded">{item.video_aspect_ratio}</span>}
+            {item.video_duration && <span className="bg-muted px-1.5 py-0.5 rounded">{item.video_duration}s</span>}
+            {item.video_has_audio != null && <span className="bg-muted px-1.5 py-0.5 rounded">{item.video_has_audio ? "Con audio" : "Sin audio"}</span>}
+            {item.generation_seed != null && item.generation_seed > 0 && <span className="bg-muted px-1.5 py-0.5 rounded">Seed: {item.generation_seed}</span>}
             <span>{formatDateTimeLocal(item.created_at)}</span>
+            {!item.deleted_at && (item.model_name || item.image_aspect_ratio || item.video_aspect_ratio) && (
+              <button
+                onClick={() => { onApplyConfig(item); onClose(); }}
+                className="ml-auto px-2 py-1 rounded-md bg-primary/10 text-primary hover:bg-primary/20 text-[11px] font-medium transition-colors"
+              >
+                Usar misma config
+              </button>
+            )}
           </div>
         </div>
       </div>

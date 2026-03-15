@@ -62,6 +62,7 @@ const GOOGLE_DURATIONS: { value: VideoDuration; label: string }[] = [
 const GOOGLE_RESOLUTIONS: { value: VideoResolution; label: string; note?: string }[] = [
   { value: "720p", label: "720p" },
   { value: "1080p", label: "1080p", note: "Solo 8s" },
+  { value: "4K", label: "4K", note: "Solo 8s" },
 ];
 
 const GOOGLE_ASPECT_RATIOS: { value: VideoAspectRatio; label: string }[] = [
@@ -127,11 +128,12 @@ export function VideoSettings({
   const resolutions = isKling ? KLING_RESOLUTIONS : isXai ? XAI_RESOLUTIONS : GOOGLE_RESOLUTIONS;
   const aspectRatios = isKling ? KLING_ASPECT_RATIOS : isXai ? XAI_ASPECT_RATIOS : GOOGLE_ASPECT_RATIOS;
 
-  // Google VEO: 1080p only available for 8s. Kling: 1080p (pro) available for all durations.
-  const has1080pRestriction = !isKling && !isXai;
+  // Google VEO: 1080p/4K only available for 8s. Kling: 1080p (pro) available for all durations.
+  const hasHighResRestriction = !isKling && !isXai;
+  const isHighRes = (r: string) => r === "1080p" || r === "4K";
 
   const handleDurationChange = (newDuration: VideoDuration) => {
-    if (has1080pRestriction && resolution === "1080p" && newDuration !== 8) {
+    if (hasHighResRestriction && isHighRes(resolution) && newDuration !== 8) {
       onChange({ duration: newDuration, resolution: "720p" });
     } else {
       onChange({ duration: newDuration });
@@ -139,7 +141,7 @@ export function VideoSettings({
   };
 
   const handleResolutionChange = (newResolution: VideoResolution) => {
-    if (has1080pRestriction && newResolution === "1080p" && duration !== 8) {
+    if (hasHighResRestriction && isHighRes(newResolution) && duration !== 8) {
       onChange({ resolution: newResolution, duration: 8 });
     } else {
       onChange({ resolution: newResolution });
@@ -227,17 +229,17 @@ export function VideoSettings({
         <Label className="text-xs text-muted-foreground">Resolución</Label>
         <div className="flex gap-2">
           {resolutions.map((r) => {
-            const is1080pDisabled = has1080pRestriction && r.value === "1080p" && duration !== 8;
+            const isHighResDisabled = hasHighResRestriction && isHighRes(r.value) && duration !== 8;
             return (
               <button
                 key={r.value}
-                disabled={disabled || is1080pDisabled}
+                disabled={disabled || isHighResDisabled}
                 onClick={() => handleResolutionChange(r.value)}
                 className={`flex-1 py-2 px-3 text-sm rounded-md border transition-colors ${
                   resolution === r.value
                     ? "bg-primary text-primary-foreground border-primary"
                     : "bg-background border-border hover:bg-muted"
-                } ${disabled || is1080pDisabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                } ${disabled || isHighResDisabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                 title={r.note}
               >
                 <div className="font-medium">{r.label}</div>
@@ -250,9 +252,9 @@ export function VideoSettings({
             );
           })}
         </div>
-        {has1080pRestriction && resolution === "1080p" && duration !== 8 && (
+        {hasHighResRestriction && isHighRes(resolution) && duration !== 8 && (
           <p className="text-xs text-muted-foreground">
-            1080p solo disponible para videos de 8 segundos
+            {resolution} solo disponible para videos de 8 segundos
           </p>
         )}
       </div>

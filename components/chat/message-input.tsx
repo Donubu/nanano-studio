@@ -45,6 +45,7 @@ export interface MessageInputHandle {
   clearFiles: () => void;
   getFiles: () => AttachedFile[];
   removeFileByUrl: (url: string) => void;
+  focus: () => void;
 }
 
 const MAX_FILES = 5;
@@ -182,6 +183,9 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     getFiles: () => attachedFiles,
     removeFileByUrl: (url: string) => {
       setAttachedFiles(prev => prev.filter(f => f.dataUrl !== url && f.sourceUrl !== url));
+    },
+    focus: () => {
+      textareaRef.current?.focus();
     },
   }), [assetMode, maxFiles, preselectedImages, attachedFiles]);
 

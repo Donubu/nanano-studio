@@ -546,7 +546,7 @@ export async function POST(
 
             const videoConfig: VideoGenerationConfig = {
               durationSeconds: ((videoSettings?.duration || conversation.video_duration) as 4 | 6 | 8) || 8,
-              resolution: ((videoSettings?.resolution || conversation.video_resolution) as "720p" | "1080p") || "720p",
+              resolution: ((videoSettings?.resolution || conversation.video_resolution) as "720p" | "1080p" | "4K") || "720p",
               aspectRatio: ((videoSettings?.aspectRatio || conversation.video_aspect_ratio) as "16:9" | "9:16") || "16:9",
               generateAudio: audioEnabled,
               negativePrompt: videoSettings?.negativePrompt || conversation.video_negative_prompt || undefined,
