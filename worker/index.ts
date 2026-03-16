@@ -5,6 +5,11 @@ import path from "path";
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
+// Increase undici headers timeout for long-running API calls (4K images ~8 min)
+// Node.js default is 300s which causes UND_ERR_HEADERS_TIMEOUT on 4K images
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+try { const u = require("undici"); u.setGlobalDispatcher(new u.Agent({ headersTimeout: 600000, bodyTimeout: 600000, connectTimeout: 30000 })); console.log("[Worker] Undici timeouts: headers=600s, body=600s"); } catch { console.warn("[Worker] Could not set undici timeouts"); }
+
 import { Worker, Job } from "bullmq";
 import Redis from "ioredis";
 import mysql from "mysql2/promise";
