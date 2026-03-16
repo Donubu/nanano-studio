@@ -27,11 +27,11 @@ services:
     restart: unless-stopped
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 1536mb --maxmemory-policy noeviction --tcp-keepalive 60 --hz 10 --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
+    command: redis-server --appendonly yes --maxmemory 1024mb --maxmemory-policy noeviction --tcp-keepalive 60 --hz 10 --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
     deploy:
       resources:
         limits:
-          memory: 2g
+          memory: 1536m
 
   puerto_studio_blue:
     build: .
@@ -44,14 +44,14 @@ services:
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
       - NODE_ENV=production
-      - NODE_OPTIONS=--max-old-space-size=4096
+      - NODE_OPTIONS=--max-old-space-size=2048
       - PORT=3000
       - APP_MODE=web
       - REDIS_URL=redis://redis:6379
     deploy:
       resources:
         limits:
-          memory: 2g
+          memory: 1536m
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
       interval: 5s
@@ -72,14 +72,14 @@ services:
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
       - NODE_ENV=production
-      - NODE_OPTIONS=--max-old-space-size=4096
+      - NODE_OPTIONS=--max-old-space-size=2048
       - PORT=3000
       - APP_MODE=web
       - REDIS_URL=redis://redis:6379
     deploy:
       resources:
         limits:
-          memory: 2g
+          memory: 1536m
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
       interval: 5s
@@ -102,16 +102,16 @@ services:
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
       - NODE_ENV=production
-      - NODE_OPTIONS=--max-old-space-size=4096
+      - NODE_OPTIONS=--max-old-space-size=2048
       - APP_MODE=worker
       - REDIS_URL=redis://redis:6379
-      - WORKER_CONCURRENCY=1
+      - WORKER_CONCURRENCY=3
       - WORKER_NAME=worker_1
     stop_grace_period: 120s
     deploy:
       resources:
         limits:
-          memory: 1536m
+          memory: 2560m
     depends_on:
       - redis
 
@@ -126,16 +126,16 @@ services:
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
       - NODE_ENV=production
-      - NODE_OPTIONS=--max-old-space-size=4096
+      - NODE_OPTIONS=--max-old-space-size=2048
       - APP_MODE=worker
       - REDIS_URL=redis://redis:6379
-      - WORKER_CONCURRENCY=1
+      - WORKER_CONCURRENCY=3
       - WORKER_NAME=worker_2
     stop_grace_period: 120s
     deploy:
       resources:
         limits:
-          memory: 1536m
+          memory: 2560m
     depends_on:
       - redis
 
@@ -150,16 +150,16 @@ services:
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
       - NODE_ENV=production
-      - NODE_OPTIONS=--max-old-space-size=4096
+      - NODE_OPTIONS=--max-old-space-size=2048
       - APP_MODE=worker
       - REDIS_URL=redis://redis:6379
-      - WORKER_CONCURRENCY=1
+      - WORKER_CONCURRENCY=3
       - WORKER_NAME=worker_3
     stop_grace_period: 120s
     deploy:
       resources:
         limits:
-          memory: 1536m
+          memory: 2560m
     depends_on:
       - redis
 
@@ -174,16 +174,16 @@ services:
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
       - NODE_ENV=production
-      - NODE_OPTIONS=--max-old-space-size=4096
+      - NODE_OPTIONS=--max-old-space-size=2048
       - APP_MODE=worker
       - REDIS_URL=redis://redis:6379
-      - WORKER_CONCURRENCY=1
+      - WORKER_CONCURRENCY=3
       - WORKER_NAME=worker_4
     stop_grace_period: 120s
     deploy:
       resources:
         limits:
-          memory: 1536m
+          memory: 2560m
     depends_on:
       - redis
 
