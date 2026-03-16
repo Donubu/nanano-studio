@@ -13,7 +13,7 @@ const POOL_KEYS: Record<VeoPool, string> = {
 };
 
 const MAX_PER_POOL = 9;
-const STALE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes - max expected video generation time
+const STALE_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes - slots auto-release after 60s RPM window
 
 // Check if overflow is configured
 function hasOverflow(): boolean {

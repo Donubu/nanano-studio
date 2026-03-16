@@ -616,6 +616,17 @@ export async function POST(
               console.log(`[VEO] Acquired slot: ${veoSlotId} (pool: ${veoPool})`);
             }
 
+            // Auto-release slot after 60s (RPM window) even if generation is still running
+            const slotAcquiredAt = Date.now();
+            let slotReleased = false;
+            const autoReleaseTimer = veoSlotId ? setTimeout(async () => {
+              if (!slotReleased && veoSlotId) {
+                slotReleased = true;
+                await releaseSlot(veoSlotId, veoPool);
+                console.log(`[VEO] Auto-released slot after 60s: ${veoSlotId} (pool: ${veoPool})`);
+              }
+            }, 60000) : null;
+
             try {
               generatedVideo = await generateVideo(
                 effectiveModelId,
@@ -627,9 +638,20 @@ export async function POST(
                 veoPool
               );
             } finally {
-              if (veoSlotId) {
-                await releaseSlot(veoSlotId, veoPool);
-                console.log(`[VEO] Released slot: ${veoSlotId} (pool: ${veoPool})`);
+              if (veoSlotId && !slotReleased) {
+                slotReleased = true;
+                if (autoReleaseTimer) clearTimeout(autoReleaseTimer);
+                // If less than 60s elapsed, wait until the minute is up before releasing
+                const elapsed = Date.now() - slotAcquiredAt;
+                if (elapsed < 60000) {
+                  setTimeout(async () => {
+                    await releaseSlot(veoSlotId!, veoPool);
+                    console.log(`[VEO] Released slot after RPM window: ${veoSlotId} (pool: ${veoPool})`);
+                  }, 60000 - elapsed);
+                } else {
+                  await releaseSlot(veoSlotId, veoPool);
+                  console.log(`[VEO] Released slot: ${veoSlotId} (pool: ${veoPool})`);
+                }
               }
             }
           }
