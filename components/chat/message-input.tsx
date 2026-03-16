@@ -353,6 +353,29 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     [handleFileSelect]
   );
 
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const imageFiles: File[] = [];
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) imageFiles.push(file);
+        }
+      }
+
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        const dt = new DataTransfer();
+        imageFiles.forEach((f) => dt.items.add(f));
+        handleFileSelect(dt.files);
+      }
+    },
+    [handleFileSelect]
+  );
+
   const handleFileInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
@@ -703,6 +726,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
               value={message}
               onChange={handleMessageChange}
               onKeyDown={handleKeyDown}
+              onPaste={supportsFiles ? handlePaste : undefined}
               placeholder={assetMode && attachedFiles.length > 0
                 ? "Escribe tu prompt... usa @ para referenciar assets"
                 : placeholder
