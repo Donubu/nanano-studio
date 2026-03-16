@@ -1849,8 +1849,6 @@ export function ChatInterface() {
             );
         }
 
-        setSendingTabs((prev) => ({...prev, [tabId]: true}));
-
         // Determinar tipo de contenido
         const hasFiles = files && files.length > 0;
         const firstImage = files?.find(f => f.type === "image");
@@ -2350,7 +2348,7 @@ export function ChatInterface() {
                 ),
             }));
         } finally {
-            setSendingTabs((prev) => ({...prev, [tabId]: false}));
+            // No-op: input is never blocked
         }
     };
 
@@ -2609,8 +2607,6 @@ export function ChatInterface() {
             );
         }
 
-        setSendingTabs((prev) => ({...prev, [tabId]: true}));
-
         // Debug: log video settings being sent
         console.log("[Video Debug] Sending with settings:", {
             audioEnabled: videoAudioEnabled,
@@ -2694,7 +2690,6 @@ export function ChatInterface() {
         const onRequestDone = () => {
             completedCount++;
             if (completedCount >= numVariations) {
-                setSendingTabs((prev) => ({...prev, [tabId]: false}));
                 // Clear video frames after all generations complete
                 setVideoFirstFrame(null);
                 setVideoLastFrame(null);
@@ -2903,8 +2898,6 @@ export function ChatInterface() {
             );
         }
 
-        setSendingTabs((prev) => ({...prev, [tabId]: true}));
-
         console.log("[Audio Debug] Sending with settings:", {
             voiceId: audioVoiceId,
             stylePrompt: audioStylePrompt,
@@ -2959,7 +2952,6 @@ export function ChatInterface() {
         const onRequestDone = () => {
             completedCount++;
             if (completedCount >= numVariations) {
-                setSendingTabs((prev) => ({...prev, [tabId]: false}));
                 fetchConversations();
                 if (selectedProjectId) {
                     fetchProjectUsage(selectedProjectId);
@@ -3066,8 +3058,6 @@ export function ChatInterface() {
         // Create a temporary generating message
         const tempMusicMessageId = nextTempId();
         const musicMessageId = tempMusicMessageId + 1;
-
-        setSendingTabs((prev) => ({...prev, [tabId]: true}));
 
         // Add optimistic user message + generating model message
         setTabMessages((prev) => ({
@@ -3204,7 +3194,7 @@ export function ChatInterface() {
                 ),
             }));
         } finally {
-            setSendingTabs((prev) => ({...prev, [tabId]: false}));
+            // No-op: input is never blocked
         }
     };
 
@@ -4474,7 +4464,7 @@ export function ChatInterface() {
                                         setSelectedConversationImages([]);
                                         setReuseImages([]);
                                     }}
-                                    disabled={isSending || !currentModelInfo?.id}
+                                    disabled={!currentModelInfo?.id}
                                     supportsFiles={isTextConversation || isImageConversation || (isVideoConversation && generationMode === "image") || (isVideoConversation && generationMode === "video" && isKlingVideoProvider && !isKlingV26)}
                                     assetMode={isVideoConversation && generationMode === "video" && isKlingVideoProvider && !isKlingV26}
                                     maxFilesOverride={isVideoConversation && generationMode === "video" && isKlingVideoProvider && !isKlingV26 ? klingMaxAssets : undefined}
@@ -4960,30 +4950,27 @@ export function ChatInterface() {
                                         </div>
 
                                         {/* Number of Images */}
-                                        {supportsMultiImage && (
-                                            <div>
-                                                <label className="text-xs text-muted-foreground mb-2 block">
-                                                    Cantidad de imagenes
-                                                </label>
-                                                <div className="flex gap-1">
-                                                    {[1, 2, 3, 4].map((n) => (
-                                                        <button
-                                                            key={n}
-                                                            onClick={() => setNumberOfImages(n)}
-                                                            disabled={isSending}
-                                                            className={cn(
-                                                                "flex-1 px-3 py-1.5 text-sm rounded-lg border transition-colors",
-                                                                numberOfImages === n
-                                                                    ? "bg-primary text-primary-foreground border-primary"
-                                                                    : "bg-muted border-border/50 hover:border-primary/50"
-                                                            )}
-                                                        >
-                                                            {n}
-                                                        </button>
-                                                    ))}
-                                                </div>
+                                        <div>
+                                            <label className="text-xs text-muted-foreground mb-2 block">
+                                                Cantidad de imagenes
+                                            </label>
+                                            <div className="flex gap-1">
+                                                {[1, 2, 3, 4].map((n) => (
+                                                    <button
+                                                        key={n}
+                                                        onClick={() => setNumberOfImages(n)}
+                                                        className={cn(
+                                                            "flex-1 px-3 py-1.5 text-sm rounded-lg border transition-colors",
+                                                            numberOfImages === n
+                                                                ? "bg-primary text-primary-foreground border-primary"
+                                                                : "bg-muted border-border/50 hover:border-primary/50"
+                                                        )}
+                                                    >
+                                                        {n}
+                                                    </button>
+                                                ))}
                                             </div>
-                                        )}
+                                        </div>
                                     </>
                                 )}
                             </div>
