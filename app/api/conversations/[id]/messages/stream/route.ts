@@ -465,7 +465,7 @@ export async function POST(
 
           // When skip_user_message, inject user message from request body (not from DB)
           if (skip_user_message && messages.length === 0) {
-            messages.push({ role: "user", content });
+            messages.push({ role: "user", content, ...(hasFiles && files ? { files } : {}) });
           }
 
           const messagesToSend = skipHistory
@@ -604,6 +604,20 @@ export async function POST(
               }, 600000);
 
               await subRedis.subscribe(channel);
+
+              // Handle Redis subscriber errors (connection drops, etc.)
+              subRedis.on("error", (err: Error) => {
+                console.error(`[Stream] Redis subscriber error for job ${job.id}:`, err.message);
+                if (!controllerClosed) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", message: "Conexión con worker perdida. Refresca para ver el resultado." })}\n\n`));
+                  clearInterval(heartbeat);
+                  clearTimeout(workerTimeout);
+                  controllerClosed = true;
+                  controller.close();
+                  subRedis.disconnect();
+                }
+              });
+
               subRedis.on("message", (ch: string, message: string) => {
                 if (ch !== channel || controllerClosed) return;
                 try {

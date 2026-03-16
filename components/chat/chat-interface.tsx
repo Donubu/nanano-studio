@@ -2034,10 +2034,17 @@ export function ChatInterface() {
                             }
                         } catch (err) {
                             console.error("[Extra image request] Error:", err);
-                            setTabMessages((prev) => ({
-                                ...prev,
-                                [tabId]: prev[tabId].filter((m) => m.id !== placeholderId),
-                            }));
+                            // Connection lost — worker may still be running.
+                            // Poll DB every 30s for up to 10 min to pick up completed results.
+                            if (conversationId) {
+                                let pollCount = 0;
+                                const maxPolls = 20; // 20 * 30s = 10 min
+                                const pollInterval = setInterval(() => {
+                                    pollCount++;
+                                    fetchMessagesForTab(tabId, conversationId);
+                                    if (pollCount >= maxPolls) clearInterval(pollInterval);
+                                }, 30000);
+                            }
                         }
                     })();
                 }
@@ -2320,6 +2327,16 @@ export function ChatInterface() {
                             : m
                     ),
                 }));
+                // Worker may still be running — poll DB every 30s for up to 10 min
+                if (conversationId) {
+                    let pollCount = 0;
+                    const maxPolls = 20;
+                    const pollInterval = setInterval(() => {
+                        pollCount++;
+                        fetchMessagesForTab(tabId, conversationId);
+                        if (pollCount >= maxPolls) clearInterval(pollInterval);
+                    }, 30000);
+                }
             }
 
             fetchConversations();

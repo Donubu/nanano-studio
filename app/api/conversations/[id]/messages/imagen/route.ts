@@ -306,6 +306,20 @@ export async function POST(
             }, 600000);
 
             await subRedis.subscribe(channel);
+
+            // Handle Redis subscriber errors (connection drops, etc.)
+            subRedis.on("error", (err: Error) => {
+              console.error(`[Imagen] Redis subscriber error for job ${job.id}:`, err.message);
+              if (!controllerClosed) {
+                sendEvent({ type: "error", message: "Conexión con worker perdida. Refresca para ver el resultado." });
+                clearInterval(heartbeat);
+                clearTimeout(workerTimeout);
+                controllerClosed = true;
+                controller.close();
+                subRedis.disconnect();
+              }
+            });
+
             subRedis.on("message", (ch: string, message: string) => {
               if (ch !== channel || controllerClosed) return;
               try {
