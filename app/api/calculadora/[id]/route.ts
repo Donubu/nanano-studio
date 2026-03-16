@@ -40,6 +40,7 @@ export async function GET(
 
     const budget = budgets[0];
     const isOwner = budget.created_by === userId;
+    const isClientUser = !isAdmin && !isOwner; // If they can see it and aren't admin/owner, they're a client user
 
     // Get items
     const [items] = await pool.execute<RowDataPacket[]>(
@@ -86,7 +87,7 @@ export async function GET(
     // Assemble response
     const result = {
       ...budget,
-      is_owner: isAdmin || isOwner,
+      is_owner: isAdmin || isOwner || isClientUser,
       items: items.map((item: RowDataPacket) => ({
         ...item,
         item_data: typeof item.item_data === "string" ? JSON.parse(item.item_data) : item.item_data,
@@ -167,8 +168,16 @@ export async function PUT(
       return NextResponse.json({ error: "Solo se pueden editar presupuestos en borrador" }, { status: 400 });
     }
 
-    if (!isAdmin && budget.created_by !== userId) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+    // Check if user is a client user (has access via client_users)
+    const isOwnerPut = budget.created_by === userId;
+    if (!isAdmin && !isOwnerPut) {
+      const [clientAccess] = await pool.execute<RowDataPacket[]>(
+        `SELECT 1 FROM client_users cu JOIN budgets b ON b.client_id = cu.client_id WHERE b.id = ? AND cu.user_id = ?`,
+        [id, userId]
+      );
+      if (clientAccess.length === 0) {
+        return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+      }
     }
 
     const body = await request.json();

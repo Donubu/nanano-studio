@@ -25,10 +25,14 @@ export async function PATCH(
       return NextResponse.json({ error: "Estado inválido" }, { status: 400 });
     }
 
-    // Verify budget exists and belongs to user (or admin)
+    // Verify budget exists and user has access (admin, owner, or client user)
     const [budgets] = await pool.execute<RowDataPacket[]>(
-      `SELECT id, status FROM budgets WHERE id = ? AND deleted_at IS NULL ${isAdmin ? "" : "AND created_by = ?"}`,
-      isAdmin ? [id] : [id, userId]
+      isAdmin
+        ? `SELECT id, status FROM budgets WHERE id = ? AND deleted_at IS NULL`
+        : `SELECT b.id, b.status FROM budgets b
+           WHERE b.id = ? AND b.deleted_at IS NULL
+           AND (b.created_by = ? OR b.client_id IN (SELECT client_id FROM client_users WHERE user_id = ?))`,
+      isAdmin ? [id] : [id, userId, userId]
     );
 
     if (budgets.length === 0) {
