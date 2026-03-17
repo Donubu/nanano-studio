@@ -294,6 +294,7 @@ export function ChatInterface() {
     const [activeTabId, setActiveTabId] = useState<number | null>(null);
     const [tabMessages, setTabMessages] = useState<Record<number, Message[]>>({});
     const [tabConversations, setTabConversations] = useState<Record<number, Conversation>>({});
+    const tabsRestoredRef = useRef(false);
 
     const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
     const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
@@ -771,7 +772,9 @@ export function ChatInterface() {
 
     // Restore tabs from localStorage after conversations are loaded
     useEffect(() => {
+        if (tabsRestoredRef.current) return;
         if (conversations.length > 0 && openTabs.length === 0) {
+            tabsRestoredRef.current = true;
             const savedTabs = localStorage.getItem(STORAGE_KEY_TABS);
             const savedActiveTab = localStorage.getItem(STORAGE_KEY_ACTIVE_TAB);
 
@@ -1223,6 +1226,7 @@ export function ChatInterface() {
                 setActiveTabId(null);
                 setTabMessages({});
                 setTabConversations({});
+                tabsRestoredRef.current = false;
                 // Clear archived conversations
                 setArchivedConversations([]);
             }
