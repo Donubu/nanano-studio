@@ -1108,6 +1108,8 @@ export function ChatInterface() {
     useEffect(() => {
         if (activeTabId && tabConversations[activeTabId]?.id) {
             pollConversationIdRef.current = tabConversations[activeTabId].id;
+        } else {
+            pollConversationIdRef.current = null;
         }
     }, [activeTabId, tabConversations]);
 
@@ -1115,10 +1117,13 @@ export function ChatInterface() {
         // Skip polling for full (estudio) conversations - FullModeWorkspace has its own polling
         if (!activeTabId || isFullConversation) return;
 
+        // Skip polling for draft tabs (no real conversation yet)
+        const currentConvId = tabConversations[activeTabId]?.id;
+        if (!currentConvId) return;
+
         const pollInterval = setInterval(async () => {
             const conversationId = pollConversationIdRef.current;
             if (!conversationId) {
-                console.log("[Polling] Skip: no conversationId in ref");
                 return;
             }
 

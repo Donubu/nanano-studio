@@ -657,7 +657,7 @@ export async function generateConversationTitle(
   userMessage: string,
   labels?: Labels
 ): Promise<string> {
-  const TITLE_MODEL = "gemini-3.1-flash-lite";
+  const TITLE_MODEL = "gemini-3.1-flash-lite-preview";
   const SYSTEM_INSTRUCTION = `Eres un asistente que genera títulos descriptivos para conversaciones.
 Tu tarea es crear un título que resuma el tema principal del mensaje del usuario.
 
