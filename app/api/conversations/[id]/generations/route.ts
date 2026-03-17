@@ -69,6 +69,14 @@ export async function GET(
 
     const conv = convRows[0];
 
+    // Auto-cleanup: mark stuck "generating" placeholders as "error" after 10 minutes
+    await pool.execute(
+      `UPDATE messages SET status = 'error'
+       WHERE conversation_id = ? AND status = 'generating'
+         AND created_at < NOW() - INTERVAL 10 MINUTE`,
+      [conversationId]
+    );
+
     // Build WHERE conditions for media type (include generating placeholders)
     const mediaConditions: string[] = [];
     if (typeFilter === "images") {

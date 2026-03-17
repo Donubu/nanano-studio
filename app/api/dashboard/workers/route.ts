@@ -1,8 +1,26 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { Queue } from "bullmq";
-import { isRedisConfigured, createRedisConnection } from "@/lib/redis";
+import { isRedisConfigured, getRedisConnection } from "@/lib/redis";
 import { STREAM_QUEUE_NAME, type StreamJobData, IMAGEN_QUEUE_NAME, type ImagenJobData } from "@/lib/queue";
+
+// Reuse Queue instances across requests to avoid connection leaks
+let streamQueue: Queue<StreamJobData> | null = null;
+let imagenQueue: Queue<ImagenJobData> | null = null;
+
+function getQueues(connection: ReturnType<typeof getRedisConnection>) {
+  if (!streamQueue) {
+    streamQueue = new Queue<StreamJobData>(STREAM_QUEUE_NAME, {
+      connection: connection as never,
+    });
+  }
+  if (!imagenQueue) {
+    imagenQueue = new Queue<ImagenJobData>(IMAGEN_QUEUE_NAME, {
+      connection: connection as never,
+    });
+  }
+  return { streamQueue, imagenQueue };
+}
 
 export async function GET() {
   try {
@@ -25,15 +43,10 @@ export async function GET() {
       });
     }
 
-    const connection = createRedisConnection();
+    const connection = getRedisConnection();
 
-    try {
-      const streamQueue = new Queue<StreamJobData>(STREAM_QUEUE_NAME, {
-        connection: connection as never,
-      });
-      const imagenQueue = new Queue<ImagenJobData>(IMAGEN_QUEUE_NAME, {
-        connection: connection as never,
-      });
+    {
+      const { streamQueue, imagenQueue } = getQueues(connection);
 
       // Get counts from both queues
       const [streamCounts, imagenCounts] = await Promise.all([
@@ -191,9 +204,6 @@ export async function GET() {
       ).length;
       const workerCount = Math.ceil(bzpopminCount / 2);
 
-      await streamQueue.close();
-      await imagenQueue.close();
-
       return NextResponse.json({
         configured: true,
         workers: workerCount,
@@ -203,8 +213,6 @@ export async function GET() {
         failedJobs,
         stats,
       });
-    } finally {
-      await connection.quit();
     }
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);

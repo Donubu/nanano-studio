@@ -293,6 +293,7 @@ export function FullModeWorkspace({
   const setHoverAudio = (v: boolean) => { setHoverAudioState(v); localStorage.setItem("full-hover-audio", String(v)); };
   const rowHeight = GRID_SIZES[gridSize];
   const [reuseWarning, setReuseWarning] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<Generation | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [showTopaz, setShowTopaz] = useState(false);
@@ -902,6 +903,11 @@ export function FullModeWorkspace({
           tags: [],
         };
         setGenerations(prev => [newGen, ...prev]);
+      } else {
+        const errData = await res.json().catch(() => null);
+        const msg = errData?.error || "Error al subir el archivo";
+        setUploadError(msg);
+        setTimeout(() => setUploadError(null), 6000);
       }
     } catch (err) {
       console.error("Error uploading external file:", err);
@@ -1933,6 +1939,16 @@ export function FullModeWorkspace({
                 <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                 <span>{reuseWarning}</span>
                 <button onClick={() => setReuseWarning(null)} className="ml-1 hover:text-foreground"><X className="h-3 w-3" /></button>
+              </div>
+            </div>
+          )}
+          {/* Upload error toast */}
+          {uploadError && (
+            <div className="flex justify-center px-4 pb-1 pointer-events-auto">
+              <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 rounded-lg px-3 py-1.5 text-xs backdrop-blur-sm">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span>{uploadError}</span>
+                <button onClick={() => setUploadError(null)} className="ml-1 hover:text-foreground"><X className="h-3 w-3" /></button>
               </div>
             </div>
           )}

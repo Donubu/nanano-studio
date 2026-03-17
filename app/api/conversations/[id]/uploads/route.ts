@@ -27,7 +27,15 @@ export async function POST(
       return NextResponse.json({ error: "Conversación no encontrada" }, { status: 404 });
     }
 
-    const body = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: "El archivo excede el límite de 100MB permitido" },
+        { status: 413 }
+      );
+    }
     const { dataUrl, mimeType, name, aspectRatio } = body as {
       dataUrl: string;
       mimeType: string;

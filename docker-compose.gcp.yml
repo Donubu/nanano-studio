@@ -41,6 +41,7 @@ services:
       - .env.production
     volumes:
       - ./credentials.json:/run/secrets/credentials.json:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
       - NODE_ENV=production
@@ -69,6 +70,7 @@ services:
       - .env.production
     volumes:
       - ./credentials.json:/run/secrets/credentials.json:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
       - NODE_ENV=production

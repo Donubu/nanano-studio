@@ -20,6 +20,7 @@ import {
     Calculator,
     Activity,
     Sparkles,
+    ScrollText,
 } from "lucide-react";
 
 const menuItems = [
@@ -77,6 +78,11 @@ const menuItems = [
         title: "Workers",
         href: "/dashboard/workers",
         icon: Activity,
+    },
+    {
+        title: "Docker Logs",
+        href: "/dashboard/logs",
+        icon: ScrollText,
     },
     {
         title: "Changelog",

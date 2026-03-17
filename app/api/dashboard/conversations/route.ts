@@ -135,7 +135,8 @@ export async function GET(request: NextRequest) {
 
     // Get filter options
     const [projects] = await pool.execute<FilterOption[]>(
-      "SELECT id, title as name FROM projects ORDER BY title"
+      `SELECT p.id, CASE WHEN c.name IS NOT NULL THEN CONCAT(c.name, ' > ', p.title) ELSE p.title END as name
+       FROM projects p LEFT JOIN clients c ON p.client_id = c.id ORDER BY c.name, p.title`
     );
 
     const [clients] = await pool.execute<FilterOption[]>(
