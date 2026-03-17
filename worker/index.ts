@@ -637,8 +637,22 @@ const worker = new Worker<StreamJobData>(
   }
 );
 
-worker.on("completed", (job) => {
+worker.on("completed", async (job) => {
   console.log(`[${WORKER_NAME}] ✓ Job ${job.id} COMPLETED @ ${new Date().toISOString()}`);
+  // Strip heavy data (base64 images in messages) to free Redis memory
+  try {
+    await job.updateData({
+      modelId: job.data.modelId,
+      conversationId: job.data.conversationId,
+      generationType: job.data.generationType,
+      labels: job.data.labels,
+      workerName: job.data.workerName,
+      effectiveCosts: job.data.effectiveCosts,
+      messages: [],
+      content: "",
+      needsTitle: false,
+    } as unknown as StreamJobData);
+  } catch { /* non-critical */ }
 });
 
 worker.on("failed", (job, err) => {
@@ -668,8 +682,17 @@ const imagenWorker = new Worker<ImagenJobData>(
   }
 );
 
-imagenWorker.on("completed", (job) => {
+imagenWorker.on("completed", async (job) => {
   console.log(`[${WORKER_NAME}] ✓ Imagen job ${job.id} completed`);
+  // Strip heavy data (base64 reference images) to free Redis memory
+  try {
+    await job.updateData({
+      modelId: job.data.modelId,
+      conversationId: job.data.conversationId,
+      labels: job.data.labels,
+      workerName: job.data.workerName,
+    } as unknown as ImagenJobData);
+  } catch { /* non-critical */ }
 });
 
 imagenWorker.on("failed", (job, err) => {
