@@ -4579,7 +4579,7 @@ export function ChatInterface() {
                                     disabled={!currentModelInfo?.id}
                                     supportsFiles={isTextConversation || isImageConversation || (isVideoConversation && generationMode === "image") || (isVideoConversation && generationMode === "video" && isKlingVideoProvider && !isKlingV26)}
                                     assetMode={isVideoConversation && generationMode === "video" && isKlingVideoProvider && !isKlingV26}
-                                    maxFilesOverride={isVideoConversation && generationMode === "video" && isKlingVideoProvider && !isKlingV26 ? klingMaxAssets : undefined}
+                                    maxFilesOverride={isVideoConversation && generationMode === "video" && isKlingVideoProvider && !isKlingV26 ? klingMaxAssets : ((isImageConversation || (isVideoConversation && generationMode === "image")) && supportsMultiImage) ? 14 : undefined}
                                     onAssetsChange={isVideoConversation && generationMode === "video" && isKlingVideoProvider && !isKlingV26 ? setKlingAssetList : undefined}
                                     preselectedImages={
                                         isVideoConversation && generationMode === "video" && isKlingVideoProvider && !isKlingV26

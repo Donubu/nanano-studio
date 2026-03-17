@@ -1570,7 +1570,7 @@ export function FullModeWorkspace({
     } else if (format === "video") {
       // VEO/other: only accept images as references
       if (media.mediaType !== "image") return;
-      if (videoReferenceImages.length < 3) {
+      if (videoReferenceImages.length < 14) {
         setVideoReferenceImages(prev => [...prev, { image: media.base64, type: "ASSET", sourceUrl: media.sourceUrl }]);
         if (videoMode !== "ingredients") setVideoMode("ingredients");
       }
@@ -2056,7 +2056,7 @@ export function FullModeWorkspace({
   
                       />
                     ))}
-                    {videoReferenceImages.length < 3 && (
+                    {videoReferenceImages.length < 14 && (
                       <CompactFrameSlot
                         image={null}
                         label="+"
@@ -2085,7 +2085,7 @@ export function FullModeWorkspace({
                 initialValue={internalPrompt || reusePrompt || undefined}
                 onInitialValueUsed={() => { setInternalPrompt(null); if (reusePrompt) onReusePromptUsed(); }}
                 assetMode={isKlingAssetMode}
-                maxFilesOverride={isKlingAssetMode ? klingMaxAssets : undefined}
+                maxFilesOverride={isKlingAssetMode ? klingMaxAssets : (format === "image" && supportsMultiImage) ? 14 : undefined}
                 onAssetsChange={isKlingAssetMode ? setKlingAssetList : undefined}
                 onExternalFileAdded={handleExternalFileAdded}
                 minimal
