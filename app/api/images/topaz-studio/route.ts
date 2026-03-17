@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { uploadToS3 } from "@/lib/s3";
 import pool from "@/lib/db";
 import { ResultSetHeader } from "mysql2";
+import sharp from "sharp";
 import {
   calculateTopazStudioCredits,
   getTopazModelShortCode,
@@ -93,7 +94,6 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const { credits, outputWidth, outputHeight, megapixels } = creditsInfo;
     const outputFormat = parameters.outputFormat || "png";
 
     // Generate filename and check if already exists
@@ -133,21 +133,42 @@ export async function POST(request: NextRequest) {
     const originalBlob = await originalResponse.blob();
     const originalBuffer = Buffer.from(await originalBlob.arrayBuffer());
 
+    // Detect actual image dimensions from the downloaded file (frontend values can be unreliable)
+    const metadata = await sharp(originalBuffer).metadata();
+    const actualWidth = metadata.width || width;
+    const actualHeight = metadata.height || height;
+
+    if (actualWidth !== width || actualHeight !== height) {
+      console.log(`[Topaz Studio] Dimensiones corregidas: frontend=${width}x${height}, real=${actualWidth}x${actualHeight}`);
+    }
+
+    // Recalculate with actual dimensions
+    let actualCreditsInfo;
+    try {
+      actualCreditsInfo = calculateTopazStudioCredits(actualWidth, actualHeight, scaleFactor, model);
+    } catch (err) {
+      return NextResponse.json({
+        error: err instanceof Error ? err.message : "Error calculando dimensiones reales"
+      }, { status: 400 });
+    }
+
+    const { credits: actualCredits, outputWidth: actualOutputWidth, outputHeight: actualOutputHeight, megapixels: actualMegapixels } = actualCreditsInfo;
+
     console.log("[Topaz Studio] Enviando a Topaz API:", {
       model,
       scaleFactor,
-      inputDimensions: `${width}x${height}`,
-      outputDimensions: `${outputWidth}x${outputHeight}`,
-      megapixels,
-      credits,
+      inputDimensions: `${actualWidth}x${actualHeight}`,
+      outputDimensions: `${actualOutputWidth}x${actualOutputHeight}`,
+      megapixels: actualMegapixels,
+      credits: actualCredits,
     });
 
     // Create FormData for Topaz API
     const formData = new FormData();
     formData.append("image", new Blob([originalBuffer]), "image.png");
     formData.append("model", model);
-    formData.append("output_width", String(outputWidth));
-    formData.append("output_height", String(outputHeight));
+    formData.append("output_width", String(actualOutputWidth));
+    formData.append("output_height", String(actualOutputHeight));
     formData.append("output_format", outputFormat);
 
     // Add optional parameters based on model type
@@ -246,13 +267,13 @@ export async function POST(request: NextRequest) {
         s3Result.url,
         model,
         scaleFactor,
-        width,
-        height,
-        outputWidth,
-        outputHeight,
-        megapixels,
+        actualWidth,
+        actualHeight,
+        actualOutputWidth,
+        actualOutputHeight,
+        actualMegapixels,
         JSON.stringify(parameters),
-        credits,
+        actualCredits,
         processingTimeMs,
         outputFormat,
         processedBuffer.length,
@@ -262,17 +283,17 @@ export async function POST(request: NextRequest) {
     // Update topaz_credits in messages table (accumulate)
     await pool.execute<ResultSetHeader>(
       "UPDATE messages SET topaz_credits = COALESCE(topaz_credits, 0) + ? WHERE id = ?",
-      [credits, messageId]
+      [actualCredits, messageId]
     );
 
     return NextResponse.json({
       url: s3Result.url,
       editId: insertResult.insertId,
-      creditsConsumed: credits,
+      creditsConsumed: actualCredits,
       processingTimeMs,
-      outputWidth,
-      outputHeight,
-      megapixels,
+      outputWidth: actualOutputWidth,
+      outputHeight: actualOutputHeight,
+      megapixels: actualMegapixels,
       fileSize: processedBuffer.length,
       cached: false,
     });
