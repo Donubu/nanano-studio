@@ -53,16 +53,15 @@ export async function GET(
 
     const { id } = await params;
     const conversationId = parseInt(id);
-    const isAdmin = session.user.role === "admin";
 
     const { searchParams } = new URL(request.url);
     const typeFilter = searchParams.get("type"); // "images" | "videos"
     const favoritesOnly = searchParams.get("favorites") === "true";
 
-    // Verify conversation access
+    // Verify conversation exists
     const [convRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT id, user_id, title FROM conversations WHERE id = ? ${isAdmin ? "" : "AND user_id = ?"}`,
-      isAdmin ? [conversationId] : [conversationId, session.user.id]
+      `SELECT id, user_id, title FROM conversations WHERE id = ?`,
+      [conversationId]
     );
     if (convRows.length === 0) {
       return NextResponse.json({ error: "Conversación no encontrada" }, { status: 404 });
@@ -70,14 +69,14 @@ export async function GET(
 
     const conv = convRows[0];
 
-    // Build WHERE conditions for media type
+    // Build WHERE conditions for media type (include generating placeholders)
     const mediaConditions: string[] = [];
     if (typeFilter === "images") {
-      mediaConditions.push("m.image_url IS NOT NULL");
+      mediaConditions.push("(m.image_url IS NOT NULL OR (m.status = 'generating' AND m.content_type = 'image'))");
     } else if (typeFilter === "videos") {
-      mediaConditions.push("m.video_url IS NOT NULL");
+      mediaConditions.push("(m.video_url IS NOT NULL OR (m.status = 'generating' AND m.content_type = 'video'))");
     } else {
-      mediaConditions.push("(m.image_url IS NOT NULL OR m.video_url IS NOT NULL)");
+      mediaConditions.push("(m.image_url IS NOT NULL OR m.video_url IS NOT NULL OR m.status = 'generating')");
     }
 
     if (favoritesOnly) {
@@ -89,6 +88,7 @@ export async function GET(
     const [rows] = await pool.execute<GenerationRow[]>(
       `SELECT
         m.id,
+        m.user_id,
         m.conversation_id,
         c.user_id as conversation_user_id,
         c.title as conversation_title,
@@ -119,11 +119,13 @@ export async function GET(
         m.video_duration,
         m.video_has_audio,
         m.video_aspect_ratio,
+        m.status,
+        m.content_type,
         m.created_at,
         m.deleted_at
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
-      LEFT JOIN users u ON c.user_id = u.id
+      LEFT JOIN users u ON COALESCE(m.user_id, c.user_id) = u.id
       LEFT JOIN models mo ON m.model_id = mo.id
       LEFT JOIN collection_items ci_excl ON ci_excl.message_id = m.id
       WHERE m.conversation_id = ? AND m.role = 'model' AND ci_excl.id IS NULL AND ${whereClause}
@@ -178,8 +180,10 @@ export async function GET(
     }
 
     const generations = rows.map(row => ({
-      type: row.video_url ? "video" as const : "image" as const,
+      type: row.video_url ? "video" as const : row.content_type === "video" ? "video" as const : "image" as const,
+      status: row.status || "completed",
       id: row.id,
+      user_id: row.user_id || null,
       conversation_id: row.conversation_id,
       conversation_user_id: row.conversation_user_id,
       conversation_title: row.conversation_title,

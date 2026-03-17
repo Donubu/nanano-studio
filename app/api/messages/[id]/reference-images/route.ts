@@ -15,15 +15,14 @@ export async function GET(
     }
 
     const { id } = await params;
-    const isAdmin = session.user.role === "admin";
 
-    // Find the model message and verify access
+    // Find the model message
     const [modelMessages] = await pool.execute<RowDataPacket[]>(
       `SELECT m.id, m.conversation_id, m.role
        FROM messages m
        JOIN conversations c ON m.conversation_id = c.id
-       WHERE m.id = ? ${isAdmin ? "" : "AND c.user_id = ?"}`,
-      isAdmin ? [id] : [id, session.user.id]
+       WHERE m.id = ?`,
+      [id]
     );
 
     if (modelMessages.length === 0) {

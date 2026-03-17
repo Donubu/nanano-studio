@@ -48,12 +48,11 @@ export async function POST(
       return NextResponse.json({ error: "tempUrl y tempKey son requeridos" }, { status: 400 });
     }
 
-    // Verify conversation exists and belongs to user
-    const isAdmin = session.user.role === "admin";
+    // Verify conversation exists
     const [conversations] = await pool.execute<ConversationRow[]>(
       `SELECT id, user_id, generation_type FROM conversations
-       WHERE id = ? ${isAdmin ? "" : "AND user_id = ?"} AND deleted_at IS NULL`,
-      isAdmin ? [id] : [id, session.user.id]
+       WHERE id = ? AND deleted_at IS NULL`,
+      [id]
     );
 
     if (conversations.length === 0) {
@@ -88,10 +87,11 @@ export async function POST(
 
     // Save model message with music data
     const [modelResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, content, music_url, music_mime_type, music_file_size, music_duration, music_config, estimated_cost)
-       VALUES (?, 'model', 'music', ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO messages (conversation_id, user_id, role, content_type, content, music_url, music_mime_type, music_file_size, music_duration, music_config, estimated_cost)
+       VALUES (?, ?, 'model', 'music', ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
+        session.user.id,
         config.prompts.map(p => p.text).join(" + "),
         tempUrl,
         "audio/mpeg",

@@ -135,7 +135,6 @@ export async function POST(
     }
 
     // Obtener conversación con configuración de video y costos del modelo
-    const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
       `SELECT c.*, m.model_id as model_model_id, m.supports_video_generation, m.api_backend as model_api_backend, p.title as project_name, cl.name as client_name,
               m.cost_video_per_second
@@ -143,8 +142,8 @@ export async function POST(
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
        LEFT JOIN clients cl ON p.client_id = cl.id
-       WHERE c.id = ? ${isAdmin ? "" : "AND c.user_id = ?"} AND c.deleted_at IS NULL`,
-      isAdmin ? [id] : [id, session.user.id]
+       WHERE c.id = ? AND c.deleted_at IS NULL`,
+      [id]
     );
 
     if (conversations.length === 0) {
@@ -188,6 +187,8 @@ export async function POST(
             );
           }
         };
+
+        let placeholderId: number | undefined;
 
         try {
           // Get the correct model from project_generation_config based on quality_tier
@@ -260,9 +261,9 @@ export async function POST(
           let userMessageId: number | null = null;
           if (!skip_user_message) {
             const [userMessageResult] = await pool.execute<ResultSetHeader>(
-              `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)
-               VALUES (?, 'user', 'text', ?, ?)`,
-              [id, effectiveQualityTier, content]
+              `INSERT INTO messages (conversation_id, user_id, role, content_type, quality_tier, content)
+               VALUES (?, ?, 'user', 'text', ?, ?)`,
+              [id, session.user.id, effectiveQualityTier, content]
             );
             userMessageId = userMessageResult.insertId;
 
@@ -349,6 +350,18 @@ export async function POST(
               progress: progress.progress,
             });
           };
+
+          // Create placeholder message before generation starts
+          const [placeholderResult] = await pool.execute<ResultSetHeader>(
+            `INSERT INTO messages (conversation_id, user_id, role, status, content_type, quality_tier, model_id, content, video_aspect_ratio, video_duration, video_has_audio)
+             VALUES (?, ?, 'model', 'generating', 'video', ?, ?, '', ?, ?, ?)`,
+            [id, session.user.id, effectiveQualityTier, effectiveModelDbId,
+             videoSettings?.aspectRatio || conversation.video_aspect_ratio || "16:9",
+             videoSettings?.duration || conversation.video_duration || 8,
+             (videoSettings?.audioEnabled !== undefined ? videoSettings.audioEnabled : (conversation.video_audio_enabled ?? true)) ? 1 : 0]
+          );
+          placeholderId = placeholderResult.insertId;
+          sendEvent({ type: "placeholders", ids: [placeholderId] });
 
           let generatedVideo;
           let generatedSeed: number;
@@ -693,26 +706,12 @@ export async function POST(
           // Resolve aspect ratio from settings (works for both providers)
           const effectiveAspectRatio = videoSettings?.aspectRatio || conversation.video_aspect_ratio || "16:9";
 
-          // Guardar respuesta del modelo en la base de datos (con quality_tier y seed)
-          const [modelResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, generation_seed, content, video_url, video_mime_type, video_file_size, video_duration, video_has_audio, video_aspect_ratio, estimated_cost)
-             VALUES (?, 'model', 'video', ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              id,
-              effectiveQualityTier,
-              effectiveModelDbId,
-              generatedVideo.seed,
-              uploadResult.url,
-              generatedVideo.mimeType,
-              uploadResult.fileSize,
-              generatedVideo.duration,
-              generatedVideo.hasAudio ? 1 : 0,
-              effectiveAspectRatio,
-              estimatedCost,
-            ]
+          // Update placeholder message with generated video data
+          await pool.execute(
+            `UPDATE messages SET status = 'completed', generation_seed = ?, video_url = ?, video_mime_type = ?, video_file_size = ?, video_duration = ?, video_has_audio = ?, video_aspect_ratio = ?, estimated_cost = ? WHERE id = ?`,
+            [generatedVideo.seed, uploadResult.url, generatedVideo.mimeType, uploadResult.fileSize, generatedVideo.duration, generatedVideo.hasAudio ? 1 : 0, effectiveAspectRatio, estimatedCost, placeholderId]
           );
-
-          const modelMessageId = modelResult.insertId;
+          const modelMessageId = placeholderId;
 
           // Actualizar costo total en la conversación
           await pool.execute(
@@ -770,23 +769,27 @@ export async function POST(
           console.error("[Video] Error generating video:", error);
           const errorMessage = error instanceof Error ? error.message : "Error desconocido";
 
-          // Guardar mensaje de error con metadata de la generación para poder reutilizar
+          // Update placeholder with error or insert new error message
           try {
             const errorVideoAspectRatio = videoSettings?.aspectRatio || conversation.video_aspect_ratio || "16:9";
             const errorVideoDuration = videoSettings?.duration || conversation.video_duration || 8;
             const errorVideoHasAudio = videoSettings?.audioEnabled !== undefined ? videoSettings.audioEnabled : (conversation.video_audio_enabled !== false);
             const errorModelId = conversation.model_id;
-            const [modelResult] = await pool.execute<ResultSetHeader>(
-              `INSERT INTO messages (conversation_id, role, content_type, content, model_id, quality_tier, video_aspect_ratio, video_duration, video_has_audio)
-               VALUES (?, 'model', 'error', ?, ?, ?, ?, ?, ?)`,
-              [id, `Error generando video: ${errorMessage}`, errorModelId, effectiveQualityTier, errorVideoAspectRatio, errorVideoDuration, errorVideoHasAudio]
-            );
 
-            sendEvent({
-              type: "error",
-              message: errorMessage,
-              id: modelResult.insertId,
-            });
+            if (placeholderId) {
+              await pool.execute(
+                `UPDATE messages SET status = 'error', content = ?, model_id = ?, quality_tier = ?, video_aspect_ratio = ?, video_duration = ?, video_has_audio = ? WHERE id = ?`,
+                [`Error generando video: ${errorMessage}`, errorModelId, effectiveQualityTier, errorVideoAspectRatio, errorVideoDuration, errorVideoHasAudio, placeholderId]
+              );
+              sendEvent({ type: "error", message: errorMessage, id: placeholderId });
+            } else {
+              const [modelResult] = await pool.execute<ResultSetHeader>(
+                `INSERT INTO messages (conversation_id, user_id, role, content_type, content, model_id, quality_tier, video_aspect_ratio, video_duration, video_has_audio)
+                 VALUES (?, ?, 'model', 'error', ?, ?, ?, ?, ?, ?)`,
+                [id, session.user.id, `Error generando video: ${errorMessage}`, errorModelId, effectiveQualityTier, errorVideoAspectRatio, errorVideoDuration, errorVideoHasAudio]
+              );
+              sendEvent({ type: "error", message: errorMessage, id: modelResult.insertId });
+            }
           } catch (dbError) {
             console.error("[Video] Error saving error message:", dbError);
             sendEvent({

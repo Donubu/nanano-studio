@@ -103,21 +103,6 @@ export async function POST(
 
     const message = messages[0];
 
-    // Check access
-    if (session.user.role !== "admin" && message.user_id !== session.user.id) {
-      if (message.project_id) {
-        const [access] = await pool.execute<RowDataPacket[]>(
-          "SELECT id FROM project_users WHERE project_id = ? AND user_id = ?",
-          [message.project_id, session.user.id]
-        );
-        if (access.length === 0) {
-          return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-        }
-      } else {
-        return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-      }
-    }
-
     // Verify tag belongs to same project
     const [tagCheck] = await pool.execute<RowDataPacket[]>(
       "SELECT id FROM tags WHERE id = ? AND project_id = ?",
@@ -198,21 +183,6 @@ export async function DELETE(
     }
 
     const message = messages[0];
-
-    // Check access
-    if (session.user.role !== "admin" && message.user_id !== session.user.id) {
-      if (message.project_id) {
-        const [access] = await pool.execute<RowDataPacket[]>(
-          "SELECT id FROM project_users WHERE project_id = ? AND user_id = ?",
-          [message.project_id, session.user.id]
-        );
-        if (access.length === 0) {
-          return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-        }
-      } else {
-        return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-      }
-    }
 
     const [result] = await pool.execute<ResultSetHeader>(
       "DELETE FROM message_tags WHERE message_id = ? AND tag_id = ?",

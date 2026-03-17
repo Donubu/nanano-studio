@@ -262,8 +262,8 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
             const errorMessage = `Error al generar respuesta: ${error.message}`;
             try {
               const [modelResult] = await pool.execute<ResultSetHeader>(
-                `INSERT INTO messages (conversation_id, role, content_type, content) VALUES (?, 'model', 'error', ?)`,
-                [data.conversationId, errorMessage]
+                `INSERT INTO messages (conversation_id, role, content_type, content, user_id) VALUES (?, 'model', 'error', ?, ?)`,
+                [data.conversationId, errorMessage, data.userId]
               );
               if (!data.skipUserMessage && data.userMessageId) {
                 await pool.execute(`UPDATE messages SET ignore_in_context = 1 WHERE id = ?`, [data.userMessageId]);
@@ -331,9 +331,9 @@ async function saveResultsToDB(
     });
     totalEstimatedCost += textCost;
     const [modelResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, thought, tokens_input, tokens_output, estimated_cost, grounding_data)
-       VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?, ?)`,
-      [data.conversationId, data.qualityTier, text, thought || null, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
+      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, thought, tokens_input, tokens_output, estimated_cost, grounding_data, user_id)
+       VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [data.conversationId, data.qualityTier, text, thought || null, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null, data.userId]
     );
     modelMessageId = modelResult.insertId;
   }
@@ -351,10 +351,10 @@ async function saveResultsToDB(
     });
     totalEstimatedCost += imageCost;
     const [imgResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost)
-       VALUES (?, 'model', 'image', ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost, user_id)
+       VALUES (?, 'model', 'image', ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [data.conversationId, data.qualityTier, img.url, img.mimeType, img.fileSize, imageAspectRatioToSave, imageSizeToSave,
-        isFirstMessage ? tokenCount.input : 0, isFirstMessage ? tokenCount.output : 0, imageCost]
+        isFirstMessage ? tokenCount.input : 0, isFirstMessage ? tokenCount.output : 0, imageCost, data.userId]
     );
     imageMessages.push({ id: imgResult.insertId, imageUrl: img.url });
     if (isFirstMessage) modelMessageId = imgResult.insertId;
@@ -371,9 +371,9 @@ async function saveResultsToDB(
     });
     totalEstimatedCost += textCost;
     const [modelResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, tokens_input, tokens_output, estimated_cost)
-       VALUES (?, 'model', 'text', ?, '', ?, ?, ?)`,
-      [data.conversationId, data.qualityTier, tokenCount.input, tokenCount.output, textCost]
+      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, tokens_input, tokens_output, estimated_cost, user_id)
+       VALUES (?, 'model', 'text', ?, '', ?, ?, ?, ?)`,
+      [data.conversationId, data.qualityTier, tokenCount.input, tokenCount.output, textCost, data.userId]
     );
     modelMessageId = modelResult.insertId;
   }
@@ -541,22 +541,19 @@ async function processImagenJob(job: Job<ImagenJobData>): Promise<void> {
         "generated"
       );
 
-      const [modelResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, generation_seed, content, image_url, image_mime_type, estimated_cost)
-         VALUES (?, 'model', 'image', ?, ?, ?, '', ?, ?, ?)`,
+      await pool.execute(
+        `UPDATE messages SET status = 'completed', generation_seed = ?, image_url = ?, image_mime_type = ?, estimated_cost = ? WHERE id = ?`,
         [
-          data.conversationId,
-          data.qualityTier,
-          data.modelDbId,
           generatedImage.seed ?? null,
           uploadResult.url,
           generatedImage.mimeType,
           costPerImage,
+          data.placeholderIds[i],
         ]
       );
 
       totalCost += costPerImage;
-      imageMessages.push({ id: modelResult.insertId, imageUrl: uploadResult.url });
+      imageMessages.push({ id: data.placeholderIds[i], imageUrl: uploadResult.url });
 
       publish({
         type: "image",
@@ -599,12 +596,12 @@ async function processImagenJob(job: Job<ImagenJobData>): Promise<void> {
     const errorMessage = error instanceof Error ? error.message : "Error desconocido";
 
     try {
-      const [modelResult] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO messages (conversation_id, role, content_type, content)
-         VALUES (?, 'model', 'error', ?)`,
-        [data.conversationId, `Error generando imagen: ${errorMessage}`]
+      const placeholders = data.placeholderIds.map(() => '?').join(',');
+      await pool.execute(
+        `UPDATE messages SET status = 'error', content = ? WHERE id IN (${placeholders}) AND status = 'generating'`,
+        [`Error generando imagen: ${errorMessage}`, ...data.placeholderIds]
       );
-      publish({ type: "error", message: errorMessage, id: modelResult.insertId });
+      publish({ type: "error", message: errorMessage, id: data.placeholderIds[0] });
     } catch (dbErr) {
       console.error(`[${WORKER_NAME}] Error saving error:`, dbErr);
       publish({ type: "error", message: errorMessage });

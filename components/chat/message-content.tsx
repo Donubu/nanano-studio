@@ -107,6 +107,11 @@ interface MessageContentProps {
   onViewImage?: () => void;
   // View video in modal
   onViewVideo?: () => void;
+  // User info (who requested the generation)
+  userName?: string | null;
+  userImage?: string | null;
+  // Generation status
+  status?: "generating" | "completed" | "error";
 }
 
 interface ImageMetadata {
@@ -228,6 +233,9 @@ export function MessageContent({
   imageAssetLabel,
   onViewImage,
   onViewVideo,
+  userName,
+  userImage,
+  status,
 }: MessageContentProps) {
   const [errorExpanded, setErrorExpanded] = useState(false);
   const isError = contentType === "error" || content.startsWith("Error");
@@ -316,6 +324,37 @@ export function MessageContent({
 
   return (
     <div className="space-y-2">
+      {/* Generating status indicator */}
+      {status === "generating" && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
+          {userImage && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={userImage} alt="" className="w-4 h-4 rounded-full" />
+          )}
+          <span>{userName || "Alguien"} está generando...</span>
+          <Loader2 className="h-4 w-4 animate-spin" />
+        </div>
+      )}
+      {/* User who requested this generation (model messages only) */}
+      {userName && !isUser && status !== "generating" && (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
+          {userImage && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={userImage} alt="" className="w-4 h-4 rounded-full" />
+          )}
+          <span>{userName}</span>
+        </div>
+      )}
+      {/* User name on user messages (for shared conversations) */}
+      {userName && isUser && (
+        <div className="flex items-center gap-1.5 text-xs text-primary-foreground/70 mb-1">
+          {userImage && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={userImage} alt="" className="w-4 h-4 rounded-full" />
+          )}
+          <span>{userName}</span>
+        </div>
+      )}
       {/* Imagen si existe */}
       {imageUrl && (
         <div className={cn(

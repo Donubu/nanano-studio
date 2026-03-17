@@ -211,6 +211,13 @@ interface Message {
         webSearchQueries?: string[];
         imageSearchQueries?: string[];
     } | null;
+    // User who created this message
+    user_id?: number;
+    user_name?: string | null;
+    user_image?: string | null;
+    user_email?: string | null;
+    // Generation status (for DB-persisted placeholders)
+    status?: "generating" | "completed" | "error";
     created_at: string;
     thought?: string;
     isStreaming?: boolean;
@@ -671,9 +678,13 @@ export function ChatInterface() {
     useEffect(() => {
         // Only handle once per page load
         if (deepLinkHandled.current) return;
-        if (!navigation.initialState || !selectedProjectId) return;
+        if (!navigation.initialState || !selectedProjectId) {
+            console.log("[DeepLink] Waiting...", { hasInitialState: !!navigation.initialState, selectedProjectId, type: navigation.initialState?.type });
+            return;
+        }
 
         const { type, id } = navigation.initialState;
+        console.log("[DeepLink] Handling:", { type, id, selectedProjectId });
         if (type === 'gallery' || type === 'generation' || type === 'topaz') {
             // Open gallery tab without pushing navigation (we're already at the URL)
             // Generation/topaz modals will be handled by generations-gallery
@@ -1089,6 +1100,63 @@ export function ChatInterface() {
         }
     };
 
+    // Polling for shared conversations - detect new messages from other users
+    const pollConversationIdRef = useRef<number | null>(null);
+    useEffect(() => {
+        if (activeTabId && tabConversations[activeTabId]?.id) {
+            pollConversationIdRef.current = tabConversations[activeTabId].id;
+        }
+    }, [activeTabId, tabConversations]);
+
+    useEffect(() => {
+        // Skip polling for full (estudio) conversations - FullModeWorkspace has its own polling
+        if (!activeTabId || isFullConversation) return;
+
+        const pollInterval = setInterval(async () => {
+            const conversationId = pollConversationIdRef.current;
+            if (!conversationId) {
+                console.log("[Polling] Skip: no conversationId in ref");
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/conversations/${conversationId}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                const serverMessages: Message[] = data.messages || [];
+
+                setTabMessages((prev) => {
+                    const currentMessages = prev[activeTabId] || [];
+                    // Only update if server has messages not in our local state
+                    const localRealIds = new Set(currentMessages.filter(m => m.id > 0).map(m => m.id));
+                    const hasNewMessages = serverMessages.some(m => !localRealIds.has(m.id));
+                    // Check if any generating messages changed status
+                    const hasStatusChanges = serverMessages.some(m => {
+                        const local = currentMessages.find(lm => lm.id === m.id);
+                        return local && (local.status !== m.status || (local.status === "generating" && m.image_url));
+                    });
+
+                    if (!hasNewMessages && !hasStatusChanges) return prev;
+
+                    // Merge: keep local temp messages (negative IDs) that are still streaming
+                    const streamingTempMessages = currentMessages.filter(m => m.id < 0 && m.isStreaming);
+                    const merged = [...serverMessages, ...streamingTempMessages].sort((a, b) => {
+                        if (a.id < 0 && b.id < 0) return a.id - b.id;
+                        if (a.id < 0) return 1;
+                        if (b.id < 0) return -1;
+                        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+                    });
+
+                    return { ...prev, [activeTabId]: merged };
+                });
+            } catch (err) {
+                console.error("[Polling] Error:", err);
+            }
+        }, 5000);
+
+        return () => clearInterval(pollInterval);
+    }, [activeTabId]);
+
     useEffect(() => {
         fetchClients();
         fetchFavoriteProjects();
@@ -1142,19 +1210,23 @@ export function ChatInterface() {
         }
     }, [projects, navigation.projectSlug]);
 
+    const prevProjectIdRef = useRef<number | null>(null);
     useEffect(() => {
         if (selectedProjectId) {
             fetchProjectModels(selectedProjectId);
             fetchProjectUsage(selectedProjectId);
             fetchProjectStats(selectedProjectId);
             fetchGenerationConfig(selectedProjectId);
-            // Clear tabs when changing project
-            setOpenTabs([]);
-            setActiveTabId(null);
-            setTabMessages({});
-            setTabConversations({});
-            // Clear archived conversations
-            setArchivedConversations([]);
+            // Clear tabs when CHANGING project (not on initial load)
+            if (prevProjectIdRef.current !== null && prevProjectIdRef.current !== selectedProjectId) {
+                setOpenTabs([]);
+                setActiveTabId(null);
+                setTabMessages({});
+                setTabConversations({});
+                // Clear archived conversations
+                setArchivedConversations([]);
+            }
+            prevProjectIdRef.current = selectedProjectId;
             setShowArchived(false);
             // Reset selected models for all tabs
             setTabSelectedModelId({});
@@ -1653,6 +1725,7 @@ export function ChatInterface() {
     };
 
     const handleOpenGallery = (skipNavigation = false) => {
+        console.log("[Gallery] handleOpenGallery called, skipNavigation:", skipNavigation, "openTabs:", openTabs.length);
         // Check if gallery tab already exists
         const existingGalleryTab = openTabs.find((t) => t.isGallery);
         if (existingGalleryTab) {
@@ -1705,6 +1778,7 @@ export function ChatInterface() {
                             title: data.title,
                             model_id: data.model_id,
                             model_display_name: data.model_display_name || "",
+                            generation_type: data.generation_type === "audio" && data.audio_tts_engine === "chirp" ? "audio_hd" : data.generation_type,
                             project_id: data.project_id,
                             project_title: data.project_title,
                             last_message: null,
@@ -1715,6 +1789,8 @@ export function ChatInterface() {
                             top_k: data.top_k,
                             max_output_tokens: data.max_output_tokens,
                             system_instruction: data.system_instruction,
+                            model_supports_image_generation: data.model_supports_image_generation,
+                            model_supports_video_generation: data.model_supports_video_generation,
                             image_aspect_ratio: data.image_aspect_ratio || "16:9",
                             image_size: data.image_size || "1K",
                             video_duration: data.video_duration || 8,
@@ -1993,7 +2069,10 @@ export function ChatInterface() {
                                     if (!line.startsWith("data: ")) continue;
                                     try {
                                         const data = JSON.parse(line.slice(6));
-                                        if (data.type === "image") {
+                                        if (data.type === "placeholders") {
+                                            // Server created DB placeholder messages for other users to see via polling
+                                            continue;
+                                        } else if (data.type === "image") {
                                             setTabMessages((prev) => ({
                                                 ...prev,
                                                 [tabId]: prev[tabId].map((m) =>
@@ -2112,7 +2191,10 @@ export function ChatInterface() {
                             try {
                                 const data = JSON.parse(line.slice(6));
 
-                                    if (data.type === "user_message") {
+                                    if (data.type === "placeholders") {
+                                        // Server created DB placeholder messages for other users to see via polling
+                                        continue;
+                                    } else if (data.type === "user_message") {
                                         realUserMessageId = data.id;
                                         // Update user message with real ID
                                         setTabMessages((prev) => ({
@@ -2503,7 +2585,10 @@ export function ChatInterface() {
                         try {
                             const data = JSON.parse(line.slice(6));
 
-                            if (data.type === "user_message" && tempUserMessageId) {
+                            if (data.type === "placeholders") {
+                                // Server created DB placeholder messages for other users to see via polling
+                                continue;
+                            } else if (data.type === "user_message" && tempUserMessageId) {
                                 const realId = data.id;
                                 setTabMessages((prev) => ({
                                     ...prev,
@@ -2818,7 +2903,10 @@ export function ChatInterface() {
                         try {
                             const data = JSON.parse(line.slice(6));
 
-                            if (data.type === "user_message" && tempUserMessageId) {
+                            if (data.type === "placeholders") {
+                                // Server created DB placeholder messages for other users to see via polling
+                                continue;
+                            } else if (data.type === "user_message" && tempUserMessageId) {
                                 const realId = data.id;
                                 setTabMessages((prev) => ({
                                     ...prev,
@@ -3130,7 +3218,10 @@ export function ChatInterface() {
                     try {
                         const data = JSON.parse(line.slice(6));
 
-                        if (data.type === "user_message") {
+                        if (data.type === "placeholders") {
+                            // Server created DB placeholder messages for other users to see via polling
+                            continue;
+                        } else if (data.type === "user_message") {
                             setTabMessages((prev) => ({
                                 ...prev,
                                 [tabId]: prev[tabId].map((m) =>
@@ -3776,6 +3867,7 @@ export function ChatInterface() {
                             onReusePromptUsed={() => setReusePrompt(null)}
                             leftSidebarOpen={leftSidebarOpen}
                             onToggleLeftSidebar={() => setLeftSidebarOpen(!leftSidebarOpen)}
+                            currentUserId={Number(session?.user?.id) || 0}
                         />
                     ) : isAudioConversation && activeTabId !== null ? (
                         /* TTS Composer View - Split layout with history column (expanded since no right sidebar) */
@@ -4252,6 +4344,9 @@ export function ChatInterface() {
                                                     onVideoSelect={handleConversationVideoSelect}
                                                     onViewImage={msg.role === "model" && msg.image_url ? () => setViewingImageMessage(msg) : undefined}
                                                     onViewVideo={msg.role === "model" && msg.video_url ? () => setViewingVideoMessage(msg) : undefined}
+                                                    userName={msg.user_name}
+                                                    userImage={msg.user_image}
+                                                    status={msg.status}
                                                 />
                                                 {/* Grounding Sources */}
                                                 {msg.role === "model" && msg.grounding_data && msg.grounding_data.sources?.length > 0 && !msg.isStreaming && (

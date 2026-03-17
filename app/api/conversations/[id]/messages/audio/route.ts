@@ -156,7 +156,6 @@ export async function POST(
     }
 
     // Obtener conversación con configuración de audio y costos del modelo
-    const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
       `SELECT c.*, m.model_id as model_model_id, m.supports_audio_generation, m.api_backend as model_api_backend, p.title as project_name, cl.name as client_name,
               m.cost_audio_per_minute
@@ -164,8 +163,8 @@ export async function POST(
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
        LEFT JOIN clients cl ON p.client_id = cl.id
-       WHERE c.id = ? ${isAdmin ? "" : "AND c.user_id = ?"} AND c.deleted_at IS NULL`,
-      isAdmin ? [id] : [id, session.user.id]
+       WHERE c.id = ? AND c.deleted_at IS NULL`,
+      [id]
     );
 
     if (conversations.length === 0) {
@@ -210,6 +209,8 @@ export async function POST(
           }
         };
 
+        let placeholderId: number | undefined;
+
         try {
           // Get the correct model from project_generation_config based on quality_tier
           let effectiveModelId = conversation.model_model_id;
@@ -249,9 +250,9 @@ export async function POST(
           let userMessageId: number | null = null;
           if (!skip_user_message) {
             const [userMessageResult] = await pool.execute<ResultSetHeader>(
-              `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)
-               VALUES (?, 'user', 'text', ?, ?)`,
-              [id, effectiveQualityTier, content]
+              `INSERT INTO messages (conversation_id, user_id, role, content_type, quality_tier, content)
+               VALUES (?, ?, 'user', 'text', ?, ?)`,
+              [id, session.user.id, effectiveQualityTier, content]
             );
             userMessageId = userMessageResult.insertId;
           }
@@ -266,6 +267,15 @@ export async function POST(
               [id]
             );
           }
+
+          // Create placeholder message with status='generating'
+          const [placeholderResult] = await pool.execute<ResultSetHeader>(
+            `INSERT INTO messages (conversation_id, user_id, role, status, content_type, quality_tier, content)
+             VALUES (?, ?, 'model', 'generating', 'audio', ?, '')`,
+            [id, session.user.id, effectiveQualityTier]
+          );
+          placeholderId = placeholderResult.insertId;
+          sendEvent({ type: "placeholders", ids: [placeholderId] });
 
           // Preparar labels para tracking
           const userIdentifier = session.user.email?.split("@")[0] || "unknown";
@@ -457,14 +467,10 @@ export async function POST(
             }
           );
 
-          // Guardar respuesta del modelo en la base de datos (con quality_tier)
-          // Guardamos el content original para permitir restauración de la configuración
-          const [modelResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, audio_url, audio_mime_type, audio_file_size, audio_duration, audio_voice_config, estimated_cost)
-             VALUES (?, 'model', 'audio', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          // Update placeholder message with the generated audio result
+          await pool.execute(
+            `UPDATE messages SET status = 'completed', model_id = ?, content = ?, audio_url = ?, audio_mime_type = ?, audio_file_size = ?, audio_duration = ?, audio_voice_config = ?, estimated_cost = ? WHERE id = ?`,
             [
-              id,
-              effectiveQualityTier,
               effectiveModelDbId,
               content, // Guardar el texto original para poder restaurarlo luego
               uploadResult.url,
@@ -473,10 +479,11 @@ export async function POST(
               generatedAudio.duration,
               JSON.stringify(voiceConfig),
               estimatedCost,
+              placeholderId,
             ]
           );
 
-          const modelMessageId = modelResult.insertId;
+          const modelMessageId = placeholderId!;
 
           // Actualizar costo total en la conversación
           await pool.execute(
@@ -532,19 +539,22 @@ export async function POST(
           console.error("[Audio] Error generating audio:", error);
           const errorMessage = error instanceof Error ? error.message : "Error desconocido";
 
-          // Guardar mensaje de error (con content_type 'error' para excluirlo del historial)
+          // Update placeholder message with error status, or insert if placeholder doesn't exist
           try {
-            const [modelResult] = await pool.execute<ResultSetHeader>(
-              `INSERT INTO messages (conversation_id, role, content_type, content)
-               VALUES (?, 'model', 'error', ?)`,
-              [id, `Error generando audio: ${errorMessage}`]
-            );
-
-            sendEvent({
-              type: "error",
-              message: errorMessage,
-              id: modelResult.insertId,
-            });
+            if (placeholderId) {
+              await pool.execute(
+                `UPDATE messages SET status = 'error', content = ? WHERE id = ?`,
+                [`Error generando audio: ${errorMessage}`, placeholderId]
+              );
+              sendEvent({ type: "error", message: errorMessage, id: placeholderId });
+            } else {
+              const [modelResult] = await pool.execute<ResultSetHeader>(
+                `INSERT INTO messages (conversation_id, user_id, role, status, content_type, content)
+                 VALUES (?, ?, 'model', 'error', 'error', ?)`,
+                [id, session.user.id, `Error generando audio: ${errorMessage}`]
+              );
+              sendEvent({ type: "error", message: errorMessage, id: modelResult.insertId });
+            }
           } catch (dbError) {
             console.error("[Audio] Error saving error message:", dbError);
             sendEvent({

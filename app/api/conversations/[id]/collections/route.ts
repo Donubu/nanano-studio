@@ -27,12 +27,10 @@ export async function GET(
 
     const { id } = await params;
     const conversationId = parseInt(id);
-    const isAdmin = session.user.role === "admin";
-
     // Verify conversation access
     const [convRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT id FROM conversations WHERE id = ? ${isAdmin ? "" : "AND user_id = ?"}`,
-      isAdmin ? [conversationId] : [conversationId, session.user.id]
+      `SELECT id FROM conversations WHERE id = ?`,
+      [conversationId]
     );
     if (convRows.length === 0) {
       return NextResponse.json({ error: "Conversación no encontrada" }, { status: 404 });
@@ -84,11 +82,9 @@ export async function POST(
 
     const { id } = await params;
     const conversationId = parseInt(id);
-    const isAdmin = session.user.role === "admin";
-
     const [convRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT id FROM conversations WHERE id = ? ${isAdmin ? "" : "AND user_id = ?"}`,
-      isAdmin ? [conversationId] : [conversationId, session.user.id]
+      `SELECT id FROM conversations WHERE id = ?`,
+      [conversationId]
     );
     if (convRows.length === 0) {
       return NextResponse.json({ error: "Conversación no encontrada" }, { status: 404 });

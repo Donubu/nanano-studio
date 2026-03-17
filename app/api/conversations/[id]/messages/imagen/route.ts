@@ -90,7 +90,6 @@ export async function POST(
     }
 
     // Obtener conversacion con configuracion de imagen y costos del modelo
-    const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
       `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, m.api_backend as model_api_backend, p.title as project_name, cl.name as client_name,
               m.cost_image_1k, m.cost_image_2k, m.cost_image_4k
@@ -98,8 +97,8 @@ export async function POST(
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
        LEFT JOIN clients cl ON p.client_id = cl.id
-       WHERE c.id = ? ${isAdmin ? "" : "AND c.user_id = ?"} AND c.deleted_at IS NULL`,
-      isAdmin ? [id] : [id, session.user.id]
+       WHERE c.id = ? AND c.deleted_at IS NULL`,
+      [id]
     );
 
     if (conversations.length === 0) {
@@ -157,9 +156,9 @@ export async function POST(
 
     // Guardar mensaje del usuario
     const [userMessageResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content)
-       VALUES (?, 'user', 'text', ?, ?)`,
-      [id, effectiveQualityTier, content]
+      `INSERT INTO messages (conversation_id, user_id, role, content_type, quality_tier, content)
+       VALUES (?, ?, 'user', 'text', ?, ?)`,
+      [id, session.user.id, effectiveQualityTier, content]
     );
     const userMessageId = userMessageResult.insertId;
 
@@ -263,9 +262,23 @@ export async function POST(
         if (redisReady && workersAvailable) {
           try {
             const queue = getImagenQueue();
+
+            // Create placeholder messages before enqueuing
+            const placeholderIds: number[] = [];
+            for (let i = 0; i < numberOfImages; i++) {
+              const [ph] = await pool.execute<ResultSetHeader>(
+                `INSERT INTO messages (conversation_id, user_id, role, status, content_type, quality_tier, model_id, content, image_aspect_ratio, image_size)
+                 VALUES (?, ?, 'model', 'generating', 'image', ?, ?, '', ?, ?)`,
+                [id, session.user.id, effectiveQualityTier, effectiveModelDbId, aspectRatio, resolution]
+              );
+              placeholderIds.push(ph.insertId);
+            }
+            sendEvent({ type: "placeholders", ids: placeholderIds });
+
             const job = await queue.add("imagen", {
               conversationId: id,
               userMessageId,
+              userId: session.user.id as number,
               content,
               modelId: effectiveModelId,
               modelDbId: effectiveModelDbId,
@@ -285,6 +298,7 @@ export async function POST(
               costImage1k: effectiveCostImage1k,
               costImage2k: effectiveCostImage2k,
               costImage4k: effectiveCostImage4k,
+              placeholderIds,
             });
 
             console.log(`[Imagen] Job ${job.id} enqueued to worker`);
@@ -351,8 +365,20 @@ export async function POST(
         // ============================================
         // DIRECT PROCESSING (fallback when no workers)
         // ============================================
+        const placeholderIds: number[] = [];
         try {
           console.log(`[Imagen] Processing directly (no workers available)`);
+
+          // Create placeholder messages in DB
+          for (let i = 0; i < numberOfImages; i++) {
+            const [ph] = await pool.execute<ResultSetHeader>(
+              `INSERT INTO messages (conversation_id, user_id, role, status, content_type, quality_tier, model_id, content, image_aspect_ratio, image_size)
+               VALUES (?, ?, 'model', 'generating', 'image', ?, ?, '', ?, ?)`,
+              [id, session.user.id, effectiveQualityTier, effectiveModelDbId, aspectRatio, resolution]
+            );
+            placeholderIds.push(ph.insertId);
+          }
+          sendEvent({ type: "placeholders", ids: placeholderIds });
 
           const onProgress = (progress: { status: string; message: string }) => {
             const retryMatch = progress.message.match(/Reintentando \((\d+)\/(\d+)\).*?(\d+)s/);
@@ -450,24 +476,13 @@ export async function POST(
               "generated"
             );
 
-            const [modelResult] = await pool.execute<ResultSetHeader>(
-              `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, generation_seed, content, image_url, image_mime_type, image_aspect_ratio, image_size, estimated_cost)
-               VALUES (?, 'model', 'image', ?, ?, ?, '', ?, ?, ?, ?, ?)`,
-              [
-                id,
-                effectiveQualityTier,
-                effectiveModelDbId,
-                generatedImage.seed ?? null,
-                uploadResult.url,
-                generatedImage.mimeType,
-                aspectRatio,
-                resolution,
-                costPerImage,
-              ]
+            await pool.execute(
+              `UPDATE messages SET status = 'completed', generation_seed = ?, image_url = ?, image_mime_type = ?, estimated_cost = ? WHERE id = ?`,
+              [generatedImage.seed ?? null, uploadResult.url, generatedImage.mimeType, costPerImage, placeholderIds[i]]
             );
 
             totalCost += costPerImage;
-            imageMessages.push({ id: modelResult.insertId, imageUrl: uploadResult.url });
+            imageMessages.push({ id: placeholderIds[i], imageUrl: uploadResult.url });
 
             sendEvent({
               type: "image",
@@ -520,17 +535,22 @@ export async function POST(
 
           // Guardar mensaje de error con metadata de la generación para poder reutilizar
           try {
-            const [modelResult] = await pool.execute<ResultSetHeader>(
-              `INSERT INTO messages (conversation_id, role, content_type, content, model_id, quality_tier, image_aspect_ratio, image_size)
-               VALUES (?, 'model', 'error', ?, ?, ?, ?, ?)`,
-              [id, `Error generando imagen: ${errorMessage}`, effectiveModelDbId, effectiveQualityTier, aspectRatio, resolution]
-            );
-
-            sendEvent({
-              type: "error",
-              message: errorMessage,
-              id: modelResult.insertId,
-            });
+            if (placeholderIds.length > 0) {
+              // Update any remaining placeholders to error
+              await pool.execute(
+                `UPDATE messages SET status = 'error', content = ? WHERE id IN (${placeholderIds.map(() => '?').join(',')}) AND status = 'generating'`,
+                [`Error generando imagen: ${errorMessage}`, ...placeholderIds]
+              );
+              sendEvent({ type: "error", message: errorMessage, id: placeholderIds[0] });
+            } else {
+              // No placeholders yet, insert error message
+              const [modelResult] = await pool.execute<ResultSetHeader>(
+                `INSERT INTO messages (conversation_id, user_id, role, status, content_type, content, model_id, quality_tier, image_aspect_ratio, image_size)
+                 VALUES (?, ?, 'model', 'error', 'error', ?, ?, ?, ?, ?)`,
+                [id, session.user.id, `Error generando imagen: ${errorMessage}`, effectiveModelDbId, effectiveQualityTier, aspectRatio, resolution]
+              );
+              sendEvent({ type: "error", message: errorMessage, id: modelResult.insertId });
+            }
           } catch (dbError) {
             console.error("[Imagen] Error saving error message:", dbError);
             sendEvent({ type: "error", message: errorMessage });

@@ -76,11 +76,6 @@ export async function DELETE(
 
     const message = messages[0];
 
-    // Check access (admin or owner)
-    if (session.user.role !== "admin" && message.user_id !== session.user.id) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-    }
-
     // Check if already deleted
     if (message.deleted_at) {
       return NextResponse.json({ error: "El mensaje ya está eliminado" }, { status: 400 });
@@ -135,11 +130,6 @@ export async function PATCH(
     }
 
     const message = messages[0];
-
-    // Check access (admin or owner)
-    if (session.user.role !== "admin" && message.user_id !== session.user.id) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-    }
 
     // Check if not deleted
     if (!message.deleted_at) {

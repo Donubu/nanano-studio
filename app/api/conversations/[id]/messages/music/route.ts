@@ -81,7 +81,6 @@ export async function POST(
     };
 
     // Obtener conversacion con configuracion de musica
-    const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
       `SELECT c.*, m.model_id as model_model_id, m.supports_music_generation, p.title as project_name, cl.name as client_name,
               m.cost_music_per_minute
@@ -89,8 +88,8 @@ export async function POST(
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
        LEFT JOIN clients cl ON p.client_id = cl.id
-       WHERE c.id = ? ${isAdmin ? "" : "AND c.user_id = ?"} AND c.deleted_at IS NULL`,
-      isAdmin ? [id] : [id, session.user.id]
+       WHERE c.id = ? AND c.deleted_at IS NULL`,
+      [id]
     );
 
     if (conversations.length === 0) {
@@ -190,14 +189,16 @@ export async function POST(
           }
         };
 
+        let placeholderId: number | undefined;
+
         try {
           const promptSummary = buildMusicPromptSummary(settings.prompts);
 
           // Save user message with prompt summary as content
           const [userMessageResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, content)
-             VALUES (?, 'user', 'text', ?)`,
-            [id, promptSummary || "Generar musica"]
+            `INSERT INTO messages (conversation_id, user_id, role, content_type, content)
+             VALUES (?, ?, 'user', 'text', ?)`,
+            [id, session.user.id, promptSummary || "Generar musica"]
           );
           const userMessageId = userMessageResult.insertId;
 
@@ -209,6 +210,15 @@ export async function POST(
           );
 
           sendEvent({ type: "user_message", id: userMessageId });
+
+          // Create placeholder message for music generation
+          const [placeholderResult] = await pool.execute<ResultSetHeader>(
+            `INSERT INTO messages (conversation_id, user_id, role, status, content_type, content)
+             VALUES (?, ?, 'model', 'generating', 'music', '')`,
+            [id, session.user.id]
+          );
+          placeholderId = placeholderResult.insertId;
+          sendEvent({ type: "placeholders", ids: [placeholderId] });
 
           console.log(`\n========== [MUSIC GENERATION REQUEST] ==========`);
           console.log("Prompts:", settings.prompts.map(p => `"${p.text}" (${p.weight})`).join(", "));
@@ -276,12 +286,11 @@ export async function POST(
             }
           );
 
-          // Save model message directly to DB
-          const [modelResult] = await pool.execute<ResultSetHeader>(
-            `INSERT INTO messages (conversation_id, role, content_type, content, music_url, music_mime_type, music_file_size, music_duration, music_config, estimated_cost)
-             VALUES (?, 'model', 'music', ?, ?, ?, ?, ?, ?, ?)`,
+          // Update placeholder message with actual music data
+          await pool.execute(
+            `UPDATE messages SET status = 'completed', content_type = 'music', content = ?, music_url = ?, music_mime_type = ?, music_file_size = ?, music_duration = ?, music_config = ?, estimated_cost = ?
+             WHERE id = ?`,
             [
-              id,
               promptSummary,
               uploadResult.url,
               "audio/mpeg",
@@ -289,6 +298,7 @@ export async function POST(
               generatedMusic.duration,
               JSON.stringify(settings),
               estimatedCost,
+              placeholderId,
             ]
           );
 
@@ -301,7 +311,7 @@ export async function POST(
           // Send saved event
           sendEvent({
             type: "saved",
-            messageId: modelResult.insertId,
+            messageId: placeholderId,
             musicUrl: uploadResult.url,
             duration: generatedMusic.duration,
             fileSize: uploadResult.fileSize,
@@ -338,16 +348,24 @@ export async function POST(
           const errorMessage = error instanceof Error ? error.message : "Error desconocido";
 
           try {
-            const [modelResult] = await pool.execute<ResultSetHeader>(
-              `INSERT INTO messages (conversation_id, role, content_type, content)
-               VALUES (?, 'model', 'error', ?)`,
-              [id, `Error generando musica: ${errorMessage}`]
-            );
+            if (placeholderId) {
+              await pool.execute(
+                `UPDATE messages SET status = 'error', content_type = 'error', content = ? WHERE id = ?`,
+                [`Error generando musica: ${errorMessage}`, placeholderId]
+              );
+            } else {
+              const [modelResult] = await pool.execute<ResultSetHeader>(
+                `INSERT INTO messages (conversation_id, user_id, role, content_type, content)
+                 VALUES (?, ?, 'model', 'error', ?)`,
+                [id, session.user.id, `Error generando musica: ${errorMessage}`]
+              );
+              placeholderId = modelResult.insertId;
+            }
 
             sendEvent({
               type: "error",
               message: errorMessage,
-              id: modelResult.insertId,
+              id: placeholderId,
             });
           } catch (dbError) {
             console.error("[Music] Error saving error message:", dbError);

@@ -1337,8 +1337,8 @@ export function GenerationsGallery({ projectId, currentUserId, onOpenConversatio
                   </Button>
                 )}
 
-                {selectedItem.conversation_user_id === currentUserId && (
-                  <Button onClick={() => { handleCloseModal(); onOpenConversation(selectedItem.conversation_id); }} className="flex-1 gap-2" variant="outline">
+                {selectedItem.conversation_id > 0 && (
+                  <Button onClick={() => { onOpenConversation(selectedItem.conversation_id); }} className="flex-1 gap-2" variant="outline">
                     <ExternalLink className="h-4 w-4" /> Ir a la conversación
                   </Button>
                 )}

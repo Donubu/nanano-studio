@@ -177,7 +177,6 @@ export async function POST(
     }
 
     // Obtener conversación con configuración, nombre del proyecto y costos del modelo
-    const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
       `SELECT c.*, c.generation_type, m.model_id as model_model_id, m.supports_image_generation, m.supports_google_search as model_supports_google_search, m.api_backend as model_api_backend, m.system_instruction as model_system_instruction, p.title as project_name, cl.name as client_name,
               m.cost_input_per_million, m.cost_output_per_million,
@@ -186,8 +185,8 @@ export async function POST(
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
        LEFT JOIN clients cl ON p.client_id = cl.id
-       WHERE c.id = ? ${isAdmin ? "" : "AND c.user_id = ?"} AND c.deleted_at IS NULL`,
-      isAdmin ? [id] : [id, session.user.id]
+       WHERE c.id = ? AND c.deleted_at IS NULL`,
+      [id]
     );
 
     if (conversations.length === 0) {
@@ -365,9 +364,9 @@ export async function POST(
 
             // Guardar mensaje del usuario (con URL de imagen guardada, no base64)
             const [userMessageResult] = await pool.execute<ResultSetHeader>(
-              `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, image_url, image_mime_type)
-               VALUES (?, 'user', ?, ?, ?, ?, ?)`,
-              [id, contentType, effectiveQualityTier, content, savedImageUrl, firstImage?.mimeType || null]
+              `INSERT INTO messages (conversation_id, user_id, role, content_type, quality_tier, content, image_url, image_mime_type)
+               VALUES (?, ?, 'user', ?, ?, ?, ?, ?)`,
+              [id, session.user.id as number, contentType, effectiveQualityTier, content, savedImageUrl, firstImage?.mimeType || null]
             );
 
             userMessageId = userMessageResult.insertId;
@@ -554,6 +553,7 @@ export async function POST(
               const queue = getStreamQueue();
               const job = await queue.add("stream", {
                 conversationId: id,
+                userId: session.user.id as number,
                 userMessageId,
                 skipUserMessage: skip_user_message,
                 content,
@@ -729,9 +729,9 @@ export async function POST(
                 });
                 totalEstimatedCost += textCost;
                 const [modelResult] = await pool.execute<ResultSetHeader>(
-                  `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, thought, tokens_input, tokens_output, estimated_cost, grounding_data)
-                   VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?, ?, ?)`,
-                  [id, effectiveQualityTier, effectiveModelDbId, fullResponse, fullThought || null, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
+                  `INSERT INTO messages (conversation_id, user_id, role, content_type, quality_tier, model_id, content, thought, tokens_input, tokens_output, estimated_cost, grounding_data)
+                   VALUES (?, ?, 'model', 'text', ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  [id, session.user.id as number, effectiveQualityTier, effectiveModelDbId, fullResponse, fullThought || null, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
                 );
                 modelMessageId = modelResult.insertId;
               }
@@ -746,9 +746,9 @@ export async function POST(
                 });
                 totalEstimatedCost += imageCost;
                 const [imgResult] = await pool.execute<ResultSetHeader>(
-                  `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost)
-                   VALUES (?, 'model', 'image', ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
-                  [id, effectiveQualityTier, effectiveModelDbId, img.url, img.mimeType, img.fileSize, imageAspectRatioToSave, imageSizeToSave,
+                  `INSERT INTO messages (conversation_id, user_id, role, content_type, quality_tier, model_id, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost)
+                   VALUES (?, ?, 'model', 'image', ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  [id, session.user.id as number, effectiveQualityTier, effectiveModelDbId, img.url, img.mimeType, img.fileSize, imageAspectRatioToSave, imageSizeToSave,
                    isFirstMessage ? tokenCount.input : 0, isFirstMessage ? tokenCount.output : 0, imageCost]
                 );
                 imageMessages.push({ id: imgResult.insertId, imageUrl: img.url });
@@ -762,9 +762,9 @@ export async function POST(
                 });
                 totalEstimatedCost += textCost;
                 const [modelResult] = await pool.execute<ResultSetHeader>(
-                  `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, tokens_input, tokens_output, estimated_cost)
-                   VALUES (?, 'model', 'text', ?, ?, '', ?, ?, ?)`,
-                  [id, effectiveQualityTier, effectiveModelDbId, tokenCount.input, tokenCount.output, textCost]
+                  `INSERT INTO messages (conversation_id, user_id, role, content_type, quality_tier, model_id, content, tokens_input, tokens_output, estimated_cost)
+                   VALUES (?, ?, 'model', 'text', ?, ?, '', ?, ?, ?)`,
+                  [id, session.user.id as number, effectiveQualityTier, effectiveModelDbId, tokenCount.input, tokenCount.output, textCost]
                 );
                 modelMessageId = modelResult.insertId;
               }
@@ -810,8 +810,8 @@ export async function POST(
               const errorMessage = error instanceof Error ? error.message : "Error desconocido";
               try {
                 const [modelResult] = await pool.execute<ResultSetHeader>(
-                  `INSERT INTO messages (conversation_id, role, content_type, content) VALUES (?, 'model', 'error', ?)`,
-                  [id, `Error: ${errorMessage}`]
+                  `INSERT INTO messages (conversation_id, user_id, role, content_type, content) VALUES (?, ?, 'model', 'error', ?)`,
+                  [id, session.user.id as number, `Error: ${errorMessage}`]
                 );
                 if (!skip_user_message && userMessageId) {
                   await pool.execute(`UPDATE messages SET ignore_in_context = 1 WHERE id = ?`, [userMessageId]);
@@ -970,9 +970,9 @@ export async function POST(
                   totalEstimatedCost += textCost;
 
                   const [modelResult] = await pool.execute<ResultSetHeader>(
-                    `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, thought, tokens_input, tokens_output, estimated_cost, grounding_data)
-                     VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [id, effectiveQualityTier, effectiveModelDbId, text, fullThought || null, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
+                    `INSERT INTO messages (conversation_id, user_id, role, content_type, quality_tier, model_id, content, thought, tokens_input, tokens_output, estimated_cost, grounding_data)
+                     VALUES (?, ?, 'model', 'text', ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [id, session.user.id as number, effectiveQualityTier, effectiveModelDbId, text, fullThought || null, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null]
                   );
                   modelMessageId = modelResult.insertId;
                 }
@@ -995,9 +995,9 @@ export async function POST(
                   totalEstimatedCost += imageCost;
 
                   const [imgResult] = await pool.execute<ResultSetHeader>(
-                    `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost)
-                     VALUES (?, 'model', 'image', ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [id, effectiveQualityTier, effectiveModelDbId, img.url, img.mimeType, img.fileSize, imageAspectRatioToSave, imageSizeToSave,
+                    `INSERT INTO messages (conversation_id, user_id, role, content_type, quality_tier, model_id, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost)
+                     VALUES (?, ?, 'model', 'image', ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [id, session.user.id as number, effectiveQualityTier, effectiveModelDbId, img.url, img.mimeType, img.fileSize, imageAspectRatioToSave, imageSizeToSave,
                      isFirstMessage ? tokenCount.input : 0,
                      isFirstMessage ? tokenCount.output : 0,
                      imageCost]
@@ -1026,9 +1026,9 @@ export async function POST(
                   totalEstimatedCost += textCost;
 
                   const [modelResult] = await pool.execute<ResultSetHeader>(
-                    `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, tokens_input, tokens_output, estimated_cost)
-                     VALUES (?, 'model', 'text', ?, ?, '', ?, ?, ?)`,
-                    [id, effectiveQualityTier, effectiveModelDbId, tokenCount.input, tokenCount.output, textCost]
+                    `INSERT INTO messages (conversation_id, user_id, role, content_type, quality_tier, model_id, content, tokens_input, tokens_output, estimated_cost)
+                     VALUES (?, ?, 'model', 'text', ?, ?, '', ?, ?, ?)`,
+                    [id, session.user.id as number, effectiveQualityTier, effectiveModelDbId, tokenCount.input, tokenCount.output, textCost]
                   );
                   modelMessageId = modelResult.insertId;
                 }
@@ -1105,9 +1105,9 @@ export async function POST(
                 // También marcar el mensaje del usuario con ignore_in_context para no enviarlo como contexto
                 const errorMessage = `Error al generar respuesta: ${error.message}`;
                 const [modelResult] = await pool.execute<ResultSetHeader>(
-                  `INSERT INTO messages (conversation_id, role, content_type, content)
-                   VALUES (?, 'model', 'error', ?)`,
-                  [id, errorMessage]
+                  `INSERT INTO messages (conversation_id, user_id, role, content_type, content)
+                   VALUES (?, ?, 'model', 'error', ?)`,
+                  [id, session.user.id as number, errorMessage]
                 );
                 if (!skip_user_message && userMessageId) {
                   await pool.execute(
@@ -1146,9 +1146,9 @@ export async function POST(
           // Guardar mensaje de error
           try {
             const [modelResult] = await pool.execute<ResultSetHeader>(
-              `INSERT INTO messages (conversation_id, role, content_type, content)
-               VALUES (?, 'model', 'text', ?)`,
-              [id, `Error: ${errorMessage}`]
+              `INSERT INTO messages (conversation_id, user_id, role, content_type, content)
+               VALUES (?, ?, 'model', 'text', ?)`,
+              [id, session.user.id as number, `Error: ${errorMessage}`]
             );
 
             if (!controllerClosed) {

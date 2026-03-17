@@ -57,7 +57,6 @@ export async function GET(
     const { id } = await params;
     const { searchParams } = new URL(request.url);
     const includeArchived = searchParams.get("archived") === "true";
-    const isAdmin = session.user.role === "admin";
 
     // Obtener conversación (incluir archivadas si se solicita)
     const [conversations] = await pool.execute<ConversationRow[]>(
@@ -76,8 +75,8 @@ export async function GET(
       JOIN models m ON c.model_id = m.id
       LEFT JOIN projects p ON c.project_id = p.id
       LEFT JOIN users u ON c.user_id = u.id
-      WHERE c.id = ? ${isAdmin ? "" : "AND c.user_id = ?"} ${includeArchived ? "" : "AND c.deleted_at IS NULL"}`,
-      isAdmin ? [id] : [id, session.user.id]
+      WHERE c.id = ? ${includeArchived ? "" : "AND c.deleted_at IS NULL"}`,
+      [id]
     );
 
     if (conversations.length === 0) {
@@ -89,7 +88,11 @@ export async function GET(
 
     // Obtener mensajes
     const [messages] = await pool.execute<RowDataPacket[]>(
-      "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC",
+      `SELECT m.*, u.name as user_name, u.image as user_image, u.email as user_email
+       FROM messages m
+       LEFT JOIN users u ON m.user_id = u.id
+       WHERE m.conversation_id = ?
+       ORDER BY m.created_at ASC`,
       [id]
     );
 
@@ -139,6 +142,9 @@ export async function GET(
         images: msg.role === "user" ? images : undefined,
         grounding_data,
         music_config,
+        user_name: msg.user_name,
+        user_image: msg.user_image,
+        user_email: msg.user_email,
       };
     });
 
@@ -205,11 +211,10 @@ export async function PUT(
       audio_locale,
     } = body;
 
-    // Verificar que la conversación pertenece al usuario y no está eliminada
-    const isAdmin = session.user.role === "admin";
+    // Verificar que la conversación existe y no está eliminada
     const [existing] = await pool.execute<ConversationRow[]>(
-      `SELECT id FROM conversations WHERE id = ? ${isAdmin ? "" : "AND user_id = ?"} AND deleted_at IS NULL`,
-      isAdmin ? [id] : [id, session.user.id]
+      `SELECT id FROM conversations WHERE id = ? AND deleted_at IS NULL`,
+      [id]
     );
 
     if (existing.length === 0) {
@@ -296,10 +301,9 @@ export async function DELETE(
     const { id } = await params;
 
     // Soft delete: marcar como eliminada en lugar de borrar
-    const isAdmin = session.user.role === "admin";
     const [result] = await pool.execute<ResultSetHeader>(
-      `UPDATE conversations SET deleted_at = NOW() WHERE id = ? ${isAdmin ? "" : "AND user_id = ?"} AND deleted_at IS NULL`,
-      isAdmin ? [id] : [id, session.user.id]
+      `UPDATE conversations SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL`,
+      [id]
     );
 
     if (result.affectedRows === 0) {

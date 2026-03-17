@@ -34,7 +34,9 @@ interface TagInfo {
 
 interface Generation {
   type: "image" | "video";
+  status?: "generating" | "completed" | "error";
   id: number;
+  user_id?: number | null;
   conversation_id: number;
   conversation_user_id: number;
   conversation_title: string;
@@ -80,6 +82,8 @@ interface InProgressItem {
   status: string;
   progress?: number;
   ratio: number;
+  userName?: string | null;
+  userImage?: string | null;
 }
 
 interface Collection {
@@ -147,6 +151,7 @@ interface FullModeWorkspaceProps {
   onReusePromptUsed: () => void;
   leftSidebarOpen: boolean;
   onToggleLeftSidebar: () => void;
+  currentUserId: number;
 }
 
 // ---- Model capability helpers ----
@@ -245,6 +250,7 @@ export function FullModeWorkspace({
   onReusePromptUsed,
   leftSidebarOpen,
   onToggleLeftSidebar,
+  currentUserId,
 }: FullModeWorkspaceProps) {
   const navigation = useNavigation();
 
@@ -447,8 +453,11 @@ export function FullModeWorkspace({
   const hasIngredients = supportsVideoIngredients(videoBackend);
   const hasAudioToggle = supportsVideoAudio(videoBackend);
 
-  // In-progress items from messages
-  const inProgressItems: InProgressItem[] = messages
+  // Track placeholder IDs so we can clean them up after generation
+  const placeholderIdsRef = useRef<number[]>([]);
+
+  // In-progress items from local messages (current user's generations)
+  const localInProgress: InProgressItem[] = messages
     .filter(m => m.role === "model" && (m.isVideoGenerating || m.isStreaming) && !m.image_url && !m.video_url)
     .map(m => {
       const isVideo = m.content_type === "video" || !!m.isVideoGenerating;
@@ -463,6 +472,29 @@ export function FullModeWorkspace({
         ratio,
       };
     });
+
+  // In-progress items from DB (other users' generating placeholders via polling)
+  // Exclude own placeholders - the current user already sees local streaming placeholders
+  const remoteInProgress: InProgressItem[] = generations
+    .filter(g => g.status === "generating")
+    .filter(g => g.user_id !== currentUserId)
+    .map(g => {
+      const ar = g.type === "video"
+        ? (g.video_aspect_ratio || videoAspectRatio)
+        : (g.image_aspect_ratio || imageAspectRatio);
+      const parts = ar.split(":");
+      const ratio = parts.length === 2 ? parseFloat(parts[0]) / parseFloat(parts[1]) : 1;
+      return {
+        id: g.id,
+        type: g.type,
+        status: `${g.user_name || "Alguien"} está generando...`,
+        ratio,
+        userName: g.user_name,
+        userImage: g.user_image,
+      };
+    });
+
+  const inProgressItems: InProgressItem[] = [...localInProgress, ...remoteInProgress];
 
   // Error items from messages (failed generations)
   const errorItems = messages
@@ -514,7 +546,8 @@ export function FullModeWorkspace({
         return true;
       })
   ).filter(g => searchScore(g.content) >= 0)
-   .filter(g => !activeTagId || g.tags.some(t => t.id === activeTagId));
+   .filter(g => !activeTagId || g.tags.some(t => t.id === activeTagId))
+   .filter(g => g.status !== "generating"); // Generating items shown via inProgressItems
 
   const imageCount = activeGenerations.filter(g => g.type === "image").length;
   const videoCount = activeGenerations.filter(g => g.type === "video").length;
@@ -716,14 +749,57 @@ export function FullModeWorkspace({
     }
   }, [conversationId, fetchGenerations]);
 
-  // Refresh when in-progress items complete
-  const prevInProgressCount = useRef(inProgressItems.length);
+  // Refresh when in-progress items complete and clean up DB placeholders
+  const prevLocalInProgressCount = useRef(localInProgress.length);
   useEffect(() => {
-    if (prevInProgressCount.current > 0 && inProgressItems.length < prevInProgressCount.current) {
+    if (prevLocalInProgressCount.current > 0 && localInProgress.length < prevLocalInProgressCount.current) {
+      // Clean up DB placeholders
+      const ids = placeholderIdsRef.current;
+      if (ids.length > 0) {
+        fetch(`/api/conversations/${conversationId}/messages/placeholder`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        }).catch(() => {});
+        placeholderIdsRef.current = [];
+      }
       fetchGenerations();
     }
-    prevInProgressCount.current = inProgressItems.length;
-  }, [inProgressItems.length, fetchGenerations]);
+    prevLocalInProgressCount.current = localInProgress.length;
+  }, [localInProgress.length, fetchGenerations, conversationId]);
+
+  // Polling for shared conversations - detect new generations from other users
+  const generationsRef = useRef(generations);
+  useEffect(() => { generationsRef.current = generations; }, [generations]);
+
+  useEffect(() => {
+    if (conversationId <= 0) return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/conversations/${conversationId}/generations`);
+        if (!res.ok) return;
+        const serverGenerations: Generation[] = await res.json();
+        const localGens = generationsRef.current;
+
+        // Detect any difference: new items, removed items, or status changes
+        const serverIds = new Set(serverGenerations.map(g => g.id));
+        const localIds = new Set(localGens.map(g => g.id));
+        const hasNew = serverGenerations.some(g => !localIds.has(g.id));
+        const hasRemoved = localGens.some(g => !serverIds.has(g.id));
+        const hasStatusChange = serverGenerations.some(sg => {
+          const local = localGens.find(g => g.id === sg.id);
+          return local && local.status !== sg.status;
+        });
+
+        if (hasNew || hasRemoved || hasStatusChange) {
+          fetchGenerations();
+        }
+      } catch { /* ignore */ }
+    }, 5000);
+
+    return () => clearInterval(pollInterval);
+  }, [conversationId, fetchGenerations]);
 
   // Poll VEO slots — only when video is generating or format is video (initial fetch)
   const hasVideoGenerating = messages.some(m => m.isVideoGenerating);
@@ -834,8 +910,31 @@ export function FullModeWorkspace({
     }
   }, [conversationId]);
 
-  const handleSend = (content: string, files?: AttachedFile[]) => {
+  const handleSend = async (content: string, files?: AttachedFile[]) => {
     if (!content.trim()) return;
+
+    // Create DB placeholders so other users see generation in progress
+    // Skip for imagen4 and video endpoints since they create their own placeholders
+    const endpointCreatesPlaceholders = format === "video" || !!isImagen4;
+    if (!endpointCreatesPlaceholders) {
+      try {
+        const res = await fetch(`/api/conversations/${conversationId}/messages/placeholder`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "image",
+            count: numVariations,
+            aspectRatio: imageAspectRatio,
+            size: imageSize,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          placeholderIdsRef.current = data.ids || [];
+        }
+      } catch { /* ignore */ }
+    }
+
     if (format === "video") {
       onSendVideo(content, undefined, files, numVariations, {
         firstFrame: videoFirstFrame,
@@ -1747,6 +1846,9 @@ export function FullModeWorkspace({
                 <div key={`progress-${item.id}`} className="group relative rounded-lg overflow-hidden bg-card border border-primary/30 animate-pulse" style={{ height: rowHeight, width: Math.round(rowHeight * item.ratio) }}>
                   <div className="flex flex-col items-center justify-center h-full gap-2 p-3">
                     <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                    {item.userImage && (
+                      <img src={item.userImage} alt="" className="w-5 h-5 rounded-full" />
+                    )}
                     <p className="text-xs text-center text-muted-foreground line-clamp-2">{item.status}</p>
                     {item.progress != null && item.progress > 0 && (
                       <div className="w-full max-w-[80%] h-1 bg-muted rounded-full overflow-hidden">
@@ -2313,7 +2415,16 @@ const GridItem = memo(function GridItem({ gen, index, rowHeight, showLabels, hov
       onMouseEnter={(e) => { if (gen.type === "video") { const v = e.currentTarget.querySelector("video"); if (v) { if (hoverAudio) v.muted = false; v.play(); } } }}
       onMouseLeave={(e) => { if (gen.type === "video") { const v = e.currentTarget.querySelector("video"); if (v) { v.pause(); v.currentTime = 0; v.muted = true; } } }}
     >
-      {gen.type === "image" && gen.image_url ? (
+      {gen.status === "generating" ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-muted/50 gap-2">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            {gen.user_image && <img src={gen.user_image} alt="" className="w-4 h-4 rounded-full" />}
+            <span>{gen.user_name || "Generando..."}</span>
+          </div>
+          <span className="text-[10px] text-muted-foreground/70">{gen.type === "video" ? "Video" : "Imagen"}</span>
+        </div>
+      ) : gen.type === "image" && gen.image_url ? (
         <img src={gen.image_url} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" draggable={false} />
       ) : gen.type === "video" && gen.video_url ? (
         <>

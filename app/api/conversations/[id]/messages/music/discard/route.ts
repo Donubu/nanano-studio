@@ -30,12 +30,11 @@ export async function POST(
       return NextResponse.json({ error: "tempKey es requerido" }, { status: 400 });
     }
 
-    // Verify conversation exists and belongs to user
-    const isAdmin = session.user.role === "admin";
+    // Verify conversation exists
     const [conversations] = await pool.execute<ConversationRow[]>(
       `SELECT id, user_id FROM conversations
-       WHERE id = ? ${isAdmin ? "" : "AND user_id = ?"} AND deleted_at IS NULL`,
-      isAdmin ? [id] : [id, session.user.id]
+       WHERE id = ? AND deleted_at IS NULL`,
+      [id]
     );
 
     if (conversations.length === 0) {

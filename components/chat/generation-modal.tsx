@@ -53,6 +53,8 @@ export interface Generation {
   created_at: string;
   deleted_at: string | null;
   tags: TagInfo[];
+  user_name?: string | null;
+  user_image?: string | null;
   source?: "generation" | "upload";
   estimated_cost?: number;
 }
@@ -675,6 +677,16 @@ export function GenerationModal({
                   )}
                 </>
               )}
+              {selectedItem.user_name && (
+                <div className="flex items-center gap-1.5">
+                  {selectedItem.user_image ? (
+                    <img src={selectedItem.user_image} alt="" className="w-4 h-4 rounded-full" />
+                  ) : (
+                    <User className="h-4 w-4" />
+                  )}
+                  <span>{selectedItem.user_name}</span>
+                </div>
+              )}
               <div className="flex items-center gap-1.5">
                 <Calendar className="h-4 w-4" />
                 <span>{formatDateTimeLocal(selectedItem.created_at)}</span>
@@ -724,8 +736,8 @@ export function GenerationModal({
                 </Button>
               )}
 
-              {onOpenConversation && selectedItem.conversation_user_id === currentUserId && selectedItem.conversation_id > 0 && (
-                <Button onClick={() => { onClose(); onOpenConversation(selectedItem.conversation_id); }} className="flex-1 gap-2" variant="outline">
+              {onOpenConversation && selectedItem.conversation_id > 0 && (
+                <Button onClick={() => { onOpenConversation(selectedItem.conversation_id); }} className="flex-1 gap-2" variant="outline">
                   <ExternalLink className="h-4 w-4" /> Ir a la conversación
                 </Button>
               )}

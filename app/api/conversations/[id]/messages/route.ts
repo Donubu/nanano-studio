@@ -48,12 +48,11 @@ export async function GET(
     }
 
     const { id } = await params;
-    const isAdmin = session.user.role === "admin";
 
-    // Verificar que la conversación pertenece al usuario
+    // Verificar que la conversación existe
     const [conversation] = await pool.execute<RowDataPacket[]>(
-      `SELECT id FROM conversations WHERE id = ? ${isAdmin ? "" : "AND user_id = ?"}`,
-      isAdmin ? [id] : [id, session.user.id]
+      `SELECT id FROM conversations WHERE id = ?`,
+      [id]
     );
 
     if (conversation.length === 0) {
@@ -64,11 +63,13 @@ export async function GET(
     }
 
     const [messages] = await pool.execute<MessageRow[]>(
-      `SELECT id, conversation_id, role, content_type, content, thought, image_url, image_mime_type,
-              tokens_input, tokens_output, grounding_data, created_at
-       FROM messages
-       WHERE conversation_id = ?
-       ORDER BY created_at ASC`,
+      `SELECT m.id, m.conversation_id, m.role, m.content_type, m.content, m.thought, m.image_url, m.image_mime_type,
+              m.tokens_input, m.tokens_output, m.grounding_data, m.created_at,
+              u.name as user_name, u.image as user_image, u.email as user_email
+       FROM messages m
+       LEFT JOIN users u ON m.user_id = u.id
+       WHERE m.conversation_id = ?
+       ORDER BY m.created_at ASC`,
       [id]
     );
 
@@ -120,15 +121,14 @@ export async function POST(
     }
 
     // Obtener conversación con configuración y nombre del proyecto
-    const isAdmin = session.user.role === "admin";
     const [conversations] = await pool.execute<ConversationRow[]>(
       `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, m.api_backend as model_api_backend, p.title as project_name, cl.name as client_name
        FROM conversations c
        JOIN models m ON c.model_id = m.id
        LEFT JOIN projects p ON c.project_id = p.id
        LEFT JOIN clients cl ON p.client_id = cl.id
-       WHERE c.id = ? ${isAdmin ? "" : "AND c.user_id = ?"}`,
-      isAdmin ? [id] : [id, session.user.id]
+       WHERE c.id = ?`,
+      [id]
     );
 
     if (conversations.length === 0) {
@@ -145,9 +145,9 @@ export async function POST(
 
     // Guardar mensaje del usuario
     const [userMessageResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, content, image_url, image_mime_type)
-       VALUES (?, 'user', ?, ?, ?, ?)`,
-      [id, contentType, content, image_url || null, image_mime_type || null]
+      `INSERT INTO messages (conversation_id, role, content_type, content, image_url, image_mime_type, user_id)
+       VALUES (?, 'user', ?, ?, ?, ?, ?)`,
+      [id, contentType, content, image_url || null, image_mime_type || null, session.user.id]
     );
 
     // Obtener historial de mensajes para contexto
@@ -225,9 +225,9 @@ export async function POST(
     // Guardar respuesta del modelo (usar content_type 'error' si hubo error para excluirlo del historial)
     const contentTypeResponse = isError ? "error" : "text";
     const [modelMessageResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, content, tokens_input, tokens_output)
-       VALUES (?, 'model', ?, ?, ?, ?)`,
-      [id, contentTypeResponse, modelResponse, tokensInput, tokensOutput]
+      `INSERT INTO messages (conversation_id, role, content_type, content, tokens_input, tokens_output, user_id)
+       VALUES (?, 'model', ?, ?, ?, ?, ?)`,
+      [id, contentTypeResponse, modelResponse, tokensInput, tokensOutput, session.user.id]
     );
 
     // Si hubo error, marcar el mensaje del usuario con ignore_in_context para no enviarlo como contexto

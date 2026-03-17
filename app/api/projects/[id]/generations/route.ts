@@ -198,7 +198,7 @@ export async function GET(
         ) as tags
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
-      LEFT JOIN users u ON c.user_id = u.id
+      LEFT JOIN users u ON COALESCE(m.user_id, c.user_id) = u.id
       LEFT JOIN models mo ON m.model_id = mo.id
       ${tagJoin}
       WHERE ${conditions.join(" AND ")}

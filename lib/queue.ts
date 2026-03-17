@@ -7,6 +7,7 @@ export const STREAM_QUEUE_NAME = "generation-stream";
 export interface StreamJobData {
   conversationId: string;
   userMessageId: number;
+  userId: number;
   skipUserMessage: boolean;
   content: string;
 
@@ -90,6 +91,7 @@ export const IMAGEN_QUEUE_NAME = "generation-imagen";
 export interface ImagenJobData {
   conversationId: string;
   userMessageId: number;
+  userId: number;
   content: string;
 
   // Model
@@ -117,6 +119,9 @@ export interface ImagenJobData {
   costImage1k: number;
   costImage2k: number;
   costImage4k: number;
+
+  // Placeholder message IDs (created by API before queuing)
+  placeholderIds: number[];
 
   // Set by worker when processing
   workerName?: string;
