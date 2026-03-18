@@ -27,11 +27,11 @@ services:
     restart: unless-stopped
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 1024mb --maxmemory-policy noeviction --tcp-keepalive 60 --hz 10 --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
+    command: redis-server --appendonly yes --maxmemory 2048mb --maxmemory-policy noeviction --tcp-keepalive 60 --hz 10 --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb --client-output-buffer-limit "pubsub 32mb 8mb 60"
     deploy:
       resources:
         limits:
-          memory: 1536m
+          memory: 2560m
 
   puerto_studio_blue:
     build: .
