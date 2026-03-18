@@ -28,6 +28,8 @@ import {
   Building2,
   Eye,
   EyeOff,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import Image from "next/image";
 import { formatDateLocal } from "@/lib/utils";
@@ -78,6 +80,8 @@ export default function ProjectsPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sortKey, setSortKey] = useState<keyof Project>("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [formData, setFormData] = useState({
@@ -236,12 +240,28 @@ export default function ProjectsPage() {
         <Table>
           <TableHeader>
             <TableRow className="border-border/50 hover:bg-transparent">
-              <TableHead className="text-muted-foreground">Proyecto</TableHead>
-              <TableHead className="text-muted-foreground">Cliente</TableHead>
-              <TableHead className="text-muted-foreground">Estado</TableHead>
-              <TableHead className="text-muted-foreground text-right">Generaciones</TableHead>
-              <TableHead className="text-muted-foreground text-right">Costo aprox</TableHead>
-              <TableHead className="text-muted-foreground">Fecha</TableHead>
+              {([
+                { key: "title", label: "Proyecto", align: "" },
+                { key: "client_name", label: "Cliente", align: "" },
+                { key: "status", label: "Estado", align: "" },
+                { key: "generation_count", label: "Generaciones", align: "text-right" },
+                { key: "estimated_cost", label: "Costo aprox", align: "text-right" },
+                { key: "created_at", label: "Fecha", align: "" },
+              ] as const).map(col => (
+                <TableHead
+                  key={col.key}
+                  className={`text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors ${col.align}`}
+                  onClick={() => {
+                    if (sortKey === col.key) setSortDir(d => d === "asc" ? "desc" : "asc");
+                    else { setSortKey(col.key); setSortDir(col.key === "created_at" || col.key === "generation_count" || col.key === "estimated_cost" ? "desc" : "asc"); }
+                  }}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    {col.label}
+                    {sortKey === col.key && (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)}
+                  </span>
+                </TableHead>
+              ))}
               <TableHead className="w-[100px] text-muted-foreground">Acciones</TableHead>
             </TableRow>
           </TableHeader>
@@ -253,7 +273,17 @@ export default function ProjectsPage() {
                 </TableCell>
               </TableRow>
             ) : (
-              projects.map((project) => (
+              [...projects].sort((a, b) => {
+                const aVal = a[sortKey];
+                const bVal = b[sortKey];
+                if (aVal == null && bVal == null) return 0;
+                if (aVal == null) return 1;
+                if (bVal == null) return -1;
+                const cmp = typeof aVal === "number" && typeof bVal === "number"
+                  ? aVal - bVal
+                  : String(aVal).localeCompare(String(bVal));
+                return sortDir === "asc" ? cmp : -cmp;
+              }).map((project) => (
                 <TableRow key={project.id} className="border-border/50 hover:bg-accent/50">
                   <TableCell>
                     <button
@@ -275,7 +305,7 @@ export default function ProjectsPage() {
                   </TableCell>
                   <TableCell>
                     {project.client_name ? (
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-col items-center gap-1">
                         {project.client_logo ? (
                           <Image
                             src={project.client_logo}
@@ -287,6 +317,7 @@ export default function ProjectsPage() {
                         ) : (
                           <Building2 className="h-5 w-5 text-muted-foreground" />
                         )}
+                        <span className="text-xs text-muted-foreground">{project.client_name}</span>
                       </div>
                     ) : (
                       <span className="text-muted-foreground">-</span>
