@@ -593,6 +593,7 @@ export async function POST(
                 effectiveCosts,
                 effectiveImageAspectRatio,
                 effectiveImageSize,
+                ...(isStudioText && { isStudioText: true }),
               });
 
               console.log(`[Stream] Job ${job.id} enqueued to worker`);

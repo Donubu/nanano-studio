@@ -389,6 +389,11 @@ async function saveResultsToDB(
     [data.conversationId]
   );
 
+  // Mark studio text generations for gallery filtering (ignore_in_context = 2)
+  if (data.isStudioText && modelMessageId) {
+    await pool.execute(`UPDATE messages SET ignore_in_context = 2 WHERE id = ?`, [modelMessageId]);
+  }
+
   // Generate title before completing (so the SSE connection is still open)
   if (data.needsTitle && !data.skipUserMessage) {
     try {

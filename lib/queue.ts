@@ -68,6 +68,9 @@ export interface StreamJobData {
   effectiveImageAspectRatio?: string;
   effectiveImageSize?: string;
 
+  // Studio text flag (Full Mode text generations that appear in gallery)
+  isStudioText?: boolean;
+
   // Set by worker when processing
   workerName?: string;
 }
