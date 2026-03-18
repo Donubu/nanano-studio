@@ -39,7 +39,11 @@ function isRetriableError(error: unknown): boolean {
         message.includes('rate limit') ||
         message.includes('quota') ||
         message.includes('429') ||
-        message.includes('503')) {
+        message.includes('503') ||
+        message.includes('fetch failed') ||
+        message.includes('socket') ||
+        message.includes('econnreset') ||
+        message.includes('other side closed')) {
       return true;
     }
   }

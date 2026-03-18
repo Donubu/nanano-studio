@@ -3339,6 +3339,9 @@ function TextDetailModal({ item, conversationId, textModels, activeTextModel, th
               userMessageId = data.id;
             } else if (data.type === "complete") {
               modelMessageId = data.id;
+            } else if (data.type === "error") {
+              accText = data.message || "Error al generar respuesta.";
+              modelMessageId = data.id || null;
             }
           } catch { /* ignore */ }
         }
@@ -3558,6 +3561,16 @@ function TextDetailModal({ item, conversationId, textModels, activeTextModel, th
               disabled={streaming}
               className="flex-1 text-sm bg-muted rounded-lg px-3 py-2 outline-none focus:ring-1 focus:ring-primary resize-none disabled:opacity-50 placeholder:text-muted-foreground/50"
             />
+            {supportsThinking && (
+              <ReasoningSelector
+                value={thinkingLevel}
+                onChange={onThinkingLevelChange}
+                showThoughts={false}
+                onShowThoughtsChange={() => {}}
+                disabled={streaming}
+                hideEyeToggle
+              />
+            )}
             <button
               onClick={handleSendFollowUp}
               disabled={!followUpInput.trim() || streaming}

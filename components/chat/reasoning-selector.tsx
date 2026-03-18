@@ -22,9 +22,10 @@ interface ReasoningSelectorProps {
   showThoughts: boolean;
   onShowThoughtsChange: (show: boolean) => void;
   disabled?: boolean;
+  hideEyeToggle?: boolean;
 }
 
-export function ReasoningSelector({ value, onChange, showThoughts, onShowThoughtsChange, disabled }: ReasoningSelectorProps) {
+export function ReasoningSelector({ value, onChange, showThoughts, onShowThoughtsChange, disabled, hideEyeToggle }: ReasoningSelectorProps) {
   const isActive = value !== "none";
 
   return (
@@ -57,7 +58,7 @@ export function ReasoningSelector({ value, onChange, showThoughts, onShowThought
         </TooltipContent>
       </Tooltip>
 
-      {isActive && (
+      {isActive && !hideEyeToggle && (
         <Tooltip>
           <TooltipTrigger asChild>
             <button
