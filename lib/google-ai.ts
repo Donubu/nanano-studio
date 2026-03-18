@@ -27,10 +27,10 @@ function isRetriableError(error: unknown): boolean {
   if (error && typeof error === 'object') {
     const errorObj = error as { status?: number; code?: number; message?: string };
     // Códigos HTTP retriables
-    if (errorObj.status === 429 || errorObj.status === 503 || errorObj.status === 500) {
+    if (errorObj.status === 429 || errorObj.status === 500 || errorObj.status === 503 || errorObj.status === 504) {
       return true;
     }
-    if (errorObj.code === 429 || errorObj.code === 503 || errorObj.code === 500) {
+    if (errorObj.code === 429 || errorObj.code === 500 || errorObj.code === 503 || errorObj.code === 504) {
       return true;
     }
     // Verificar en el mensaje
@@ -43,7 +43,10 @@ function isRetriableError(error: unknown): boolean {
         message.includes('fetch failed') ||
         message.includes('socket') ||
         message.includes('econnreset') ||
-        message.includes('other side closed')) {
+        message.includes('other side closed') ||
+        message.includes('deadline_exceeded') ||
+        message.includes('gateway timeout') ||
+        message.includes('504')) {
       return true;
     }
   }
