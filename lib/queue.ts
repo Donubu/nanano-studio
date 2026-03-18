@@ -13,6 +13,7 @@ export interface StreamJobData {
 
   // Model
   modelId: string;
+  modelDbId?: number | null;
   backend?: string;
   generationType: string;
   qualityTier: "normal" | "hq";

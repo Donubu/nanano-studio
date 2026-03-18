@@ -565,6 +565,7 @@ export async function POST(
                 skipUserMessage: skip_user_message,
                 content,
                 modelId: effectiveModelId,
+                modelDbId: effectiveModelDbId,
                 backend: effectiveBackend,
                 generationType,
                 qualityTier: effectiveQualityTier,

@@ -262,8 +262,8 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
             const errorMessage = `Error al generar respuesta: ${error.message}`;
             try {
               const [modelResult] = await pool.execute<ResultSetHeader>(
-                `INSERT INTO messages (conversation_id, role, content_type, content, user_id) VALUES (?, 'model', 'error', ?, ?)`,
-                [data.conversationId, errorMessage, data.userId]
+                `INSERT INTO messages (conversation_id, role, content_type, model_id, content, user_id) VALUES (?, 'model', 'error', ?, ?, ?)`,
+                [data.conversationId, data.modelDbId || null, errorMessage, data.userId]
               );
               if (!data.skipUserMessage && data.userMessageId) {
                 await pool.execute(`UPDATE messages SET ignore_in_context = 1 WHERE id = ?`, [data.userMessageId]);
@@ -331,9 +331,9 @@ async function saveResultsToDB(
     });
     totalEstimatedCost += textCost;
     const [modelResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, thought, tokens_input, tokens_output, estimated_cost, grounding_data, user_id)
-       VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [data.conversationId, data.qualityTier, text, thought || null, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null, data.userId]
+      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, thought, tokens_input, tokens_output, estimated_cost, grounding_data, user_id)
+       VALUES (?, 'model', 'text', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [data.conversationId, data.qualityTier, data.modelDbId || null, text, thought || null, tokenCount.input, tokenCount.output, textCost, groundingData ? JSON.stringify(groundingData) : null, data.userId]
     );
     modelMessageId = modelResult.insertId;
   }
@@ -351,9 +351,9 @@ async function saveResultsToDB(
     });
     totalEstimatedCost += imageCost;
     const [imgResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost, user_id)
-       VALUES (?, 'model', 'image', ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [data.conversationId, data.qualityTier, img.url, img.mimeType, img.fileSize, imageAspectRatioToSave, imageSizeToSave,
+      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, image_url, image_mime_type, image_file_size, image_aspect_ratio, image_size, tokens_input, tokens_output, estimated_cost, user_id)
+       VALUES (?, 'model', 'image', ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [data.conversationId, data.qualityTier, data.modelDbId || null, img.url, img.mimeType, img.fileSize, imageAspectRatioToSave, imageSizeToSave,
         isFirstMessage ? tokenCount.input : 0, isFirstMessage ? tokenCount.output : 0, imageCost, data.userId]
     );
     imageMessages.push({ id: imgResult.insertId, imageUrl: img.url });
@@ -371,9 +371,9 @@ async function saveResultsToDB(
     });
     totalEstimatedCost += textCost;
     const [modelResult] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, content, tokens_input, tokens_output, estimated_cost, user_id)
-       VALUES (?, 'model', 'text', ?, '', ?, ?, ?, ?)`,
-      [data.conversationId, data.qualityTier, tokenCount.input, tokenCount.output, textCost, data.userId]
+      `INSERT INTO messages (conversation_id, role, content_type, quality_tier, model_id, content, tokens_input, tokens_output, estimated_cost, user_id)
+       VALUES (?, 'model', 'text', ?, ?, '', ?, ?, ?, ?)`,
+      [data.conversationId, data.qualityTier, data.modelDbId || null, tokenCount.input, tokenCount.output, textCost, data.userId]
     );
     modelMessageId = modelResult.insertId;
   }
