@@ -87,30 +87,14 @@ export async function GET(
     } else if (typeFilter === "videos") {
       mediaConditions.push("(m.video_url IS NOT NULL OR (m.status = 'generating' AND m.content_type = 'video'))");
     } else if (typeFilter === "texts") {
-      // Text-only generations: exclude companions to image/video and follow-ups (ignore_in_context=1)
-      mediaConditions.push(`(m.content_type = 'text' AND m.content IS NOT NULL AND m.content != '' AND m.image_url IS NULL AND m.video_url IS NULL
-        AND COALESCE(m.ignore_in_context, 0) = 0
-        AND NOT EXISTS (
-          SELECT 1 FROM messages sibling
-          WHERE sibling.conversation_id = m.conversation_id
-            AND sibling.role = 'model'
-            AND sibling.id > m.id
-            AND sibling.id < m.id + 50
-            AND (sibling.image_url IS NOT NULL OR sibling.video_url IS NOT NULL)
-        ))`);
+      // Text-only generations: only show texts marked as studio text (ignore_in_context = 2)
+      mediaConditions.push(`(m.content_type = 'text' AND m.ignore_in_context = 2 AND m.content IS NOT NULL AND m.content != ''
+        AND m.image_url IS NULL AND m.video_url IS NULL)`);
     } else {
-      // All: images + videos + generating + standalone text (exclude follow-ups)
+      // All: images + videos + generating + studio text
       mediaConditions.push(`(m.image_url IS NOT NULL OR m.video_url IS NOT NULL OR m.status = 'generating'
-        OR (m.content_type = 'text' AND m.content IS NOT NULL AND m.content != '' AND m.image_url IS NULL AND m.video_url IS NULL
-          AND COALESCE(m.ignore_in_context, 0) = 0
-          AND NOT EXISTS (
-            SELECT 1 FROM messages sibling
-            WHERE sibling.conversation_id = m.conversation_id
-              AND sibling.role = 'model'
-              AND sibling.id > m.id
-              AND sibling.id < m.id + 50
-              AND (sibling.image_url IS NOT NULL OR sibling.video_url IS NOT NULL)
-          )))`);
+        OR (m.content_type = 'text' AND m.ignore_in_context = 2 AND m.content IS NOT NULL AND m.content != ''
+          AND m.image_url IS NULL AND m.video_url IS NULL))`);
     }
 
     if (favoritesOnly) {

@@ -163,6 +163,8 @@ export async function POST(
 
     // quality_tier kept for legacy compat but selected_model_id takes precedence
     const effectiveQualityTier: QualityTier = quality_tier === "hq" ? "hq" : "normal";
+    // Mark text generations from Full Mode studio for gallery filtering
+    const isStudioText = generation_type_override === "text";
 
     if (!content || content.trim() === "") {
       return new Response(JSON.stringify({ error: "El contenido del mensaje es requerido" }), {
@@ -787,6 +789,11 @@ export async function POST(
                 [id]
               );
 
+              // Mark studio text generations for gallery filtering (ignore_in_context = 2)
+              if (isStudioText && modelMessageId) {
+                await pool.execute(`UPDATE messages SET ignore_in_context = 2 WHERE id = ?`, [modelMessageId]);
+              }
+
               if (!controllerClosed) {
                 controller.enqueue(
                   encoder.encode(`data: ${JSON.stringify({
@@ -1065,6 +1072,11 @@ export async function POST(
                 const totalCost = Number(totalsResult[0]?.total_estimated_cost) || 0;
 
                 console.log(`[Stream][${reqId}] COMPLETE @ ${new Date().toISOString()} | Images: ${validImages.length} | Tokens: ${tokenCount.input}/${tokenCount.output}`);
+
+                // Mark studio text generations for gallery filtering
+                if (isStudioText && modelMessageId) {
+                  await pool.execute(`UPDATE messages SET ignore_in_context = 2 WHERE id = ?`, [modelMessageId]);
+                }
 
                 // Enviar evento de finalización
                 if (!controllerClosed) {
