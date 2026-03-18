@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import {
   getGcpCostsSummary,
+  getGcpCostsByService,
   getGcpDailyTotals,
   getLastSyncInfo,
   isBillingConfigured,
 } from "@/lib/gcp-billing";
 
 // GET - Get GCP costs summary
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const session = await auth();
 
@@ -33,17 +34,37 @@ export async function GET() {
     // Get summary data
     const summary = await getGcpCostsSummary();
 
-    // Get daily totals for last 30 days (for chart)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const dailyTotals = await getGcpDailyTotals(thirtyDaysAgo, new Date());
+    // Parse period/date params
+    const { searchParams } = new URL(request.url);
+    const period = searchParams.get("period") || "30";
+    const dateFromParam = searchParams.get("date_from");
+    const dateToParam = searchParams.get("date_to");
 
-    // Get last sync info
-    const lastSync = await getLastSyncInfo();
+    let fromDate: Date;
+    let toDate = new Date();
+    if (dateFromParam && dateToParam) {
+      fromDate = new Date(dateFromParam);
+      toDate = new Date(dateToParam);
+      toDate.setHours(23, 59, 59, 999);
+    } else if (period === "1") {
+      fromDate = new Date();
+      fromDate.setHours(0, 0, 0, 0);
+    } else {
+      const days = parseInt(period) || 30;
+      fromDate = new Date();
+      fromDate.setDate(fromDate.getDate() - days);
+    }
+
+    // Fetch daily totals, by-service breakdown, and last sync in parallel
+    const [dailyTotals, byServiceForPeriod, lastSync] = await Promise.all([
+      getGcpDailyTotals(fromDate, toDate),
+      getGcpCostsByService(fromDate, toDate),
+      getLastSyncInfo(),
+    ]);
 
     return NextResponse.json({
       configured: true,
-      summary,
+      summary: { ...summary, byService: byServiceForPeriod },
       dailyTotals,
       lastSync,
     });

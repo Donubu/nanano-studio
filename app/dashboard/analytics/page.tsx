@@ -134,11 +134,7 @@ interface AnalyticsData {
   modelBreakdown: ModelBreakdown[];
   userBreakdown: UserBreakdown[];
   projectBreakdown: ProjectBreakdown[];
-  summaries: {
-    "7d": Summary;
-    "30d": Summary;
-    "all": Summary;
-  };
+  summary: Summary;
   generationTypes: GenerationType[];
   budgetStats: BudgetStats;
 }
@@ -155,17 +151,23 @@ const CHART_COLORS = {
   audioHd: "#e11d48",
 };
 
-type PeriodType = "7" | "30" | "90" | "all";
+type PeriodType = "1" | "7" | "30" | "90" | "all" | "custom";
 
 export default function AnalyticsPage() {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<PeriodType>("30");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const fetchAnalytics = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/dashboard/analytics?period=${period}`);
+      let url = `/api/dashboard/analytics?period=${period}`;
+      if (period === "custom" && dateFrom && dateTo) {
+        url = `/api/dashboard/analytics?period=custom&date_from=${dateFrom}&date_to=${dateTo}`;
+      }
+      const res = await fetch(url);
       if (res.ok) {
         const result = await res.json();
         setData(result);
@@ -175,9 +177,10 @@ export default function AnalyticsPage() {
     } finally {
       setLoading(false);
     }
-  }, [period]);
+  }, [period, dateFrom, dateTo]);
 
   useEffect(() => {
+    if (period === "custom" && (!dateFrom || !dateTo)) return;
     fetchAnalytics();
   }, [fetchAnalytics]);
 
@@ -199,32 +202,16 @@ export default function AnalyticsPage() {
     return date.toLocaleDateString("es-CL", { month: "short", day: "numeric" });
   };
 
-  const getCurrentSummary = (): Summary => {
-    if (!data) return { tokensInput: 0, tokensOutput: 0, totalTokens: 0, estimatedCost: 0, imageCount: 0, videoCount: 0, musicCount: 0, audioCount: 0, audioHdCount: 0, messageCount: 0, conversationCount: 0, topazImageCredits: 0, topazVideoCredits: 0 };
-    if (period === "7") return data.summaries["7d"];
-    if (period === "30") return data.summaries["30d"];
-    return data.summaries["all"];
-  };
-
-  const getPreviousSummary = (): Summary | null => {
-    if (!data || period === "all") return null;
-    if (period === "7") return data.summaries["30d"];
-    return data.summaries["all"];
-  };
-
-  const calculateChange = (current: number, previous: number | null): number | null => {
-    if (previous === null || previous === 0) return null;
-    return ((current - previous) / previous) * 100;
-  };
-
-  const currentSummary = getCurrentSummary();
-  const previousSummary = getPreviousSummary();
+  const emptySummary: Summary = { tokensInput: 0, tokensOutput: 0, totalTokens: 0, estimatedCost: 0, imageCount: 0, videoCount: 0, musicCount: 0, audioCount: 0, audioHdCount: 0, messageCount: 0, conversationCount: 0, topazImageCredits: 0, topazVideoCredits: 0 };
+  const currentSummary = data?.summary || emptySummary;
 
   const periodLabels: Record<PeriodType, string> = {
+    "1": "Hoy",
     "7": "Últimos 7 días",
     "30": "Últimos 30 días",
     "90": "Últimos 90 días",
     "all": "Todo el tiempo",
+    "custom": dateFrom && dateTo ? `${dateFrom} — ${dateTo}` : "Rango personalizado",
   };
 
   if (loading && !data) {
@@ -250,18 +237,27 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Period Selector */}
-        <div className="flex gap-1 bg-muted p-1 rounded-lg">
-          {(["7", "30", "90", "all"] as PeriodType[]).map((p) => (
-            <Button
-              key={p}
-              variant={period === p ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setPeriod(p)}
-              className={period === p ? "bg-background shadow-sm" : ""}
-            >
-              {p === "all" ? "Todo" : `${p}d`}
-            </Button>
-          ))}
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1 bg-muted p-1 rounded-lg">
+            {(["1", "7", "30", "90", "all", "custom"] as PeriodType[]).map((p) => (
+              <Button
+                key={p}
+                variant={period === p ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => setPeriod(p)}
+                className={period === p ? "bg-background shadow-sm" : ""}
+              >
+                {p === "1" ? "Hoy" : p === "all" ? "Todo" : p === "custom" ? "Rango" : `${p}d`}
+              </Button>
+            ))}
+          </div>
+          {period === "custom" && (
+            <div className="flex items-center gap-1.5">
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="text-xs bg-muted border border-border/50 rounded-md px-2 py-1.5 text-foreground" />
+              <span className="text-xs text-muted-foreground">a</span>
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="text-xs bg-muted border border-border/50 rounded-md px-2 py-1.5 text-foreground" />
+            </div>
+          )}
         </div>
       </div>
 

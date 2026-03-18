@@ -76,7 +76,7 @@ interface SummaryResponse {
 
 const COLORS = ["#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ec4899", "#3b82f6", "#ef4444", "#84cc16"];
 
-type PeriodType = "7" | "30" | "90";
+type PeriodType = "1" | "7" | "30" | "90" | "custom";
 
 export default function BillingPage() {
   const [data, setData] = useState<SummaryResponse | null>(null);
@@ -84,10 +84,16 @@ export default function BillingPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [period, setPeriod] = useState<PeriodType>("30");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/gcp-costs/summary");
+      let url = `/api/admin/gcp-costs/summary?period=${period}`;
+      if (period === "custom" && dateFrom && dateTo) {
+        url = `/api/admin/gcp-costs/summary?period=custom&date_from=${dateFrom}&date_to=${dateTo}`;
+      }
+      const res = await fetch(url);
       if (res.ok) {
         const result = await res.json();
         setData(result);
@@ -97,9 +103,10 @@ export default function BillingPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [period, dateFrom, dateTo]);
 
   useEffect(() => {
+    if (period === "custom" && (!dateFrom || !dateTo)) return;
     fetchData();
   }, [fetchData]);
 
@@ -249,11 +256,20 @@ export default function BillingPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="1">Hoy</SelectItem>
               <SelectItem value="7">7 días</SelectItem>
               <SelectItem value="30">30 días</SelectItem>
               <SelectItem value="90">90 días</SelectItem>
+              <SelectItem value="custom">Rango</SelectItem>
             </SelectContent>
           </Select>
+          {period === "custom" && (
+            <div className="flex items-center gap-1.5">
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="text-xs bg-muted border border-border/50 rounded-md px-2 py-1.5 text-foreground" />
+              <span className="text-xs text-muted-foreground">a</span>
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="text-xs bg-muted border border-border/50 rounded-md px-2 py-1.5 text-foreground" />
+            </div>
+          )}
 
           {/* Sync button */}
           <Button

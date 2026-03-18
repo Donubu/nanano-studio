@@ -94,13 +94,24 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const period = searchParams.get("period") || "30"; // 7, 30, 90, all
+    const period = searchParams.get("period") || "30"; // 1, 7, 30, 90, all, custom
+    const dateFrom = searchParams.get("date_from"); // YYYY-MM-DD (for custom period)
+    const dateTo = searchParams.get("date_to"); // YYYY-MM-DD (for custom period)
     const projectId = searchParams.get("project_id");
 
     // Build date filter
     let dateFilter = "";
     let dateFilterConv = "";
-    if (period !== "all") {
+    if (dateFrom && dateTo) {
+      dateFilter = `AND m.created_at >= '${dateFrom} 00:00:00' AND m.created_at <= '${dateTo} 23:59:59'`;
+      dateFilterConv = `AND c.created_at >= '${dateFrom} 00:00:00' AND c.created_at <= '${dateTo} 23:59:59'`;
+    } else if (period === "1") {
+      dateFilter = `AND m.created_at >= CURDATE()`;
+      dateFilterConv = `AND c.created_at >= CURDATE()`;
+    } else if (period === "1") {
+      dateFilter = `AND m.created_at >= CURDATE()`;
+      dateFilterConv = `AND c.created_at >= CURDATE()`;
+    } else if (period !== "all") {
       const days = parseInt(period);
       dateFilter = `AND m.created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)`;
       dateFilterConv = `AND c.created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)`;
@@ -213,38 +224,26 @@ export async function GET(request: NextRequest) {
       ORDER BY estimated_cost DESC
     `);
 
-    // 5. Period summaries (7d, 30d, all)
-    const getSummary = async (days: number | null): Promise<PeriodSummaryRow> => {
-      const filter = days ? `AND m.created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)` : "";
-      const filterConv = days ? `AND c.created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)` : "";
-
-      const [rows] = await pool.execute<PeriodSummaryRow[]>(`
-        SELECT
-          COALESCE(SUM(m.tokens_input), 0) as tokens_input,
-          COALESCE(SUM(m.tokens_output), 0) as tokens_output,
-          COALESCE(SUM(m.estimated_cost), 0) as estimated_cost,
-          SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
-          SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
-          SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
-          SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
-          SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
-          COUNT(*) as message_count,
-          COUNT(DISTINCT c.id) as conversation_count
-        FROM messages m
-        JOIN conversations c ON m.conversation_id = c.id
-        WHERE m.role = 'model'
-            ${filter}
-          ${projectFilter}
-      `);
-
-      return rows[0];
-    };
-
-    const [summary7d, summary30d, summaryAll] = await Promise.all([
-      getSummary(7),
-      getSummary(30),
-      getSummary(null),
-    ]);
+    // 5. Period summary — uses the same dateFilter as the rest of the page
+    const [summaryRows] = await pool.execute<PeriodSummaryRow[]>(`
+      SELECT
+        COALESCE(SUM(m.tokens_input), 0) as tokens_input,
+        COALESCE(SUM(m.tokens_output), 0) as tokens_output,
+        COALESCE(SUM(m.estimated_cost), 0) as estimated_cost,
+        SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
+        SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
+        SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
+        SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
+        SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
+        COUNT(*) as message_count,
+        COUNT(DISTINCT c.id) as conversation_count
+      FROM messages m
+      JOIN conversations c ON m.conversation_id = c.id
+      WHERE m.role = 'model'
+        ${dateFilter}
+        ${projectFilter}
+    `);
+    const currentSummary = summaryRows[0];
 
     // 6. Hourly distribution (for activity heatmap)
     const [hourlyDistribution] = await pool.execute<RowDataPacket[]>(`
@@ -281,34 +280,37 @@ export async function GET(request: NextRequest) {
       GROUP BY type
     `);
 
-    // 8. Topaz credits (separate query for each period)
-    const getTopazCredits = async (days: number | null): Promise<{ imageCredits: number; videoCredits: number }> => {
-      const imageFilter = days ? `WHERE created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)` : "";
-      const videoFilter = days ? `AND created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)` : "";
+    // 8. Topaz credits for current period
+    let topazDateFilter = "";
+    let topazVideoDateFilter = "";
+    if (dateFrom && dateTo) {
+      topazDateFilter = `WHERE created_at >= '${dateFrom} 00:00:00' AND created_at <= '${dateTo} 23:59:59'`;
+      topazVideoDateFilter = `AND created_at >= '${dateFrom} 00:00:00' AND created_at <= '${dateTo} 23:59:59'`;
+    } else if (period === "1") {
+      topazDateFilter = `WHERE created_at >= CURDATE()`;
+      topazVideoDateFilter = `AND created_at >= CURDATE()`;
+    } else if (period !== "all") {
+      const days = parseInt(period);
+      topazDateFilter = `WHERE created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)`;
+      topazVideoDateFilter = `AND created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)`;
+    }
 
-      const [imageRows] = await pool.execute<TopazCreditsRow[]>(`
+    const [[topazImageRows], [topazVideoRows]] = await Promise.all([
+      pool.execute<TopazCreditsRow[]>(`
         SELECT COALESCE(SUM(credits_consumed), 0) as topaz_image_credits
         FROM topaz_edits
-        ${imageFilter}
-      `);
-
-      const [videoRows] = await pool.execute<TopazCreditsRow[]>(`
+        ${topazDateFilter}
+      `),
+      pool.execute<TopazCreditsRow[]>(`
         SELECT COALESCE(SUM(credits_consumed), 0) as topaz_video_credits
         FROM topaz_video_edits
-        WHERE status = 'completed' ${videoFilter}
-      `);
-
-      return {
-        imageCredits: Number(imageRows[0]?.topaz_image_credits || 0),
-        videoCredits: Number(videoRows[0]?.topaz_video_credits || 0),
-      };
-    };
-
-    const [topaz7d, topaz30d, topazAll] = await Promise.all([
-      getTopazCredits(7),
-      getTopazCredits(30),
-      getTopazCredits(null),
+        WHERE status = 'completed' ${topazVideoDateFilter}
+      `),
     ]);
+    const topazCredits = {
+      imageCredits: Number((topazImageRows as TopazCreditsRow[])[0]?.topaz_image_credits || 0),
+      videoCredits: Number((topazVideoRows as TopazCreditsRow[])[0]?.topaz_video_credits || 0),
+    };
 
     // Cost corrections from environment
     const costMultiplier = getCostMultiplier();
@@ -369,52 +371,20 @@ export async function GET(request: NextRequest) {
         audioHdCount: Number(row.audio_hd_count),
         conversationCount: Number(row.conversation_count),
       })),
-      summaries: {
-        "7d": {
-          tokensInput: Number(summary7d.tokens_input),
-          tokensOutput: Number(summary7d.tokens_output),
-          totalTokens: Number(summary7d.tokens_input) + Number(summary7d.tokens_output),
-          estimatedCost: (Number(summary7d.estimated_cost) * costMultiplier) + monthlyBaseCost,
-          imageCount: Number(summary7d.image_count),
-          videoCount: Number(summary7d.video_count),
-          musicCount: Number(summary7d.music_count),
-          audioCount: Number(summary7d.audio_count),
-          audioHdCount: Number(summary7d.audio_hd_count),
-          messageCount: Number(summary7d.message_count),
-          conversationCount: Number(summary7d.conversation_count),
-          topazImageCredits: topaz7d.imageCredits,
-          topazVideoCredits: topaz7d.videoCredits,
-        },
-        "30d": {
-          tokensInput: Number(summary30d.tokens_input),
-          tokensOutput: Number(summary30d.tokens_output),
-          totalTokens: Number(summary30d.tokens_input) + Number(summary30d.tokens_output),
-          estimatedCost: (Number(summary30d.estimated_cost) * costMultiplier) + monthlyBaseCost,
-          imageCount: Number(summary30d.image_count),
-          videoCount: Number(summary30d.video_count),
-          musicCount: Number(summary30d.music_count),
-          audioCount: Number(summary30d.audio_count),
-          audioHdCount: Number(summary30d.audio_hd_count),
-          messageCount: Number(summary30d.message_count),
-          conversationCount: Number(summary30d.conversation_count),
-          topazImageCredits: topaz30d.imageCredits,
-          topazVideoCredits: topaz30d.videoCredits,
-        },
-        "all": {
-          tokensInput: Number(summaryAll.tokens_input),
-          tokensOutput: Number(summaryAll.tokens_output),
-          totalTokens: Number(summaryAll.tokens_input) + Number(summaryAll.tokens_output),
-          estimatedCost: (Number(summaryAll.estimated_cost) * costMultiplier) + monthlyBaseCost,
-          imageCount: Number(summaryAll.image_count),
-          videoCount: Number(summaryAll.video_count),
-          musicCount: Number(summaryAll.music_count),
-          audioCount: Number(summaryAll.audio_count),
-          audioHdCount: Number(summaryAll.audio_hd_count),
-          messageCount: Number(summaryAll.message_count),
-          conversationCount: Number(summaryAll.conversation_count),
-          topazImageCredits: topazAll.imageCredits,
-          topazVideoCredits: topazAll.videoCredits,
-        },
+      summary: {
+        tokensInput: Number(currentSummary.tokens_input),
+        tokensOutput: Number(currentSummary.tokens_output),
+        totalTokens: Number(currentSummary.tokens_input) + Number(currentSummary.tokens_output),
+        estimatedCost: (Number(currentSummary.estimated_cost) * costMultiplier) + monthlyBaseCost,
+        imageCount: Number(currentSummary.image_count),
+        videoCount: Number(currentSummary.video_count),
+        musicCount: Number(currentSummary.music_count),
+        audioCount: Number(currentSummary.audio_count),
+        audioHdCount: Number(currentSummary.audio_hd_count),
+        messageCount: Number(currentSummary.message_count),
+        conversationCount: Number(currentSummary.conversation_count),
+        topazImageCredits: topazCredits.imageCredits,
+        topazVideoCredits: topazCredits.videoCredits,
       },
       hourlyDistribution: hourlyDistribution.map(row => ({
         hour: row.hour,
