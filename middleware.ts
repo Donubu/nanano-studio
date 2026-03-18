@@ -5,7 +5,8 @@ import { NextResponse } from "next/server";
 const { auth } = NextAuth(authConfig);
 
 export default auth((req) => {
-  const isLoggedIn = !!req.auth;
+  const token = req.auth;
+  const isLoggedIn = !!token;
   const isLoginPage = req.nextUrl.pathname === "/login";
   const isAuthRoute = req.nextUrl.pathname.startsWith("/api/auth");
   const isHealthRoute = req.nextUrl.pathname.startsWith("/api/health");
@@ -15,13 +16,21 @@ export default auth((req) => {
     return NextResponse.next();
   }
 
+  // JWT exists but missing critical fields (DB failed during login) — force re-login
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const hasIncompleteSession = isLoggedIn && (!token.user || !(token.user as any).id);
+
   // Redirigir a home si ya está logueado e intenta acceder a login
-  if (isLoginPage && isLoggedIn) {
+  if (isLoginPage && isLoggedIn && !hasIncompleteSession) {
     return NextResponse.redirect(new URL("/", req.url));
   }
 
-  // Redirigir a login si no está logueado
-  if (!isLoginPage && !isLoggedIn) {
+  // Redirigir a login si no está logueado o sesión incompleta
+  if (!isLoginPage && (!isLoggedIn || hasIncompleteSession)) {
+    // Clear the broken session by redirecting through signout
+    if (hasIncompleteSession) {
+      return NextResponse.redirect(new URL("/api/auth/signout", req.url));
+    }
     return NextResponse.redirect(new URL("/login", req.url));
   }
 
