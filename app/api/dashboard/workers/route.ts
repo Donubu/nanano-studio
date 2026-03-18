@@ -48,10 +48,23 @@ export async function GET() {
     {
       const { streamQueue, imagenQueue } = getQueues(connection);
 
-      // Get counts from both queues
-      const [streamCounts, imagenCounts] = await Promise.all([
+      // Fetch all data in parallel (counts, active, completed, failed, client list)
+      const [
+        streamCounts, imagenCounts,
+        streamActiveRaw, imagenActiveRaw,
+        streamCompletedRaw, imagenCompletedRaw,
+        streamFailedRaw, imagenFailedRaw,
+        clientList,
+      ] = await Promise.all([
         streamQueue.getJobCounts("waiting", "active", "completed", "failed", "delayed"),
         imagenQueue.getJobCounts("waiting", "active", "completed", "failed", "delayed"),
+        streamQueue.getJobs(["active"]),
+        imagenQueue.getJobs(["active"]),
+        streamQueue.getJobs(["completed"], 0, 19),
+        imagenQueue.getJobs(["completed"], 0, 19),
+        streamQueue.getJobs(["failed"], 0, 19),
+        imagenQueue.getJobs(["failed"], 0, 19),
+        connection.client("LIST") as Promise<string>,
       ]);
 
       const counts = {
@@ -62,12 +75,7 @@ export async function GET() {
         delayed: (streamCounts.delayed || 0) + (imagenCounts.delayed || 0),
       };
 
-      // Active jobs from both queues
-      const [streamActiveRaw, imagenActiveRaw] = await Promise.all([
-        streamQueue.getJobs(["active"]),
-        imagenQueue.getJobs(["active"]),
-      ]);
-
+      // Active jobs
       const mapActiveJob = (job: { id?: string; data: { modelId: string; conversationId: string; generationType?: string; labels?: { user_name?: string; project_name?: string }; workerName?: string }; processedOn?: number }, queueLabel: string) => ({
         id: job.id,
         queue: queueLabel,
@@ -85,12 +93,7 @@ export async function GET() {
         ...imagenActiveRaw.filter((j) => j?.data).map((j) => mapActiveJob(j as never, "imagen")),
       ];
 
-      // Completed jobs from both queues (most recent 20 combined)
-      const [streamCompletedRaw, imagenCompletedRaw] = await Promise.all([
-        streamQueue.getJobs(["completed"], 0, 19),
-        imagenQueue.getJobs(["completed"], 0, 19),
-      ]);
-
+      // Completed jobs (most recent 20 combined)
       const mapCompletedJob = (job: { id?: string; data?: { modelId?: string; generationType?: string; labels?: { user_name?: string; project_name?: string }; workerName?: string }; finishedOn?: number; processedOn?: number }, queueLabel: string) => ({
         id: job.id,
         queue: queueLabel,
@@ -110,12 +113,7 @@ export async function GET() {
         .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0))
         .slice(0, 20);
 
-      // Failed jobs from both queues (most recent 20 combined)
-      const [streamFailedRaw, imagenFailedRaw] = await Promise.all([
-        streamQueue.getJobs(["failed"], 0, 19),
-        imagenQueue.getJobs(["failed"], 0, 19),
-      ]);
-
+      // Failed jobs (most recent 20 combined)
       const mapFailedJob = (job: { id?: string; data?: { modelId?: string; generationType?: string; qualityTier?: string; labels?: { user_name?: string; project_name?: string }; workerName?: string }; failedReason?: string; finishedOn?: number }, queueLabel: string) => ({
         id: job.id,
         queue: queueLabel,
@@ -135,12 +133,7 @@ export async function GET() {
         .sort((a, b) => (b.failedAt || 0) - (a.failedAt || 0))
         .slice(0, 20);
 
-      // Compute average duration stats from a larger sample of completed jobs
-      const [streamStatsRaw, imagenStatsRaw] = await Promise.all([
-        streamQueue.getJobs(["completed"], 0, 99),
-        imagenQueue.getJobs(["completed"], 0, 99),
-      ]);
-
+      // Compute stats from the already-fetched completed jobs (no extra query)
       interface StatEntry { totalMs: number; count: number; minMs: number; maxMs: number }
       const statsMap: Record<string, Record<string, StatEntry>> = {
         byModel: {},
@@ -157,8 +150,8 @@ export async function GET() {
       };
 
       const allStatsJobs = [
-        ...streamStatsRaw.filter((j) => j?.data),
-        ...imagenStatsRaw.filter((j) => j?.data),
+        ...streamCompletedRaw.filter((j) => j?.data),
+        ...imagenCompletedRaw.filter((j) => j?.data),
       ];
 
       for (const job of allStatsJobs) {
@@ -191,10 +184,7 @@ export async function GET() {
         sampleSize: allStatsJobs.filter(j => j.finishedOn && j.processedOn).length,
       };
 
-      // Count unique worker processes across both queues
-      // Each worker process creates 2 BullMQ Workers (stream + imagen), each with a bzpopmin connection
-      // So we count total bzpopmin connections and divide by 2 to get actual worker processes
-      const clientList = await connection.client("LIST") as string;
+      // Count unique worker processes
       const clientLines = clientList.split("\n");
       const streamB64 = Buffer.from(STREAM_QUEUE_NAME).toString("base64");
       const imagenB64 = Buffer.from(IMAGEN_QUEUE_NAME).toString("base64");
