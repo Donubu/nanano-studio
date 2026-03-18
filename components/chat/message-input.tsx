@@ -114,13 +114,24 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
       setMessage(initialValue);
       onInitialValueUsed?.();
     }
-  }, [initialValue, onInitialValueUsed]);
+  }, [initialValue, onInitialValueUsed]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-resize textarea when message changes programmatically
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [message]); // eslint-disable-line react-hooks/exhaustive-deps
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
 
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const adjustTextareaHeight = () => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, minimal ? 200 : 300)}px`;
+  };
   const mentionListRef = useRef<HTMLDivElement>(null);
 
   // @ mention state
@@ -726,7 +737,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
               value={message}
               onChange={handleMessageChange}
               onKeyDown={handleKeyDown}
-              onPaste={supportsFiles ? handlePaste : undefined}
+              onPaste={(e) => { if (supportsFiles) handlePaste(e); requestAnimationFrame(adjustTextareaHeight); }}
               placeholder={assetMode && attachedFiles.length > 0
                 ? "Escribe tu prompt... usa @ para referenciar assets"
                 : placeholder
@@ -746,11 +757,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
                 height: "auto",
                 minHeight: minimal ? "44px" : "132px",
               }}
-              onInput={(e) => {
-                const target = e.target as HTMLTextAreaElement;
-                target.style.height = "auto";
-                target.style.height = `${Math.min(target.scrollHeight, minimal ? 200 : 300)}px`;
-              }}
+              onInput={adjustTextareaHeight}
               onBlur={() => {
                 // Delay hiding to allow click on mention item
                 setTimeout(() => setShowMentionPopup(false), 200);

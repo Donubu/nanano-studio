@@ -113,6 +113,14 @@ export async function PATCH(
     const body = await request.json();
     const { action } = body;
 
+    if (action === "hide_from_gallery") {
+      await pool.execute<ResultSetHeader>(
+        "UPDATE messages SET ignore_in_context = 1 WHERE id = ?",
+        [id]
+      );
+      return NextResponse.json({ success: true });
+    }
+
     if (action !== "restore") {
       return NextResponse.json({ error: "Acción no válida" }, { status: 400 });
     }

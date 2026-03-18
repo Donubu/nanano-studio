@@ -91,13 +91,12 @@ export async function DELETE(
     const { id, collectionId } = await params;
     const conversationId = parseInt(id);
     const colId = parseInt(collectionId);
-    const isAdmin = session.user.role === "admin";
 
     const [colRows] = await pool.execute<RowDataPacket[]>(
       `SELECT c.id FROM collections c
        JOIN conversations conv ON c.conversation_id = conv.id
-       WHERE c.id = ? AND c.conversation_id = ? ${isAdmin ? "" : "AND conv.user_id = ?"}`,
-      isAdmin ? [colId, conversationId] : [colId, conversationId, session.user.id]
+       WHERE c.id = ? AND c.conversation_id = ?`,
+      [colId, conversationId]
     );
     if (colRows.length === 0) {
       return NextResponse.json({ error: "Colección no encontrada" }, { status: 404 });

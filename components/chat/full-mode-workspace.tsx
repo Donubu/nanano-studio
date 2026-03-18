@@ -7,7 +7,8 @@ import {
   Undo2, ZoomIn, X, Loader2, ChevronLeft, ChevronRight, VolumeX,
   Upload, Clock, ChevronUp, RectangleHorizontal, RectangleVertical, Square,
   AlertTriangle, Play, PanelLeft, PanelLeftClose, RotateCcw, SlidersHorizontal, Eye, EyeOff,
-  FolderPlus, Folder, ArrowLeft, Pencil, MoreHorizontal, Search, Volume2, Tag
+  FolderPlus, Folder, ArrowLeft, Pencil, MoreHorizontal, Search, Volume2, Tag,
+  MessageSquare, Brain, Send, ChevronDown, Copy, Check
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MessageInput, AttachedFile, MessageInputHandle } from "./message-input";
@@ -15,15 +16,18 @@ import { type ReferenceImage } from "./video-input-frames";
 import { TopazStudio } from "./topaz-studio";
 import { TopazStudioVideo } from "./topaz-studio-video";
 import { VideoPlayer } from "./video-player";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { ProjectModel as ConfigModel } from "./quality-selector";
+import { ReasoningSelector, type ThinkingLevel } from "./reasoning-selector";
 import { cn, formatDateTimeLocal } from "@/lib/utils";
 import { useNavigation } from "@/contexts/navigation-context";
 import type { ImagenAspectRatio } from "./image-settings";
 
 // ---- Types ----
 
-type MediaFilter = "all" | "images" | "videos" | "favorites" | "deleted";
-type FullFormat = "image" | "video";
+type MediaFilter = "all" | "images" | "videos" | "texts" | "favorites" | "deleted";
+type FullFormat = "image" | "video" | "text";
 type VideoMode = "none" | "keyframes" | "ingredients";
 
 interface TagInfo {
@@ -33,7 +37,7 @@ interface TagInfo {
 }
 
 interface Generation {
-  type: "image" | "video";
+  type: "image" | "video" | "text";
   status?: "generating" | "completed" | "error";
   id: number;
   user_id?: number | null;
@@ -71,6 +75,8 @@ interface Generation {
   music_file_size: number | null;
   music_duration: number | null;
   music_config: null;
+  text_content: string | null;
+  thought: string | null;
   created_at: string;
   deleted_at: string | null;
   tags: TagInfo[];
@@ -78,12 +84,13 @@ interface Generation {
 
 interface InProgressItem {
   id: number;
-  type: "image" | "video";
+  type: "image" | "video" | "text";
   status: string;
   progress?: number;
   ratio: number;
   userName?: string | null;
   userImage?: string | null;
+  textContent?: string;
 }
 
 interface Collection {
@@ -306,6 +313,16 @@ export function FullModeWorkspace({
   // Track selected model per format independently
   const [selectedImageModelId, setSelectedImageModelId] = useState<number | null>(null);
   const [selectedVideoModelId, setSelectedVideoModelId] = useState<number | null>(null);
+  // Text format state
+  const [selectedTextModelId, setSelectedTextModelId] = useState<number | null>(null);
+  const [textThinkingLevel, setTextThinkingLevel] = useState<ThinkingLevel>("none");
+  const [textShowThoughts, setTextShowThoughts] = useState(false);
+  const [textStreamingItems, setTextStreamingItems] = useState<Map<string, { textContent: string; thought: string }>>(new Map());
+  const [selectedTextItem, setSelectedTextItem] = useState<Generation | null>(null);
+  const [textModalMessages, setTextModalMessages] = useState<Array<{ role: "user" | "model"; content: string; thought?: string; user_name?: string | null; user_image?: string | null; created_at?: string }>>([]);
+  const [textModalStreaming, setTextModalStreaming] = useState(false);
+  const [textModalStreamContent, setTextModalStreamContent] = useState("");
+
   // Kling asset tracking
   const [klingAssetList, setKlingAssetList] = useState<Array<{ assetId: string; type: string; label: string }>>([]);
 
@@ -324,8 +341,10 @@ export function FullModeWorkspace({
   // ---- Derived: models & capabilities ----
   const imageConfig = generationConfig.find(c => c.generation_type === "image");
   const videoConfig = generationConfig.find(c => c.generation_type === "video");
+  const textConfig = generationConfig.find(c => c.generation_type === "text");
   const imageModels = imageConfig?.models || [];
   const videoModels = videoConfig?.models || [];
+  const textModels = textConfig?.models || [];
 
   // Resolve active model per format using local state, falling back to project default
   const activeVideoModel = videoModels.find(m => m.id === selectedVideoModelId) || videoModels.find(m => m.is_default) || videoModels[0];
@@ -341,12 +360,15 @@ export function FullModeWorkspace({
   const isImagen4 = activeImageModel?.model_id?.includes("imagen-4") || activeImageModel?.model_id?.includes("grok-imagine-image") || activeImageModel?.model_id?.includes("kling-omni-image");
   const supportsMultiImage = activeImageModel?.model_id?.includes("image-preview") || activeImageModel?.model_id?.includes("flash-image");
 
+  const activeTextModel = textModels.find(m => m.id === selectedTextModelId) || textModels.find(m => m.is_default) || textModels[0];
+  const supportsTextThinking = activeTextModel?.model_id?.startsWith("gemini-3.1-pro") || false;
+
   // Current model for display
-  const currentModel = format === "image" ? activeImageModel : activeVideoModel;
+  const currentModel = format === "text" ? activeTextModel : format === "image" ? activeImageModel : activeVideoModel;
 
   // Sync parent selectedConfigModelId when format changes
   useEffect(() => {
-    const model = format === "image" ? activeImageModel : activeVideoModel;
+    const model = format === "text" ? activeTextModel : format === "image" ? activeImageModel : activeVideoModel;
     if (model) onSelectConfigModel(model.id);
   }, [format]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -359,7 +381,13 @@ export function FullModeWorkspace({
       const wasAssetMode = prevAssetMode.current;
       const currentFiles = messageInputRef.current?.getFiles() || [];
 
-      if (prevFmt === format && format === "video") {
+      if (format === "text" || prevFmt === "text") {
+        // When switching to/from text, just clear files
+        messageInputRef.current?.clearFiles();
+        setVideoReferenceImages([]);
+        setVideoFirstFrame(null);
+        setVideoLastFrame(null);
+      } else if (prevFmt === format && format === "video") {
         // Same format (video), but model changed (assetMode toggled)
         if (!wasAssetMode && isKlingAssetMode) {
           // VEO → Kling Omni: migrate videoReferenceImages to Kling assets
@@ -438,7 +466,9 @@ export function FullModeWorkspace({
   // Handle model selection: save per-format and notify parent
   // Note: file migration between video models (VEO↔Kling) is handled by the useEffect on isKlingAssetMode
   const handleSelectModel = useCallback((id: number) => {
-    if (format === "image") {
+    if (format === "text") {
+      setSelectedTextModelId(id);
+    } else if (format === "image") {
       setSelectedImageModelId(id);
     } else {
       setSelectedVideoModelId(id);
@@ -543,6 +573,7 @@ export function FullModeWorkspace({
     : activeGenerations.filter(g => {
         if (filter === "images") return g.type === "image";
         if (filter === "videos") return g.type === "video";
+        if (filter === "texts") return g.type === "text";
         if (filter === "favorites") return g.is_favorite;
         return true;
       })
@@ -552,9 +583,11 @@ export function FullModeWorkspace({
 
   const imageCount = activeGenerations.filter(g => g.type === "image").length;
   const videoCount = activeGenerations.filter(g => g.type === "video").length;
+  const textCount = activeGenerations.filter(g => g.type === "text").length;
   const favoriteCount = activeGenerations.filter(g => g.is_favorite).length;
   const hasImages = imageCount > 0;
   const hasVideos = videoCount > 0;
+  const hasTexts = textCount > 0;
   const hasFavorites = favoriteCount > 0;
   const hasDeleted = deletedGenerations.length > 0;
 
@@ -898,6 +931,8 @@ export function FullModeWorkspace({
           video_aspect_ratio: data.type === "video" ? (detectedAspectRatio || null) : null,
           audio_url: null, audio_mime_type: null, audio_file_size: null, audio_duration: null, audio_voice_config: null,
           music_url: null, music_mime_type: null, music_file_size: null, music_duration: null, music_config: null,
+          text_content: null,
+          thought: null,
           created_at: new Date().toISOString(),
           deleted_at: null,
           tags: [],
@@ -916,8 +951,89 @@ export function FullModeWorkspace({
     }
   }, [conversationId]);
 
+  const handleSendText = async (content: string) => {
+    if (!content.trim() || !activeTextModel) return;
+    const tempId = `text_${Date.now()}`;
+
+    // Add streaming placeholder
+    setTextStreamingItems(prev => {
+      const next = new Map(prev);
+      next.set(tempId, { textContent: "", thought: "" });
+      return next;
+    });
+
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/messages/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content,
+          selected_model_id: activeTextModel.id,
+          generation_type_override: "text",
+          no_context: true,
+          ...(supportsTextThinking && textThinkingLevel !== "none" && { thinking_level: textThinkingLevel }),
+          ...(supportsTextThinking && textThinkingLevel !== "none" && { include_thoughts: true }),
+        }),
+      });
+
+      if (!res.ok || !res.body) {
+        throw new Error("Stream failed");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accText = "";
+      let accThought = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === "chunk") {
+              accText += data.text;
+              setTextStreamingItems(prev => {
+                const next = new Map(prev);
+                next.set(tempId, { textContent: accText, thought: accThought });
+                return next;
+              });
+            } else if (data.type === "thought") {
+              accThought += data.text;
+            } else if (data.type === "complete" || data.type === "error") {
+              break;
+            }
+          } catch { /* ignore parse errors */ }
+        }
+      }
+    } catch (err) {
+      console.error("Text generation error:", err);
+    } finally {
+      // Remove streaming item and refresh gallery
+      setTextStreamingItems(prev => {
+        const next = new Map(prev);
+        next.delete(tempId);
+        return next;
+      });
+      fetchGenerations();
+    }
+  };
+
   const handleSend = async (content: string, files?: AttachedFile[]) => {
     if (!content.trim()) return;
+
+    // Text format: handle via direct SSE (no placeholders needed)
+    if (format === "text") {
+      handleSendText(content);
+      return;
+    }
 
     // Create DB placeholders so other users see generation in progress
     // Skip for imagen4 and video endpoints since they create their own placeholders
@@ -968,6 +1084,7 @@ export function FullModeWorkspace({
     onToggleFavorite(id);
     setGenerations(prev => prev.map(g => g.id === id ? { ...g, is_favorite: !g.is_favorite } : g));
     if (selectedItem?.id === id) setSelectedItem(prev => prev ? { ...prev, is_favorite: !prev.is_favorite } : prev);
+    if (selectedTextItem?.id === id) setSelectedTextItem(prev => prev ? { ...prev, is_favorite: !prev.is_favorite } : prev);
   };
 
   const handleDelete = async (id: number, e?: React.MouseEvent) => {
@@ -1065,7 +1182,10 @@ export function FullModeWorkspace({
     setFormat(gen.type);
     // Restore model
     if (gen.model_id) {
-      if (gen.type === "image") {
+      if (gen.type === "text") {
+        const m = textModels.find(m => m.id === gen.model_id);
+        if (m) setSelectedTextModelId(m.id);
+      } else if (gen.type === "image") {
         const m = imageModels.find(m => m.id === gen.model_id);
         if (m) setSelectedImageModelId(m.id);
       } else {
@@ -1115,7 +1235,10 @@ export function FullModeWorkspace({
 
     // 2. Restore model selection
     if (gen.model_id) {
-      if (gen.type === "image") {
+      if (gen.type === "text") {
+        const matchedModel = textModels.find(m => m.id === gen.model_id);
+        if (matchedModel) setSelectedTextModelId(matchedModel.id);
+      } else if (gen.type === "image") {
         const matchedModel = imageModels.find(m => m.id === gen.model_id);
         if (matchedModel) setSelectedImageModelId(matchedModel.id);
       } else {
@@ -1329,6 +1452,37 @@ export function FullModeWorkspace({
 
   const openGeneration = (index: number, gen: Generation) => {
     setSettingsOpen(false);
+    if (gen.type === "text") {
+      setSelectedTextItem(gen);
+      setTextModalMessages([]);
+      setTextModalStreamContent("");
+      // Load follow-up thread from DB (messages after this model message)
+      fetch(`/api/conversations/${conversationId}/messages`)
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (!data) return;
+          const allMsgs = Array.isArray(data) ? data : data.messages || [];
+          // Find messages after the root model message
+          const afterRoot = allMsgs.filter((m: Record<string, unknown>) => (m.id as number) > gen.id);
+          const followUps: Array<{ role: "user" | "model"; content: string; thought?: string; user_name?: string | null; user_image?: string | null; created_at?: string }> = [];
+          for (const msg of afterRoot) {
+            const isTextMsg = msg.role === "user" || (msg.role === "model" && msg.content_type === "text" && !msg.image_url && !msg.video_url);
+            if (!isTextMsg) break;
+            if (!msg.content) continue;
+            followUps.push({
+              role: msg.role as "user" | "model",
+              content: msg.content as string,
+              thought: (msg.thought as string) || undefined,
+              user_name: (msg.user_name as string) || null,
+              user_image: (msg.user_image as string) || null,
+              created_at: (msg.created_at as string) || undefined,
+            });
+          }
+          if (followUps.length > 0) setTextModalMessages(followUps);
+        })
+        .catch(() => {});
+      return;
+    }
     setSelectedItem(gen);
     setSelectedIndex(index);
   };
@@ -1598,7 +1752,10 @@ export function FullModeWorkspace({
   // ---- Summary label for compact badge ----
   const settingsSummary = (() => {
     const parts: string[] = [];
-    if (format === "image") {
+    if (format === "text") {
+      if (currentModel) parts.push(currentModel.display_name);
+      if (supportsTextThinking && textThinkingLevel !== "none") parts.push(`🧠 ${textThinkingLevel}`);
+    } else if (format === "image") {
       parts.push(imageAspectRatio);
       parts.push(imageSize);
       if (currentModel) parts.push(currentModel.display_name);
@@ -1608,7 +1765,7 @@ export function FullModeWorkspace({
       parts.push(videoResolution);
       if (currentModel) parts.push(currentModel.display_name);
     }
-    if (numVariations > 1) parts.push(`x${numVariations}`);
+    if (format !== "text" && numVariations > 1) parts.push(`x${numVariations}`);
     return parts.join(" · ");
   })();
 
@@ -1636,6 +1793,7 @@ export function FullModeWorkspace({
           <FilterButton active={filter === "all"} onClick={() => setFilter("all")} icon={<LayoutGrid className="h-4 w-4" />} title={`Todos (${activeGenerations.length})`} />
           {hasImages && <FilterButton active={filter === "images"} onClick={() => setFilter("images")} icon={<ImageIcon className="h-4 w-4" />} title={`Imágenes (${imageCount})`} />}
           {hasVideos && <FilterButton active={filter === "videos"} onClick={() => setFilter("videos")} icon={<Video className="h-4 w-4" />} title={`Videos (${videoCount})`} />}
+          {hasTexts && <FilterButton active={filter === "texts"} onClick={() => setFilter("texts")} icon={<MessageSquare className="h-4 w-4" />} title={`Textos (${textCount})`} />}
           {hasFavorites && <FilterButton active={filter === "favorites"} onClick={() => setFilter("favorites")} icon={<Star className="h-4 w-4" />} title={`Favoritos (${favoriteCount})`} />}
           <FilterButton active={searchOpen} onClick={() => { setSearchOpen(!searchOpen); if (!searchOpen) requestAnimationFrame(() => searchInputRef.current?.focus()); else setSearchQuery(""); }} icon={<Search className="h-4 w-4" />} title="Buscar" />
           {hasDeleted && (
@@ -1827,7 +1985,7 @@ export function FullModeWorkspace({
               </div>
             );
             })()
-          ) : filteredGenerations.length === 0 && collections.length === 0 && inProgressItems.length === 0 && errorItems.length === 0 && uploadingItems.length === 0 ? (
+          ) : filteredGenerations.length === 0 && collections.length === 0 && inProgressItems.length === 0 && errorItems.length === 0 && uploadingItems.length === 0 && textStreamingItems.size === 0 ? (
             <div className="flex items-center justify-center h-full text-muted-foreground">
               <div className="text-center">
                 <LayoutGrid className="h-12 w-12 mx-auto mb-3 opacity-30" />
@@ -1861,6 +2019,20 @@ export function FullModeWorkspace({
                         <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${item.progress}%` }} />
                       </div>
                     )}
+                  </div>
+                </div>
+              ))}
+              {/* Text streaming placeholders */}
+              {Array.from(textStreamingItems.entries()).map(([tempId, item]) => (
+                <div key={`text-stream-${tempId}`} className="group relative rounded-lg overflow-hidden bg-gradient-to-br from-blue-500/10 to-purple-500/10 dark:from-blue-500/5 dark:to-purple-500/5 border border-blue-500/30" style={{ height: rowHeight, width: rowHeight }}>
+                  <div className="flex flex-col h-full p-3 overflow-hidden">
+                    <div className="flex items-center gap-1.5 mb-2 shrink-0">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+                      <span className="text-[10px] text-blue-500 font-medium">Generando texto...</span>
+                    </div>
+                    <div className="flex-1 overflow-hidden">
+                      <p className="text-[11px] text-foreground/80 leading-relaxed line-clamp-[10]">{item.textContent || "..."}</p>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -2094,10 +2266,12 @@ export function FullModeWorkspace({
                 ref={messageInputRef}
                 onSend={(content, files) => handleSend(content, files)}
                 disabled={isSending}
-                placeholder={format === "video"
-                  ? isKlingOmni ? "Describe el video... usa @asset para referenciar" : "Describe el video..."
-                  : "Describe la imagen..."}
-                supportsFiles={format === "image" || isKlingAssetMode}
+                placeholder={format === "text"
+                  ? "Escribe un prompt..."
+                  : format === "video"
+                    ? isKlingOmni ? "Describe el video... usa @asset para referenciar" : "Describe el video..."
+                    : "Describe la imagen..."}
+                supportsFiles={format !== "text" && (format === "image" || isKlingAssetMode)}
                 initialValue={internalPrompt || reusePrompt || undefined}
                 onInitialValueUsed={() => { setInternalPrompt(null); if (reusePrompt) onReusePromptUsed(); }}
                 assetMode={isKlingAssetMode}
@@ -2117,21 +2291,28 @@ export function FullModeWorkspace({
                           : "bg-card text-muted-foreground border-border/50 hover:text-foreground hover:border-border"
                       )}
                     >
-                      {format === "image" ? <ImageIcon className="h-3.5 w-3.5" /> : <Video className="h-3.5 w-3.5" />}
+                      {format === "text" ? <MessageSquare className="h-3.5 w-3.5" /> : format === "image" ? <ImageIcon className="h-3.5 w-3.5" /> : <Video className="h-3.5 w-3.5" />}
                       {currentModel && <span>{currentModel.display_name}</span>}
-                      <span className="text-muted-foreground/70">·</span>
-                      {format === "video" && <><span>{videoDuration}s</span><span className="text-muted-foreground/70">·</span></>}
-                      {(() => {
-                        const ar = format === "image" ? imageAspectRatio : videoAspectRatio;
-                        return ar === "16:9" || ar === "4:3" ? <RectangleHorizontal className="h-3 w-3" />
-                          : ar === "9:16" || ar === "3:4" ? <RectangleVertical className="h-3 w-3" />
-                          : <Square className="h-3 w-3" />;
-                      })()}
-                      <span className="text-muted-foreground/70">·</span>
-                      <span>{format === "image" ? imageSize : videoResolution}</span>
-                      {numVariations > 1 && <><span className="text-muted-foreground/70">·</span><span>x{numVariations}</span></>}
-                      {((format === "image" && imageNegativePrompt) || (format === "video" && videoNegativePrompt)) && (
-                        <span className="text-amber-500" title={format === "image" ? imageNegativePrompt : videoNegativePrompt}>⊘</span>
+                      {format === "text" && supportsTextThinking && textThinkingLevel !== "none" && (
+                        <Brain className="h-3 w-3 text-purple-500" />
+                      )}
+                      {format !== "text" && (
+                        <>
+                          <span className="text-muted-foreground/70">·</span>
+                          {format === "video" && <><span>{videoDuration}s</span><span className="text-muted-foreground/70">·</span></>}
+                          {(() => {
+                            const ar = format === "image" ? imageAspectRatio : videoAspectRatio;
+                            return ar === "16:9" || ar === "4:3" ? <RectangleHorizontal className="h-3 w-3" />
+                              : ar === "9:16" || ar === "3:4" ? <RectangleVertical className="h-3 w-3" />
+                              : <Square className="h-3 w-3" />;
+                          })()}
+                          <span className="text-muted-foreground/70">·</span>
+                          <span>{format === "image" ? imageSize : videoResolution}</span>
+                          {numVariations > 1 && <><span className="text-muted-foreground/70">·</span><span>x{numVariations}</span></>}
+                          {((format === "image" && imageNegativePrompt) || (format === "video" && videoNegativePrompt)) && (
+                            <span className="text-amber-500" title={format === "image" ? imageNegativePrompt : videoNegativePrompt}>⊘</span>
+                          )}
+                        </>
                       )}
                       <ChevronUp className={cn("h-3 w-3 transition-transform ml-0.5", settingsOpen ? "" : "rotate-180")} />
                     </button>
@@ -2144,27 +2325,45 @@ export function FullModeWorkspace({
                         {/* Row 1: Format + Model */}
                         <div className="flex items-center gap-3 flex-wrap">
                           <div className="w-full flex gap-1 p-0.5 bg-muted rounded-md">
-                            <button onClick={() => setFormat("image")} className={cn("flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors w-1/2", format === "image" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+                            <button onClick={() => setFormat("image")} className={cn("flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors w-1/3", format === "image" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
                               <ImageIcon className="h-3 w-3" /> Imagen
                             </button>
-                            <button onClick={() => setFormat("video")} className={cn("flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors w-1/2", format === "video" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+                            <button onClick={() => setFormat("video")} className={cn("flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors w-1/3", format === "video" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
                               <Video className="h-3 w-3" /> Video
                             </button>
+                            <button onClick={() => setFormat("text")} className={cn("flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors w-1/3", format === "text" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+                              <MessageSquare className="h-3 w-3" /> Texto
+                            </button>
                           </div>
-                          {(format === "image" ? imageModels : videoModels).length > 1 && (
+                          {(format === "text" ? textModels : format === "image" ? imageModels : videoModels).length > 1 && (
                             <select
-                              value={(format === "image" ? activeImageModel?.id : activeVideoModel?.id) || ""}
+                              value={(format === "text" ? activeTextModel?.id : format === "image" ? activeImageModel?.id : activeVideoModel?.id) || ""}
                               onChange={(e) => handleSelectModel(Number(e.target.value))}
                               className="w-full text-xs bg-muted border-none rounded-md px-2 py-1.5 text-foreground focus:ring-1 focus:ring-primary"
                             >
-                              {(format === "image" ? imageModels : videoModels).map(m => (
+                              {(format === "text" ? textModels : format === "image" ? imageModels : videoModels).map(m => (
                                 <option key={m.id} value={m.id}>{m.display_name}</option>
                               ))}
                             </select>
                           )}
                         </div>
 
-                        {format === "image" ? (
+                        {format === "text" ? (
+                          <div className="space-y-2">
+                            {supportsTextThinking && (
+                              <div className="flex items-center gap-2">
+                                <label className="text-xs text-muted-foreground">Razonamiento</label>
+                                <ReasoningSelector
+                                  value={textThinkingLevel}
+                                  onChange={setTextThinkingLevel}
+                                  showThoughts={textShowThoughts}
+                                  onShowThoughtsChange={setTextShowThoughts}
+                                />
+                              </div>
+                            )}
+                            <p className="text-[10px] text-muted-foreground text-center">Generación de texto sin contexto de conversación</p>
+                          </div>
+                        ) : format === "image" ? (
                           <div className="flex items-center gap-4 flex-wrap">
                             <div className="flex items-center gap-2">
                               <div className="flex gap-0.5">
@@ -2253,7 +2452,8 @@ export function FullModeWorkspace({
                           </>
                         )}
 
-                        {/* Negative prompt (both formats) */}
+                        {/* Negative prompt (image/video only) */}
+                        {format !== "text" && (
                         <div>
                           <textarea
                             value={format === "image" ? imageNegativePrompt : videoNegativePrompt}
@@ -2266,6 +2466,7 @@ export function FullModeWorkspace({
                             className="w-full text-xs bg-muted rounded-md px-2 py-1.5 text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-1 focus:ring-primary resize-none"
                           />
                         </div>
+                        )}
 
                         {/* VEO slots indicator */}
                         {format === "video" && isVeoProvider && veoAvailableSlots !== null && (
@@ -2279,7 +2480,8 @@ export function FullModeWorkspace({
                   )}
                   </div>
 
-                  {/* Quick variation cycle button */}
+                  {/* Quick variation cycle button (not for text) */}
+                  {format !== "text" && (
                   <button
                     onClick={() => {
                       const maxVar = format === "video" ? maxVideoVariations : 4;
@@ -2296,6 +2498,7 @@ export function FullModeWorkspace({
                   >
                     x{numVariations}
                   </button>
+                  )}
 
                   {/* In-progress counter */}
                   {inProgressItems.length > 0 && (
@@ -2313,6 +2516,31 @@ export function FullModeWorkspace({
         </div>
         </div>
       </div>
+
+      {/* Text detail modal */}
+      {selectedTextItem && (
+        <TextDetailModal
+          item={selectedTextItem}
+          conversationId={conversationId}
+          textModels={textModels}
+          activeTextModel={activeTextModel}
+          thinkingLevel={textThinkingLevel}
+          onThinkingLevelChange={setTextThinkingLevel}
+          showThoughts={textShowThoughts}
+          onShowThoughtsChange={setTextShowThoughts}
+          messages={textModalMessages}
+          setMessages={setTextModalMessages}
+          streaming={textModalStreaming}
+          setStreaming={setTextModalStreaming}
+          streamContent={textModalStreamContent}
+          setStreamContent={setTextModalStreamContent}
+          onClose={() => { setSelectedTextItem(null); setTextModalMessages([]); setTextModalStreamContent(""); }}
+          onFavorite={handleToggleFavorite}
+          onDelete={handleDelete}
+          onUseAsPrompt={(text) => { setSelectedTextItem(null); setTextModalMessages([]); setTextModalStreamContent(""); setInternalPrompt(text); requestAnimationFrame(() => messageInputRef.current?.focus()); }}
+          fetchGenerations={fetchGenerations}
+        />
+      )}
 
       {/* Detail modal */}
       {selectedItem && !showTopaz && !showTopazVideo && (
@@ -2333,7 +2561,9 @@ export function FullModeWorkspace({
           onToggleTag={handleToggleTag}
           onCreateTag={handleCreateTag}
           onRegenerate={(prompt, type) => {
-            if (type === "image") {
+            if (type === "text") {
+              handleSendText(prompt);
+            } else if (type === "image") {
               const imgSettings = {
                 aspectRatio: imageAspectRatio,
                 size: imageSize,
@@ -2368,6 +2598,8 @@ export function FullModeWorkspace({
 const GRID_SIZES = { S: 180, M: 275, L: 335 } as const;
 
 function getAspectRatio(gen: Generation): number {
+  // Text generations are always square
+  if (gen.type === "text") return 1;
   const raw = gen.image_aspect_ratio || gen.video_aspect_ratio;
   if (raw) {
     const parts = raw.split(":");
@@ -2411,22 +2643,20 @@ const GridItem = memo(function GridItem({ gen, index, rowHeight, showLabels, hov
   return (
     <div
       onClick={() => onOpen(index, gen)}
-      draggable={!!(gen.image_url || gen.video_url)}
+      draggable={!!(gen.image_url || gen.video_url || gen.type === "text")}
       onDragStart={(e) => {
         const url = gen.image_url || gen.video_url;
-        if (url) {
-          e.dataTransfer.setData("application/x-nanano-image", JSON.stringify({ type: "chat-image", url, mediaType: gen.type, id: gen.id }));
-          e.dataTransfer.setData("text/uri-list", url);
-          e.dataTransfer.effectAllowed = "copy";
-          onDragStarted?.(gen.type as "image" | "video");
-        }
+        e.dataTransfer.setData("application/x-nanano-image", JSON.stringify({ type: "chat-image", url: url || "", mediaType: gen.type, id: gen.id }));
+        if (url) e.dataTransfer.setData("text/uri-list", url);
+        e.dataTransfer.effectAllowed = "copy";
+        if (gen.type !== "text") onDragStarted?.(gen.type as "image" | "video");
       }}
       onDragEnd={() => onDragEnded?.()}
       style={{ height: rowHeight, width: itemWidth, contentVisibility: "auto", containIntrinsicSize: `${itemWidth}px ${rowHeight}px` }}
       className={cn(
         "group relative rounded-lg overflow-hidden cursor-pointer bg-card border transition-all shrink-0",
         gen.deleted_at ? "border-red-500/30 opacity-60" : "border-border/50 hover:border-primary/50",
-        (gen.image_url || gen.video_url) && "cursor-grab active:cursor-grabbing"
+        (gen.image_url || gen.video_url || gen.type === "text") && "cursor-grab active:cursor-grabbing"
       )}
       onMouseEnter={(e) => { if (gen.type === "video") { const v = e.currentTarget.querySelector("video"); if (v) { if (hoverAudio) v.muted = false; v.play(); } } }}
       onMouseLeave={(e) => { if (gen.type === "video") { const v = e.currentTarget.querySelector("video"); if (v) { v.pause(); v.currentTime = 0; v.muted = true; } } }}
@@ -2438,7 +2668,15 @@ const GridItem = memo(function GridItem({ gen, index, rowHeight, showLabels, hov
             {gen.user_image && <img src={gen.user_image} alt="" className="w-4 h-4 rounded-full" />}
             <span>{gen.user_name || "Generando..."}</span>
           </div>
-          <span className="text-[10px] text-muted-foreground/70">{gen.type === "video" ? "Video" : "Imagen"}</span>
+          <span className="text-[10px] text-muted-foreground/70">{gen.type === "video" ? "Video" : gen.type === "text" ? "Texto" : "Imagen"}</span>
+        </div>
+      ) : gen.type === "text" ? (
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-purple-500/10 dark:from-blue-500/5 dark:to-purple-500/5 p-3 flex flex-col overflow-hidden">
+          <div className="flex items-center gap-1.5 mb-1.5 shrink-0">
+            <MessageSquare className="h-3 w-3 text-blue-600 dark:text-blue-500" />
+            <span className="text-[10px] text-blue-600 dark:text-blue-500 font-medium">{gen.model_name || "Texto"}</span>
+          </div>
+          <p className="text-[11px] text-foreground/70 leading-relaxed line-clamp-[10] flex-1">{gen.content || ""}</p>
         </div>
       ) : gen.type === "image" && gen.image_url ? (
         <img src={gen.image_url} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" draggable={false} />
@@ -2522,7 +2760,7 @@ function DetailModal({ item, index, total, projectTags, onClose, onPrev, onNext,
   onDownload: (g: Generation) => void;
   onReuse: (g: Generation) => void;
   onApplyConfig: (g: Generation) => void;
-  onRegenerate: (prompt: string, type: "image" | "video") => void;
+  onRegenerate: (prompt: string, type: "image" | "video" | "text") => void;
   onToggleTag: (genId: number, tagId: number) => void;
   onCreateTag: (name: string, color: string) => Promise<{ id: number; name: string; color: string } | null>;
   onTopaz: () => void; onTopazVideo: () => void;
@@ -2607,7 +2845,7 @@ function DetailModal({ item, index, total, projectTags, onClose, onPrev, onNext,
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border/50">
           <div className="flex items-center gap-3">
-            {item.type === "image" ? <ImageIcon className="h-5 w-5 text-muted-foreground" /> : <Video className="h-5 w-5 text-muted-foreground" />}
+            {item.type === "text" ? <MessageSquare className="h-5 w-5 text-muted-foreground" /> : item.type === "image" ? <ImageIcon className="h-5 w-5 text-muted-foreground" /> : <Video className="h-5 w-5 text-muted-foreground" />}
             <span className="text-sm text-muted-foreground">{index !== null && `${index + 1} / ${total}`}</span>
           </div>
           <div className="flex items-center gap-2">
@@ -3000,6 +3238,334 @@ function GalleryPickerModal({ projectId, acceptVideo, onSelect, onClose }: {
               })}
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Text Detail Modal ----
+
+function TextDetailModal({ item, conversationId, textModels, activeTextModel, thinkingLevel, onThinkingLevelChange, showThoughts, onShowThoughtsChange, messages, setMessages, streaming, setStreaming, streamContent, setStreamContent, onClose, onFavorite, onDelete, onUseAsPrompt, fetchGenerations }: {
+  item: Generation;
+  conversationId: number;
+  textModels: ConfigModel[];
+  activeTextModel: ConfigModel | undefined;
+  thinkingLevel: ThinkingLevel;
+  onThinkingLevelChange: (level: ThinkingLevel) => void;
+  showThoughts: boolean;
+  onShowThoughtsChange: (show: boolean) => void;
+  messages: Array<{ role: "user" | "model"; content: string; thought?: string; user_name?: string | null; user_image?: string | null; created_at?: string }>;
+  setMessages: React.Dispatch<React.SetStateAction<Array<{ role: "user" | "model"; content: string; thought?: string; user_name?: string | null; user_image?: string | null; created_at?: string }>>>;
+  streaming: boolean;
+  setStreaming: React.Dispatch<React.SetStateAction<boolean>>;
+  streamContent: string;
+  setStreamContent: React.Dispatch<React.SetStateAction<string>>;
+  onClose: () => void;
+  onFavorite: (id: number, e?: React.MouseEvent) => void;
+  onDelete: (id: number, e?: React.MouseEvent) => void;
+  onUseAsPrompt: (text: string) => void;
+  fetchGenerations: () => void;
+}) {
+  const supportsThinking = activeTextModel?.model_id?.startsWith("gemini-3.1-pro") || false;
+  const [followUpInput, setFollowUpInput] = useState("");
+  const [expandedThoughts, setExpandedThoughts] = useState<Set<number>>(new Set());
+  const [copiedId, setCopiedId] = useState<number | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, streamContent]);
+
+  const handleCopy = (text: string, idx: number) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(idx);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleSendFollowUp = async () => {
+    if (!followUpInput.trim() || streaming || !activeTextModel) return;
+    const userMsg = followUpInput.trim();
+    setFollowUpInput("");
+    setMessages(prev => [...prev, { role: "user", content: userMsg, user_name: item.user_name, user_image: item.user_image, created_at: new Date().toISOString() }]);
+    setStreaming(true);
+    setStreamContent("");
+
+    try {
+      const supportsThinking = activeTextModel.model_id?.startsWith("gemini-3.1-pro") || false;
+      const res = await fetch(`/api/conversations/${conversationId}/messages/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: userMsg,
+          selected_model_id: activeTextModel.id,
+          generation_type_override: "text",
+          ...(supportsThinking && thinkingLevel !== "none" && { thinking_level: thinkingLevel }),
+          ...(supportsThinking && thinkingLevel !== "none" && { include_thoughts: true }),
+        }),
+      });
+
+      if (!res.ok || !res.body) throw new Error("Stream failed");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accText = "";
+      let accThought = "";
+      let userMessageId: number | null = null;
+      let modelMessageId: number | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === "chunk") {
+              accText += data.text;
+              setStreamContent(accText);
+            } else if (data.type === "thought") {
+              accThought += data.text;
+            } else if (data.type === "user_message") {
+              userMessageId = data.id;
+            } else if (data.type === "complete") {
+              modelMessageId = data.id;
+            }
+          } catch { /* ignore */ }
+        }
+      }
+
+      // Mark follow-up model message as hidden from gallery
+      // (don't mark user message — ignore_in_context on user msgs breaks context in stream endpoint)
+      if (modelMessageId) {
+        fetch(`/api/messages/${modelMessageId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "hide_from_gallery" }),
+        }).catch(() => {});
+      }
+
+      setMessages(prev => [...prev, { role: "model", content: accText, thought: accThought || undefined }]);
+    } catch (err) {
+      console.error("Follow-up error:", err);
+      setMessages(prev => [...prev, { role: "model", content: "Error al generar respuesta." }]);
+    } finally {
+      setStreaming(false);
+      setStreamContent("");
+      fetchGenerations();
+    }
+  };
+
+  const toggleThought = (idx: number) => {
+    setExpandedThoughts(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center" onClick={onClose}>
+      <div className="relative max-w-3xl w-full max-h-[90vh] flex flex-col bg-sidebar rounded-xl overflow-hidden mx-8" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-border/50">
+          <div className="flex items-center gap-3">
+            <MessageSquare className="h-5 w-5 text-blue-500" />
+            <span className="text-sm font-medium">Texto generado</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => onFavorite(item.id)} className={cn("p-2 rounded-lg transition-colors", item.is_favorite ? "bg-yellow-500/20 text-yellow-500" : "hover:bg-accent text-muted-foreground")}>
+              <Star className={cn("h-5 w-5", item.is_favorite && "fill-current")} />
+            </button>
+            <button onClick={(e) => { onDelete(item.id, e); onClose(); }} className="p-2 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-500">
+              <Trash2 className="h-5 w-5" />
+            </button>
+            <button onClick={onClose} className="p-2 rounded-lg hover:bg-accent text-muted-foreground">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-5" style={{ minHeight: 0 }}>
+          {/* Original user prompt */}
+          {item.content && (
+            <div className="rounded-lg bg-muted px-4 py-3 border-l-2 border-primary/30 max-w-[80%]">
+              <div className="flex items-center gap-2 mb-1.5">
+                {item.user_image ? (
+                  <img src={item.user_image} alt="" className="w-5 h-5 rounded-full shrink-0" title={item.user_name || undefined} />
+                ) : (
+                  <div className="w-5 h-5 rounded-full bg-primary/20 shrink-0" title={item.user_name || undefined} />
+                )}
+                {item.user_name && <span className="text-[11px] text-muted-foreground font-medium">{item.user_name}</span>}
+                <span className="text-[10px] text-muted-foreground/60">{formatDateTimeLocal(item.created_at)}</span>
+              </div>
+              <p className="text-sm text-foreground/80">{item.content}</p>
+            </div>
+          )}
+
+          {/* Original model response */}
+          <div className="relative group/text rounded-lg bg-muted/70 dark:bg-card/50 border border-border/40 px-4 py-3">
+            <div className="absolute -top-3 right-2 flex items-center gap-0.5 opacity-0 group-hover/text:opacity-100 transition-all">
+              <button
+                onClick={() => onUseAsPrompt(item.text_content || item.content || "")}
+                className="p-1.5 rounded-md bg-background border border-border/50 hover:bg-accent text-muted-foreground shadow-sm"
+                title="Usar como prompt"
+              >
+                <Undo2 className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => handleCopy(item.text_content || item.content || "", -1)}
+                className="p-1.5 rounded-md bg-background border border-border/50 hover:bg-accent text-muted-foreground shadow-sm"
+                title="Copiar"
+              >
+                {copiedId === -1 ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+            {item.thought && (
+              <button
+                onClick={() => toggleThought(-1)}
+                className="flex items-center gap-1.5 mb-2 text-xs text-purple-500 hover:text-purple-400 transition-colors"
+              >
+                <Brain className="h-3.5 w-3.5" />
+                <span>{expandedThoughts.has(-1) ? "Ocultar razonamiento" : "Ver razonamiento"}</span>
+                <ChevronDown className={cn("h-3 w-3 transition-transform", expandedThoughts.has(-1) && "rotate-180")} />
+              </button>
+            )}
+            {expandedThoughts.has(-1) && item.thought && (
+              <div className="mb-3 p-3 rounded-lg bg-purple-500/5 border border-purple-500/20 text-xs text-purple-300/80">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.thought}</ReactMarkdown>
+              </div>
+            )}
+            <div className="prose prose-sm dark:prose-invert max-w-none text-[14px] leading-relaxed">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {item.text_content || item.content || ""}
+              </ReactMarkdown>
+            </div>
+          </div>
+
+          {/* Follow-up messages */}
+          {messages.map((msg, idx) => (
+            <div key={idx} className={cn(
+              "relative group/msg",
+              msg.role === "user"
+                ? "rounded-lg bg-muted px-4 py-3 border-l-2 border-primary/30 max-w-[80%]"
+                : "rounded-lg bg-muted/70 dark:bg-card/50 border border-border/40 px-4 py-3"
+            )}>
+              {msg.role === "user" ? (
+                <>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    {msg.user_image ? (
+                      <img src={msg.user_image} alt="" className="w-5 h-5 rounded-full shrink-0" title={msg.user_name || undefined} />
+                    ) : (
+                      <div className="w-5 h-5 rounded-full bg-primary/20 shrink-0" title={msg.user_name || undefined} />
+                    )}
+                    {msg.user_name && <span className="text-[11px] text-muted-foreground font-medium">{msg.user_name}</span>}
+                    {msg.created_at && <span className="text-[10px] text-muted-foreground/60">{formatDateTimeLocal(msg.created_at)}</span>}
+                  </div>
+                  <p className="text-sm text-foreground/80">{msg.content}</p>
+                </>
+              ) : (
+                <>
+                  <div className="absolute -top-3 right-2 flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-all">
+                    <button
+                      onClick={() => onUseAsPrompt(msg.content)}
+                      className="p-1.5 rounded-md bg-background border border-border/50 hover:bg-accent text-muted-foreground shadow-sm"
+                      title="Usar como prompt"
+                    >
+                      <Undo2 className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleCopy(msg.content, idx)}
+                      className="p-1.5 rounded-md bg-background border border-border/50 hover:bg-accent text-muted-foreground shadow-sm"
+                      title="Copiar"
+                    >
+                      {copiedId === idx ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                  {msg.thought && (
+                    <button
+                      onClick={() => toggleThought(idx)}
+                      className="flex items-center gap-1.5 mb-2 text-xs text-purple-500 hover:text-purple-400 transition-colors"
+                    >
+                      <Brain className="h-3.5 w-3.5" />
+                      <span>{expandedThoughts.has(idx) ? "Ocultar razonamiento" : "Ver razonamiento"}</span>
+                      <ChevronDown className={cn("h-3 w-3 transition-transform", expandedThoughts.has(idx) && "rotate-180")} />
+                    </button>
+                  )}
+                  {expandedThoughts.has(idx) && msg.thought && (
+                    <div className="mb-3 p-3 rounded-lg bg-purple-500/5 border border-purple-500/20 text-xs text-purple-300/80">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.thought}</ReactMarkdown>
+                    </div>
+                  )}
+                  <div className="prose prose-sm dark:prose-invert max-w-none text-[14px] leading-relaxed">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+
+          {/* Streaming content */}
+          {streaming && streamContent && (
+            <div className="rounded-lg bg-muted/70 dark:bg-card/50 border border-border/40 px-4 py-3">
+              <div className="prose prose-sm dark:prose-invert max-w-none text-[14px] leading-relaxed">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamContent}</ReactMarkdown>
+                <span className="inline-block w-2 h-4 bg-primary/50 animate-pulse ml-0.5" />
+              </div>
+            </div>
+          )}
+          {streaming && !streamContent && (
+            <div className="rounded-lg bg-muted/70 dark:bg-card/50 border border-border/40 px-4 py-3">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="text-sm">Generando...</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer with metadata + input */}
+        <div className="border-t border-border/50 p-4 space-y-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            {item.model_name && <span className="bg-muted px-1.5 py-0.5 rounded">{item.model_name}</span>}
+            <span>{formatDateTimeLocal(item.created_at)}</span>
+          </div>
+          {/* Follow-up input */}
+          <div className="flex items-end gap-2">
+            <textarea
+              ref={inputRef}
+              value={followUpInput}
+              onChange={(e) => setFollowUpInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendFollowUp();
+                }
+              }}
+              placeholder="Continuar la conversación..."
+              rows={1}
+              disabled={streaming}
+              className="flex-1 text-sm bg-muted rounded-lg px-3 py-2 outline-none focus:ring-1 focus:ring-primary resize-none disabled:opacity-50 placeholder:text-muted-foreground/50"
+            />
+            <button
+              onClick={handleSendFollowUp}
+              disabled={!followUpInput.trim() || streaming}
+              className="p-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-30 transition-colors"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

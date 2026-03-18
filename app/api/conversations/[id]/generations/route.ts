@@ -29,6 +29,9 @@ interface GenerationRow extends RowDataPacket {
   video_duration: number | null;
   video_has_audio: boolean | null;
   video_aspect_ratio: string | null;
+  content_type: string | null;
+  model_content: string | null;
+  model_thought: string | null;
   created_at: string;
   deleted_at: string | null;
 }
@@ -55,7 +58,7 @@ export async function GET(
     const conversationId = parseInt(id);
 
     const { searchParams } = new URL(request.url);
-    const typeFilter = searchParams.get("type"); // "images" | "videos"
+    const typeFilter = searchParams.get("type"); // "images" | "videos" | "texts"
     const favoritesOnly = searchParams.get("favorites") === "true";
 
     // Verify conversation exists
@@ -83,8 +86,31 @@ export async function GET(
       mediaConditions.push("(m.image_url IS NOT NULL OR (m.status = 'generating' AND m.content_type = 'image'))");
     } else if (typeFilter === "videos") {
       mediaConditions.push("(m.video_url IS NOT NULL OR (m.status = 'generating' AND m.content_type = 'video'))");
+    } else if (typeFilter === "texts") {
+      // Text-only generations: exclude companions to image/video and follow-ups (ignore_in_context=1)
+      mediaConditions.push(`(m.content_type = 'text' AND m.content IS NOT NULL AND m.content != '' AND m.image_url IS NULL AND m.video_url IS NULL
+        AND COALESCE(m.ignore_in_context, 0) = 0
+        AND NOT EXISTS (
+          SELECT 1 FROM messages sibling
+          WHERE sibling.conversation_id = m.conversation_id
+            AND sibling.role = 'model'
+            AND sibling.id > m.id
+            AND sibling.id < m.id + 50
+            AND (sibling.image_url IS NOT NULL OR sibling.video_url IS NOT NULL)
+        ))`);
     } else {
-      mediaConditions.push("(m.image_url IS NOT NULL OR m.video_url IS NOT NULL OR m.status = 'generating')");
+      // All: images + videos + generating + standalone text (exclude follow-ups)
+      mediaConditions.push(`(m.image_url IS NOT NULL OR m.video_url IS NOT NULL OR m.status = 'generating'
+        OR (m.content_type = 'text' AND m.content IS NOT NULL AND m.content != '' AND m.image_url IS NULL AND m.video_url IS NULL
+          AND COALESCE(m.ignore_in_context, 0) = 0
+          AND NOT EXISTS (
+            SELECT 1 FROM messages sibling
+            WHERE sibling.conversation_id = m.conversation_id
+              AND sibling.role = 'model'
+              AND sibling.id > m.id
+              AND sibling.id < m.id + 50
+              AND (sibling.image_url IS NOT NULL OR sibling.video_url IS NOT NULL)
+          )))`);
     }
 
     if (favoritesOnly) {
@@ -129,6 +155,8 @@ export async function GET(
         m.video_aspect_ratio,
         m.status,
         m.content_type,
+        m.content as model_content,
+        m.thought as model_thought,
         m.created_at,
         m.deleted_at
       FROM messages m
@@ -188,7 +216,10 @@ export async function GET(
     }
 
     const generations = rows.map(row => ({
-      type: row.video_url ? "video" as const : row.content_type === "video" ? "video" as const : "image" as const,
+      type: row.video_url ? "video" as const
+        : row.content_type === "video" ? "video" as const
+        : (row.content_type === "text" && !row.image_url && !row.video_url) ? "text" as const
+        : "image" as const,
       status: row.status || "completed",
       id: row.id,
       user_id: row.user_id || null,
@@ -226,6 +257,8 @@ export async function GET(
       music_file_size: null,
       music_duration: null,
       music_config: null,
+      text_content: row.model_content || null,
+      thought: row.model_thought || null,
       created_at: row.created_at,
       deleted_at: row.deleted_at,
       tags: tagMap[row.id] || [],

@@ -62,6 +62,9 @@ export async function GET(
         m.video_has_audio,
         m.video_aspect_ratio,
         m.audio_url, m.audio_mime_type, m.audio_file_size, m.audio_duration,
+        m.content_type,
+        m.content as model_content,
+        m.thought as model_thought,
         m.created_at,
         m.deleted_at,
         ci.sort_order
@@ -69,7 +72,7 @@ export async function GET(
       JOIN messages m ON ci.message_id = m.id
       LEFT JOIN models mo ON m.model_id = mo.id
       WHERE ci.collection_id = ?
-      ORDER BY ci.sort_order ASC, ci.added_at ASC`,
+      ORDER BY m.created_at DESC`,
       [colId]
     );
 
@@ -105,7 +108,9 @@ export async function GET(
     }
 
     const generations = items.map((row: RowDataPacket) => ({
-      type: row.video_url ? "video" : "image",
+      type: row.video_url ? "video"
+        : (row.content_type === "text" && !row.image_url && !row.video_url) ? "text"
+        : "image",
       id: row.id,
       conversation_id: row.conversation_id,
       conversation_user_id: 0,
@@ -137,6 +142,8 @@ export async function GET(
       audio_duration: row.audio_duration,
       audio_voice_config: null,
       music_url: null, music_mime_type: null, music_file_size: null, music_duration: null, music_config: null,
+      text_content: row.model_content || null,
+      thought: row.model_thought || null,
       created_at: row.created_at,
       deleted_at: row.deleted_at,
       tags: tagMap[row.id] || [],

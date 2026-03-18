@@ -33,6 +33,8 @@ import {
   ImageIcon,
   Video,
   Music,
+  AudioLines,
+  LayoutGrid,
   Search,
   ChevronLeft,
   ChevronRight,
@@ -183,7 +185,9 @@ export default function ConversationsPage() {
       case "image": return <ImageIcon className="h-4 w-4 text-purple-400" />;
       case "video": return <Video className="h-4 w-4 text-orange-400" />;
       case "audio": return <Music className="h-4 w-4 text-green-400" />;
+      case "audio_hd": return <AudioLines className="h-4 w-4 text-emerald-400" />;
       case "music": return <Music className="h-4 w-4 text-teal-400" />;
+      case "full": return <LayoutGrid className="h-4 w-4 text-indigo-400" />;
       default: return <MessageSquare className="h-4 w-4 text-blue-400" />;
     }
   };
@@ -193,7 +197,9 @@ export default function ConversationsPage() {
       case "image": return "Imagen";
       case "video": return "Video";
       case "audio": return "Audio";
+      case "audio_hd": return "Audio HD";
       case "music": return "Música";
+      case "full": return "Estudio";
       default: return "Texto";
     }
   };
@@ -289,7 +295,9 @@ export default function ConversationsPage() {
                 <SelectItem value="image">Imagen</SelectItem>
                 <SelectItem value="video">Video</SelectItem>
                 <SelectItem value="audio">Audio</SelectItem>
+                <SelectItem value="audio_hd">Audio HD</SelectItem>
                 <SelectItem value="music">Música</SelectItem>
+                <SelectItem value="full">Estudio</SelectItem>
               </SelectContent>
             </Select>
 
