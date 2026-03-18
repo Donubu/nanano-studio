@@ -172,6 +172,7 @@ export interface AttachedFile {
   mimeType: string;
   name?: string;
   type: "image" | "document" | "audio";
+  sourceUrl?: string; // existing GCS/CDN URL — skip re-upload when present
 }
 
 export interface ChatMessage {

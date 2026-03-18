@@ -319,7 +319,8 @@ export function FullModeWorkspace({
   const [textShowThoughts, setTextShowThoughts] = useState(false);
   const [textStreamingItems, setTextStreamingItems] = useState<Map<string, { textContent: string; thought: string }>>(new Map());
   const [selectedTextItem, setSelectedTextItem] = useState<Generation | null>(null);
-  const [textModalMessages, setTextModalMessages] = useState<Array<{ role: "user" | "model"; content: string; thought?: string; user_name?: string | null; user_image?: string | null; created_at?: string }>>([]);
+  const [selectedTextItemImages, setSelectedTextItemImages] = useState<string[]>([]);
+  const [textModalMessages, setTextModalMessages] = useState<Array<{ role: "user" | "model"; content: string; thought?: string; user_name?: string | null; user_image?: string | null; created_at?: string; attachedImages?: string[] }>>([]);
   const [textModalStreaming, setTextModalStreaming] = useState(false);
   const [textModalStreamContent, setTextModalStreamContent] = useState("");
 
@@ -381,9 +382,13 @@ export function FullModeWorkspace({
       const wasAssetMode = prevAssetMode.current;
       const currentFiles = messageInputRef.current?.getFiles() || [];
 
-      if (format === "text" || prevFmt === "text") {
-        // When switching to/from text, just clear files
-        messageInputRef.current?.clearFiles();
+      if (format === "text" && prevFmt !== "text") {
+        // Switching TO text: keep image files, clear video-specific state
+        setVideoReferenceImages([]);
+        setVideoFirstFrame(null);
+        setVideoLastFrame(null);
+      } else if (prevFmt === "text" && format !== "text") {
+        // Switching FROM text: keep image files, clear video-specific state
         setVideoReferenceImages([]);
         setVideoFirstFrame(null);
         setVideoLastFrame(null);
@@ -951,7 +956,7 @@ export function FullModeWorkspace({
     }
   }, [conversationId]);
 
-  const handleSendText = async (content: string) => {
+  const handleSendText = async (content: string, files?: AttachedFile[]) => {
     if (!content.trim() || !activeTextModel) return;
     const tempId = `text_${Date.now()}`;
 
@@ -968,6 +973,7 @@ export function FullModeWorkspace({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           content,
+          ...(files && files.length > 0 && { files }),
           selected_model_id: activeTextModel.id,
           generation_type_override: "text",
           no_context: true,
@@ -1031,7 +1037,7 @@ export function FullModeWorkspace({
 
     // Text format: handle via direct SSE (no placeholders needed)
     if (format === "text") {
-      handleSendText(content);
+      handleSendText(content, files);
       return;
     }
 
@@ -1456,19 +1462,29 @@ export function FullModeWorkspace({
       setSelectedTextItem(gen);
       setTextModalMessages([]);
       setTextModalStreamContent("");
+      setSelectedTextItemImages([]);
       // Load follow-up thread from DB (messages after this model message)
       fetch(`/api/conversations/${conversationId}/messages`)
         .then(res => res.ok ? res.json() : null)
         .then(data => {
           if (!data) return;
           const allMsgs = Array.isArray(data) ? data : data.messages || [];
+          // Find the original user message (preceding the root model message) to get its images
+          const originalUserMsg = allMsgs
+            .filter((m: Record<string, unknown>) => m.role === "user" && (m.id as number) < gen.id)
+            .sort((a: Record<string, unknown>, b: Record<string, unknown>) => (b.id as number) - (a.id as number))[0];
+          if (originalUserMsg) {
+            const origImages = (originalUserMsg.images as string[]) || [];
+            if (origImages.length > 0) setSelectedTextItemImages(origImages);
+          }
           // Find messages after the root model message
           const afterRoot = allMsgs.filter((m: Record<string, unknown>) => (m.id as number) > gen.id);
-          const followUps: Array<{ role: "user" | "model"; content: string; thought?: string; user_name?: string | null; user_image?: string | null; created_at?: string }> = [];
+          const followUps: Array<{ role: "user" | "model"; content: string; thought?: string; user_name?: string | null; user_image?: string | null; created_at?: string; attachedImages?: string[] }> = [];
           for (const msg of afterRoot) {
             const isTextMsg = msg.role === "user" || (msg.role === "model" && msg.content_type === "text" && !msg.image_url && !msg.video_url);
             if (!isTextMsg) break;
             if (!msg.content) continue;
+            const msgImages = (msg.images as string[]) || [];
             followUps.push({
               role: msg.role as "user" | "model",
               content: msg.content as string,
@@ -1476,6 +1492,7 @@ export function FullModeWorkspace({
               user_name: (msg.user_name as string) || null,
               user_image: (msg.user_image as string) || null,
               created_at: (msg.created_at as string) || undefined,
+              ...(msg.role === "user" && msgImages.length > 0 ? { attachedImages: msgImages } : {}),
             });
           }
           if (followUps.length > 0) setTextModalMessages(followUps);
@@ -2271,7 +2288,7 @@ export function FullModeWorkspace({
                   : format === "video"
                     ? isKlingOmni ? "Describe el video... usa @asset para referenciar" : "Describe el video..."
                     : "Describe la imagen..."}
-                supportsFiles={format !== "text" && (format === "image" || isKlingAssetMode)}
+                supportsFiles={format === "text" || format === "image" || isKlingAssetMode}
                 initialValue={internalPrompt || reusePrompt || undefined}
                 onInitialValueUsed={() => { setInternalPrompt(null); if (reusePrompt) onReusePromptUsed(); }}
                 assetMode={isKlingAssetMode}
@@ -2534,7 +2551,8 @@ export function FullModeWorkspace({
           setStreaming={setTextModalStreaming}
           streamContent={textModalStreamContent}
           setStreamContent={setTextModalStreamContent}
-          onClose={() => { setSelectedTextItem(null); setTextModalMessages([]); setTextModalStreamContent(""); }}
+          originalUserImages={selectedTextItemImages}
+          onClose={() => { setSelectedTextItem(null); setTextModalMessages([]); setTextModalStreamContent(""); setSelectedTextItemImages([]); }}
           onFavorite={handleToggleFavorite}
           onDelete={handleDelete}
           onUseAsPrompt={(text) => { setSelectedTextItem(null); setTextModalMessages([]); setTextModalStreamContent(""); setInternalPrompt(text); requestAnimationFrame(() => messageInputRef.current?.focus()); }}
@@ -3246,7 +3264,7 @@ function GalleryPickerModal({ projectId, acceptVideo, onSelect, onClose }: {
 
 // ---- Text Detail Modal ----
 
-function TextDetailModal({ item, conversationId, textModels, activeTextModel, thinkingLevel, onThinkingLevelChange, showThoughts, onShowThoughtsChange, messages, setMessages, streaming, setStreaming, streamContent, setStreamContent, onClose, onFavorite, onDelete, onUseAsPrompt, fetchGenerations }: {
+function TextDetailModal({ item, conversationId, textModels, activeTextModel, thinkingLevel, onThinkingLevelChange, showThoughts, onShowThoughtsChange, originalUserImages, messages, setMessages, streaming, setStreaming, streamContent, setStreamContent, onClose, onFavorite, onDelete, onUseAsPrompt, fetchGenerations }: {
   item: Generation;
   conversationId: number;
   textModels: ConfigModel[];
@@ -3255,12 +3273,13 @@ function TextDetailModal({ item, conversationId, textModels, activeTextModel, th
   onThinkingLevelChange: (level: ThinkingLevel) => void;
   showThoughts: boolean;
   onShowThoughtsChange: (show: boolean) => void;
-  messages: Array<{ role: "user" | "model"; content: string; thought?: string; user_name?: string | null; user_image?: string | null; created_at?: string }>;
-  setMessages: React.Dispatch<React.SetStateAction<Array<{ role: "user" | "model"; content: string; thought?: string; user_name?: string | null; user_image?: string | null; created_at?: string }>>>;
+  messages: Array<{ role: "user" | "model"; content: string; thought?: string; user_name?: string | null; user_image?: string | null; created_at?: string; attachedImages?: string[] }>;
+  setMessages: React.Dispatch<React.SetStateAction<Array<{ role: "user" | "model"; content: string; thought?: string; user_name?: string | null; user_image?: string | null; created_at?: string; attachedImages?: string[] }>>>;
   streaming: boolean;
   setStreaming: React.Dispatch<React.SetStateAction<boolean>>;
   streamContent: string;
   setStreamContent: React.Dispatch<React.SetStateAction<string>>;
+  originalUserImages: string[];
   onClose: () => void;
   onFavorite: (id: number, e?: React.MouseEvent) => void;
   onDelete: (id: number, e?: React.MouseEvent) => void;
@@ -3269,10 +3288,12 @@ function TextDetailModal({ item, conversationId, textModels, activeTextModel, th
 }) {
   const supportsThinking = activeTextModel?.model_id?.startsWith("gemini-3.1-pro") || false;
   const [followUpInput, setFollowUpInput] = useState("");
+  const [followUpFiles, setFollowUpFiles] = useState<AttachedFile[]>([]);
   const [expandedThoughts, setExpandedThoughts] = useState<Set<number>>(new Set());
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -3287,11 +3308,34 @@ function TextDetailModal({ item, conversationId, textModels, activeTextModel, th
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList) return;
+    Array.from(fileList).forEach(file => {
+      if (!file.type.startsWith("image/")) return;
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFollowUpFiles(prev => [...prev, {
+          dataUrl: reader.result as string,
+          mimeType: file.type,
+          name: file.name,
+          type: "image" as const,
+          size: file.size,
+        }]);
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = "";
+  };
+
   const handleSendFollowUp = async () => {
-    if (!followUpInput.trim() || streaming || !activeTextModel) return;
+    if ((!followUpInput.trim() && followUpFiles.length === 0) || streaming || !activeTextModel) return;
     const userMsg = followUpInput.trim();
+    const filesToSend = [...followUpFiles];
     setFollowUpInput("");
-    setMessages(prev => [...prev, { role: "user", content: userMsg, user_name: item.user_name, user_image: item.user_image, created_at: new Date().toISOString() }]);
+    setFollowUpFiles([]);
+    const imageUrls = filesToSend.map(f => f.dataUrl).filter(Boolean) as string[];
+    setMessages(prev => [...prev, { role: "user", content: userMsg || "(imagen adjunta)", user_name: item.user_name, user_image: item.user_image, created_at: new Date().toISOString(), ...(imageUrls.length > 0 && { attachedImages: imageUrls }) }]);
     setStreaming(true);
     setStreamContent("");
 
@@ -3301,7 +3345,8 @@ function TextDetailModal({ item, conversationId, textModels, activeTextModel, th
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          content: userMsg,
+          content: userMsg || "Describe la imagen adjunta",
+          ...(filesToSend.length > 0 && { files: filesToSend }),
           selected_model_id: activeTextModel.id,
           generation_type_override: "text",
           ...(supportsThinking && thinkingLevel !== "none" && { thinking_level: thinkingLevel }),
@@ -3414,6 +3459,13 @@ function TextDetailModal({ item, conversationId, textModels, activeTextModel, th
                 <span className="text-[10px] text-muted-foreground/60">{formatDateTimeLocal(item.created_at)}</span>
               </div>
               <p className="text-sm text-foreground/80">{item.content}</p>
+              {originalUserImages.length > 0 && (
+                <div className="flex gap-2 mt-2 flex-wrap">
+                  {originalUserImages.map((src, i) => (
+                    <img key={i} src={src} alt="" className="h-20 rounded-md object-cover border border-border/50" />
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -3477,6 +3529,13 @@ function TextDetailModal({ item, conversationId, textModels, activeTextModel, th
                     {msg.created_at && <span className="text-[10px] text-muted-foreground/60">{formatDateTimeLocal(msg.created_at)}</span>}
                   </div>
                   <p className="text-sm text-foreground/80">{msg.content}</p>
+                  {msg.attachedImages && msg.attachedImages.length > 0 && (
+                    <div className="flex gap-2 mt-2 flex-wrap">
+                      {msg.attachedImages.map((src, i) => (
+                        <img key={i} src={src} alt="" className="h-20 rounded-md object-cover border border-border/50" />
+                      ))}
+                    </div>
+                  )}
                 </>
               ) : (
                 <>
@@ -3544,8 +3603,30 @@ function TextDetailModal({ item, conversationId, textModels, activeTextModel, th
             {item.model_name && <span className="bg-muted px-1.5 py-0.5 rounded">{item.model_name}</span>}
             <span>{formatDateTimeLocal(item.created_at)}</span>
           </div>
+          {/* File previews */}
+          {followUpFiles.length > 0 && (
+            <div className="flex gap-2 flex-wrap">
+              {followUpFiles.map((f, i) => (
+                <div key={i} className="relative w-12 h-12 rounded-md overflow-hidden border border-border/50 group/thumb">
+                  <img src={f.dataUrl} alt="" className="w-full h-full object-cover" />
+                  <button onClick={() => setFollowUpFiles(prev => prev.filter((_, j) => j !== i))} className="absolute inset-0 bg-black/60 opacity-0 group-hover/thumb:opacity-100 flex items-center justify-center transition-opacity">
+                    <X className="h-3 w-3 text-white" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           {/* Follow-up input */}
           <div className="flex items-end gap-2">
+            <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFileSelect} />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={streaming}
+              className="shrink-0 p-2 rounded-lg hover:bg-accent text-muted-foreground disabled:opacity-30 transition-colors"
+              title="Adjuntar imagen"
+            >
+              <ImageIcon className="h-4 w-4" />
+            </button>
             <textarea
               ref={inputRef}
               value={followUpInput}

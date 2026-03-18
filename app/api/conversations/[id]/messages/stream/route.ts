@@ -354,9 +354,10 @@ export async function POST(
 
           if (!skip_user_message) {
             // Guardar primera imagen en disco si existe (para preview en historial)
+            // Skip upload if the file already has a sourceUrl (existing GCS asset)
             if (firstImage) {
               try {
-                savedImageUrl = await saveUploadedFile(firstImage, id);
+                savedImageUrl = firstImage.sourceUrl || await saveUploadedFile(firstImage, id);
               } catch (err) {
                 console.error("Error guardando imagen del usuario:", err);
               }
@@ -372,15 +373,21 @@ export async function POST(
             userMessageId = userMessageResult.insertId;
 
             // Guardar todas las imágenes adjuntas en message_images
+            // Skip upload for files that already have a sourceUrl (existing GCS assets)
             if (hasFiles && files) {
               const imageFiles = files.filter(f => f.type === "image");
               for (let i = 0; i < imageFiles.length; i++) {
                 const imgFile = imageFiles[i];
                 try {
-                  // La primera imagen ya fue guardada como savedImageUrl
-                  const imgUrl = i === 0 && savedImageUrl ? savedImageUrl : await saveUploadedFile(imgFile, id);
-                  const base64Data = imgFile.dataUrl.split(",")[1];
-                  const fileSize = Buffer.from(base64Data, "base64").length;
+                  let imgUrl: string;
+                  if (imgFile.sourceUrl) {
+                    imgUrl = imgFile.sourceUrl;
+                  } else if (i === 0 && savedImageUrl) {
+                    imgUrl = savedImageUrl;
+                  } else {
+                    imgUrl = await saveUploadedFile(imgFile, id);
+                  }
+                  const fileSize = imgFile.sourceUrl ? 0 : Buffer.from(imgFile.dataUrl.split(",")[1], "base64").length;
                   await pool.execute(
                     `INSERT INTO message_images (message_id, image_url, mime_type, file_size, sort_order) VALUES (?, ?, ?, ?, ?)`,
                     [userMessageId, imgUrl, imgFile.mimeType, fileSize, i]

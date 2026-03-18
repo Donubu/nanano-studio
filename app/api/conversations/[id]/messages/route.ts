@@ -73,6 +73,20 @@ export async function GET(
       [id]
     );
 
+    // Fetch all images from message_images for user messages
+    const userMsgIds = messages.filter(m => m.role === "user").map(m => m.id);
+    let imageMap: Record<number, string[]> = {};
+    if (userMsgIds.length > 0) {
+      const [imgRows] = await pool.execute<RowDataPacket[]>(
+        `SELECT message_id, image_url FROM message_images WHERE message_id IN (${userMsgIds.map(() => "?").join(",")}) ORDER BY sort_order ASC`,
+        userMsgIds
+      );
+      for (const row of imgRows) {
+        if (!imageMap[row.message_id]) imageMap[row.message_id] = [];
+        imageMap[row.message_id].push(row.image_url);
+      }
+    }
+
     // Parse grounding_data JSON for messages that have it
     const messagesWithParsedGrounding = messages.map(msg => {
       const raw = msg as Record<string, unknown>;
@@ -84,7 +98,8 @@ export async function GET(
             : raw.grounding_data;
         } catch {}
       }
-      return { ...msg, grounding_data };
+      const images = msg.role === "user" ? (imageMap[msg.id] || []) : [];
+      return { ...msg, grounding_data, images };
     });
 
     return NextResponse.json(messagesWithParsedGrounding);
