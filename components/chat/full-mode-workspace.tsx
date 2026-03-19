@@ -3291,9 +3291,11 @@ function TextDetailModal({ item, conversationId, textModels, activeTextModel, th
   const [followUpFiles, setFollowUpFiles] = useState<AttachedFile[]>([]);
   const [expandedThoughts, setExpandedThoughts] = useState<Set<number>>(new Set());
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [selectionPopup, setSelectionPopup] = useState<{ text: string; x: number; y: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -3301,6 +3303,52 @@ function TextDetailModal({ item, conversationId, textModels, activeTextModel, th
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, streamContent]);
+
+  // Text selection popup
+  useEffect(() => {
+    const contentEl = contentRef.current;
+    if (!contentEl) return;
+
+    const handleMouseUp = () => {
+      // Small delay to let the selection finalize
+      setTimeout(() => {
+        const selection = window.getSelection();
+        const selectedText = selection?.toString().trim();
+        if (!selectedText || selectedText.length < 2) {
+          setSelectionPopup(null);
+          return;
+        }
+        // Check that the selection is within our content area
+        if (!selection?.rangeCount) return;
+        const range = selection.getRangeAt(0);
+        if (!contentEl.contains(range.commonAncestorContainer)) {
+          setSelectionPopup(null);
+          return;
+        }
+        const rect = range.getBoundingClientRect();
+        const containerRect = contentEl.getBoundingClientRect();
+        setSelectionPopup({
+          text: selectedText,
+          x: Math.min(Math.max(rect.left + rect.width / 2 - containerRect.left, 60), containerRect.width - 60),
+          y: rect.top - containerRect.top + contentEl.scrollTop - 8,
+        });
+      }, 10);
+    };
+
+    const handleMouseDown = (e: MouseEvent) => {
+      // Hide popup when clicking outside it (but not when clicking the popup button itself)
+      if (selectionPopup && !(e.target as HTMLElement).closest("[data-selection-popup]")) {
+        setSelectionPopup(null);
+      }
+    };
+
+    contentEl.addEventListener("mouseup", handleMouseUp);
+    contentEl.addEventListener("mousedown", handleMouseDown);
+    return () => {
+      contentEl.removeEventListener("mouseup", handleMouseUp);
+      contentEl.removeEventListener("mousedown", handleMouseDown);
+    };
+  }, [selectionPopup]);
 
   const handleCopy = (text: string, idx: number) => {
     navigator.clipboard.writeText(text);
@@ -3445,7 +3493,27 @@ function TextDetailModal({ item, conversationId, textModels, activeTextModel, th
         </div>
 
         {/* Content */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-5" style={{ minHeight: 0 }}>
+        <div ref={(el) => { scrollRef.current = el; contentRef.current = el; }} className="relative flex-1 overflow-y-auto p-6 space-y-5" style={{ minHeight: 0 }}>
+          {/* Selection popup */}
+          {selectionPopup && (
+            <div
+              data-selection-popup
+              className="absolute z-50 animate-in fade-in zoom-in-95 duration-150"
+              style={{ left: selectionPopup.x, top: selectionPopup.y, transform: "translate(-50%, -100%)" }}
+            >
+              <button
+                onClick={() => {
+                  onUseAsPrompt(selectionPopup.text);
+                  setSelectionPopup(null);
+                  window.getSelection()?.removeAllRanges();
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium shadow-lg hover:bg-primary/90 transition-colors whitespace-nowrap"
+              >
+                <Undo2 className="h-3 w-3" />
+                Usar como prompt
+              </button>
+            </div>
+          )}
           {/* Original user prompt */}
           {item.content && (
             <div className="rounded-lg bg-muted px-4 py-3 border-l-2 border-primary/30 max-w-[80%]">

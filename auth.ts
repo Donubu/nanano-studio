@@ -15,6 +15,7 @@ interface UserRow extends RowDataPacket {
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
   callbacks: {
+    ...authConfig.callbacks,
     async signIn({ user, account }) {
       if (account?.provider === "google") {
         try {
@@ -62,14 +63,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         }
       }
       return token;
-    },
-    async session({ session, token }) {
-      if (session.user) {
-        (session.user as { id: number; role: string; canCreateProjects: boolean }).id = token.id as number;
-        (session.user as { id: number; role: string; canCreateProjects: boolean }).role = token.role as string;
-        (session.user as { id: number; role: string; canCreateProjects: boolean }).canCreateProjects = (token.canCreateProjects as boolean) || false;
-      }
-      return session;
     },
   },
 });

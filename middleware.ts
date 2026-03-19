@@ -27,9 +27,12 @@ export default auth((req) => {
 
   // Redirigir a login si no está logueado o sesión incompleta
   if (!isLoginPage && (!isLoggedIn || hasIncompleteSession)) {
-    // Clear the broken session by redirecting through signout
+    // Clear the broken session cookie and redirect to login
     if (hasIncompleteSession) {
-      return NextResponse.redirect(new URL("/api/auth/signout", req.url));
+      const response = NextResponse.redirect(new URL("/login", req.url));
+      response.cookies.delete("authjs.session-token");
+      response.cookies.delete("__Secure-authjs.session-token");
+      return response;
     }
     return NextResponse.redirect(new URL("/login", req.url));
   }

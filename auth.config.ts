@@ -16,4 +16,15 @@ export const authConfig: NextAuthConfig = {
   session: {
     strategy: "jwt",
   },
+  callbacks: {
+    // Shared session callback so middleware can also see user.id/role
+    async session({ session, token }) {
+      if (session.user) {
+        (session.user as { id: number; role: string; canCreateProjects: boolean }).id = token.id as number;
+        (session.user as { id: number; role: string; canCreateProjects: boolean }).role = token.role as string;
+        (session.user as { id: number; role: string; canCreateProjects: boolean }).canCreateProjects = (token.canCreateProjects as boolean) || false;
+      }
+      return session;
+    },
+  },
 };
