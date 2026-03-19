@@ -32,15 +32,10 @@ export async function GET() {
       JOIN projects p ON ufp.project_id = p.id
       LEFT JOIN clients c ON p.client_id = c.id
       LEFT JOIN (
-        SELECT
-          conv.project_id,
-          COUNT(msg.id) as generation_count
-        FROM conversations conv
-        JOIN messages msg ON conv.id = msg.conversation_id
-        WHERE msg.role = 'model'
-          AND (msg.image_url IS NOT NULL OR msg.video_url IS NOT NULL OR msg.audio_url IS NOT NULL)
-          AND msg.deleted_at IS NULL
-        GROUP BY conv.project_id
+        SELECT project_id, COUNT(*) as generation_count
+        FROM conversations
+        WHERE deleted_at IS NULL
+        GROUP BY project_id
       ) gen ON p.id = gen.project_id
       WHERE ufp.user_id = ? AND p.hidden = 0
       ORDER BY ufp.created_at DESC

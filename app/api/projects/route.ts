@@ -35,71 +35,37 @@ export async function GET(request: NextRequest) {
     const clientParams = clientId ? [clientId] : [];
 
     // Admin ve todos los proyectos, usuarios normales solo los asignados
-    if (session.user.role === "admin") {
-      const [rows] = await pool.execute<ProjectRow[]>(`
-        SELECT
-          p.id, p.title, p.description, p.client_id, p.status, p.hidden, p.created_at,
-          c.name as client_name, c.logo as client_logo,
-          COALESCE(gen.generation_count, 0) as generation_count,
-          COALESCE(gen.estimated_cost, 0) as estimated_cost,
-          COALESCE(uc.user_count, 0) as user_count,
-          gen.last_message_at
-        FROM projects p
-        LEFT JOIN clients c ON p.client_id = c.id
-        LEFT JOIN (
-          SELECT
-            conv.project_id,
-            COUNT(msg.id) as generation_count,
-            SUM(msg.estimated_cost) as estimated_cost,
-            MAX(msg.created_at) as last_message_at
-          FROM conversations conv
-          JOIN messages msg ON conv.id = msg.conversation_id
-          WHERE msg.role = 'model'
-            AND (msg.image_url IS NOT NULL OR msg.video_url IS NOT NULL OR msg.audio_url IS NOT NULL)
-            AND msg.deleted_at IS NULL
-          GROUP BY conv.project_id
-        ) gen ON p.id = gen.project_id
-        LEFT JOIN (
-          SELECT project_id, COUNT(*) as user_count
-          FROM project_users
-          GROUP BY project_id
-        ) uc ON p.id = uc.project_id
-        WHERE 1=1 ${clientFilter}
-        ORDER BY gen.last_message_at DESC, p.created_at DESC
-      `, [...clientParams]);
-      return NextResponse.json(rows);
-    }
+    // Use conversation-level aggregates instead of scanning all messages
+    const genSubquery = `
+      SELECT
+        conv.project_id,
+        SUM(conv.total_estimated_cost) as estimated_cost,
+        MAX(conv.updated_at) as last_message_at
+      FROM conversations conv
+      WHERE conv.deleted_at IS NULL
+      GROUP BY conv.project_id
+    `;
+    const ucSubquery = `
+      SELECT project_id, COUNT(*) as user_count
+      FROM project_users
+      GROUP BY project_id
+    `;
 
-    // Usuario normal: todos los proyectos no-hidden
+    const hiddenFilter = session.user.role === "admin" ? "" : "AND p.hidden = 0";
+
     const [rows] = await pool.execute<ProjectRow[]>(`
       SELECT
         p.id, p.title, p.description, p.client_id, p.status, p.hidden, p.created_at,
         c.name as client_name, c.logo as client_logo,
-        COALESCE(gen.generation_count, 0) as generation_count,
+        0 as generation_count,
         COALESCE(gen.estimated_cost, 0) as estimated_cost,
         COALESCE(uc.user_count, 0) as user_count,
         gen.last_message_at
       FROM projects p
       LEFT JOIN clients c ON p.client_id = c.id
-      LEFT JOIN (
-        SELECT
-          conv.project_id,
-          COUNT(msg.id) as generation_count,
-          SUM(msg.estimated_cost) as estimated_cost,
-          MAX(msg.created_at) as last_message_at
-        FROM conversations conv
-        JOIN messages msg ON conv.id = msg.conversation_id
-        WHERE msg.role = 'model'
-          AND (msg.image_url IS NOT NULL OR msg.video_url IS NOT NULL OR msg.audio_url IS NOT NULL)
-          AND msg.deleted_at IS NULL
-        GROUP BY conv.project_id
-      ) gen ON p.id = gen.project_id
-      LEFT JOIN (
-        SELECT project_id, COUNT(*) as user_count
-        FROM project_users
-        GROUP BY project_id
-      ) uc ON p.id = uc.project_id
-      WHERE p.hidden = 0 ${clientFilter}
+      LEFT JOIN (${genSubquery}) gen ON p.id = gen.project_id
+      LEFT JOIN (${ucSubquery}) uc ON p.id = uc.project_id
+      WHERE 1=1 ${hiddenFilter} ${clientFilter}
       ORDER BY gen.last_message_at DESC, p.created_at DESC
     `, [...clientParams]);
 
