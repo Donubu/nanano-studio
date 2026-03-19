@@ -298,6 +298,17 @@ export function FullModeWorkspace({
   const setGridSize = (v: "S" | "M" | "L") => { setGridSizeState(v); localStorage.setItem("full-grid-size", v); };
   const setShowLabels = (v: boolean) => { setShowLabelsState(v); localStorage.setItem("full-show-labels", String(v)); };
   const setHoverAudio = (v: boolean) => { setHoverAudioState(v); localStorage.setItem("full-hover-audio", String(v)); };
+
+  // Pagination
+  const [pageSize, setPageSizeState] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("full-gallery-page-size");
+      if (saved) { const n = Number(saved); if ([20, 50, 150, 200, 0].includes(n)) return n; }
+    }
+    return 50;
+  });
+  const [currentPage, setCurrentPage] = useState(0);
+  const setPageSize = (v: number) => { setPageSizeState(v); localStorage.setItem("full-gallery-page-size", String(v)); setCurrentPage(0); };
   const rowHeight = GRID_SIZES[gridSize];
   const [reuseWarning, setReuseWarning] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -585,6 +596,21 @@ export function FullModeWorkspace({
   ).filter(g => searchScore(g.content) >= 0)
    .filter(g => !activeTagId || g.tags.some(t => t.id === activeTagId))
    .filter(g => g.status !== "generating"); // Generating items shown via inProgressItems
+
+  // Reset page when filters change
+  const filterKey = `${filter}-${searchLower}-${activeTagId}`;
+  const prevFilterKey = useRef(filterKey);
+  if (prevFilterKey.current !== filterKey) {
+    prevFilterKey.current = filterKey;
+    if (currentPage !== 0) setCurrentPage(0);
+  }
+
+  // Paginate filtered generations
+  const totalFilteredCount = filteredGenerations.length;
+  const totalPages = pageSize === 0 ? 1 : Math.ceil(totalFilteredCount / pageSize);
+  const paginatedGenerations = pageSize === 0
+    ? filteredGenerations
+    : filteredGenerations.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
 
   const imageCount = activeGenerations.filter(g => g.type === "image").length;
   const videoCount = activeGenerations.filter(g => g.type === "video").length;
@@ -1511,8 +1537,8 @@ export function FullModeWorkspace({
     setShowTopazVideo(false);
   };
 
-  // Navigable list: collection items when inside a collection, otherwise filtered generations
-  const navigableList = activeCollectionId ? collectionGenerations : filteredGenerations;
+  // Navigable list: collection items when inside a collection, otherwise paginated generations
+  const navigableList = activeCollectionId ? collectionGenerations : paginatedGenerations;
 
   const goToPrev = () => {
     if (selectedIndex !== null && selectedIndex > 0) {
@@ -2099,7 +2125,7 @@ export function FullModeWorkspace({
                   : [];
                 type GridEntry = { kind: "generation"; data: Generation; index: number; score: number } | { kind: "collection"; data: Collection; score: number };
                 const entries: GridEntry[] = [
-                  ...filteredGenerations.map((data, index) => ({ kind: "generation" as const, data, index, score: searchScore(data.content) })),
+                  ...paginatedGenerations.map((data, index) => ({ kind: "generation" as const, data, index, score: searchScore(data.content) })),
                   ...visibleCollections.map(data => ({ kind: "collection" as const, data, score: Math.max(searchScore(data.name), searchScore(data.search_text)) })),
                 ];
                 // When searching, sort by relevance (score desc) then date; otherwise just by date
@@ -2115,6 +2141,46 @@ export function FullModeWorkspace({
                   return <GridItem key={`${entry.data.type}-${entry.data.id}`} gen={entry.data} index={entry.index} rowHeight={rowHeight} showLabels={showLabels} hoverAudio={hoverAudio} onOpen={openGeneration} onFavorite={handleToggleFavorite} onDelete={handleDelete} onRestore={handleRestore} onDownload={handleDownload} onReuse={handleReusePrompt} onDragStarted={setDraggedMediaType} onDragEnded={() => setDraggedMediaType(null)} />;
                 });
               })()}
+            </div>
+          )}
+
+          {/* Pagination controls */}
+          {!activeCollectionId && totalFilteredCount > 20 && (
+            <div className="flex items-center justify-between px-2 py-3 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <span>Mostrar:</span>
+                {[20, 50, 150, 200, 0].map(size => (
+                  <button
+                    key={size}
+                    onClick={() => setPageSize(size)}
+                    className={`px-2 py-1 rounded ${pageSize === size ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                  >
+                    {size === 0 ? "Todas" : size}
+                  </button>
+                ))}
+              </div>
+              {pageSize > 0 && totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                    disabled={currentPage === 0}
+                    className="px-2 py-1 rounded hover:bg-muted disabled:opacity-30"
+                  >
+                    ← Anterior
+                  </button>
+                  <span>{currentPage + 1} / {totalPages} ({totalFilteredCount})</span>
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                    disabled={currentPage >= totalPages - 1}
+                    className="px-2 py-1 rounded hover:bg-muted disabled:opacity-30"
+                  >
+                    Siguiente →
+                  </button>
+                </div>
+              )}
+              {pageSize > 0 && totalPages <= 1 && (
+                <span>{totalFilteredCount} items</span>
+              )}
             </div>
           )}
         </div>
