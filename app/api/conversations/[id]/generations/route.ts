@@ -103,6 +103,12 @@ export async function GET(
 
     const whereClause = mediaConditions.join(" AND ");
 
+    // Pre-fetch user messages for this conversation to avoid correlated subqueries
+    const [userMessages] = await pool.execute<RowDataPacket[]>(
+      `SELECT id, content FROM messages WHERE conversation_id = ? AND role = 'user' ORDER BY id ASC`,
+      [conversationId]
+    );
+
     const [rows] = await pool.execute<GenerationRow[]>(
       `SELECT
         m.id,
@@ -112,18 +118,11 @@ export async function GET(
         c.title as conversation_title,
         u.name as user_name,
         u.image as user_image,
-        CASE
-          WHEN m.content LIKE 'Archivo subido:%' THEN m.content
-          ELSE (SELECT um.content FROM messages um WHERE um.conversation_id = m.conversation_id AND um.role = 'user' AND um.id < m.id ORDER BY um.id DESC LIMIT 1)
-        END as content,
+        m.content as content,
         m.quality_tier,
         mo.display_name as model_name,
         m.model_id as model_id_value,
         m.generation_seed,
-        CASE
-          WHEN m.content LIKE 'Archivo subido:%' THEN NULL
-          ELSE (SELECT um.id FROM messages um WHERE um.conversation_id = m.conversation_id AND um.role = 'user' AND um.id < m.id ORDER BY um.id DESC LIMIT 1)
-        END as user_message_id,
         m.is_favorite,
         m.image_url,
         m.image_mime_type,
@@ -147,11 +146,32 @@ export async function GET(
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN users u ON COALESCE(m.user_id, c.user_id) = u.id
       LEFT JOIN models mo ON m.model_id = mo.id
-      LEFT JOIN collection_items ci_excl ON ci_excl.message_id = m.id
-      WHERE m.conversation_id = ? AND m.role = 'model' AND ci_excl.id IS NULL AND ${whereClause}
+      WHERE m.conversation_id = ? AND m.role = 'model'
+        AND NOT EXISTS (SELECT 1 FROM collection_items ci WHERE ci.message_id = m.id)
+        AND ${whereClause}
       ORDER BY m.created_at DESC`,
       [conversationId]
     );
+
+    // Resolve user message content/id in JS instead of correlated subqueries
+    // userMessages is sorted by id ASC, so we can binary search for the previous user message
+    const resolveUserMessage = (modelMessageId: number, modelContent: string | null) => {
+      if (modelContent && modelContent.startsWith('Archivo subido:')) {
+        return { content: modelContent, userMessageId: null };
+      }
+      // Find the last user message with id < modelMessageId
+      let lastUserMsg: { id: number; content: string } | null = null;
+      for (let i = userMessages.length - 1; i >= 0; i--) {
+        if (userMessages[i].id < modelMessageId) {
+          lastUserMsg = userMessages[i] as { id: number; content: string };
+          break;
+        }
+      }
+      return {
+        content: lastUserMsg?.content || null,
+        userMessageId: lastUserMsg?.id || null,
+      };
+    };
 
     // Fetch tags for all message IDs
     const messageIds = rows.map(r => r.id);
@@ -172,7 +192,9 @@ export async function GET(
     }
 
     // Fetch reference images for user messages
-    const userMessageIds = [...new Set(rows.map(r => r.user_message_id).filter(Boolean) as number[])];
+    const userMessageIds = [...new Set(
+      rows.map(r => resolveUserMessage(r.id, r.content).userMessageId).filter(Boolean) as number[]
+    )];
     let refImageMap: Record<number, {url: string, mime_type: string | null}[]> = {};
 
     if (userMessageIds.length > 0) {
@@ -199,7 +221,9 @@ export async function GET(
       }
     }
 
-    const generations = rows.map(row => ({
+    const generations = rows.map(row => {
+      const resolved = resolveUserMessage(row.id, row.content);
+      return {
       type: row.video_url ? "video" as const
         : row.content_type === "video" ? "video" as const
         : (row.content_type === "text" && !row.image_url && !row.video_url) ? "text" as const
@@ -212,12 +236,12 @@ export async function GET(
       conversation_title: row.conversation_title,
       user_name: row.user_name,
       user_image: row.user_image,
-      content: row.content,
+      content: resolved.content,
       quality_tier: row.quality_tier,
       model_name: row.model_name,
       model_id: row.model_id_value || null,
       generation_seed: row.generation_seed,
-      reference_images: row.user_message_id ? (refImageMap[row.user_message_id] || []) : [],
+      reference_images: resolved.userMessageId ? (refImageMap[resolved.userMessageId] || []) : [],
       is_favorite: Boolean(row.is_favorite),
       image_url: row.image_url,
       image_mime_type: row.image_mime_type,
@@ -246,7 +270,8 @@ export async function GET(
       created_at: row.created_at,
       deleted_at: row.deleted_at,
       tags: tagMap[row.id] || [],
-    }));
+    };
+    });
 
     return NextResponse.json(generations);
   } catch (error) {
