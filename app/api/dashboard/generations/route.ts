@@ -198,73 +198,106 @@ export async function GET(request: NextRequest) {
       queryParams.push(dateTo + " 23:59:59");
     }
 
-    // Get total count
-    const countQuery = `
-      SELECT COUNT(*) as total
-      FROM messages m
-      JOIN conversations c ON m.conversation_id = c.id
-      LEFT JOIN projects p ON c.project_id = p.id
-      LEFT JOIN clients cl ON p.client_id = cl.id
-      LEFT JOIN users u ON c.user_id = u.id
-      WHERE ${conditions.join(" AND ")}
-    `;
-
-    const [countResult] = await pool.execute<RowDataPacket[]>(countQuery, queryParams);
-    const total = countResult[0]?.total || 0;
-
-    // Main query
-    const mainQuery = `
-      SELECT
-        m.id,
-        c.id as conversation_id,
-        c.title as conversation_title,
-        p.id as project_id,
-        p.title as project_name,
-        cl.id as client_id,
-        cl.name as client_name,
-        u.id as user_id,
-        u.name as user_name,
-        u.email as user_email,
-        c.model_id,
-        COALESCE(mo_msg.display_name, mo_conv.display_name) as model_name,
-        m.content,
-        m.content_type,
-        m.quality_tier,
-        m.generation_seed,
-        m.tokens_input,
-        m.tokens_output,
-        m.estimated_cost,
-        m.image_url,
-        m.image_file_size,
-        COALESCE(m.image_aspect_ratio, c.image_aspect_ratio) as image_aspect_ratio,
-        m.video_url,
-        m.video_file_size,
-        m.video_duration,
-        m.audio_url,
-        m.audio_file_size,
-        m.audio_duration,
-        m.music_url,
-        m.music_file_size,
-        m.music_duration,
-        m.created_at,
-        m.deleted_at
-      FROM messages m
-      JOIN conversations c ON m.conversation_id = c.id
-      LEFT JOIN projects p ON c.project_id = p.id
-      LEFT JOIN clients cl ON p.client_id = cl.id
-      LEFT JOIN users u ON c.user_id = u.id
-      LEFT JOIN models mo_msg ON m.model_id = mo_msg.id
-      LEFT JOIN models mo_conv ON c.model_id = mo_conv.id
-      WHERE ${conditions.join(" AND ")}
-      ORDER BY m.created_at DESC
-      LIMIT ${Number(limit)} OFFSET ${Number(offset)}
-    `;
-
-    const [generations] = await pool.execute<GenerationRow[]>(mainQuery, queryParams);
-
-    // Apply cost corrections
+    const whereClause = conditions.join(" AND ");
     const costMultiplier = getCostMultiplier();
     const monthlyBaseCost = getMonthlyBaseCost();
+
+    // Run all independent queries in parallel
+    const [
+      [countResult],
+      [generations],
+      [totalsResult],
+      [topazImageTotals],
+      [topazVideoTotals],
+      [projects],
+      [clients],
+    ] = await Promise.all([
+      pool.execute<RowDataPacket[]>(`
+        SELECT COUNT(*) as total
+        FROM messages m
+        JOIN conversations c ON m.conversation_id = c.id
+        LEFT JOIN projects p ON c.project_id = p.id
+        LEFT JOIN clients cl ON p.client_id = cl.id
+        LEFT JOIN users u ON c.user_id = u.id
+        WHERE ${whereClause}
+      `, queryParams),
+      pool.execute<GenerationRow[]>(`
+        SELECT
+          m.id,
+          c.id as conversation_id,
+          c.title as conversation_title,
+          p.id as project_id,
+          p.title as project_name,
+          cl.id as client_id,
+          cl.name as client_name,
+          u.id as user_id,
+          u.name as user_name,
+          u.email as user_email,
+          c.model_id,
+          COALESCE(mo_msg.display_name, mo_conv.display_name) as model_name,
+          m.content,
+          m.content_type,
+          m.quality_tier,
+          m.generation_seed,
+          m.tokens_input,
+          m.tokens_output,
+          m.estimated_cost,
+          m.image_url,
+          m.image_file_size,
+          COALESCE(m.image_aspect_ratio, c.image_aspect_ratio) as image_aspect_ratio,
+          m.video_url,
+          m.video_file_size,
+          m.video_duration,
+          m.audio_url,
+          m.audio_file_size,
+          m.audio_duration,
+          m.music_url,
+          m.music_file_size,
+          m.music_duration,
+          m.created_at,
+          m.deleted_at
+        FROM messages m
+        JOIN conversations c ON m.conversation_id = c.id
+        LEFT JOIN projects p ON c.project_id = p.id
+        LEFT JOIN clients cl ON p.client_id = cl.id
+        LEFT JOIN users u ON c.user_id = u.id
+        LEFT JOIN models mo_msg ON m.model_id = mo_msg.id
+        LEFT JOIN models mo_conv ON c.model_id = mo_conv.id
+        WHERE ${whereClause}
+        ORDER BY m.created_at DESC
+        LIMIT ${Number(limit)} OFFSET ${Number(offset)}
+      `, queryParams),
+      pool.execute<RowDataPacket[]>(`
+        SELECT
+          SUM(COALESCE(m.tokens_input, 0)) as total_tokens_input,
+          SUM(COALESCE(m.tokens_output, 0)) as total_tokens_output,
+          SUM(COALESCE(m.estimated_cost, 0)) as total_cost,
+          COUNT(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 END) as image_count,
+          COUNT(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 END) as video_count,
+          COUNT(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' THEN 1 END) as audio_count,
+          COUNT(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 END) as music_count
+        FROM messages m
+        JOIN conversations c ON m.conversation_id = c.id
+        LEFT JOIN projects p ON c.project_id = p.id
+        LEFT JOIN clients cl ON p.client_id = cl.id
+        LEFT JOIN users u ON c.user_id = u.id
+        WHERE ${whereClause}
+      `, queryParams),
+      pool.execute<RowDataPacket[]>(
+        "SELECT COUNT(*) as count, COALESCE(SUM(credits_consumed), 0) as credits FROM topaz_edits"
+      ),
+      pool.execute<RowDataPacket[]>(
+        "SELECT COUNT(*) as count, COALESCE(SUM(credits_consumed), 0) as credits FROM topaz_video_edits WHERE status = 'completed'"
+      ),
+      pool.execute<ProjectRow[]>(
+        "SELECT id, title FROM projects WHERE status = 'active' ORDER BY title"
+      ),
+      pool.execute<ClientRow[]>(
+        "SELECT id, name FROM clients ORDER BY name"
+      ),
+    ]);
+
+    const total = countResult[0]?.total || 0;
 
     // Determine type for each generation
     const result = generations.map(gen => {
@@ -288,43 +321,7 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // Get totals for filters
-    const [totalsResult] = await pool.execute<RowDataPacket[]>(`
-      SELECT
-        SUM(COALESCE(m.tokens_input, 0)) as total_tokens_input,
-        SUM(COALESCE(m.tokens_output, 0)) as total_tokens_output,
-        SUM(COALESCE(m.estimated_cost, 0)) as total_cost,
-        COUNT(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 END) as image_count,
-        COUNT(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 END) as video_count,
-        COUNT(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' THEN 1 END) as audio_count,
-        COUNT(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 END) as music_count
-      FROM messages m
-      JOIN conversations c ON m.conversation_id = c.id
-      LEFT JOIN projects p ON c.project_id = p.id
-      LEFT JOIN clients cl ON p.client_id = cl.id
-      LEFT JOIN users u ON c.user_id = u.id
-      WHERE ${conditions.join(" AND ")}
-    `, queryParams);
-
     const totals = totalsResult[0] || {};
-
-    // Get Topaz totals
-    const [topazImageTotals] = await pool.execute<RowDataPacket[]>(
-      "SELECT COUNT(*) as count, COALESCE(SUM(credits_consumed), 0) as credits FROM topaz_edits"
-    );
-    const [topazVideoTotals] = await pool.execute<RowDataPacket[]>(
-      "SELECT COUNT(*) as count, COALESCE(SUM(credits_consumed), 0) as credits FROM topaz_video_edits WHERE status = 'completed'"
-    );
-
-    // Get available projects for filter dropdown
-    const [projects] = await pool.execute<ProjectRow[]>(
-      "SELECT id, title FROM projects WHERE status = 'active' ORDER BY title"
-    );
-
-    // Get available clients for filter dropdown
-    const [clients] = await pool.execute<ClientRow[]>(
-      "SELECT id, name FROM clients ORDER BY name"
-    );
 
     return NextResponse.json({
       data: result,
@@ -717,168 +714,169 @@ async function handleAllGenerations(
 
   const topazWhereClause = topazConditions.length > 0 ? `AND ${topazConditions.join(" AND ")}` : "";
 
-  // Get counts for pagination
-  const [msgCountResult] = await pool.execute<RowDataPacket[]>(`
-    SELECT COUNT(*) as total
-    FROM messages m
-    JOIN conversations c ON m.conversation_id = c.id
-    LEFT JOIN projects p ON c.project_id = p.id
-    LEFT JOIN clients cl ON p.client_id = cl.id
-    LEFT JOIN users u ON c.user_id = u.id
-    WHERE ${msgConditions.join(" AND ")}
-  `, msgParams);
+  const msgWhereClause = msgConditions.join(" AND ");
+  const fetchLimit = Math.min(offset + limit + 100, 500);
 
-  const [topazImgCountResult] = await pool.execute<RowDataPacket[]>(`
-    SELECT COUNT(*) as total
-    FROM topaz_edits te
-    JOIN messages m ON te.message_id = m.id
-    JOIN conversations c ON m.conversation_id = c.id
-    LEFT JOIN projects p ON c.project_id = p.id
-    LEFT JOIN clients cl ON p.client_id = cl.id
-    LEFT JOIN users u ON c.user_id = u.id
-    WHERE 1=1 ${topazWhereClause}
-  `, topazParams);
-
-  const [topazVidCountResult] = await pool.execute<RowDataPacket[]>(`
-    SELECT COUNT(*) as total
-    FROM topaz_video_edits tve
-    JOIN messages m ON tve.message_id = m.id
-    JOIN conversations c ON m.conversation_id = c.id
-    LEFT JOIN projects p ON c.project_id = p.id
-    LEFT JOIN clients cl ON p.client_id = cl.id
-    LEFT JOIN users u ON c.user_id = u.id
-    WHERE tve.status = 'completed' ${topazWhereClause}
-  `, topazParams);
+  // Run all queries in parallel
+  const [
+    [msgCountResult],
+    [topazImgCountResult],
+    [topazVidCountResult],
+    [messages],
+    [topazImages],
+    [topazVideos],
+  ] = await Promise.all([
+    pool.execute<RowDataPacket[]>(`
+      SELECT COUNT(*) as total
+      FROM messages m
+      JOIN conversations c ON m.conversation_id = c.id
+      LEFT JOIN projects p ON c.project_id = p.id
+      LEFT JOIN clients cl ON p.client_id = cl.id
+      LEFT JOIN users u ON c.user_id = u.id
+      WHERE ${msgWhereClause}
+    `, msgParams),
+    pool.execute<RowDataPacket[]>(`
+      SELECT COUNT(*) as total
+      FROM topaz_edits te
+      JOIN messages m ON te.message_id = m.id
+      JOIN conversations c ON m.conversation_id = c.id
+      LEFT JOIN projects p ON c.project_id = p.id
+      LEFT JOIN clients cl ON p.client_id = cl.id
+      LEFT JOIN users u ON c.user_id = u.id
+      WHERE 1=1 ${topazWhereClause}
+    `, topazParams),
+    pool.execute<RowDataPacket[]>(`
+      SELECT COUNT(*) as total
+      FROM topaz_video_edits tve
+      JOIN messages m ON tve.message_id = m.id
+      JOIN conversations c ON m.conversation_id = c.id
+      LEFT JOIN projects p ON c.project_id = p.id
+      LEFT JOIN clients cl ON p.client_id = cl.id
+      LEFT JOIN users u ON c.user_id = u.id
+      WHERE tve.status = 'completed' ${topazWhereClause}
+    `, topazParams),
+    pool.execute<GenerationRow[]>(`
+      SELECT
+        m.id,
+        c.id as conversation_id,
+        c.title as conversation_title,
+        p.id as project_id,
+        p.title as project_name,
+        cl.id as client_id,
+        cl.name as client_name,
+        u.id as user_id,
+        u.name as user_name,
+        u.email as user_email,
+        c.model_id,
+        COALESCE(mo_msg.display_name, mo_conv.display_name) as model_name,
+        m.content,
+        m.content_type,
+        m.quality_tier,
+        m.generation_seed,
+        m.tokens_input,
+        m.tokens_output,
+        m.estimated_cost,
+        m.image_url,
+        m.image_file_size,
+        COALESCE(m.image_aspect_ratio, c.image_aspect_ratio) as image_aspect_ratio,
+        m.video_url,
+        m.video_file_size,
+        m.video_duration,
+        m.audio_url,
+        m.audio_file_size,
+        m.audio_duration,
+        m.music_url,
+        m.music_file_size,
+        m.music_duration,
+        m.created_at,
+        m.deleted_at
+      FROM messages m
+      JOIN conversations c ON m.conversation_id = c.id
+      LEFT JOIN projects p ON c.project_id = p.id
+      LEFT JOIN clients cl ON p.client_id = cl.id
+      LEFT JOIN users u ON c.user_id = u.id
+      LEFT JOIN models mo_msg ON m.model_id = mo_msg.id
+      LEFT JOIN models mo_conv ON c.model_id = mo_conv.id
+      WHERE ${msgWhereClause}
+      ORDER BY m.created_at DESC
+      LIMIT ${Number(fetchLimit)}
+    `, msgParams),
+    pool.execute<TopazImageEditRow[]>(`
+      SELECT
+        te.id,
+        te.message_id,
+        te.original_url,
+        te.result_url,
+        te.model,
+        te.scale_factor,
+        te.input_width,
+        te.input_height,
+        te.output_width,
+        te.output_height,
+        te.credits_consumed,
+        te.output_file_size,
+        te.created_at,
+        c.id as conversation_id,
+        c.title as conversation_title,
+        p.id as project_id,
+        p.title as project_name,
+        cl.id as client_id,
+        cl.name as client_name,
+        u.id as user_id,
+        u.name as user_name,
+        u.email as user_email
+      FROM topaz_edits te
+      JOIN messages m ON te.message_id = m.id
+      JOIN conversations c ON m.conversation_id = c.id
+      LEFT JOIN projects p ON c.project_id = p.id
+      LEFT JOIN clients cl ON p.client_id = cl.id
+      LEFT JOIN users u ON c.user_id = u.id
+      WHERE 1=1 ${topazWhereClause}
+      ORDER BY te.created_at DESC
+      LIMIT ${Number(fetchLimit)}
+    `, topazParams),
+    pool.execute<TopazVideoEditRow[]>(`
+      SELECT
+        tve.id,
+        tve.message_id,
+        tve.original_url,
+        tve.result_url,
+        tve.model,
+        tve.model_name,
+        tve.input_duration,
+        tve.input_width,
+        tve.input_height,
+        tve.output_width,
+        tve.output_height,
+        tve.output_file_size,
+        tve.credits_consumed,
+        tve.status,
+        tve.created_at,
+        c.id as conversation_id,
+        c.title as conversation_title,
+        p.id as project_id,
+        p.title as project_name,
+        cl.id as client_id,
+        cl.name as client_name,
+        u.id as user_id,
+        u.name as user_name,
+        u.email as user_email
+      FROM topaz_video_edits tve
+      JOIN messages m ON tve.message_id = m.id
+      JOIN conversations c ON m.conversation_id = c.id
+      LEFT JOIN projects p ON c.project_id = p.id
+      LEFT JOIN clients cl ON p.client_id = cl.id
+      LEFT JOIN users u ON c.user_id = u.id
+      WHERE tve.status = 'completed' ${topazWhereClause}
+      ORDER BY tve.created_at DESC
+      LIMIT ${Number(fetchLimit)}
+    `, topazParams),
+  ]);
 
   const totalMessages = Number(msgCountResult[0]?.total) || 0;
   const totalTopazImg = Number(topazImgCountResult[0]?.total) || 0;
   const totalTopazVid = Number(topazVidCountResult[0]?.total) || 0;
   const grandTotal = totalMessages + totalTopazImg + totalTopazVid;
-
-  // Fetch all data and combine (limited to reasonable amount for sorting)
-  const fetchLimit = Math.min(offset + limit + 100, 500); // Fetch enough for offset + limit
-
-  // Fetch messages
-  const [messages] = await pool.execute<GenerationRow[]>(`
-    SELECT
-      m.id,
-      c.id as conversation_id,
-      c.title as conversation_title,
-      p.id as project_id,
-      p.title as project_name,
-      cl.id as client_id,
-      cl.name as client_name,
-      u.id as user_id,
-      u.name as user_name,
-      u.email as user_email,
-      c.model_id,
-      COALESCE(mo_msg.display_name, mo_conv.display_name) as model_name,
-      m.content,
-      m.content_type,
-      m.quality_tier,
-      m.generation_seed,
-      m.tokens_input,
-      m.tokens_output,
-      m.estimated_cost,
-      m.image_url,
-      m.image_file_size,
-      COALESCE(m.image_aspect_ratio, c.image_aspect_ratio) as image_aspect_ratio,
-      m.video_url,
-      m.video_file_size,
-      m.video_duration,
-      m.audio_url,
-      m.audio_file_size,
-      m.audio_duration,
-      m.music_url,
-      m.music_file_size,
-      m.music_duration,
-      m.created_at,
-      m.deleted_at
-    FROM messages m
-    JOIN conversations c ON m.conversation_id = c.id
-    LEFT JOIN projects p ON c.project_id = p.id
-    LEFT JOIN clients cl ON p.client_id = cl.id
-    LEFT JOIN users u ON c.user_id = u.id
-    LEFT JOIN models mo_msg ON m.model_id = mo_msg.id
-    LEFT JOIN models mo_conv ON c.model_id = mo_conv.id
-    WHERE ${msgConditions.join(" AND ")}
-    ORDER BY m.created_at DESC
-    LIMIT ${Number(fetchLimit)}
-  `, msgParams);
-
-  // Fetch Topaz image edits
-  const [topazImages] = await pool.execute<TopazImageEditRow[]>(`
-    SELECT
-      te.id,
-      te.message_id,
-      te.original_url,
-      te.result_url,
-      te.model,
-      te.scale_factor,
-      te.input_width,
-      te.input_height,
-      te.output_width,
-      te.output_height,
-      te.credits_consumed,
-      te.output_file_size,
-      te.created_at,
-      c.id as conversation_id,
-      c.title as conversation_title,
-      p.id as project_id,
-      p.title as project_name,
-      cl.id as client_id,
-      cl.name as client_name,
-      u.id as user_id,
-      u.name as user_name,
-      u.email as user_email
-    FROM topaz_edits te
-    JOIN messages m ON te.message_id = m.id
-    JOIN conversations c ON m.conversation_id = c.id
-    LEFT JOIN projects p ON c.project_id = p.id
-    LEFT JOIN clients cl ON p.client_id = cl.id
-    LEFT JOIN users u ON c.user_id = u.id
-    WHERE 1=1 ${topazWhereClause}
-    ORDER BY te.created_at DESC
-    LIMIT ${Number(fetchLimit)}
-  `, topazParams);
-
-  // Fetch Topaz video edits
-  const [topazVideos] = await pool.execute<TopazVideoEditRow[]>(`
-    SELECT
-      tve.id,
-      tve.message_id,
-      tve.original_url,
-      tve.result_url,
-      tve.model,
-      tve.model_name,
-      tve.input_duration,
-      tve.input_width,
-      tve.input_height,
-      tve.output_width,
-      tve.output_height,
-      tve.output_file_size,
-      tve.credits_consumed,
-      tve.status,
-      tve.created_at,
-      c.id as conversation_id,
-      c.title as conversation_title,
-      p.id as project_id,
-      p.title as project_name,
-      cl.id as client_id,
-      cl.name as client_name,
-      u.id as user_id,
-      u.name as user_name,
-      u.email as user_email
-    FROM topaz_video_edits tve
-    JOIN messages m ON tve.message_id = m.id
-    JOIN conversations c ON m.conversation_id = c.id
-    LEFT JOIN projects p ON c.project_id = p.id
-    LEFT JOIN clients cl ON p.client_id = cl.id
-    LEFT JOIN users u ON c.user_id = u.id
-    WHERE tve.status = 'completed' ${topazWhereClause}
-    ORDER BY tve.created_at DESC
-    LIMIT ${Number(fetchLimit)}
-  `, topazParams);
 
   // Transform and combine all results
   type CombinedGeneration = {
@@ -1063,40 +1061,45 @@ async function handleAllGenerations(
   // Apply pagination
   const paginatedData = combined.slice(offset, offset + limit);
 
-  // Get totals
-  const [totalsResult] = await pool.execute<RowDataPacket[]>(`
-    SELECT
-      SUM(COALESCE(m.tokens_input, 0)) as total_tokens_input,
-      SUM(COALESCE(m.tokens_output, 0)) as total_tokens_output,
-      SUM(COALESCE(m.estimated_cost, 0)) as total_cost,
-      COUNT(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 END) as image_count,
-      COUNT(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 END) as video_count,
-      COUNT(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' THEN 1 END) as audio_count,
-      COUNT(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 END) as music_count
-    FROM messages m
-    JOIN conversations c ON m.conversation_id = c.id
-    LEFT JOIN projects p ON c.project_id = p.id
-    LEFT JOIN clients cl ON p.client_id = cl.id
-    LEFT JOIN users u ON c.user_id = u.id
-    WHERE ${msgConditions.join(" AND ")}
-  `, msgParams);
-
-  const [topazImageTotals] = await pool.execute<RowDataPacket[]>(
-    "SELECT COUNT(*) as count, COALESCE(SUM(credits_consumed), 0) as credits FROM topaz_edits"
-  );
-  const [topazVideoTotals] = await pool.execute<RowDataPacket[]>(
-    "SELECT COUNT(*) as count, COALESCE(SUM(credits_consumed), 0) as credits FROM topaz_video_edits WHERE status = 'completed'"
-  );
+  // Get totals and filters in parallel
+  const [
+    [totalsResult],
+    [topazImageTotals],
+    [topazVideoTotals],
+    [projects],
+    [clients],
+  ] = await Promise.all([
+    pool.execute<RowDataPacket[]>(`
+      SELECT
+        SUM(COALESCE(m.tokens_input, 0)) as total_tokens_input,
+        SUM(COALESCE(m.tokens_output, 0)) as total_tokens_output,
+        SUM(COALESCE(m.estimated_cost, 0)) as total_cost,
+        COUNT(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 END) as image_count,
+        COUNT(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 END) as video_count,
+        COUNT(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' THEN 1 END) as audio_count,
+        COUNT(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 END) as music_count
+      FROM messages m
+      JOIN conversations c ON m.conversation_id = c.id
+      LEFT JOIN projects p ON c.project_id = p.id
+      LEFT JOIN clients cl ON p.client_id = cl.id
+      LEFT JOIN users u ON c.user_id = u.id
+      WHERE ${msgWhereClause}
+    `, msgParams),
+    pool.execute<RowDataPacket[]>(
+      "SELECT COUNT(*) as count, COALESCE(SUM(credits_consumed), 0) as credits FROM topaz_edits"
+    ),
+    pool.execute<RowDataPacket[]>(
+      "SELECT COUNT(*) as count, COALESCE(SUM(credits_consumed), 0) as credits FROM topaz_video_edits WHERE status = 'completed'"
+    ),
+    pool.execute<ProjectRow[]>(
+      "SELECT id, title FROM projects WHERE status = 'active' ORDER BY title"
+    ),
+    pool.execute<ClientRow[]>(
+      "SELECT id, name FROM clients ORDER BY name"
+    ),
+  ]);
 
   const totals = totalsResult[0] || {};
-
-  // Get filters
-  const [projects] = await pool.execute<ProjectRow[]>(
-    "SELECT id, title FROM projects WHERE status = 'active' ORDER BY title"
-  );
-  const [clients] = await pool.execute<ClientRow[]>(
-    "SELECT id, name FROM clients ORDER BY name"
-  );
 
   return NextResponse.json({
     data: paginatedData,

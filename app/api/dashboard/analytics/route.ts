@@ -125,162 +125,7 @@ export async function GET(request: NextRequest) {
       projectFilterConv = `AND c.project_id = ${parseInt(projectId)}`;
     }
 
-    // 1. Daily stats for chart
-    const [dailyStats] = await pool.execute<DailyStatsRow[]>(`
-      SELECT
-        DATE(m.created_at) as date,
-        COALESCE(SUM(m.tokens_input), 0) as tokens_input,
-        COALESCE(SUM(m.tokens_output), 0) as tokens_output,
-        COALESCE(SUM(m.estimated_cost), 0) as estimated_cost,
-        SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
-        SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
-        SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
-        SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
-        SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
-        COUNT(*) as message_count
-      FROM messages m
-      JOIN conversations c ON m.conversation_id = c.id
-      WHERE m.role = 'model'
-        ${dateFilter}
-        ${projectFilter}
-      GROUP BY DATE(m.created_at)
-      ORDER BY date ASC
-    `);
-
-    // 2. Model breakdown
-    const [modelBreakdown] = await pool.execute<ModelBreakdownRow[]>(`
-      SELECT
-        mo.id as model_id,
-        mo.display_name as model_name,
-        COALESCE(SUM(m.tokens_input), 0) as tokens_input,
-        COALESCE(SUM(m.tokens_output), 0) as tokens_output,
-        COALESCE(SUM(m.estimated_cost), 0) as estimated_cost,
-        SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
-        SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
-        SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
-        SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
-        SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
-        COUNT(*) as message_count
-      FROM messages m
-      JOIN conversations c ON m.conversation_id = c.id
-      JOIN models mo ON c.model_id = mo.id
-      WHERE m.role = 'model'
-        ${dateFilter}
-        ${projectFilter}
-      GROUP BY mo.id, mo.display_name
-      ORDER BY estimated_cost DESC
-    `);
-
-    // 3. User breakdown (top 10)
-    const [userBreakdown] = await pool.execute<UserBreakdownRow[]>(`
-      SELECT
-        u.id as user_id,
-        u.name as user_name,
-        u.email as user_email,
-        COALESCE(SUM(m.tokens_input), 0) as tokens_input,
-        COALESCE(SUM(m.tokens_output), 0) as tokens_output,
-        COALESCE(SUM(m.estimated_cost), 0) as estimated_cost,
-        SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
-        SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
-        SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
-        SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
-        SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
-        COUNT(*) as message_count,
-        COUNT(DISTINCT c.id) as conversation_count
-      FROM messages m
-      JOIN conversations c ON m.conversation_id = c.id
-      JOIN users u ON c.user_id = u.id
-      WHERE m.role = 'model'
-        ${dateFilter}
-        ${projectFilter}
-      GROUP BY u.id, u.name, u.email
-      ORDER BY estimated_cost DESC
-      LIMIT 10
-    `);
-
-    // 4. Project breakdown
-    const [projectBreakdown] = await pool.execute<ProjectBreakdownRow[]>(`
-      SELECT
-        p.id as project_id,
-        p.title as project_name,
-        cl.name as client_name,
-        COALESCE(SUM(m.tokens_input), 0) as tokens_input,
-        COALESCE(SUM(m.tokens_output), 0) as tokens_output,
-        COALESCE(SUM(m.estimated_cost), 0) as estimated_cost,
-        SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
-        SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
-        SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
-        SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
-        SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
-        COUNT(DISTINCT c.id) as conversation_count
-      FROM messages m
-      JOIN conversations c ON m.conversation_id = c.id
-      LEFT JOIN projects p ON c.project_id = p.id
-      LEFT JOIN clients cl ON p.client_id = cl.id
-      WHERE m.role = 'model'
-        ${dateFilter}
-        ${projectFilter}
-      GROUP BY p.id, p.title, cl.name
-      ORDER BY estimated_cost DESC
-    `);
-
-    // 5. Period summary — uses the same dateFilter as the rest of the page
-    const [summaryRows] = await pool.execute<PeriodSummaryRow[]>(`
-      SELECT
-        COALESCE(SUM(m.tokens_input), 0) as tokens_input,
-        COALESCE(SUM(m.tokens_output), 0) as tokens_output,
-        COALESCE(SUM(m.estimated_cost), 0) as estimated_cost,
-        SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
-        SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
-        SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
-        SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
-        SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
-        COUNT(*) as message_count,
-        COUNT(DISTINCT c.id) as conversation_count
-      FROM messages m
-      JOIN conversations c ON m.conversation_id = c.id
-      WHERE m.role = 'model'
-        ${dateFilter}
-        ${projectFilter}
-    `);
-    const currentSummary = summaryRows[0];
-
-    // 6. Hourly distribution (for activity heatmap)
-    const [hourlyDistribution] = await pool.execute<RowDataPacket[]>(`
-      SELECT
-        HOUR(m.created_at) as hour,
-        DAYOFWEEK(m.created_at) as day_of_week,
-        COUNT(*) as count
-      FROM messages m
-      JOIN conversations c ON m.conversation_id = c.id
-      WHERE m.role = 'model'
-        ${dateFilter}
-        ${projectFilter}
-      GROUP BY HOUR(m.created_at), DAYOFWEEK(m.created_at)
-    `);
-
-    // 7. Generation types breakdown
-    const [generationTypes] = await pool.execute<RowDataPacket[]>(`
-      SELECT
-        CASE
-          WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 'music'
-          WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 'video'
-          WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 'image'
-          WHEN m.quality_tier = 'chirp' THEN 'audio_hd'
-          WHEN m.audio_url IS NOT NULL AND m.audio_url != '' THEN 'audio'
-          ELSE 'text'
-        END as type,
-        COUNT(*) as count,
-        COALESCE(SUM(m.estimated_cost), 0) as cost
-      FROM messages m
-      JOIN conversations c ON m.conversation_id = c.id
-      WHERE m.role = 'model'
-        ${dateFilter}
-        ${projectFilter}
-      GROUP BY type
-    `);
-
-    // 8. Topaz credits for current period
+    // Topaz date filters
     let topazDateFilter = "";
     let topazVideoDateFilter = "";
     if (dateFrom && dateTo) {
@@ -295,7 +140,166 @@ export async function GET(request: NextRequest) {
       topazVideoDateFilter = `AND created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)`;
     }
 
-    const [[topazImageRows], [topazVideoRows]] = await Promise.all([
+    // Run ALL analytics queries in parallel
+    const [
+      [dailyStats],
+      [modelBreakdown],
+      [userBreakdown],
+      [projectBreakdown],
+      [summaryRows],
+      [hourlyDistribution],
+      [generationTypes],
+      [topazImageRows],
+      [topazVideoRows],
+    ] = await Promise.all([
+      // 1. Daily stats for chart
+      pool.execute<DailyStatsRow[]>(`
+        SELECT
+          DATE(m.created_at) as date,
+          COALESCE(SUM(m.tokens_input), 0) as tokens_input,
+          COALESCE(SUM(m.tokens_output), 0) as tokens_output,
+          COALESCE(SUM(m.estimated_cost), 0) as estimated_cost,
+          SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
+          SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
+          SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
+          SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
+          SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
+          COUNT(*) as message_count
+        FROM messages m
+        JOIN conversations c ON m.conversation_id = c.id
+        WHERE m.role = 'model'
+          ${dateFilter}
+          ${projectFilter}
+        GROUP BY DATE(m.created_at)
+        ORDER BY date ASC
+      `),
+      // 2. Model breakdown
+      pool.execute<ModelBreakdownRow[]>(`
+        SELECT
+          mo.id as model_id,
+          mo.display_name as model_name,
+          COALESCE(SUM(m.tokens_input), 0) as tokens_input,
+          COALESCE(SUM(m.tokens_output), 0) as tokens_output,
+          COALESCE(SUM(m.estimated_cost), 0) as estimated_cost,
+          SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
+          SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
+          SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
+          SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
+          SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
+          COUNT(*) as message_count
+        FROM messages m
+        JOIN conversations c ON m.conversation_id = c.id
+        JOIN models mo ON c.model_id = mo.id
+        WHERE m.role = 'model'
+          ${dateFilter}
+          ${projectFilter}
+        GROUP BY mo.id, mo.display_name
+        ORDER BY estimated_cost DESC
+      `),
+      // 3. User breakdown (top 10)
+      pool.execute<UserBreakdownRow[]>(`
+        SELECT
+          u.id as user_id,
+          u.name as user_name,
+          u.email as user_email,
+          COALESCE(SUM(m.tokens_input), 0) as tokens_input,
+          COALESCE(SUM(m.tokens_output), 0) as tokens_output,
+          COALESCE(SUM(m.estimated_cost), 0) as estimated_cost,
+          SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
+          SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
+          SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
+          SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
+          SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
+          COUNT(*) as message_count,
+          COUNT(DISTINCT c.id) as conversation_count
+        FROM messages m
+        JOIN conversations c ON m.conversation_id = c.id
+        JOIN users u ON c.user_id = u.id
+        WHERE m.role = 'model'
+          ${dateFilter}
+          ${projectFilter}
+        GROUP BY u.id, u.name, u.email
+        ORDER BY estimated_cost DESC
+        LIMIT 10
+      `),
+      // 4. Project breakdown
+      pool.execute<ProjectBreakdownRow[]>(`
+        SELECT
+          p.id as project_id,
+          p.title as project_name,
+          cl.name as client_name,
+          COALESCE(SUM(m.tokens_input), 0) as tokens_input,
+          COALESCE(SUM(m.tokens_output), 0) as tokens_output,
+          COALESCE(SUM(m.estimated_cost), 0) as estimated_cost,
+          SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
+          SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
+          SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
+          SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
+          SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
+          COUNT(DISTINCT c.id) as conversation_count
+        FROM messages m
+        JOIN conversations c ON m.conversation_id = c.id
+        LEFT JOIN projects p ON c.project_id = p.id
+        LEFT JOIN clients cl ON p.client_id = cl.id
+        WHERE m.role = 'model'
+          ${dateFilter}
+          ${projectFilter}
+        GROUP BY p.id, p.title, cl.name
+        ORDER BY estimated_cost DESC
+      `),
+      // 5. Period summary
+      pool.execute<PeriodSummaryRow[]>(`
+        SELECT
+          COALESCE(SUM(m.tokens_input), 0) as tokens_input,
+          COALESCE(SUM(m.tokens_output), 0) as tokens_output,
+          COALESCE(SUM(m.estimated_cost), 0) as estimated_cost,
+          SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) as image_count,
+          SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) as video_count,
+          SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) as music_count,
+          SUM(CASE WHEN m.audio_url IS NOT NULL AND m.audio_url != '' AND m.quality_tier != 'chirp' THEN 1 ELSE 0 END) as audio_count,
+          SUM(CASE WHEN m.quality_tier = 'chirp' THEN 1 ELSE 0 END) as audio_hd_count,
+          COUNT(*) as message_count,
+          COUNT(DISTINCT c.id) as conversation_count
+        FROM messages m
+        JOIN conversations c ON m.conversation_id = c.id
+        WHERE m.role = 'model'
+          ${dateFilter}
+          ${projectFilter}
+      `),
+      // 6. Hourly distribution
+      pool.execute<RowDataPacket[]>(`
+        SELECT
+          HOUR(m.created_at) as hour,
+          DAYOFWEEK(m.created_at) as day_of_week,
+          COUNT(*) as count
+        FROM messages m
+        JOIN conversations c ON m.conversation_id = c.id
+        WHERE m.role = 'model'
+          ${dateFilter}
+          ${projectFilter}
+        GROUP BY HOUR(m.created_at), DAYOFWEEK(m.created_at)
+      `),
+      // 7. Generation types breakdown
+      pool.execute<RowDataPacket[]>(`
+        SELECT
+          CASE
+            WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 'music'
+            WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 'video'
+            WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 'image'
+            WHEN m.quality_tier = 'chirp' THEN 'audio_hd'
+            WHEN m.audio_url IS NOT NULL AND m.audio_url != '' THEN 'audio'
+            ELSE 'text'
+          END as type,
+          COUNT(*) as count,
+          COALESCE(SUM(m.estimated_cost), 0) as cost
+        FROM messages m
+        JOIN conversations c ON m.conversation_id = c.id
+        WHERE m.role = 'model'
+          ${dateFilter}
+          ${projectFilter}
+        GROUP BY type
+      `),
+      // 8. Topaz credits
       pool.execute<TopazCreditsRow[]>(`
         SELECT COALESCE(SUM(credits_consumed), 0) as topaz_image_credits
         FROM topaz_edits
@@ -307,6 +311,8 @@ export async function GET(request: NextRequest) {
         WHERE status = 'completed' ${topazVideoDateFilter}
       `),
     ]);
+
+    const currentSummary = summaryRows[0];
     const topazCredits = {
       imageCredits: Number((topazImageRows as TopazCreditsRow[])[0]?.topaz_image_credits || 0),
       videoCredits: Number((topazVideoRows as TopazCreditsRow[])[0]?.topaz_video_credits || 0),

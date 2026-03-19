@@ -88,7 +88,7 @@ export async function GET(request: NextRequest) {
 
     const whereClause = conditions.length > 0 ? "WHERE " + conditions.join(" AND ") : "";
 
-    // Get conversations with stats
+    // Replace correlated subqueries with JOINs for message stats
     const query = `
       SELECT
         c.id,
@@ -105,47 +105,60 @@ export async function GET(request: NextRequest) {
         c.created_at,
         c.updated_at,
         c.deleted_at,
-        (SELECT COUNT(*) FROM messages msg WHERE msg.conversation_id = c.id AND msg.deleted_at IS NULL) as message_count,
-        (SELECT COUNT(*) FROM messages msg WHERE msg.conversation_id = c.id AND msg.deleted_at IS NULL AND (msg.image_url IS NOT NULL OR msg.video_url IS NOT NULL OR msg.audio_url IS NOT NULL OR msg.music_url IS NOT NULL)) as asset_count,
-        (SELECT COALESCE(SUM(msg.estimated_cost), 0) FROM messages msg WHERE msg.conversation_id = c.id) as estimated_cost
+        COALESCE(ms.message_count, 0) as message_count,
+        COALESCE(ms.asset_count, 0) as asset_count,
+        COALESCE(ms.estimated_cost, 0) as estimated_cost
       FROM conversations c
       LEFT JOIN projects p ON c.project_id = p.id
       LEFT JOIN clients cl ON p.client_id = cl.id
       LEFT JOIN users u ON c.user_id = u.id
       LEFT JOIN models m ON c.model_id = m.id
+      LEFT JOIN (
+        SELECT
+          conversation_id,
+          COUNT(CASE WHEN deleted_at IS NULL THEN 1 END) as message_count,
+          COUNT(CASE WHEN deleted_at IS NULL AND (image_url IS NOT NULL OR video_url IS NOT NULL OR audio_url IS NOT NULL OR music_url IS NOT NULL) THEN 1 END) as asset_count,
+          SUM(estimated_cost) as estimated_cost
+        FROM messages
+        GROUP BY conversation_id
+      ) ms ON ms.conversation_id = c.id
       ${whereClause}
       ORDER BY c.updated_at DESC
       LIMIT ? OFFSET ?
     `;
 
     const queryParams = [...params, Number(limit), Number(offset)];
-    const [rows] = await pool.query<ConversationRow[]>(query, queryParams);
 
-    // Count total
-    const countQuery = `
-      SELECT COUNT(*) as total
-      FROM conversations c
-      LEFT JOIN projects p ON c.project_id = p.id
-      LEFT JOIN clients cl ON p.client_id = cl.id
-      LEFT JOIN users u ON c.user_id = u.id
-      ${whereClause}
-    `;
-    const [countRows] = await pool.query<CountRow[]>(countQuery, params);
+    // Run data query, count query, and filter queries in parallel
+    const [
+      [rows],
+      [countRows],
+      [projects],
+      [clients],
+      [users],
+    ] = await Promise.all([
+      pool.query<ConversationRow[]>(query, queryParams),
+      pool.query<CountRow[]>(`
+        SELECT COUNT(*) as total
+        FROM conversations c
+        LEFT JOIN projects p ON c.project_id = p.id
+        LEFT JOIN clients cl ON p.client_id = cl.id
+        LEFT JOIN users u ON c.user_id = u.id
+        ${whereClause}
+      `, params),
+      pool.execute<FilterOption[]>(
+        `SELECT p.id, CASE WHEN c.name IS NOT NULL THEN CONCAT(c.name, ' > ', p.title) ELSE p.title END as name
+         FROM projects p LEFT JOIN clients c ON p.client_id = c.id ORDER BY c.name, p.title`
+      ),
+      pool.execute<FilterOption[]>(
+        "SELECT id, name FROM clients ORDER BY name"
+      ),
+      pool.execute<FilterOption[]>(
+        "SELECT id, name FROM users WHERE name IS NOT NULL ORDER BY name"
+      ),
+    ]);
+
     const total = countRows[0].total;
-
-    // Get filter options
-    const [projects] = await pool.execute<FilterOption[]>(
-      `SELECT p.id, CASE WHEN c.name IS NOT NULL THEN CONCAT(c.name, ' > ', p.title) ELSE p.title END as name
-       FROM projects p LEFT JOIN clients c ON p.client_id = c.id ORDER BY c.name, p.title`
-    );
-
-    const [clients] = await pool.execute<FilterOption[]>(
-      "SELECT id, name FROM clients ORDER BY name"
-    );
-
-    const [users] = await pool.execute<FilterOption[]>(
-      "SELECT id, name FROM users WHERE name IS NOT NULL ORDER BY name"
-    );
 
     return NextResponse.json({
       data: rows,
