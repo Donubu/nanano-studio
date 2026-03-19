@@ -7,8 +7,8 @@ const basePool = mysql.createPool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   waitForConnections: true,
-  connectionLimit: 20,
-  queueLimit: 100,
+  connectionLimit: 50,
+  queueLimit: 250,
   timezone: "-03:00", // Chile (America/Santiago)
   dateStrings: true, // Devolver fechas como strings para mejor control
   // Producción: manejar conexiones perdidas

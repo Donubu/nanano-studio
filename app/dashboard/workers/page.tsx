@@ -173,7 +173,12 @@ export default function WorkersPage() {
   };
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const fetchData = useCallback(async () => {
+  const fetchingRef = useRef(false);
+
+  const fetchData = useCallback(async (isInitial = false) => {
+    // Prevent concurrent fetches (previous one still running)
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
     try {
       const res = await fetch("/api/dashboard/workers");
       if (res.ok) {
@@ -181,15 +186,16 @@ export default function WorkersPage() {
         setData(json);
       }
     } catch {
-      // silent
+      // Keep existing data on error — don't clear the UI
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
+      fetchingRef.current = false;
     }
   }, []);
 
   useEffect(() => {
-    fetchData();
-    const id = setInterval(fetchData, 3000);
+    fetchData(true);
+    const id = setInterval(() => fetchData(false), 5000);
     return () => clearInterval(id);
   }, [fetchData]);
 
