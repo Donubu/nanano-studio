@@ -31,6 +31,14 @@ interface ModelBreakdownRow extends RowDataPacket {
   message_count: number;
 }
 
+interface ModelQualityBreakdownRow extends RowDataPacket {
+  model_id: number;
+  model_name: string;
+  image_size: string;
+  estimated_cost: number;
+  image_count: number;
+}
+
 interface UserBreakdownRow extends RowDataPacket {
   user_id: number;
   user_name: string;
@@ -144,6 +152,7 @@ export async function GET(request: NextRequest) {
     const [
       [dailyStats],
       [modelBreakdown],
+      [modelQualityBreakdown],
       [userBreakdown],
       [projectBreakdown],
       [summaryRows],
@@ -196,7 +205,25 @@ export async function GET(request: NextRequest) {
         GROUP BY mo.id, mo.display_name
         ORDER BY estimated_cost DESC
       `),
-      // 3. User breakdown (top 10)
+      // 2b. Model + resolution breakdown (for images)
+      pool.execute<ModelQualityBreakdownRow[]>(`
+        SELECT
+          mo.id as model_id,
+          mo.display_name as model_name,
+          UPPER(COALESCE(NULLIF(TRIM(m.image_size), ''), '1K')) as image_size,
+          COALESCE(SUM(m.estimated_cost), 0) as estimated_cost,
+          COUNT(*) as image_count
+        FROM messages m
+        JOIN conversations c ON m.conversation_id = c.id
+        JOIN models mo ON c.model_id = mo.id
+        WHERE m.role = 'model'
+          AND m.image_url IS NOT NULL AND m.image_url != ''
+          ${dateFilter}
+          ${projectFilter}
+        GROUP BY mo.id, mo.display_name, UPPER(COALESCE(NULLIF(TRIM(m.image_size), ''), '1K'))
+        ORDER BY mo.display_name, image_size
+      `),
+      // 3. User breakdown
       pool.execute<UserBreakdownRow[]>(`
         SELECT
           u.id as user_id,
@@ -220,7 +247,6 @@ export async function GET(request: NextRequest) {
           ${projectFilter}
         GROUP BY u.id, u.name, u.email
         ORDER BY estimated_cost DESC
-        LIMIT 10
       `),
       // 4. Project breakdown
       pool.execute<ProjectBreakdownRow[]>(`
@@ -348,6 +374,13 @@ export async function GET(request: NextRequest) {
         audioCount: Number(row.audio_count),
         audioHdCount: Number(row.audio_hd_count),
         messageCount: Number(row.message_count),
+      })),
+      modelQualityBreakdown: modelQualityBreakdown.map(row => ({
+        modelId: row.model_id,
+        modelName: row.model_name,
+        imageSize: row.image_size,
+        estimatedCost: Number(row.estimated_cost) * costMultiplier,
+        imageCount: Number(row.image_count),
       })),
       userBreakdown: userBreakdown.map(row => ({
         userId: row.user_id,

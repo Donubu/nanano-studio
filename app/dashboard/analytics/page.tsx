@@ -68,6 +68,14 @@ interface ModelBreakdown {
   messageCount: number;
 }
 
+interface ModelQualityBreakdown {
+  modelId: number;
+  modelName: string;
+  imageSize: string;
+  estimatedCost: number;
+  imageCount: number;
+}
+
 interface UserBreakdown {
   userId: number;
   userName: string;
@@ -132,6 +140,7 @@ interface BudgetStats {
 interface AnalyticsData {
   dailyStats: DailyStat[];
   modelBreakdown: ModelBreakdown[];
+  modelQualityBreakdown: ModelQualityBreakdown[];
   userBreakdown: UserBreakdown[];
   projectBreakdown: ProjectBreakdown[];
   summary: Summary;
@@ -692,28 +701,45 @@ export default function AnalyticsPage() {
           <CardContent>
             <div className="space-y-3">
               {data?.modelBreakdown && data.modelBreakdown.length > 0 ? (
-                data.modelBreakdown.slice(0, 5).map((model) => (
-                  <div key={model.modelId} className="flex items-center justify-between py-2 border-b border-border/30 last:border-0">
-                    <div>
-                      <div className="font-medium text-sm">{model.modelName}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {formatNumber(model.tokensInput + model.tokensOutput)} tokens
+                data.modelBreakdown.map((model) => {
+                  const qualityItems = data.modelQualityBreakdown?.filter(q => q.modelId === model.modelId) || [];
+                  return (
+                    <div key={model.modelId} className="py-2 border-b border-border/30 last:border-0">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-medium text-sm">{model.modelName}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-medium text-green-400">{formatCost(model.estimatedCost)}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {[
+                              model.imageCount > 0 && `${model.imageCount} img`,
+                              model.videoCount > 0 && `${model.videoCount} vid`,
+                              model.musicCount > 0 && `${model.musicCount} mus`,
+                              model.audioCount > 0 && `${model.audioCount} aud`,
+                              model.audioHdCount > 0 && `${model.audioHdCount} hd`,
+                            ].filter(Boolean).join(" / ")}
+                          </div>
+                        </div>
                       </div>
+                      {qualityItems.length > 0 && (
+                        <div className="mt-1.5 ml-3 space-y-0.5">
+                          {qualityItems.map((q) => (
+                            <div key={`${q.modelId}-${q.imageSize}`} className="flex items-center justify-between text-xs text-muted-foreground">
+                              <span className="flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-purple-400/60" />
+                                {q.imageSize}
+                              </span>
+                              <span>
+                                {q.imageCount} img — {formatCost(q.estimatedCost)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <div className="text-right">
-                      <div className="font-medium text-green-400">{formatCost(model.estimatedCost)}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {[
-                          model.imageCount > 0 && `${model.imageCount} img`,
-                          model.videoCount > 0 && `${model.videoCount} vid`,
-                          model.musicCount > 0 && `${model.musicCount} mus`,
-                          model.audioCount > 0 && `${model.audioCount} aud`,
-                          model.audioHdCount > 0 && `${model.audioHdCount} hd`,
-                        ].filter(Boolean).join(" / ")}
-                      </div>
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               ) : (
                 <div className="text-center py-4 text-muted-foreground text-sm">
                   No hay datos
@@ -728,13 +754,13 @@ export default function AnalyticsPage() {
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <Users className="h-4 w-4 text-blue-400" />
-              Top Usuarios
+              Por Usuario
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
               {data?.userBreakdown && data.userBreakdown.length > 0 ? (
-                data.userBreakdown.slice(0, 5).map((user) => (
+                data.userBreakdown.map((user) => (
                   <div key={user.userId} className="flex items-center justify-between py-2 border-b border-border/30 last:border-0">
                     <div>
                       <div className="font-medium text-sm">{user.userName}</div>
@@ -779,7 +805,7 @@ export default function AnalyticsPage() {
           <CardContent>
             <div className="space-y-3">
               {data?.projectBreakdown && data.projectBreakdown.length > 0 ? (
-                data.projectBreakdown.slice(0, 5).map((project) => (
+                data.projectBreakdown.map((project) => (
                   <div key={project.projectId || "no-project"} className="flex items-center justify-between py-2 border-b border-border/30 last:border-0">
                     <div>
                       {project.clientName && (
