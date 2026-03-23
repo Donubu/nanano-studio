@@ -1,6 +1,6 @@
 {
   "name": "nanano",
-  "version": "7.2.30",
+  "version": "7.2.31",
   "private": true,
   "scripts": {
     "dev": "node scripts/bump-version.js && next dev",
