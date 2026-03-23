@@ -10,9 +10,11 @@ export default auth((req) => {
   const isLoginPage = req.nextUrl.pathname === "/login";
   const isAuthRoute = req.nextUrl.pathname.startsWith("/api/auth");
   const isHealthRoute = req.nextUrl.pathname.startsWith("/api/health");
+  const isShareRoute = req.nextUrl.pathname.startsWith("/share");
+  const isShareApiRoute = req.nextUrl.pathname.startsWith("/api/share");
 
-  // Permitir rutas de autenticación y health check
-  if (isAuthRoute || isHealthRoute) {
+  // Permitir rutas de autenticación, health check y compartidos públicos
+  if (isAuthRoute || isHealthRoute || isShareRoute || isShareApiRoute) {
     return NextResponse.next();
   }
 

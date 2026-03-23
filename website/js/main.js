@@ -94,7 +94,7 @@ function initCapabilityTabs() {
  */
 function initScrollReveal() {
   const revealElements = document.querySelectorAll(
-    '.feature-card, .benefit-card, .use-case, .pricing-card, .section-header'
+    '.feature-card, .benefit-card, .use-case, .pricing-card, .section-header, .studio-feature, .studio-preview'
   );
 
   // Add data-reveal attribute

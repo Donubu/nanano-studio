@@ -8,7 +8,7 @@ import {
   Upload, Clock, ChevronUp, RectangleHorizontal, RectangleVertical, Square,
   AlertTriangle, Play, PanelLeft, PanelLeftClose, RotateCcw, SlidersHorizontal, Eye, EyeOff,
   FolderPlus, Folder, ArrowLeft, Pencil, MoreHorizontal, Search, Volume2, Tag,
-  MessageSquare, Brain, Send, ChevronDown, Copy, Check
+  MessageSquare, Brain, Send, ChevronDown, Copy, Check, Share2, Link, ExternalLink
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MessageInput, AttachedFile, MessageInputHandle } from "./message-input";
@@ -273,6 +273,9 @@ export function FullModeWorkspace({
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareState, setShareState] = useState<{ is_shared: boolean; share_url: string | null; visit_count: number } | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<MediaFilter>("all");
   const [format, setFormat] = useState<FullFormat>("image");
@@ -1839,6 +1842,90 @@ export function FullModeWorkspace({
           {hasTexts && <FilterButton active={filter === "texts"} onClick={() => setFilter("texts")} icon={<MessageSquare className="h-4 w-4" />} title={`Textos (${textCount})`} />}
           {hasFavorites && <FilterButton active={filter === "favorites"} onClick={() => setFilter("favorites")} icon={<Star className="h-4 w-4" />} title={`Favoritos (${favoriteCount})`} />}
           <FilterButton active={searchOpen} onClick={() => { setSearchOpen(!searchOpen); if (!searchOpen) requestAnimationFrame(() => searchInputRef.current?.focus()); else setSearchQuery(""); }} icon={<Search className="h-4 w-4" />} title="Buscar" />
+          <div className="relative">
+            <FilterButton active={shareOpen} onClick={async () => {
+              if (!shareOpen) {
+                try {
+                  const res = await fetch(`/api/conversations/${conversationId}/share`);
+                  if (res.ok) setShareState(await res.json());
+                } catch {}
+              }
+              setShareOpen(!shareOpen);
+            }} icon={<Share2 className="h-4 w-4" />} title="Compartir" />
+            {shareOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShareOpen(false)} />
+                <div className="absolute left-full top-0 ml-1 z-50 w-64 bg-card border border-border/50 rounded-lg shadow-xl p-3 space-y-3">
+                  <p className="text-xs font-medium">Compartir Estudio</p>
+                  {shareState?.is_shared ? (
+                    <>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          readOnly
+                          value={shareState.share_url || ""}
+                          className="flex-1 bg-muted rounded px-2 py-1.5 text-[11px] text-foreground outline-none truncate"
+                          onClick={(e) => (e.target as HTMLInputElement).select()}
+                        />
+                        <button
+                          onClick={() => {
+                            if (shareState.share_url) {
+                              navigator.clipboard.writeText(shareState.share_url);
+                              setShareCopied(true);
+                              setTimeout(() => setShareCopied(false), 2000);
+                            }
+                          }}
+                          className="shrink-0 p-1.5 rounded hover:bg-muted transition-colors"
+                          title="Copiar link"
+                        >
+                          {shareCopied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5 text-muted-foreground" />}
+                        </button>
+                        <a
+                          href={shareState.share_url || "#"}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="shrink-0 p-1.5 rounded hover:bg-muted transition-colors"
+                          title="Abrir en nueva pestaña"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
+                        </a>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] text-muted-foreground">{shareState.visit_count} visita{shareState.visit_count !== 1 ? "s" : ""}</span>
+                        <button
+                          onClick={async () => {
+                            await fetch(`/api/conversations/${conversationId}/share`, { method: "DELETE" });
+                            setShareState({ is_shared: false, share_url: null, visit_count: 0 });
+                          }}
+                          className="text-[11px] text-red-400 hover:text-red-300 transition-colors"
+                        >
+                          Dejar de compartir
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-[11px] text-muted-foreground">Genera un link público para que otros vean este estudio en tiempo real.</p>
+                      <button
+                        onClick={async () => {
+                          try {
+                            const res = await fetch(`/api/conversations/${conversationId}/share`, { method: "POST" });
+                            if (res.ok) {
+                              const data = await res.json();
+                              setShareState({ is_shared: true, share_url: data.share_url, visit_count: 0 });
+                            }
+                          } catch {}
+                        }}
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                      >
+                        <Link className="h-3.5 w-3.5" />
+                        Crear link público
+                      </button>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
           {hasDeleted && (
             <>
               <div className="w-5 border-b border-border/50 my-1" />
