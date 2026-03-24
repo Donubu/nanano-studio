@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
+import { z } from "zod";
+import { parseBody } from "@/lib/api-utils";
 
 interface ClientRow extends RowDataPacket {
   id: number;
@@ -61,15 +63,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { name, logo, hidden = false } = body;
+    const createClientSchema = z.object({
+      name: z.string().min(1, "El nombre es requerido").max(255),
+      logo: z.string().url().nullable().optional(),
+      hidden: z.boolean().default(false),
+    });
 
-    if (!name) {
-      return NextResponse.json(
-        { error: "El nombre es requerido" },
-        { status: 400 }
-      );
-    }
+    const parsed = await parseBody(request, createClientSchema);
+    if (parsed.error) return parsed.error;
+    const { name, logo, hidden } = parsed.data;
 
     const [result] = await pool.execute<ResultSetHeader>(
       "INSERT INTO clients (name, logo, hidden) VALUES (?, ?, ?)",

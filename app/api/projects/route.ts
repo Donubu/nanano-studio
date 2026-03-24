@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
+import { z } from "zod";
+import { parseBody, getPagination, paginationMeta } from "@/lib/api-utils";
 
 interface ProjectRow extends RowDataPacket {
   id: number;
@@ -30,6 +32,7 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const clientId = searchParams.get("client_id");
+    const { limit, offset } = getPagination(searchParams);
 
     const clientFilter = clientId ? "AND p.client_id = ?" : "";
     const clientParams = clientId ? [clientId] : [];
@@ -53,22 +56,34 @@ export async function GET(request: NextRequest) {
 
     const hiddenFilter = session.user.role === "admin" ? "" : "AND p.hidden = 0";
 
-    const [rows] = await pool.execute<ProjectRow[]>(`
-      SELECT
-        p.id, p.title, p.description, p.client_id, p.status, p.hidden, p.created_at,
-        c.name as client_name, c.logo as client_logo,
-        0 as generation_count,
-        COALESCE(gen.estimated_cost, 0) as estimated_cost,
-        COALESCE(uc.user_count, 0) as user_count,
-        gen.last_message_at
+    const baseQuery = `
       FROM projects p
       LEFT JOIN clients c ON p.client_id = c.id
       LEFT JOIN (${genSubquery}) gen ON p.id = gen.project_id
       LEFT JOIN (${ucSubquery}) uc ON p.id = uc.project_id
-      WHERE 1=1 ${hiddenFilter} ${clientFilter}
-      ORDER BY gen.last_message_at DESC, p.created_at DESC
-    `, [...clientParams]);
+      WHERE 1=1 ${hiddenFilter} ${clientFilter}`;
 
+    if (limit !== null) {
+      const [[{ total }]] = await pool.execute<(RowDataPacket & { total: number })[]>(
+        `SELECT COUNT(*) as total ${baseQuery}`, [...clientParams]
+      );
+      const [rows] = await pool.execute<ProjectRow[]>(`
+        SELECT p.id, p.title, p.description, p.client_id, p.status, p.hidden, p.created_at,
+          c.name as client_name, c.logo as client_logo, 0 as generation_count,
+          COALESCE(gen.estimated_cost, 0) as estimated_cost, COALESCE(uc.user_count, 0) as user_count,
+          gen.last_message_at
+        ${baseQuery} ORDER BY gen.last_message_at DESC, p.created_at DESC LIMIT ? OFFSET ?
+      `, [...clientParams, limit, offset]);
+      return NextResponse.json({ data: rows, pagination: paginationMeta(total, limit, offset) });
+    }
+
+    const [rows] = await pool.execute<ProjectRow[]>(`
+      SELECT p.id, p.title, p.description, p.client_id, p.status, p.hidden, p.created_at,
+        c.name as client_name, c.logo as client_logo, 0 as generation_count,
+        COALESCE(gen.estimated_cost, 0) as estimated_cost, COALESCE(uc.user_count, 0) as user_count,
+        gen.last_message_at
+      ${baseQuery} ORDER BY gen.last_message_at DESC, p.created_at DESC
+    `, [...clientParams]);
     return NextResponse.json(rows);
   } catch (error) {
     console.error("Error obteniendo proyectos:", error);
@@ -95,15 +110,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 });
     }
 
-    const body = await request.json();
-    const { title, description, client_id, status = "active", hidden = false } = body;
+    const createProjectSchema = z.object({
+      title: z.string().min(1, "El título es requerido").max(500),
+      description: z.string().max(2000).nullable().optional(),
+      client_id: z.number().int().positive().nullable().optional(),
+      status: z.enum(["active", "archived", "paused"]).default("active"),
+      hidden: z.boolean().default(false),
+    });
 
-    if (!title) {
-      return NextResponse.json(
-        { error: "El título es requerido" },
-        { status: 400 }
-      );
-    }
+    const parsed = await parseBody(request, createProjectSchema);
+    if (parsed.error) return parsed.error;
+    const { title, description, client_id, status, hidden } = parsed.data;
 
     const [result] = await pool.execute<ResultSetHeader>(
       "INSERT INTO projects (title, description, client_id, status, hidden) VALUES (?, ?, ?, ?, ?)",

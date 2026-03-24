@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
+import { z } from "zod";
+import { parseBody, getPagination, paginationMeta } from "@/lib/api-utils";
 
 interface UserRow extends RowDataPacket {
   id: number;
@@ -28,14 +30,24 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const includeDeleted = searchParams.get("includeDeleted") === "true";
 
-    let query = "SELECT id, email, name, image, role, cargo, ai_calculator_access, can_create_projects, blocked_at, deleted_at, created_at FROM users";
-    if (!includeDeleted) {
-      query += " WHERE deleted_at IS NULL";
+    const { limit, offset } = getPagination(searchParams);
+
+    const whereClause = includeDeleted ? "" : "WHERE deleted_at IS NULL";
+
+    if (limit !== null) {
+      const [[{ total }]] = await pool.execute<(RowDataPacket & { total: number })[]>(
+        `SELECT COUNT(*) as total FROM users ${whereClause}`
+      );
+      const [rows] = await pool.execute<UserRow[]>(
+        `SELECT id, email, name, image, role, cargo, ai_calculator_access, can_create_projects, blocked_at, deleted_at, created_at FROM users ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+        [limit, offset]
+      );
+      return NextResponse.json({ data: rows, pagination: paginationMeta(total, limit, offset) });
     }
-    query += " ORDER BY created_at DESC";
 
-    const [rows] = await pool.execute<UserRow[]>(query);
-
+    const [rows] = await pool.execute<UserRow[]>(
+      `SELECT id, email, name, image, role, cargo, ai_calculator_access, can_create_projects, blocked_at, deleted_at, created_at FROM users ${whereClause} ORDER BY created_at DESC`
+    );
     return NextResponse.json(rows);
   } catch (error) {
     console.error("Error obteniendo usuarios:", error);
@@ -55,15 +67,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { email, name, role = "user", cargo = "Sin definir", ai_calculator_access = false, can_create_projects = false } = body;
+    const createUserSchema = z.object({
+      email: z.string().email("Email inválido"),
+      name: z.string().max(255).nullable().optional(),
+      role: z.enum(["admin", "user"]).default("user"),
+      cargo: z.string().max(255).default("Sin definir"),
+      ai_calculator_access: z.boolean().default(false),
+      can_create_projects: z.boolean().default(false),
+    });
 
-    if (!email) {
-      return NextResponse.json(
-        { error: "El email es requerido" },
-        { status: 400 }
-      );
-    }
+    const parsed = await parseBody(request, createUserSchema);
+    if (parsed.error) return parsed.error;
+    const { email, name, role, cargo, ai_calculator_access, can_create_projects } = parsed.data;
 
     // Verificar si el email ya existe (incluyendo soft deleted)
     const [existing] = await pool.execute<UserRow[]>(
