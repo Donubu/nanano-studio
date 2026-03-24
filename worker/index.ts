@@ -8,7 +8,7 @@ dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 // Increase undici headers timeout for long-running API calls (4K images ~8 min)
 // Node.js default is 300s which causes UND_ERR_HEADERS_TIMEOUT on 4K images
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-try { const u = require("undici"); u.setGlobalDispatcher(new u.Agent({ headersTimeout: 600000, bodyTimeout: 600000, connectTimeout: 30000 })); console.log("[Worker] Undici timeouts: headers=600s, body=600s"); } catch { console.warn("[Worker] Could not set undici timeouts"); }
+try { const u = require("undici"); u.setGlobalDispatcher(new u.Agent({ headersTimeout: 600000, bodyTimeout: 600000, connectTimeout: 30000 })); } catch { /* undici not available */ }
 
 import { Worker, Job } from "bullmq";
 import Redis from "ioredis";
@@ -21,6 +21,7 @@ import { generateKlingImage, KlingImageConfig } from "@/lib/kling-image";
 import { uploadToS3, generateFileName } from "@/lib/s3";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
 import { ResultSetHeader, RowDataPacket } from "mysql2";
+import { createLogger, classifyError } from "@/lib/logger";
 
 // ============================================
 // CONFIG
@@ -37,6 +38,7 @@ const REDIS_PUB_OPTIONS = {
 };
 import os from "os";
 const WORKER_NAME = process.env.WORKER_NAME || os.hostname() || `worker-${process.pid}`;
+const log = createLogger({ worker: WORKER_NAME });
 
 // ============================================
 // DB POOL (independent from Next.js)
@@ -87,24 +89,22 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
     pubRedis.publish(channel, JSON.stringify(event));
   };
 
-  const jobStartTime = Date.now();
-  console.log(`\n========== [${WORKER_NAME}] Job ${job.id} START @ ${new Date().toISOString()} ==========`);
-  console.log(`  Model: ${data.modelId} (${data.backend || "default"})`);
-  console.log(`  Type: ${data.generationType} | Quality: ${data.qualityTier}`);
-  console.log(`  Conversation: ${data.conversationId} | User: ${data.labels?.user_name || "—"}`);
-  console.log(`  Project: ${data.labels?.project_name || "—"}`);
-  if (data.settings.imageConfig) {
-    console.log(`  Image: ${data.settings.imageConfig.aspectRatio || "—"} @ ${data.settings.imageConfig.imageSize || "—"}`);
-  }
-  if (data.settings.googleSearchEnabled) console.log(`  Google Search: enabled`);
-  if (data.settings.googleImageSearchEnabled) console.log(`  Image Search: enabled`);
-  console.log(`  Temperature: ${data.settings.temperature ?? "—"} | TopP: ${data.settings.topP ?? "—"} | MaxTokens: ${data.settings.maxOutputTokens ?? "—"}`);
-  if (data.settings.thinkingLevel && data.settings.thinkingLevel !== "none") {
-    console.log(`  Thinking: ${data.settings.thinkingLevel} | IncludeThoughts: ${data.settings.includeThoughts ?? false}`);
-  }
-  console.log(`  Content: ${data.content.substring(0, 100)}${data.content.length > 100 ? "..." : ""}`);
-  console.log(`  Messages: ${data.messages.length} | NeedsTitle: ${data.needsTitle}`);
-  console.log(`==========================================\n`);
+  const jobLog = log.child({ jobId: job.id, queue: "stream", conversationId: data.conversationId });
+  const timer = jobLog.time("stream_job_completed");
+
+  jobLog.info("stream_job_start", {
+    model: data.modelId,
+    backend: data.backend || "default",
+    generationType: data.generationType,
+    qualityTier: data.qualityTier,
+    user: data.labels?.user_name,
+    project: data.labels?.project_name,
+    messageCount: data.messages.length,
+    promptLength: data.content.length,
+    googleSearch: !!data.settings.googleSearchEnabled,
+    imageSearch: !!data.settings.googleImageSearchEnabled,
+    thinkingLevel: data.settings.thinkingLevel || "none",
+  });
 
   // Store worker name in job data so dashboard can show which worker handles it
   await job.updateData({ ...data, workerName: WORKER_NAME });
@@ -170,7 +170,7 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
           savedImages.push({ url: saved.url, fileSize: saved.fileSize, mimeType: img.mimeType });
           publish({ type: "image", imageUrl: saved.url, mimeType: img.mimeType, imageIndex: savedImages.length - 1 });
         } catch (err) {
-          console.error("[Worker] Error saving image (non-stream):", err);
+          jobLog.error("image_save_failed", { error: err instanceof Error ? err.message : String(err) });
         }
       }
 
@@ -228,7 +228,7 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
                 savedImages[imageIndex] = { url: saved.url, fileSize: saved.fileSize, mimeType: image.mimeType };
                 publish({ type: "image", imageUrl: saved.url, mimeType: image.mimeType, imageIndex });
               } catch (err) {
-                console.error(`[Worker] Error saving image ${imageIndex}:`, err);
+                jobLog.error("image_save_failed", { imageIndex, error: err instanceof Error ? err.message : String(err) });
               }
             })();
             imageUploadPromises.push(uploadPromise);
@@ -246,7 +246,7 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
                     const saved = await saveGeneratedImage(img, data.conversationId);
                     savedImages.push({ url: saved.url, fileSize: saved.fileSize, mimeType: img.mimeType });
                   } catch (err) {
-                    console.error("[Worker] Error saving final image:", err);
+                    jobLog.error("image_save_failed", { error: err instanceof Error ? err.message : String(err) });
                   }
                 }
               }
@@ -258,7 +258,8 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
             }
           },
           onError: async (error) => {
-            console.error("[Worker] Stream error:", error);
+            const classified = classifyError(error);
+            jobLog.error("stream_generation_error", { errorCategory: classified.category, retryable: classified.retryable, errorMessage: error.message });
             const errorMessage = `Error al generar respuesta: ${error.message}`;
             try {
               const [modelResult] = await pool.execute<ResultSetHeader>(
@@ -270,7 +271,7 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
               }
               publish({ type: "error", message: error.message, id: modelResult.insertId });
             } catch (dbErr) {
-              console.error("[Worker] Error saving error:", dbErr);
+              jobLog.error("stream_db_error_save_failed", { dbError: dbErr instanceof Error ? dbErr.message : String(dbErr) });
               publish({ type: "error", message: error.message });
             }
             rejectJob(error);
@@ -282,7 +283,8 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
       ).catch(rejectJob);
     });
   } catch (error) {
-    console.error("[Worker] Job error:", error);
+    const classified = classifyError(error);
+    jobLog.error("stream_job_failed", { errorCategory: classified.category, retryable: classified.retryable, errorMessage: error instanceof Error ? error.message : "Error desconocido" });
     const errorMessage = error instanceof Error ? error.message : "Error desconocido";
     // Try to save error and notify client (may already be done by onError)
     try {
@@ -400,9 +402,8 @@ async function saveResultsToDB(
       const title = await generateConversationTitle(data.content, data.labels);
       await pool.execute("UPDATE conversations SET title = ? WHERE id = ?", [title, data.conversationId]);
       publish({ type: "title", title });
-      console.log(`[${WORKER_NAME}] Generated title: ${title}`);
     } catch (err) {
-      console.error(`[${WORKER_NAME}] Error generating title:`, err);
+      // title generation is non-critical, don't fail the job
     }
   }
 
@@ -435,13 +436,19 @@ async function processImagenJob(job: Job<ImagenJobData>): Promise<void> {
     pubRedis.publish(channel, JSON.stringify(event));
   };
 
-  console.log(`\n========== [${WORKER_NAME}] Imagen Job ${job.id} ==========`);
-  console.log(`  Model: ${data.modelId} (${data.backend || "default"})`);
-  console.log(`  Resolution: ${data.resolution} | Aspect: ${data.aspectRatio}`);
-  console.log(`  Images: ${data.numberOfImages}`);
-  console.log(`  Conversation: ${data.conversationId} | User: ${data.labels?.user_name || "—"}`);
-  console.log(`  Prompt: ${data.content.substring(0, 100)}${data.content.length > 100 ? "..." : ""}`);
-  console.log(`==========================================\n`);
+  const jobLog = log.child({ jobId: job.id, queue: "imagen", conversationId: data.conversationId });
+  const timer = jobLog.time("imagen_job_completed");
+
+  jobLog.info("imagen_job_start", {
+    model: data.modelId,
+    backend: data.backend || "default",
+    resolution: data.resolution,
+    aspectRatio: data.aspectRatio,
+    numberOfImages: data.numberOfImages,
+    user: data.labels?.user_name,
+    project: data.labels?.project_name,
+    promptLength: data.content.length,
+  });
 
   await job.updateData({ ...data, workerName: WORKER_NAME });
 
@@ -581,11 +588,12 @@ async function processImagenJob(job: Job<ImagenJobData>): Promise<void> {
         const title = await generateConversationTitle(data.content, data.labels);
         await pool.execute("UPDATE conversations SET title = ? WHERE id = ?", [title, data.conversationId]);
         publish({ type: "title", title });
-        console.log(`[${WORKER_NAME}] Generated title: ${title}`);
-      } catch (err) {
-        console.error(`[${WORKER_NAME}] Error generating title:`, err);
+      } catch {
+        // title generation is non-critical
       }
     }
+
+    timer.end({ images: generatedImages.length, totalCost });
 
     publish({
       type: "complete",
@@ -597,7 +605,8 @@ async function processImagenJob(job: Job<ImagenJobData>): Promise<void> {
     });
 
   } catch (error) {
-    console.error(`[${WORKER_NAME}] Imagen job error:`, error);
+    const classified = classifyError(error);
+    jobLog.error("imagen_job_failed", { errorCategory: classified.category, retryable: classified.retryable, errorMessage: error instanceof Error ? error.message : "Error desconocido" });
     const errorMessage = error instanceof Error ? error.message : "Error desconocido";
 
     try {
@@ -608,7 +617,7 @@ async function processImagenJob(job: Job<ImagenJobData>): Promise<void> {
       );
       publish({ type: "error", message: errorMessage, id: data.placeholderIds[0] });
     } catch (dbErr) {
-      console.error(`[${WORKER_NAME}] Error saving error:`, dbErr);
+      jobLog.error("imagen_db_error_save_failed", { dbError: dbErr instanceof Error ? dbErr.message : String(dbErr) });
       publish({ type: "error", message: errorMessage });
     }
 
@@ -622,7 +631,7 @@ async function processImagenJob(job: Job<ImagenJobData>): Promise<void> {
 // START WORKER
 // ============================================
 
-console.log(`[${WORKER_NAME}] Starting with concurrency=${CONCURRENCY}, redis=${REDIS_URL}`);
+log.info("worker_starting", { concurrency: CONCURRENCY, redis: REDIS_URL });
 
 const worker = new Worker<StreamJobData>(
   STREAM_QUEUE_NAME,
@@ -643,7 +652,7 @@ const worker = new Worker<StreamJobData>(
 );
 
 worker.on("completed", async (job) => {
-  console.log(`[${WORKER_NAME}] ✓ Job ${job.id} COMPLETED @ ${new Date().toISOString()}`);
+  log.info("stream_job_completed", { jobId: job.id });
   // Strip heavy data (base64 images in messages) to free Redis memory
   try {
     await job.updateData({
@@ -661,11 +670,12 @@ worker.on("completed", async (job) => {
 });
 
 worker.on("failed", (job, err) => {
-  console.error(`[${WORKER_NAME}] ✗ Job ${job?.id} failed: ${err.message}`);
+  const classified = classifyError(err);
+  log.error("stream_job_failed_final", { jobId: job?.id, errorCategory: classified.category, errorMessage: err.message });
 });
 
 worker.on("error", (err) => {
-  console.error(`[${WORKER_NAME}] Stream error:`, err);
+  log.error("stream_worker_error", { errorMessage: err.message });
 });
 
 // Imagen worker (same process, separate queue)
@@ -688,7 +698,7 @@ const imagenWorker = new Worker<ImagenJobData>(
 );
 
 imagenWorker.on("completed", async (job) => {
-  console.log(`[${WORKER_NAME}] ✓ Imagen job ${job.id} completed`);
+  log.info("imagen_job_completed", { jobId: job.id });
   // Strip heavy data (base64 reference images) to free Redis memory
   try {
     await job.updateData({
@@ -701,18 +711,19 @@ imagenWorker.on("completed", async (job) => {
 });
 
 imagenWorker.on("failed", (job, err) => {
-  console.error(`[${WORKER_NAME}] ✗ Imagen job ${job?.id} failed: ${err.message}`);
+  const classified = classifyError(err);
+  log.error("imagen_job_failed_final", { jobId: job?.id, errorCategory: classified.category, errorMessage: err.message });
 });
 
 imagenWorker.on("error", (err) => {
-  console.error(`[${WORKER_NAME}] Imagen error:`, err);
+  log.error("imagen_worker_error", { errorMessage: err.message });
 });
 
-console.log(`[${WORKER_NAME}] Ready and waiting for jobs (stream + imagen)...`);
+log.info("worker_ready", { queues: ["stream", "imagen"] });
 
 // Graceful shutdown
 process.on("SIGTERM", async () => {
-  console.log("[Worker] SIGTERM received, shutting down...");
+  log.info("worker_shutdown", { signal: "SIGTERM" });
   await worker.close();
   await imagenWorker.close();
   await pool.end();
@@ -720,7 +731,7 @@ process.on("SIGTERM", async () => {
 });
 
 process.on("SIGINT", async () => {
-  console.log("[Worker] SIGINT received, shutting down...");
+  log.info("worker_shutdown", { signal: "SIGINT" });
   await worker.close();
   await imagenWorker.close();
   await pool.end();
