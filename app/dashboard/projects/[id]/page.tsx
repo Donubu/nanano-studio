@@ -957,45 +957,6 @@ export default function ProjectDetailPage() {
                   Agregar
                 </Button>
               </div>
-              {selectedUserId && (
-                <div className="grid grid-cols-4 gap-3 p-3 rounded-lg bg-muted/50 border border-border/50">
-                  {([
-                    { key: "text", label: "Texto", icon: <FileText className="h-3.5 w-3.5 text-green-400" />, color: "text-green-400" },
-                    { key: "image", label: "Imagen", icon: <ImageIcon className="h-3.5 w-3.5 text-blue-400" />, color: "text-blue-400" },
-                    { key: "video", label: "Video", icon: <Video className="h-3.5 w-3.5 text-purple-400" />, color: "text-purple-400" },
-                    { key: "audio", label: "Audio", icon: <Mic className="h-3.5 w-3.5 text-orange-400" />, color: "text-orange-400" },
-                  ] as const).map(({ key, label, icon }) => (
-                    <div key={key} className="space-y-2">
-                      <div className="text-xs font-medium flex items-center gap-1.5">{icon} {label}</div>
-                      {(["normal", "hq"] as const).map((tier) => {
-                        const k = `${key}_${tier}` as LimitKey;
-                        return (
-                          <div key={tier} className="flex items-center gap-1.5">
-                            <span className="text-[10px] text-muted-foreground w-6 uppercase">{tier}</span>
-                            <Input
-                              type="number"
-                              min="1"
-                              value={addLimits[k]}
-                              onChange={(e) => setAddLimits(prev => ({ ...prev, [k]: e.target.value }))}
-                              className="w-16 h-7 text-xs bg-muted border-border/50"
-                              disabled={addUnlimited[k]}
-                            />
-                            <label className="flex items-center gap-0.5 cursor-pointer text-[10px]">
-                              <input
-                                type="checkbox"
-                                checked={addUnlimited[k]}
-                                onChange={(e) => setAddUnlimited(prev => ({ ...prev, [k]: e.target.checked }))}
-                                className="w-3 h-3 rounded accent-primary"
-                              />
-                              <span className="text-muted-foreground">∞</span>
-                            </label>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
 
             {/* Users table */}
@@ -1036,84 +997,12 @@ export default function ProjectDetailPage() {
                           </div>
                         </div>
                         <div className="flex items-center gap-1">
-                          {isEditing ? (
-                            <>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-green-500/10" onClick={() => handleUpdateUserLimit(pu.user_id)} disabled={saving}>
-                                <Check className="h-4 w-4 text-green-400" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEditingUserLimit(null)}>
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </>
-                          ) : (
-                            <>
-                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
-                                setEditingUserLimit(pu.user_id);
-                                const newLimits = {} as Record<LimitKey, string>;
-                                const newUnlimited = {} as Record<LimitKey, boolean>;
-                                for (const t of ["text", "image", "video", "audio"] as const) {
-                                  for (const q of ["normal", "hq"] as const) {
-                                    const k = `${t}_${q}` as LimitKey;
-                                    const dbKey = `max_monthly_${t}_${q}` as keyof ProjectUser;
-                                    const val = (pu[dbKey] as number) || 0;
-                                    newUnlimited[k] = val === 0;
-                                    newLimits[k] = val === 0 ? "10" : val.toString();
-                                  }
-                                }
-                                setEditLimits(newLimits);
-                                setEditUnlimited(newUnlimited);
-                              }}>
-                                <Pencil className="h-4 w-4" />
-                              </Button>
                               <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-red-500/10" onClick={() => handleRemoveUser(pu.user_id)}>
                                 <Trash2 className="h-4 w-4 text-red-400" />
                               </Button>
-                            </>
-                          )}
                         </div>
                       </div>
 
-                      {/* Limits grid */}
-                      <div className="grid grid-cols-4 gap-3">
-                        {limitTypes.map(({ key, label, icon }) => (
-                          <div key={key} className="space-y-1">
-                            <div className="text-[10px] font-medium flex items-center gap-1 text-muted-foreground">{icon} {label}</div>
-                            {(["normal", "hq"] as const).map((tier) => {
-                              const k = `${key}_${tier}` as LimitKey;
-                              const dbKey = `max_monthly_${key}_${tier}` as keyof ProjectUser;
-                              const val = (pu[dbKey] as number) || 0;
-                              return (
-                                <div key={tier} className="flex items-center gap-1">
-                                  <span className="text-[10px] text-muted-foreground w-5 uppercase">{tier}</span>
-                                  {isEditing ? (
-                                    <>
-                                      <Input
-                                        type="number"
-                                        min="1"
-                                        value={editLimits[k]}
-                                        onChange={(e) => setEditLimits(prev => ({ ...prev, [k]: e.target.value }))}
-                                        className="w-14 h-6 text-xs bg-muted border-border/50 px-1.5"
-                                        disabled={editUnlimited[k]}
-                                      />
-                                      <label className="flex items-center gap-0.5 cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          checked={editUnlimited[k]}
-                                          onChange={(e) => setEditUnlimited(prev => ({ ...prev, [k]: e.target.checked }))}
-                                          className="w-3 h-3 rounded accent-primary"
-                                        />
-                                        <span className="text-[10px] text-muted-foreground">∞</span>
-                                      </label>
-                                    </>
-                                  ) : (
-                                    <span className="text-xs tabular-nums">{formatLimit(val)}</span>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ))}
-                      </div>
                     </div>
                   );
                 })}

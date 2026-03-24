@@ -653,17 +653,9 @@ export default function UsersPage() {
                             <div className="text-xs text-muted-foreground">{project.client_name}</div>
                           )}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-1 px-2 py-1 bg-card rounded">
-                            <Zap className="h-3 w-3 text-yellow-400" />
-                            <span className="text-xs">
-                              {project.max_monthly_generations === 0 ? "∞" : project.max_monthly_generations}
-                            </span>
-                          </div>
-                          <Badge variant="outline" className="text-xs">
-                            {project.role}
-                          </Badge>
-                        </div>
+                        <Badge variant="outline" className="text-xs">
+                          {project.role}
+                        </Badge>
                       </div>
                     ))}
                   </div>

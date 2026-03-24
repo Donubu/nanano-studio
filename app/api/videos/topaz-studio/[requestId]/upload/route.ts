@@ -33,6 +33,16 @@ export async function POST(
       }, { status: 400 });
     }
 
+    // Validar que la URL sea de Topaz S3 (prevenir SSRF)
+    try {
+      const url = new URL(uploadUrl);
+      if (url.protocol !== "https:" || !url.hostname.endsWith(".amazonaws.com")) {
+        return NextResponse.json({ error: "URL de upload no válida" }, { status: 400 });
+      }
+    } catch {
+      return NextResponse.json({ error: "URL de upload malformada" }, { status: 400 });
+    }
+
     // Upload to Topaz S3
     const videoBuffer = await videoFile.arrayBuffer();
 

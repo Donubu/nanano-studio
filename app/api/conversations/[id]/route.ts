@@ -299,11 +299,12 @@ export async function DELETE(
     }
 
     const { id } = await params;
+    const isAdmin = session.user.role === "admin";
 
-    // Soft delete: marcar como eliminada en lugar de borrar
+    // Soft delete: solo el dueño o admin puede eliminar
     const [result] = await pool.execute<ResultSetHeader>(
-      `UPDATE conversations SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL`,
-      [id]
+      `UPDATE conversations SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL ${isAdmin ? "" : "AND user_id = ?"}`,
+      isAdmin ? [id] : [id, session.user.id]
     );
 
     if (result.affectedRows === 0) {
