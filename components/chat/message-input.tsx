@@ -51,6 +51,7 @@ export interface MessageInputHandle {
 const MAX_FILES = 5;
 const MAX_FILES_ASSET_MODE = 10;
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+const MAX_TOTAL_SIZE = 100 * 1024 * 1024; // 100MB combined limit
 
 // Tipos de archivo soportados
 const SUPPORTED_TYPES = {
@@ -155,6 +156,10 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   }, [attachedFiles.length, assetMode, preselectedImages]);
 
   const maxFiles = maxFilesOverride ?? (assetMode ? MAX_FILES_ASSET_MODE : MAX_FILES);
+
+  // Total file size check (100MB combined limit for Gemini API)
+  const totalFileSize = useMemo(() => attachedFiles.reduce((sum, f) => sum + (f.size || 0), 0), [attachedFiles]);
+  const exceedsTotalSize = totalFileSize > MAX_TOTAL_SIZE;
 
   // Expose imperative method to inject files from outside
   useImperativeHandle(ref, () => ({
@@ -428,7 +433,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
 
   const handleSend = useCallback(async () => {
     const hasContent = message.trim() || attachedFiles.length > 0 || preselectedImages.length > 0;
-    if (!hasContent || disabled) return;
+    if (!hasContent || disabled || exceedsTotalSize) return;
 
     // Convert preselected images to AttachedFile format
     const preselectedAsFiles: AttachedFile[] = [];
@@ -461,7 +466,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     setAttachedFiles([]);
     setNoContext(false); // Reset after sending
     nextAssetId.current = 1; // Reset asset counter
-  }, [message, attachedFiles, preselectedImages, disabled, onSend, noContext]);
+  }, [message, attachedFiles, preselectedImages, disabled, exceedsTotalSize, onSend, noContext]);
 
   // Handle textarea changes for @ mention detection
   const handleMessageChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -699,6 +704,13 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
           </div>
         )}
 
+        {/* Total size warning */}
+        {exceedsTotalSize && (
+          <div className="text-xs text-red-700 dark:text-red-400 bg-red-100 dark:bg-red-950/30 border border-red-300 dark:border-red-800/30 rounded-md px-3 py-1.5">
+            Los archivos adjuntos suman <strong>{formatFileSize(totalFileSize)}</strong>, superando el límite de 100 MB. Reduce el peso o cantidad de archivos para poder enviar.
+          </div>
+        )}
+
         {/* Input y botones */}
         <div className="flex gap-2 items-end">
           {/* Botón de adjuntar archivo */}
@@ -854,7 +866,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
           {/* Botón enviar */}
           <Button
             onClick={handleSend}
-            disabled={disabled || (!message.trim() && attachedFiles.length === 0 && preselectedImages.length === 0)}
+            disabled={disabled || exceedsTotalSize || (!message.trim() && attachedFiles.length === 0 && preselectedImages.length === 0)}
             className="shrink-0 h-10"
           >
             {disabled ? (

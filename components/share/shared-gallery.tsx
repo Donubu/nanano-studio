@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Download, X, ChevronLeft, ChevronRight, Image as ImageIcon, Video, MessageSquare, LayoutGrid, Filter, Folder, ArrowLeft } from "lucide-react";
+import { Download, X, ChevronLeft, ChevronRight, Image as ImageIcon, Video, MessageSquare, LayoutGrid, Filter, Folder, ArrowLeft, Sun, Moon, Monitor, Volume2, VolumeX, Play } from "lucide-react";
+import { useTheme } from "next-themes";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { VideoPlayer } from "@/components/chat/video-player";
 
 // ---- Types ----
@@ -100,12 +103,21 @@ export function SharedGallery({ token, initialData }: SharedGalleryProps) {
   const [title] = useState(initialData.title);
   const [visitCount, setVisitCount] = useState(initialData.visit_count || 0);
   const [filter, setFilter] = useState<"all" | "images" | "videos" | "texts">("all");
-  const [gridSize, setGridSize] = useState<"S" | "M" | "L">(() => {
-    if (typeof window !== "undefined") {
-      return (localStorage.getItem("shared-grid-size") as "S" | "M" | "L") || "M";
-    }
-    return "M";
-  });
+  const [gridSize, setGridSize] = useState<"S" | "M" | "L">("M");
+  const { theme, setTheme } = useTheme();
+  const [hoverAudio, setHoverAudio] = useState(false);
+
+  // Hydrate from localStorage after mount to avoid SSR mismatch
+  useEffect(() => {
+    const savedSize = localStorage.getItem("shared-grid-size") as "S" | "M" | "L" | null;
+    if (savedSize && ["S", "M", "L"].includes(savedSize)) setGridSize(savedSize);
+    if (localStorage.getItem("shared-hover-audio") === "true") setHoverAudio(true);
+  }, []);
+  const toggleHoverAudio = () => {
+    const next = !hoverAudio;
+    setHoverAudio(next);
+    localStorage.setItem("shared-hover-audio", String(next));
+  };
   const [selectedItem, setSelectedItem] = useState<Generation | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const latestTimestamp = useRef<string>(
@@ -261,17 +273,7 @@ export function SharedGallery({ token, initialData }: SharedGalleryProps) {
               <LayoutGrid className="h-3.5 w-3.5" />
               Estudio
             </div>
-            {activeCollection ? (
-              <div className="flex items-center gap-1.5 min-w-0">
-                <button onClick={closeCollection} className="text-muted-foreground hover:text-foreground transition-colors">
-                  <ArrowLeft className="h-4 w-4" />
-                </button>
-                <Folder className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <span className="text-sm font-medium truncate">{activeCollection.name}</span>
-              </div>
-            ) : (
-              <h1 className="text-sm font-medium truncate">{title || "Estudio Compartido"}</h1>
-            )}
+            <h1 className="text-sm font-medium truncate">{title || "Estudio Compartido"}</h1>
             <span className="text-xs text-muted-foreground shrink-0">
               {generations.length} generaciones
             </span>
@@ -298,6 +300,38 @@ export function SharedGallery({ token, initialData }: SharedGalleryProps) {
                   {size}
                 </button>
               ))}
+            </div>
+            {/* Audio on hover */}
+            <button
+              onClick={toggleHoverAudio}
+              className={`p-1.5 rounded-md transition-colors ${hoverAudio ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+              title={hoverAudio ? "Audio en hover: ON" : "Audio en hover: OFF"}
+            >
+              {hoverAudio ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+            </button>
+            {/* Theme toggle */}
+            <div className="flex items-center border rounded-md overflow-hidden">
+              <button
+                onClick={() => setTheme("light")}
+                className={`p-1.5 transition-colors ${theme === "light" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+                title="Claro"
+              >
+                <Sun className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => setTheme("dark")}
+                className={`p-1.5 transition-colors ${theme === "dark" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+                title="Oscuro"
+              >
+                <Moon className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => setTheme("system")}
+                className={`p-1.5 transition-colors ${theme === "system" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+                title="Sistema"
+              >
+                <Monitor className="h-3.5 w-3.5" />
+              </button>
             </div>
           </div>
         </div>
@@ -332,6 +366,22 @@ export function SharedGallery({ token, initialData }: SharedGalleryProps) {
         </div>
       </div>
 
+      {/* Collection breadcrumb */}
+      {activeCollection && (
+        <div className="border-b bg-card/50 px-4 py-2 shrink-0">
+          <div className="max-w-screen-2xl mx-auto flex items-center gap-2">
+            <button onClick={closeCollection} className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <Folder className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-sm font-medium truncate">{activeCollection.name}</span>
+            <span className="text-xs text-muted-foreground">
+              {collectionItems.length} {collectionItems.length === 1 ? "item" : "items"}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Gallery Grid */}
       <div className="flex-1 overflow-y-auto p-4">
         <div className="max-w-screen-2xl mx-auto">
@@ -347,7 +397,7 @@ export function SharedGallery({ token, initialData }: SharedGalleryProps) {
                 if (activeCollection) {
                   // Inside a collection: just show filtered items
                   return filtered.map((gen, index) => (
-                    <GridItemCard key={gen.id} gen={gen} index={index} rowHeight={rowHeight} onOpen={openModal} />
+                    <GridItemCard key={gen.id} gen={gen} index={index} rowHeight={rowHeight} hoverAudio={hoverAudio} onOpen={openModal} />
                   ));
                 }
 
@@ -375,15 +425,15 @@ export function SharedGallery({ token, initialData }: SharedGalleryProps) {
                         ) : (
                           <div className="absolute inset-0 bg-gradient-to-br from-amber-500/10 to-orange-500/10" />
                         )}
-                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/30">
-                          <Folder className="h-6 w-6 text-amber-400" />
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/40 group-hover:bg-black/20 transition-colors">
+                          <Folder className="h-10 w-10 text-amber-400" />
                           <span className="text-xs font-medium text-white text-center px-2 line-clamp-2">{col.name}</span>
                           <span className="text-[10px] text-white/60">{col.item_count} item{col.item_count !== 1 ? "s" : ""}</span>
                         </div>
                       </div>
                     );
                   }
-                  return <GridItemCard key={entry.data.id} gen={entry.data} index={entry.index} rowHeight={rowHeight} onOpen={openModal} />;
+                  return <GridItemCard key={entry.data.id} gen={entry.data} index={entry.index} rowHeight={rowHeight} hoverAudio={hoverAudio} onOpen={openModal} />;
                 });
               })()}
               {/* Fallback for non-interleaved filtered items when there are no collections */}
@@ -430,8 +480,8 @@ export function SharedGallery({ token, initialData }: SharedGalleryProps) {
 
 // ---- Grid Item ----
 
-function GridItemCard({ gen, index, rowHeight, onOpen }: {
-  gen: Generation; index: number; rowHeight: number;
+function GridItemCard({ gen, index, rowHeight, hoverAudio, onOpen }: {
+  gen: Generation; index: number; rowHeight: number; hoverAudio?: boolean;
   onOpen: (i: number, g: Generation) => void;
 }) {
   const ratio = getAspectRatio(gen);
@@ -445,13 +495,13 @@ function GridItemCard({ gen, index, rowHeight, onOpen }: {
       onMouseEnter={(e) => {
         if (gen.type === "video") {
           const v = e.currentTarget.querySelector("video");
-          if (v) v.play();
+          if (v) { if (hoverAudio) v.muted = false; v.play(); }
         }
       }}
       onMouseLeave={(e) => {
         if (gen.type === "video") {
           const v = e.currentTarget.querySelector("video");
-          if (v) { v.pause(); v.currentTime = 0; }
+          if (v) { v.pause(); v.currentTime = 0; v.muted = true; }
         }
       }}
     >
@@ -490,7 +540,16 @@ function GridItemCard({ gen, index, rowHeight, onOpen }: {
         />
       ) : null}
 
-      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
+      <div className="absolute inset-0 bg-black/20 group-hover:bg-black/0 transition-colors" />
+
+      {/* Play icon for videos */}
+      {gen.type === "video" && gen.status !== "generating" && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-70 group-hover:opacity-0 transition-opacity">
+          <div className="p-2 rounded-full bg-black/50">
+            <Play className="h-5 w-5 text-white fill-white" />
+          </div>
+        </div>
+      )}
 
       {gen.tags.length > 0 && (
         <div className="absolute top-1.5 left-1.5 flex flex-wrap gap-1">
@@ -552,9 +611,9 @@ function SharedModal({
       className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
       onClick={onClose}
     >
+      <div className="relative max-w-3xl w-full mx-14" onClick={(e) => e.stopPropagation()}>
       <div
-        className="relative bg-card rounded-xl border max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
+        className="bg-card rounded-xl border w-full max-h-[85vh] flex flex-col overflow-hidden"
       >
         {/* Modal header */}
         <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
@@ -627,8 +686,8 @@ function SharedModal({
           )}
 
           {gen.type === "text" && gen.text_content && (
-            <div className="bg-muted/50 rounded-lg p-4 mb-4 max-h-[60vh] overflow-y-auto">
-              <p className="text-sm whitespace-pre-wrap leading-relaxed">{gen.text_content}</p>
+            <div className="bg-muted/50 rounded-lg p-4 mb-4 max-h-[60vh] overflow-y-auto prose prose-sm dark:prose-invert max-w-none text-[14px] leading-relaxed">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{gen.text_content}</ReactMarkdown>
             </div>
           )}
 
@@ -649,11 +708,12 @@ function SharedModal({
           </div>
         </div>
 
+      </div>
         {/* Navigation arrows */}
         {onPrev && (
           <button
             onClick={onPrev}
-            className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
+            className="absolute -left-12 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/15 border border-white/30 text-white hover:bg-white/25 transition-colors"
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
@@ -661,12 +721,13 @@ function SharedModal({
         {onNext && (
           <button
             onClick={onNext}
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
+            className="absolute -right-12 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/15 border border-white/30 text-white hover:bg-white/25 transition-colors"
           >
             <ChevronRight className="h-5 w-5" />
           </button>
         )}
       </div>
+
     </div>
   );
 }
