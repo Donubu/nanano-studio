@@ -1991,7 +1991,7 @@ export function FullModeWorkspace({
         </div>
 
         {/* Media grid */}
-        <div ref={gridRef} className="flex-1 overflow-y-auto p-4 pb-36">
+        <div ref={gridRef} className="flex-1 overflow-y-auto p-4 pb-48">
           {/* Search bar */}
           {searchOpen && (
             <div className="flex items-center gap-2 mb-3">
@@ -2233,40 +2233,57 @@ export function FullModeWorkspace({
 
           {/* Pagination controls */}
           {!activeCollectionId && totalFilteredCount > 20 && (
-            <div className="flex items-center justify-between px-2 py-3 text-xs text-muted-foreground">
-              <div className="flex items-center gap-2">
-                <span>Mostrar:</span>
+            <div className="relative z-30 mx-auto mt-4 mb-2 flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm px-4 py-3 shadow-sm">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-muted-foreground mr-1">Mostrar:</span>
                 {[20, 50, 150, 200, 0].map(size => (
                   <button
                     key={size}
                     onClick={() => setPageSize(size)}
-                    className={`px-2 py-1 rounded ${pageSize === size ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${pageSize === size ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-muted text-muted-foreground"}`}
                   >
                     {size === 0 ? "Todas" : size}
                   </button>
                 ))}
               </div>
               {pageSize > 0 && totalPages > 1 && (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
                   <button
                     onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
                     disabled={currentPage === 0}
-                    className="px-2 py-1 rounded hover:bg-muted disabled:opacity-30"
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                   >
                     ← Anterior
                   </button>
-                  <span>{currentPage + 1} / {totalPages} ({totalFilteredCount})</span>
+                  <div className="flex items-center gap-1.5 text-sm font-medium tabular-nums">
+                    <input
+                      type="number"
+                      min={1}
+                      max={totalPages}
+                      value={currentPage + 1}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        if (val >= 1 && val <= totalPages) setCurrentPage(val - 1);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                      }}
+                      className="w-12 text-center rounded-md border border-border bg-muted/50 px-1 py-1 text-sm tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <span className="text-muted-foreground">/ {totalPages}</span>
+                    <span className="text-muted-foreground text-xs">({totalFilteredCount})</span>
+                  </div>
                   <button
                     onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
                     disabled={currentPage >= totalPages - 1}
-                    className="px-2 py-1 rounded hover:bg-muted disabled:opacity-30"
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                   >
                     Siguiente →
                   </button>
                 </div>
               )}
               {pageSize > 0 && totalPages <= 1 && (
-                <span>{totalFilteredCount} items</span>
+                <span className="text-sm text-muted-foreground">{totalFilteredCount} items</span>
               )}
             </div>
           )}
