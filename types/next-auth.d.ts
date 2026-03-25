@@ -6,6 +6,7 @@ declare module "next-auth" {
       id: number;
       role: string;
       canCreateProjects: boolean;
+      hasPersonalSpace: boolean;
     } & DefaultSession["user"];
   }
 
@@ -13,6 +14,7 @@ declare module "next-auth" {
     id: number;
     role: string;
     canCreateProjects: boolean;
+    hasPersonalSpace: boolean;
   }
 }
 
@@ -21,5 +23,6 @@ declare module "next-auth/jwt" {
     id: number;
     role: string;
     canCreateProjects: boolean;
+    hasPersonalSpace: boolean;
   }
 }

@@ -10,6 +10,7 @@ interface UserRow extends RowDataPacket {
   image: string | null;
   role: string;
   can_create_projects: number;
+  has_personal_space: number;
 }
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
@@ -50,13 +51,14 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (account && user) {
         try {
           const [rows] = await pool.execute<UserRow[]>(
-            "SELECT id, role, can_create_projects FROM users WHERE email = ?",
+            "SELECT id, role, can_create_projects, has_personal_space FROM users WHERE email = ?",
             [user.email]
           );
           if (rows.length > 0) {
             token.id = rows[0].id;
             token.role = rows[0].role;
             token.canCreateProjects = rows[0].can_create_projects === 1;
+            token.hasPersonalSpace = rows[0].has_personal_space === 1;
           }
         } catch (error) {
           console.error("Error en jwt callback:", error);

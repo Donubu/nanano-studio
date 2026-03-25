@@ -27,7 +27,7 @@ export async function GET() {
     if (isAdmin) {
       // Admin ve todos los clientes incluyendo hidden
       const [rows] = await pool.execute<ClientRow[]>(
-        `SELECT c.id, c.name, c.logo, c.hidden, c.default_project_id, c.created_at,
+        `SELECT c.id, c.name, c.logo, c.hidden, c.is_internal, c.default_project_id, c.created_at,
           (SELECT COUNT(*) FROM projects WHERE client_id = c.id) as project_count
          FROM clients c
          ORDER BY c.name ASC`
@@ -35,13 +35,19 @@ export async function GET() {
       return NextResponse.json(rows);
     }
 
-    // Usuario normal: ve todos los clientes no-hidden
+    // Usuario normal: ve clientes no-hidden + cliente interno si tiene espacio personal
+    const userId = session.user.id;
     const [rows] = await pool.execute<ClientRow[]>(
-      `SELECT c.id, c.name, c.logo, c.hidden, c.default_project_id, c.created_at,
-        (SELECT COUNT(*) FROM projects WHERE client_id = c.id AND hidden = 0) as project_count
+      `SELECT c.id, c.name, c.logo, c.hidden, c.is_internal, c.default_project_id, c.created_at,
+        (SELECT COUNT(*) FROM projects WHERE client_id = c.id AND (hidden = 0 OR (is_personal = 1 AND owner_user_id = ?))) as project_count
        FROM clients c
        WHERE c.hidden = 0
-       ORDER BY c.name ASC`
+         OR (c.is_internal = 1 AND EXISTS(
+           SELECT 1 FROM projects p
+           WHERE p.client_id = c.id AND p.is_personal = 1 AND p.owner_user_id = ?
+         ))
+       ORDER BY c.name ASC`,
+      [userId, userId]
     );
 
     return NextResponse.json(rows);
@@ -67,19 +73,27 @@ export async function POST(request: NextRequest) {
       name: z.string().min(1, "El nombre es requerido").max(255),
       logo: z.string().url().nullable().optional(),
       hidden: z.boolean().default(false),
+      is_internal: z.boolean().default(false),
     });
 
     const parsed = await parseBody(request, createClientSchema);
     if (parsed.error) return parsed.error;
-    const { name, logo, hidden } = parsed.data;
+    const { name, logo, hidden, is_internal } = parsed.data;
+
+    // Solo 1 cliente puede ser interno
+    if (is_internal) {
+      await pool.execute<ResultSetHeader>(
+        "UPDATE clients SET is_internal = 0 WHERE is_internal = 1"
+      );
+    }
 
     const [result] = await pool.execute<ResultSetHeader>(
-      "INSERT INTO clients (name, logo, hidden) VALUES (?, ?, ?)",
-      [name, logo || null, hidden ? 1 : 0]
+      "INSERT INTO clients (name, logo, hidden, is_internal) VALUES (?, ?, ?, ?)",
+      [name, logo || null, hidden ? 1 : 0, is_internal ? 1 : 0]
     );
 
     return NextResponse.json(
-      { id: result.insertId, name, logo, hidden },
+      { id: result.insertId, name, logo, hidden, is_internal },
       { status: 201 }
     );
   } catch (error) {

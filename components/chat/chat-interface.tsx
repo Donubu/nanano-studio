@@ -151,6 +151,8 @@ interface Project {
     generation_count: number;
     last_message_at: string | null;
     created_at: string;
+    is_personal?: boolean;
+    owner_user_id?: number | null;
 }
 
 interface FavoriteProject {
@@ -160,6 +162,7 @@ interface FavoriteProject {
     client_name: string | null;
     client_logo: string | null;
     generation_count: number;
+    is_personal?: number;
     created_at: string;
 }
 
@@ -4633,18 +4636,29 @@ export function ChatInterface() {
                                                             className="border-b border-border/30 last:border-0 hover:bg-accent/50 cursor-pointer transition-colors"
                                                         >
                                                             <td className="pl-3 pr-0 py-3 w-10">
-                                                                <button
-                                                                    onClick={(e) => { e.stopPropagation(); toggleProjectFavorite(fp.id); }}
-                                                                    className="shrink-0 text-yellow-400 hover:text-muted-foreground transition-colors"
-                                                                    title="Quitar de favoritos"
-                                                                >
-                                                                    <Star className="h-4 w-4 fill-yellow-400" />
-                                                                </button>
+                                                                {fp.is_personal ? (
+                                                                    <span className="shrink-0 text-blue-400">
+                                                                        <Lock className="h-4 w-4" />
+                                                                    </span>
+                                                                ) : (
+                                                                    <button
+                                                                        onClick={(e) => { e.stopPropagation(); toggleProjectFavorite(fp.id); }}
+                                                                        className="shrink-0 text-yellow-400 hover:text-muted-foreground transition-colors"
+                                                                        title="Quitar de favoritos"
+                                                                    >
+                                                                        <Star className="h-4 w-4 fill-yellow-400" />
+                                                                    </button>
+                                                                )}
                                                             </td>
                                                             <td className="px-4 py-3">
                                                                 <div className="flex items-center gap-2">
                                                                     <Folder className="h-4 w-4 text-primary/70 shrink-0" />
                                                                     <span className="font-medium">{fp.title}</span>
+                                                                    {!!fp.is_personal && (
+                                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                                                            Espacio personal privado
+                                                                        </span>
+                                                                    )}
                                                                 </div>
                                                             </td>
                                                             <td className="px-4 py-3">
@@ -4729,72 +4743,85 @@ export function ChatInterface() {
                                     </div>
                                 ) : (
                                     <div className="bg-card rounded-xl border border-border/50 overflow-hidden">
-                                        <table className="w-full">
-                                            <thead>
-                                                <tr className="border-b border-border/50 text-left">
-                                                    <th className="w-10"></th>
-                                                    <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Nombre</th>
-                                                    <th className="px-4 py-3 text-xs font-medium text-muted-foreground text-center">Generaciones</th>
-                                                    <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Fecha creación</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {(() => {
-                                                    const selectedClient = clients.find(c => c.id === selectedClientId);
-                                                    const defaultProjId = selectedClient?.default_project_id;
-                                                    return [...projects]
-                                                        .sort((a, b) => {
-                                                            // Default project always first
-                                                            if (defaultProjId) {
-                                                                if (a.id === defaultProjId) return -1;
-                                                                if (b.id === defaultProjId) return 1;
-                                                            }
-                                                            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-                                                        })
-                                                        .map((project) => {
-                                                        const isDefault = project.id === defaultProjId;
-                                                        const isFav = favoriteProjectIds.has(project.id);
-                                                        return (
-                                                            <tr
-                                                                key={project.id}
-                                                                onClick={() => setSelectedProjectId(project.id)}
-                                                                className={cn(
-                                                                    "border-b border-border/30 last:border-0 transition-colors",
-                                                                    "hover:bg-accent/50 cursor-pointer",
-                                                                    isDefault && "bg-yellow-500/5"
-                                                                )}
-                                                            >
-                                                                <td className="pl-3 pr-0 py-3 w-10">
-                                                                    <button
-                                                                        onClick={(e) => { e.stopPropagation(); toggleProjectFavorite(project.id); }}
-                                                                        className="shrink-0 text-muted-foreground hover:text-yellow-500 transition-colors"
-                                                                        title={isFav ? "Quitar de favoritos" : "Agregar a favoritos"}
-                                                                    >
-                                                                        <Star className={cn("h-4 w-4", isFav && "fill-yellow-400 text-yellow-400")} />
-                                                                    </button>
-                                                                </td>
-                                                                <td className="px-4 py-3">
-                                                                    <div className="flex items-center gap-2">
-                                                                        {isDefault ? (
-                                                                            <Pin className="h-4 w-4 text-yellow-500 fill-yellow-500 shrink-0" />
+                                        {(() => {
+                                            const allPersonal = projects.length > 0 && projects.every(p => p.is_personal);
+                                            const selectedClient = clients.find(c => c.id === selectedClientId);
+                                            const defaultProjId = selectedClient?.default_project_id;
+                                            const sorted = [...projects].sort((a, b) => {
+                                                if (defaultProjId) {
+                                                    if (a.id === defaultProjId) return -1;
+                                                    if (b.id === defaultProjId) return 1;
+                                                }
+                                                return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+                                            });
+                                            return (
+                                                <table className="w-full">
+                                                    <thead>
+                                                        <tr className="border-b border-border/50 text-left">
+                                                            <th className="w-10"></th>
+                                                            <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Nombre</th>
+                                                            {!allPersonal && (
+                                                                <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Fecha creación</th>
+                                                            )}
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {sorted.map((project) => {
+                                                            const isDefault = project.id === defaultProjId;
+                                                            const isFav = favoriteProjectIds.has(project.id);
+                                                            return (
+                                                                <tr
+                                                                    key={project.id}
+                                                                    onClick={() => setSelectedProjectId(project.id)}
+                                                                    className={cn(
+                                                                        "border-b border-border/30 last:border-0 transition-colors",
+                                                                        "hover:bg-accent/50 cursor-pointer",
+                                                                        isDefault && "bg-yellow-500/5"
+                                                                    )}
+                                                                >
+                                                                    <td className="pl-3 pr-0 py-3 w-10">
+                                                                        {!!project.is_personal ? (
+                                                                            <span className="shrink-0 text-blue-400">
+                                                                                <Lock className="h-4 w-4" />
+                                                                            </span>
                                                                         ) : (
-                                                                            <Folder className="h-4 w-4 text-primary/70 shrink-0" />
+                                                                            <button
+                                                                                onClick={(e) => { e.stopPropagation(); toggleProjectFavorite(project.id); }}
+                                                                                className="shrink-0 text-muted-foreground hover:text-yellow-500 transition-colors"
+                                                                                title={isFav ? "Quitar de favoritos" : "Agregar a favoritos"}
+                                                                            >
+                                                                                <Star className={cn("h-4 w-4", isFav && "fill-yellow-400 text-yellow-400")} />
+                                                                            </button>
                                                                         )}
-                                                                        <span className={cn("font-medium", isDefault && "text-yellow-500")}>{project.title}</span>
-                                                                    </div>
-                                                                </td>
-                                                                <td className="px-4 py-3 text-center text-sm text-muted-foreground">
-                                                                    {project.generation_count}
-                                                                </td>
-                                                                <td className="px-4 py-3 text-sm text-muted-foreground">
-                                                                    {formatDateLocal(project.created_at)}
-                                                                </td>
-                                                            </tr>
-                                                        );
-                                                    });
-                                                })()}
-                                            </tbody>
-                                        </table>
+                                                                    </td>
+                                                                    <td className="px-4 py-3">
+                                                                        <div className="flex items-center gap-2">
+                                                                            {isDefault ? (
+                                                                                <Pin className="h-4 w-4 text-yellow-500 fill-yellow-500 shrink-0" />
+                                                                            ) : (
+                                                                                <Folder className="h-4 w-4 text-primary/70 shrink-0" />
+                                                                            )}
+                                                                            <span className={cn("font-medium", isDefault && "text-yellow-500")}>{project.title}</span>
+                                                                            {!!project.is_personal && (
+                                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                                                                    <Lock className="h-2.5 w-2.5" />
+                                                                                    Espacio personal privado
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                    </td>
+                                                                    {!allPersonal && (
+                                                                        <td className="px-4 py-3 text-sm text-muted-foreground">
+                                                                            {formatDateLocal(project.created_at)}
+                                                                        </td>
+                                                                    )}
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            );
+                                        })()}
                                     </div>
                                 )}
                             </>

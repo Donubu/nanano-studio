@@ -4,6 +4,7 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { z } from "zod";
 import { parseBody, getPagination, paginationMeta } from "@/lib/api-utils";
+import { createPersonalSpace } from "@/lib/personal-space";
 
 interface UserRow extends RowDataPacket {
   id: number;
@@ -39,14 +40,14 @@ export async function GET(request: NextRequest) {
         `SELECT COUNT(*) as total FROM users ${whereClause}`
       );
       const [rows] = await pool.execute<UserRow[]>(
-        `SELECT id, email, name, image, role, cargo, ai_calculator_access, can_create_projects, blocked_at, deleted_at, created_at FROM users ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+        `SELECT id, email, name, image, role, cargo, ai_calculator_access, can_create_projects, has_personal_space, blocked_at, deleted_at, created_at FROM users ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
         [limit, offset]
       );
       return NextResponse.json({ data: rows, pagination: paginationMeta(total, limit, offset) });
     }
 
     const [rows] = await pool.execute<UserRow[]>(
-      `SELECT id, email, name, image, role, cargo, ai_calculator_access, can_create_projects, blocked_at, deleted_at, created_at FROM users ${whereClause} ORDER BY created_at DESC`
+      `SELECT id, email, name, image, role, cargo, ai_calculator_access, can_create_projects, has_personal_space, blocked_at, deleted_at, created_at FROM users ${whereClause} ORDER BY created_at DESC`
     );
     return NextResponse.json(rows);
   } catch (error) {
@@ -74,11 +75,12 @@ export async function POST(request: NextRequest) {
       cargo: z.string().max(255).default("Sin definir"),
       ai_calculator_access: z.boolean().default(false),
       can_create_projects: z.boolean().default(false),
+      has_personal_space: z.boolean().default(false),
     });
 
     const parsed = await parseBody(request, createUserSchema);
     if (parsed.error) return parsed.error;
-    const { email, name, role, cargo, ai_calculator_access, can_create_projects } = parsed.data;
+    const { email, name, role, cargo, ai_calculator_access, can_create_projects, has_personal_space } = parsed.data;
 
     // Verificar si el email ya existe (incluyendo soft deleted)
     const [existing] = await pool.execute<UserRow[]>(
@@ -90,11 +92,22 @@ export async function POST(request: NextRequest) {
       if (existing[0].deleted_at) {
         // Restaurar usuario eliminado
         await pool.execute<ResultSetHeader>(
-          "UPDATE users SET name = ?, role = ?, cargo = ?, ai_calculator_access = ?, can_create_projects = ?, deleted_at = NULL, blocked_at = NULL WHERE id = ?",
-          [name || null, role, cargo, ai_calculator_access ? 1 : 0, can_create_projects ? 1 : 0, existing[0].id]
+          "UPDATE users SET name = ?, role = ?, cargo = ?, ai_calculator_access = ?, can_create_projects = ?, has_personal_space = ?, deleted_at = NULL, blocked_at = NULL WHERE id = ?",
+          [name || null, role, cargo, ai_calculator_access ? 1 : 0, can_create_projects ? 1 : 0, has_personal_space ? 1 : 0, existing[0].id]
         );
+
+        // Crear espacio personal si se activa
+        if (has_personal_space) {
+          try {
+            await createPersonalSpace(existing[0].id, name || email);
+          } catch (e) {
+            // No bloquear la creación del usuario si falla el espacio personal
+            console.error("Error creando espacio personal:", e);
+          }
+        }
+
         return NextResponse.json(
-          { id: existing[0].id, email, name, role, cargo, ai_calculator_access, restored: true },
+          { id: existing[0].id, email, name, role, cargo, ai_calculator_access, has_personal_space, restored: true },
           { status: 200 }
         );
       }
@@ -105,12 +118,21 @@ export async function POST(request: NextRequest) {
     }
 
     const [result] = await pool.execute<ResultSetHeader>(
-      "INSERT INTO users (email, name, role, cargo, ai_calculator_access, can_create_projects) VALUES (?, ?, ?, ?, ?, ?)",
-      [email, name || null, role, cargo, ai_calculator_access ? 1 : 0, can_create_projects ? 1 : 0]
+      "INSERT INTO users (email, name, role, cargo, ai_calculator_access, can_create_projects, has_personal_space) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [email, name || null, role, cargo, ai_calculator_access ? 1 : 0, can_create_projects ? 1 : 0, has_personal_space ? 1 : 0]
     );
 
+    // Crear espacio personal si se activa
+    if (has_personal_space) {
+      try {
+        await createPersonalSpace(result.insertId, name || email);
+      } catch (e) {
+        console.error("Error creando espacio personal:", e);
+      }
+    }
+
     return NextResponse.json(
-      { id: result.insertId, email, name, role, cargo, ai_calculator_access },
+      { id: result.insertId, email, name, role, cargo, ai_calculator_access, has_personal_space },
       { status: 201 }
     );
   } catch (error) {

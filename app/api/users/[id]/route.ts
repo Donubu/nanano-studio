@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
+import { createPersonalSpace } from "@/lib/personal-space";
 
 interface UserRow extends RowDataPacket {
   id: number;
@@ -40,7 +41,7 @@ export async function GET(
     const { id } = await params;
 
     const [rows] = await pool.execute<UserRow[]>(
-      "SELECT id, email, name, image, role, cargo, ai_calculator_access, can_create_projects, blocked_at, deleted_at, created_at FROM users WHERE id = ?",
+      "SELECT id, email, name, image, role, cargo, ai_calculator_access, can_create_projects, has_personal_space, blocked_at, deleted_at, created_at FROM users WHERE id = ?",
       [id]
     );
 
@@ -91,11 +92,11 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
-    const { email, name, role, cargo, ai_calculator_access, can_create_projects } = body;
+    const { email, name, role, cargo, ai_calculator_access, can_create_projects, has_personal_space } = body;
 
     // Verificar que el usuario existe
     const [existing] = await pool.execute<UserRow[]>(
-      "SELECT id, deleted_at FROM users WHERE id = ?",
+      "SELECT id, name, email, has_personal_space, deleted_at FROM users WHERE id = ?",
       [id]
     );
 
@@ -128,7 +129,8 @@ export async function PUT(
         role = COALESCE(?, role),
         cargo = COALESCE(?, cargo),
         ai_calculator_access = COALESCE(?, ai_calculator_access),
-        can_create_projects = COALESCE(?, can_create_projects)
+        can_create_projects = COALESCE(?, can_create_projects),
+        has_personal_space = COALESCE(?, has_personal_space)
       WHERE id = ?`,
       [
         email || null,
@@ -137,9 +139,23 @@ export async function PUT(
         cargo || null,
         ai_calculator_access !== undefined ? (ai_calculator_access ? 1 : 0) : null,
         can_create_projects !== undefined ? (can_create_projects ? 1 : 0) : null,
+        has_personal_space !== undefined ? (has_personal_space ? 1 : 0) : null,
         id,
       ]
     );
+
+    // Crear espacio personal si se está activando (no tenía antes)
+    if (has_personal_space && !existing[0].has_personal_space) {
+      try {
+        const userName = name || existing[0].name || existing[0].email;
+        await createPersonalSpace(Number(id), userName);
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : "Error desconocido";
+        return NextResponse.json(
+          { success: true, warning: `Usuario actualizado pero no se pudo crear el espacio personal: ${message}` }
+        );
+      }
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -54,7 +54,14 @@ export async function GET(request: NextRequest) {
       GROUP BY project_id
     `;
 
-    const hiddenFilter = session.user.role === "admin" ? "" : "AND p.hidden = 0";
+    const isAdmin = session.user.role === "admin";
+    const userId = session.user.id;
+
+    // Admin ve todo; usuarios ven no-hidden + sus proyectos personales
+    const hiddenFilter = isAdmin
+      ? ""
+      : "AND (p.hidden = 0 OR (p.is_personal = 1 AND p.owner_user_id = ?))";
+    const hiddenParams = isAdmin ? [] : [userId];
 
     const baseQuery = `
       FROM projects p
@@ -63,27 +70,29 @@ export async function GET(request: NextRequest) {
       LEFT JOIN (${ucSubquery}) uc ON p.id = uc.project_id
       WHERE 1=1 ${hiddenFilter} ${clientFilter}`;
 
+    const baseParams = [...hiddenParams, ...clientParams];
+
     if (limit !== null) {
       const [[{ total }]] = await pool.execute<(RowDataPacket & { total: number })[]>(
-        `SELECT COUNT(*) as total ${baseQuery}`, [...clientParams]
+        `SELECT COUNT(*) as total ${baseQuery}`, [...baseParams]
       );
       const [rows] = await pool.execute<ProjectRow[]>(`
-        SELECT p.id, p.title, p.description, p.client_id, p.status, p.hidden, p.created_at,
+        SELECT p.id, p.title, p.description, p.client_id, p.status, p.hidden, p.is_personal, p.owner_user_id, p.created_at,
           c.name as client_name, c.logo as client_logo, 0 as generation_count,
           COALESCE(gen.estimated_cost, 0) as estimated_cost, COALESCE(uc.user_count, 0) as user_count,
           gen.last_message_at
         ${baseQuery} ORDER BY gen.last_message_at DESC, p.created_at DESC LIMIT ? OFFSET ?
-      `, [...clientParams, limit, offset]);
+      `, [...baseParams, limit, offset]);
       return NextResponse.json({ data: rows, pagination: paginationMeta(total, limit, offset) });
     }
 
     const [rows] = await pool.execute<ProjectRow[]>(`
-      SELECT p.id, p.title, p.description, p.client_id, p.status, p.hidden, p.created_at,
+      SELECT p.id, p.title, p.description, p.client_id, p.status, p.hidden, p.is_personal, p.owner_user_id, p.created_at,
         c.name as client_name, c.logo as client_logo, 0 as generation_count,
         COALESCE(gen.estimated_cost, 0) as estimated_cost, COALESCE(uc.user_count, 0) as user_count,
         gen.last_message_at
       ${baseQuery} ORDER BY gen.last_message_at DESC, p.created_at DESC
-    `, [...clientParams]);
+    `, [...baseParams]);
     return NextResponse.json(rows);
   } catch (error) {
     console.error("Error obteniendo proyectos:", error);

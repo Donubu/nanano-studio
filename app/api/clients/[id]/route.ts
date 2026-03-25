@@ -24,7 +24,7 @@ export async function GET(
     const { id } = await params;
 
     const [rows] = await pool.execute<ClientRow[]>(
-      "SELECT id, name, logo, hidden, default_project_id, created_at FROM clients WHERE id = ?",
+      "SELECT id, name, logo, hidden, is_internal, default_project_id, created_at FROM clients WHERE id = ?",
       [id]
     );
 
@@ -59,7 +59,7 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
-    const { name, logo, hidden, default_project_id } = body;
+    const { name, logo, hidden, default_project_id, is_internal } = body;
 
     const [existing] = await pool.execute<ClientRow[]>(
       "SELECT id FROM clients WHERE id = ?",
@@ -70,6 +70,14 @@ export async function PUT(
       return NextResponse.json(
         { error: "Cliente no encontrado" },
         { status: 404 }
+      );
+    }
+
+    // Solo 1 cliente puede ser interno
+    if (is_internal === true) {
+      await pool.execute<ResultSetHeader>(
+        "UPDATE clients SET is_internal = 0 WHERE is_internal = 1 AND id != ?",
+        [id]
       );
     }
 
@@ -91,6 +99,10 @@ export async function PUT(
     if (default_project_id !== undefined) {
       updates.push("default_project_id = ?");
       values.push(default_project_id || null);
+    }
+    if (is_internal !== undefined) {
+      updates.push("is_internal = ?");
+      values.push(is_internal ? 1 : 0);
     }
 
     if (updates.length > 0) {

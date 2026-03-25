@@ -20,7 +20,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, Loader2, Upload, Building2, Eye, EyeOff, Star } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Upload, Building2, Eye, EyeOff, Star, Home } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import Image from "next/image";
 import { formatDateLocal } from "@/lib/utils";
 
@@ -29,6 +30,7 @@ interface Client {
   name: string;
   logo: string | null;
   hidden: boolean;
+  is_internal: boolean;
   default_project_id: number | null;
   created_at: string;
   project_count: number;
@@ -47,7 +49,7 @@ export default function ClientsPage() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [deletingClient, setDeletingClient] = useState<Client | null>(null);
-  const [formData, setFormData] = useState({ name: "", logo: "", hidden: false, default_project_id: null as number | null });
+  const [formData, setFormData] = useState({ name: "", logo: "", hidden: false, is_internal: false, default_project_id: null as number | null });
   const [clientProjects, setClientProjects] = useState<ProjectOption[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -86,7 +88,7 @@ export default function ClientsPage() {
 
   const openCreateDialog = () => {
     setEditingClient(null);
-    setFormData({ name: "", logo: "", hidden: false, default_project_id: null });
+    setFormData({ name: "", logo: "", hidden: false, is_internal: false, default_project_id: null });
     setClientProjects([]);
     setError("");
     setIsDialogOpen(true);
@@ -95,7 +97,7 @@ export default function ClientsPage() {
   const openEditDialog = (e: React.MouseEvent, client: Client) => {
     e.stopPropagation();
     setEditingClient(client);
-    setFormData({ name: client.name, logo: client.logo || "", hidden: !!client.hidden, default_project_id: client.default_project_id });
+    setFormData({ name: client.name, logo: client.logo || "", hidden: !!client.hidden, is_internal: !!client.is_internal, default_project_id: client.default_project_id });
     setError("");
     fetchClientProjects(client.id);
     setIsDialogOpen(true);
@@ -259,6 +261,12 @@ export default function ClientsPage() {
                   <TableCell className="font-medium">
                     <span className="flex items-center gap-2">
                       {client.name}
+                      {!!client.is_internal && (
+                        <Badge variant="outline" className="text-xs border-blue-500/30 text-blue-400 gap-1">
+                          <Home className="h-3 w-3" />
+                          Interno
+                        </Badge>
+                      )}
                       {!!client.hidden && (
                         <span title="Oculto"><EyeOff className="h-4 w-4 text-orange-400" /></span>
                       )}
@@ -398,6 +406,25 @@ export default function ClientsPage() {
                 </label>
                 <span className="text-xs text-muted-foreground">
                   (Solo visible para administradores)
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="client-internal"
+                  checked={formData.is_internal}
+                  onChange={(e) =>
+                    setFormData({ ...formData, is_internal: e.target.checked })
+                  }
+                  className="rounded border-border/50"
+                />
+                <label htmlFor="client-internal" className="text-sm font-medium flex items-center gap-1.5">
+                  <Home className="h-3.5 w-3.5 text-blue-400" />
+                  Cliente Interno
+                </label>
+                <span className="text-xs text-muted-foreground">
+                  (Espacios personales de usuarios se crean aqui)
                 </span>
               </div>
 

@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, Loader2, Eye, Ban, RotateCcw, Zap, FolderOpen, FolderPlus, Calculator } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Eye, Ban, RotateCcw, Zap, FolderOpen, FolderPlus, Calculator, Home } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { formatDateLocal } from "@/lib/utils";
 
@@ -33,6 +33,7 @@ interface User {
   cargo: string;
   ai_calculator_access: number;
   can_create_projects: number;
+  has_personal_space: number;
   blocked_at: string | null;
   deleted_at: string | null;
   created_at: string;
@@ -65,6 +66,7 @@ export default function UsersPage() {
     cargo: "Sin definir",
     ai_calculator_access: false,
     can_create_projects: false,
+    has_personal_space: false,
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -92,7 +94,7 @@ export default function UsersPage() {
 
   const openCreateDialog = () => {
     setEditingUser(null);
-    setFormData({ email: "", name: "", role: "user", cargo: "Sin definir", ai_calculator_access: false, can_create_projects: false });
+    setFormData({ email: "", name: "", role: "user", cargo: "Sin definir", ai_calculator_access: false, can_create_projects: false, has_personal_space: false });
     setError("");
     setIsDialogOpen(true);
   };
@@ -106,6 +108,7 @@ export default function UsersPage() {
       cargo: user.cargo || "Sin definir",
       ai_calculator_access: !!user.ai_calculator_access,
       can_create_projects: !!user.can_create_projects,
+      has_personal_space: !!user.has_personal_space,
     });
     setError("");
     setIsDialogOpen(true);
@@ -505,6 +508,21 @@ export default function UsersPage() {
                   Puede crear proyectos
                 </label>
               </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="has_personal_space"
+                  checked={formData.has_personal_space}
+                  onChange={(e) =>
+                    setFormData({ ...formData, has_personal_space: e.target.checked })
+                  }
+                  className="h-4 w-4 rounded border-border/50"
+                />
+                <label htmlFor="has_personal_space" className="text-sm font-medium flex items-center gap-2">
+                  <Home className="h-4 w-4 text-blue-400" />
+                  Espacio Personal
+                </label>
+              </div>
             </div>
             <DialogFooter>
               <Button
@@ -601,7 +619,7 @@ export default function UsersPage() {
               </div>
 
               {/* Cargo y accesos */}
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="bg-muted rounded-lg p-3">
                   <div className="text-xs text-muted-foreground mb-1">Cargo</div>
                   <div className="text-sm font-medium">{selectedUser.cargo || "Sin definir"}</div>
@@ -623,6 +641,17 @@ export default function UsersPage() {
                     <FolderPlus className="h-3.5 w-3.5" />
                     {selectedUser.can_create_projects ? (
                       <span className="text-green-400">Activado</span>
+                    ) : (
+                      <span className="text-muted-foreground">Desactivado</span>
+                    )}
+                  </div>
+                </div>
+                <div className="bg-muted rounded-lg p-3">
+                  <div className="text-xs text-muted-foreground mb-1">Espacio Personal</div>
+                  <div className="text-sm font-medium flex items-center gap-1.5">
+                    <Home className="h-3.5 w-3.5" />
+                    {selectedUser.has_personal_space ? (
+                      <span className="text-blue-400">Activado</span>
                     ) : (
                       <span className="text-muted-foreground">Desactivado</span>
                     )}

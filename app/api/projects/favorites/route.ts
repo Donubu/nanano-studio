@@ -10,6 +10,7 @@ interface FavoriteProjectRow extends RowDataPacket {
   client_name: string | null;
   client_logo: string | null;
   generation_count: number;
+  is_personal: number;
   created_at: string;
 }
 
@@ -22,14 +23,22 @@ export async function GET() {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 
+    const userId = session.user.id;
+
+    // User-favorited projects (non-hidden) + personal project always included
     const [rows] = await pool.execute<FavoriteProjectRow[]>(`
       SELECT
         p.id, p.title, p.client_id,
         c.name as client_name, c.logo as client_logo,
         COALESCE(gen.generation_count, 0) as generation_count,
+        p.is_personal,
         p.created_at
-      FROM user_favorite_projects ufp
-      JOIN projects p ON ufp.project_id = p.id
+      FROM (
+        SELECT project_id, created_at as fav_created_at FROM user_favorite_projects WHERE user_id = ?
+        UNION
+        SELECT id as project_id, created_at as fav_created_at FROM projects WHERE is_personal = 1 AND owner_user_id = ?
+      ) src
+      JOIN projects p ON src.project_id = p.id
       LEFT JOIN clients c ON p.client_id = c.id
       LEFT JOIN (
         SELECT project_id, COUNT(*) as generation_count
@@ -37,9 +46,9 @@ export async function GET() {
         WHERE deleted_at IS NULL
         GROUP BY project_id
       ) gen ON p.id = gen.project_id
-      WHERE ufp.user_id = ? AND p.hidden = 0
-      ORDER BY ufp.created_at DESC
-    `, [session.user.id]);
+      WHERE p.hidden = 0 OR (p.is_personal = 1 AND p.owner_user_id = ?)
+      ORDER BY p.is_personal DESC, src.fav_created_at DESC
+    `, [userId, userId, userId]);
 
     return NextResponse.json(rows);
   } catch (error) {
