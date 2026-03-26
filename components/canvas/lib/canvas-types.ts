@@ -79,9 +79,40 @@ export interface StaticImageGroupNodeData extends BaseNodeData {
   images: { url: string; caption?: string }[];
 }
 
+// --- Params Nodes (presets) ---
+
+export interface ParamsTextNodeData extends BaseNodeData {
+  type: "params-text";
+  modelId?: number;
+  temperature?: number;
+  maxOutputTokens?: number;
+  systemInstruction?: string;
+  thinkingLevel?: string;
+  outputAsPrompt?: boolean;
+}
+
+export interface ParamsImageNodeData extends BaseNodeData {
+  type: "params-image";
+  modelId?: number;
+  aspectRatio: string;
+  resolution: string;
+  negativePrompt?: string;
+  numberOfImages?: number;
+}
+
+export interface ParamsVideoNodeData extends BaseNodeData {
+  type: "params-video";
+  modelId?: number;
+  duration: number;
+  aspectRatio: string;
+  resolution: string;
+  audioEnabled: boolean;
+  negativePrompt?: string;
+}
+
 // --- Union Types ---
-export type CanvasNodeData = TextNodeData | ImageNodeData | VideoNodeData | NoteNodeData | StaticTextNodeData | StaticImageNodeData | StaticImageGroupNodeData;
-export type CanvasNodeType = "text" | "image" | "video" | "note" | "static-text" | "static-image" | "static-image-group";
+export type CanvasNodeData = TextNodeData | ImageNodeData | VideoNodeData | NoteNodeData | StaticTextNodeData | StaticImageNodeData | StaticImageGroupNodeData | ParamsTextNodeData | ParamsImageNodeData | ParamsVideoNodeData;
+export type CanvasNodeType = "text" | "image" | "video" | "note" | "static-text" | "static-image" | "static-image-group" | "params-text" | "params-image" | "params-video";
 
 export type TextNode = Node<TextNodeData, "text">;
 export type ImageNode = Node<ImageNodeData, "image">;
@@ -90,7 +121,10 @@ export type NoteNode = Node<NoteNodeData, "note">;
 export type StaticTextNode = Node<StaticTextNodeData, "static-text">;
 export type StaticImageNode = Node<StaticImageNodeData, "static-image">;
 export type StaticImageGroupNode = Node<StaticImageGroupNodeData, "static-image-group">;
-export type CanvasNode = TextNode | ImageNode | VideoNode | NoteNode | StaticTextNode | StaticImageNode | StaticImageGroupNode;
+export type ParamsTextNode = Node<ParamsTextNodeData, "params-text">;
+export type ParamsImageNode = Node<ParamsImageNodeData, "params-image">;
+export type ParamsVideoNode = Node<ParamsVideoNodeData, "params-video">;
+export type CanvasNode = TextNode | ImageNode | VideoNode | NoteNode | StaticTextNode | StaticImageNode | StaticImageGroupNode | ParamsTextNode | ParamsImageNode | ParamsVideoNode;
 
 export type CanvasEdge = Edge;
 
@@ -104,6 +138,8 @@ export const HANDLE_IDS = {
   INPUT_FIRST_FRAME: "input-first-frame",
   INPUT_LAST_FRAME: "input-last-frame",
   INPUT_MEDIA: "input-media",
+  INPUT_PARAMS: "input-params",
+  OUTPUT_PARAMS: "output-params",
 } as const;
 
 // --- Default configs for new nodes ---
@@ -175,6 +211,37 @@ export function getDefaultNodeData(type: CanvasNodeType): CanvasNodeData {
         label: "Galería",
         status: "completed",
         images: [],
+      };
+    case "params-text":
+      return {
+        ...base,
+        type: "params-text",
+        label: "Params Texto",
+        status: "completed",
+        temperature: 1.0,
+        maxOutputTokens: 8192,
+        outputAsPrompt: true,
+      };
+    case "params-image":
+      return {
+        ...base,
+        type: "params-image",
+        label: "Params Imagen",
+        status: "completed",
+        aspectRatio: "16:9",
+        resolution: "1K",
+        numberOfImages: 1,
+      };
+    case "params-video":
+      return {
+        ...base,
+        type: "params-video",
+        label: "Params Video",
+        status: "completed",
+        duration: 8,
+        aspectRatio: "16:9",
+        resolution: "720p",
+        audioEnabled: true,
       };
   }
 }

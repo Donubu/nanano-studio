@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { Handle, Position, type NodeProps, useReactFlow } from "@xyflow/react";
 import { ImageIcon, Loader2, AlertCircle } from "lucide-react";
 import { HANDLE_IDS, type ImageNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
@@ -16,6 +16,7 @@ const statusColors: Record<string, string> = {
 export const ImageNodeComponent = memo(function ImageNode({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as ImageNodeData;
   const status = nodeData.status || "idle";
+  const { updateNodeData } = useReactFlow();
 
   return (
     <div
@@ -29,7 +30,7 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected }
         position={Position.Left}
         id={HANDLE_IDS.INPUT_PROMPT}
         className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background"
-        style={{ top: "30%" }}
+        style={{ top: "22%" }}
         title="Prompt input"
       />
       <Handle
@@ -37,15 +38,23 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected }
         position={Position.Left}
         id={HANDLE_IDS.INPUT_REFERENCE}
         className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background"
-        style={{ top: "70%" }}
+        style={{ top: "55%" }}
         title="Reference image"
+      />
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={HANDLE_IDS.INPUT_PARAMS}
+        className="!w-3 !h-3 !border-2 !border-background"
+        style={{ top: "85%", backgroundColor: "#fc0" }}
+        title="Parámetros"
       />
 
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
         <ImageIcon className="h-3.5 w-3.5 text-purple-400 shrink-0" />
         <AIBadge />
-        <span className="text-xs font-medium flex-1 truncate">{nodeData.label || "Imagen"}</span>
+        <input value={nodeData.label || ""} onChange={(e) => updateNodeData(id, { ...nodeData, label: e.target.value })} placeholder="Imagen" className="text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate placeholder:text-muted-foreground/50" />
         <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
           {nodeData.modelName && <span className="truncate max-w-[80px]">{nodeData.modelName}</span>}
           <span>{nodeData.aspectRatio}</span>

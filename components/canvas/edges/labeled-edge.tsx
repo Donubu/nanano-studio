@@ -15,6 +15,7 @@ const HANDLE_LABELS: Record<string, string> = {
   [HANDLE_IDS.INPUT_FIRST_FRAME]: "FIRST",
   [HANDLE_IDS.INPUT_LAST_FRAME]: "LAST",
   [HANDLE_IDS.INPUT_MEDIA]: "MEDIA",
+  [HANDLE_IDS.INPUT_PARAMS]: "PARAMS",
 };
 
 const HANDLE_COLORS: Record<string, string> = {
@@ -23,6 +24,7 @@ const HANDLE_COLORS: Record<string, string> = {
   [HANDLE_IDS.INPUT_FIRST_FRAME]: "bg-background border-purple-500/40",
   [HANDLE_IDS.INPUT_LAST_FRAME]: "bg-background border-purple-500/40",
   [HANDLE_IDS.INPUT_MEDIA]: "bg-background text-emerald-400 border-emerald-500/40",
+  [HANDLE_IDS.INPUT_PARAMS]: "bg-background border-yellow-400/40",
 };
 
 // Labels with dual-color for image-related handles
@@ -37,6 +39,9 @@ const HANDLE_DUAL_LABEL: Record<string, { text: string; color: string }[]> = {
   ],
   [HANDLE_IDS.INPUT_REFERENCE]: [
     { text: "REF", color: "text-purple-400" },
+  ],
+  [HANDLE_IDS.INPUT_PARAMS]: [
+    { text: "PARAMS", color: "text-yellow-400" },
   ],
 };
 

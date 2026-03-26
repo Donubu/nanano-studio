@@ -1,18 +1,20 @@
 "use client";
 
-import { X, Play, Trash2, MessageSquare, ImageIcon, Video, Loader2, Lock, Unlock } from "lucide-react";
+import { X, Play, Trash2, MessageSquare, ImageIcon, Video, Loader2, Lock, Unlock, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { Node } from "@xyflow/react";
-import type { CanvasNodeData, TextNodeData, ImageNodeData, VideoNodeData } from "../lib/canvas-types";
+import type { CanvasNodeData, TextNodeData, ImageNodeData, VideoNodeData, HANDLE_IDS } from "../lib/canvas-types";
+import { HANDLE_IDS as HANDLES } from "../lib/canvas-types";
 import type { CanvasGenerationConfig, CanvasModel } from "../canvas-workspace";
 
 interface NodeConfigPanelProps {
   node: Node;
+  nodes: Node[];
   generationConfig: CanvasGenerationConfig[];
-  edges: Array<{ source: string; target: string }>;
+  edges: Array<{ source: string; target: string; targetHandle?: string | null }>;
   onUpdateData: (nodeId: string, updates: Partial<CanvasNodeData>) => void;
   onDelete: (nodeId: string) => void;
   onExecute: (nodeId: string) => void;
@@ -41,6 +43,7 @@ const typeToGenType: Record<string, string> = {
 
 export function NodeConfigPanel({
   node,
+  nodes,
   generationConfig,
   edges,
   onUpdateData,
@@ -54,6 +57,13 @@ export function NodeConfigPanel({
   const Icon = typeIcons[type] || MessageSquare;
   const isGenerating = data.status === "generating";
   const isLocked = data.locked === true;
+
+  // Check if a params node is connected
+  const paramsEdge = edges.find((e) => e.target === node.id && e.targetHandle === HANDLES.INPUT_PARAMS);
+  const paramsNode = paramsEdge ? nodes.find((n) => n.id === paramsEdge.source) : null;
+  const paramsData = paramsNode?.data as Record<string, unknown> | null;
+  const hasParams = !!paramsData;
+  const isReadOnly = isLocked || hasParams;
 
   // Get models for this node type from generation config
   const genType = typeToGenType[type];
@@ -97,26 +107,21 @@ export function NodeConfigPanel({
       </div>
 
       {/* Locked banner */}
-      {isLocked && (
+      {isLocked && !hasParams && (
         <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 text-amber-500 text-xs">
           <Lock className="h-3 w-3" /> Nodo bloqueado
+        </div>
+      )}
+      {/* Params connected banner */}
+      {hasParams && (
+        <div className="flex items-center gap-2 px-4 py-2 text-xs" style={{ backgroundColor: "rgba(255,204,0,0.1)", color: "#fc0" }}>
+          <Settings className="h-3 w-3" /> Parámetros externos ({paramsNode?.data ? (paramsNode.data as Record<string,unknown>).label as string : "Params"})
         </div>
       )}
 
       {/* Content */}
       <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${isLocked ? "opacity-50 pointer-events-none" : ""}`}>
-        {/* Label */}
-        <div className="space-y-1.5">
-          <Label className="text-xs">Nombre</Label>
-          <Input
-            value={data.label || ""}
-            onChange={(e) => onUpdateData(node.id, { label: e.target.value } as Partial<CanvasNodeData>)}
-            placeholder="Nombre del nodo"
-            className="h-8 text-sm"
-          />
-        </div>
-
-        {/* Prompt */}
+        {/* Prompt - always editable (unless locked) */}
         <div className="space-y-1.5">
           <Label className="text-xs">Prompt</Label>
           <Textarea
@@ -127,41 +132,59 @@ export function NodeConfigPanel({
           />
         </div>
 
-        {/* Model selector */}
-        {availableModels.length > 0 && (
+        {/* Negative prompt - always editable for image/video (unless locked) */}
+        {(type === "image" || type === "video") && (
           <div className="space-y-1.5">
-            <Label className="text-xs">Modelo</Label>
-            <select
-              value={nodeData.modelId || ""}
-              onChange={(e) => {
-                const modelId = e.target.value ? Number(e.target.value) : undefined;
-                const model = modelId ? availableModels.find((m) => m.id === modelId) : (availableModels.find((m) => m.is_default) || availableModels[0]);
-                onUpdateData(node.id, { modelId, modelName: model?.display_name } as Partial<CanvasNodeData>);
-              }}
-              className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm"
-            >
-              <option value="">
-                {availableModels.find((m) => m.is_default)?.display_name || availableModels[0]?.display_name || "Auto"} (default)
-              </option>
-              {availableModels.filter((m) => !m.is_default).map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.display_name}
-                </option>
-              ))}
-            </select>
-            {selectedModel && (
-              <p className="text-[10px] text-muted-foreground">
-                Usando: <span className="font-medium text-foreground/70">{selectedModel.display_name}</span>
-                {selectedModel.api_backend && <span className="ml-1 opacity-60">({selectedModel.api_backend})</span>}
-              </p>
-            )}
+            <Label className="text-xs">Negative Prompt</Label>
+            <Textarea
+              value={(nodeData as ImageNodeData | VideoNodeData).negativePrompt || ""}
+              onChange={(e) => onUpdateData(node.id, { negativePrompt: e.target.value } as Partial<CanvasNodeData>)}
+              placeholder="Lo que no quieres en la generación (opcional)"
+              className="text-sm min-h-[50px] resize-y"
+            />
           </div>
         )}
 
-        {/* Type-specific settings */}
-        {type === "text" && <TextSettings data={data as TextNodeData} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} models={availableModels} />}
-        {type === "image" && <ImageSettings data={data as ImageNodeData} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} />}
-        {type === "video" && <VideoSettings data={data as VideoNodeData} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} />}
+        {/* Settings section - hidden when params connected, disabled when locked */}
+        {!hasParams && (
+          <>
+            {/* Model selector */}
+            {availableModels.length > 0 && (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Modelo</Label>
+                <select
+                  value={nodeData.modelId || ""}
+                  onChange={(e) => {
+                    const modelId = e.target.value ? Number(e.target.value) : undefined;
+                    const model = modelId ? availableModels.find((m) => m.id === modelId) : (availableModels.find((m) => m.is_default) || availableModels[0]);
+                    onUpdateData(node.id, { modelId, modelName: model?.display_name } as Partial<CanvasNodeData>);
+                  }}
+                  className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="">
+                    {availableModels.find((m) => m.is_default)?.display_name || availableModels[0]?.display_name || "Auto"} (default)
+                  </option>
+                  {availableModels.filter((m) => !m.is_default).map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.display_name}
+                    </option>
+                  ))}
+                </select>
+                {selectedModel && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Usando: <span className="font-medium text-foreground/70">{selectedModel.display_name}</span>
+                    {selectedModel.api_backend && <span className="ml-1 opacity-60">({selectedModel.api_backend})</span>}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Type-specific settings */}
+            {type === "text" && <TextSettings data={data as TextNodeData} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} models={availableModels} />}
+            {type === "image" && <ImageSettings data={data as ImageNodeData} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} />}
+            {type === "video" && <VideoSettings data={data as VideoNodeData} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} />}
+          </>
+        )}
 
         {/* Output preview */}
         {data.status === "completed" && (
@@ -202,6 +225,7 @@ export function NodeConfigPanel({
           size="sm"
           onClick={() => onExecute(node.id)}
           disabled={isGenerating || isExecuting || isLocked}
+          title={hasParams ? "Ejecutar con parámetros externos" : undefined}
           className="flex-1 gap-1.5"
         >
           {isGenerating ? (
@@ -370,15 +394,6 @@ function ImageSettings({ data, onUpdate }: { data: ImageNodeData; onUpdate: (u: 
           ))}
         </div>
       </div>
-      <div className="space-y-1.5">
-        <Label className="text-xs">Negative Prompt</Label>
-        <Textarea
-          value={data.negativePrompt || ""}
-          onChange={(e) => onUpdate({ negativePrompt: e.target.value })}
-          placeholder="Lo que no quieres en la imagen (opcional)"
-          className="text-sm min-h-[50px] resize-y"
-        />
-      </div>
     </>
   );
 }
@@ -449,15 +464,6 @@ function VideoSettings({ data, onUpdate }: { data: VideoNodeData; onUpdate: (u: 
           className="rounded"
         />
         <Label htmlFor="audio-enabled" className="text-xs">Audio habilitado</Label>
-      </div>
-      <div className="space-y-1.5">
-        <Label className="text-xs">Negative Prompt</Label>
-        <Textarea
-          value={data.negativePrompt || ""}
-          onChange={(e) => onUpdate({ negativePrompt: e.target.value })}
-          placeholder="Lo que no quieres en el video (opcional)"
-          className="text-sm min-h-[50px] resize-y"
-        />
       </div>
     </>
   );

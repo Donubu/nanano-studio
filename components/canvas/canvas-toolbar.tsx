@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ImageIcon, Video, MessageSquare, Play, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock } from "lucide-react";
+import { ImageIcon, Video, MessageSquare, Play, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CanvasNodeType, ExecutionProgress } from "./lib/canvas-types";
 
@@ -25,6 +25,12 @@ const nodeOptions: { type: CanvasNodeType; icon: typeof MessageSquare; label: st
   { type: "static-text", icon: Type, label: "Texto", isAI: false },
   { type: "static-image", icon: ImagePlus, label: "Imagen estática", isAI: false },
   { type: "static-image-group", icon: Images, label: "Galería", isAI: false },
+];
+
+const paramsOptions: { type: CanvasNodeType; icon: typeof MessageSquare; label: string }[] = [
+  { type: "params-text", icon: MessageSquare, label: "Params Texto" },
+  { type: "params-image", icon: ImageIcon, label: "Params Imagen" },
+  { type: "params-video", icon: Video, label: "Params Video" },
 ];
 
 export function CanvasToolbar({
@@ -56,7 +62,7 @@ export function CanvasToolbar({
             Nodo
           </Button>
           {addMenuOpen && (
-            <div className="absolute top-full left-0 mt-1 bg-popover border border-border rounded-lg shadow-lg p-1 min-w-[170px] z-50">
+            <div className="absolute top-full left-0 mt-1 bg-popover border border-border rounded-lg shadow-lg p-1 min-w-[190px] z-50">
               <div className="px-3 py-1 text-[10px] text-muted-foreground uppercase tracking-wider">Generación</div>
               {nodeOptions.filter(o => o.isAI).map(({ type, icon: Icon, label }) => (
                 <button
@@ -78,6 +84,19 @@ export function CanvasToolbar({
                   className="flex items-center gap-2 w-full px-3 py-1.5 text-sm rounded-md hover:bg-accent transition-colors"
                 >
                   <Icon className="h-3.5 w-3.5" />
+                  {label}
+                </button>
+              ))}
+              <div className="my-1 border-t border-border/50" />
+              <div className="px-3 py-1 text-[10px] text-muted-foreground uppercase tracking-wider">Parámetros</div>
+              {paramsOptions.map(({ type, icon: Icon, label }) => (
+                <button
+                  key={type}
+                  onClick={() => { onAddNode(type); setAddMenuOpen(false); }}
+                  className="flex items-center gap-2 w-full px-3 py-1.5 text-sm rounded-md hover:bg-accent transition-colors whitespace-nowrap"
+                >
+                  <Settings className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <Icon className="h-3.5 w-3.5 shrink-0" />
                   {label}
                 </button>
               ))}

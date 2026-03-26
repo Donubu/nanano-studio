@@ -79,7 +79,7 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
         <Images className="h-3.5 w-3.5 text-teal-400 shrink-0" />
-        <span className="text-xs font-medium flex-1 truncate">{nodeData.label || "Galería"}</span>
+        <input value={nodeData.label || ""} onChange={(e) => updateNodeData(id, { ...nodeData, images: nodeData.images, label: e.target.value })} placeholder="Galería" className="text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate placeholder:text-muted-foreground/50" />
         <span className="text-[10px] text-muted-foreground">{images.length}</span>
         <NodeDeleteButton nodeId={id} />
       </div>

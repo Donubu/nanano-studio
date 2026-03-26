@@ -43,6 +43,11 @@ const VALID_CONNECTIONS: ConnectionRule[] = [
   { sourceType: "static-image-group", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_LAST_FRAME },
   { sourceType: "static-image-group", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_REFERENCE },
   { sourceType: "static-image-group", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "image", targetHandle: HANDLE_IDS.INPUT_REFERENCE },
+
+  // === Params → AI nodes (1 params per AI node) ===
+  { sourceType: "params-text", sourceHandle: HANDLE_IDS.OUTPUT_PARAMS, targetType: "text", targetHandle: HANDLE_IDS.INPUT_PARAMS },
+  { sourceType: "params-image", sourceHandle: HANDLE_IDS.OUTPUT_PARAMS, targetType: "image", targetHandle: HANDLE_IDS.INPUT_PARAMS },
+  { sourceType: "params-video", sourceHandle: HANDLE_IDS.OUTPUT_PARAMS, targetType: "video", targetHandle: HANDLE_IDS.INPUT_PARAMS },
 ];
 
 /**
@@ -50,25 +55,36 @@ const VALID_CONNECTIONS: ConnectionRule[] = [
  */
 export function isValidConnection(
   connection: Connection,
-  nodes: Node[]
+  nodes: Node[],
+  edges?: CanvasEdge[]
 ): boolean {
   const sourceNode = nodes.find((n) => n.id === connection.source);
   const targetNode = nodes.find((n) => n.id === connection.target);
 
   if (!sourceNode || !targetNode) return false;
-  // No self-connections
   if (connection.source === connection.target) return false;
 
   const sourceType = sourceNode.type;
   const targetType = targetNode.type;
 
-  return VALID_CONNECTIONS.some(
+  const isValid = VALID_CONNECTIONS.some(
     (rule) =>
       rule.sourceType === sourceType &&
       rule.sourceHandle === connection.sourceHandle &&
       rule.targetType === targetType &&
       rule.targetHandle === connection.targetHandle
   );
+  if (!isValid) return false;
+
+  // Enforce: only 1 params node per AI node
+  if (connection.targetHandle === HANDLE_IDS.INPUT_PARAMS && edges) {
+    const alreadyHasParams = edges.some(
+      (e) => e.target === connection.target && e.targetHandle === HANDLE_IDS.INPUT_PARAMS
+    );
+    if (alreadyHasParams) return false;
+  }
+
+  return true;
 }
 
 /**
@@ -81,7 +97,7 @@ export function getCompatibleTargetTypes(
 ): { type: string; label: string; targetHandle: string }[] {
   const seen = new Set<string>();
   const results: { type: string; label: string; targetHandle: string }[] = [];
-  const labels: Record<string, string> = { text: "Texto", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería" };
+  const labels: Record<string, string> = { text: "Texto", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video" };
 
   for (const rule of VALID_CONNECTIONS) {
     if (rule.sourceType === sourceType && rule.sourceHandle === sourceHandle) {
@@ -108,7 +124,7 @@ export function getCompatibleSourceTypes(
 ): { type: string; label: string; sourceHandle: string }[] {
   const seen = new Set<string>();
   const results: { type: string; label: string; sourceHandle: string }[] = [];
-  const labels: Record<string, string> = { text: "Texto", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería" };
+  const labels: Record<string, string> = { text: "Texto", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video" };
 
   for (const rule of VALID_CONNECTIONS) {
     if (rule.targetType === targetType && rule.targetHandle === targetHandle) {

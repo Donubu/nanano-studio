@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { Handle, Position, type NodeProps, useReactFlow } from "@xyflow/react";
 import { Loader2, AlertCircle, Brain, Sparkles, FileText } from "lucide-react";
 import { HANDLE_IDS, type TextNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
@@ -16,6 +16,7 @@ const statusColors: Record<string, string> = {
 export const TextNodeComponent = memo(function TextNode({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as TextNodeData;
   const status = nodeData.status || "idle";
+  const { updateNodeData } = useReactFlow();
 
   return (
     <div
@@ -29,7 +30,7 @@ export const TextNodeComponent = memo(function TextNode({ id, data, selected }: 
         position={Position.Left}
         id={HANDLE_IDS.INPUT_PROMPT}
         className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background"
-        style={{ top: "35%" }}
+        style={{ top: "25%" }}
         title="Prompt (texto)"
       />
       <Handle
@@ -37,8 +38,16 @@ export const TextNodeComponent = memo(function TextNode({ id, data, selected }: 
         position={Position.Left}
         id={HANDLE_IDS.INPUT_MEDIA}
         className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background"
-        style={{ top: "70%" }}
+        style={{ top: "55%" }}
         title="Media (imagen/video)"
+      />
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={HANDLE_IDS.INPUT_PARAMS}
+        className="!w-3 !h-3 !border-2 !border-background"
+        style={{ top: "85%", backgroundColor: "#fc0" }}
+        title="Parámetros"
       />
 
       {/* Header */}
@@ -49,7 +58,7 @@ export const TextNodeComponent = memo(function TextNode({ id, data, selected }: 
           <FileText className="h-3.5 w-3.5 text-blue-400 shrink-0" />
         )}
         <AIBadge />
-        <span className="text-xs font-medium flex-1 truncate">{nodeData.label || "Texto"}</span>
+        <input value={nodeData.label || ""} onChange={(e) => updateNodeData(id, { ...nodeData, label: e.target.value })} placeholder="Texto" className="text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate placeholder:text-muted-foreground/50" />
         {nodeData.modelName && (
           <span className="text-[10px] text-muted-foreground truncate max-w-[80px]">{nodeData.modelName}</span>
         )}

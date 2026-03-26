@@ -2,7 +2,7 @@
 CREATE TABLE canvas_nodes (
   id VARCHAR(64) NOT NULL,
   conversation_id INT NOT NULL,
-  type ENUM('text','image','video','note','static-text','static-image','static-image-group') NOT NULL,
+  type ENUM('text','image','video','note','static-text','static-image','static-image-group','params-text','params-image','params-video') NOT NULL,
   label VARCHAR(255) NOT NULL DEFAULT '',
   position_x DOUBLE NOT NULL DEFAULT 0,
   position_y DOUBLE NOT NULL DEFAULT 0,

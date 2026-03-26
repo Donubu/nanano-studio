@@ -28,6 +28,7 @@ import { NoteNodeComponent } from "./nodes/note-node";
 import { StaticTextNodeComponent } from "./nodes/static-text-node";
 import { StaticImageNodeComponent } from "./nodes/static-image-node";
 import { StaticImageGroupNodeComponent } from "./nodes/static-image-group-node";
+import { ParamsNodeComponent } from "./nodes/params-node";
 import { CanvasToolbar } from "./canvas-toolbar";
 import { NodeConfigPanel } from "./panels/node-config-panel";
 import { useAutoSave } from "./hooks/use-auto-save";
@@ -35,7 +36,7 @@ import { useCanvasExecution } from "./hooks/use-canvas-execution";
 import { useUndoRedo } from "./hooks/use-undo-redo";
 import { isValidConnection, wouldCreateCycle, getCompatibleTargetTypes, getCompatibleSourceTypes } from "./lib/connection-rules";
 import { getDefaultNodeData, type CanvasNodeType, type CanvasNodeData, HANDLE_IDS } from "./lib/canvas-types";
-import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Type } from "lucide-react";
+import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Type, Settings } from "lucide-react";
 import { CanvasProvider } from "./canvas-context";
 import { LabeledEdge } from "./edges/labeled-edge";
 import { ImagePickerModal } from "@/components/chat/image-picker-modal";
@@ -57,6 +58,9 @@ const nodeTypes: NodeTypes = {
   "static-text": StaticTextNodeComponent,
   "static-image": StaticImageNodeComponent,
   "static-image-group": StaticImageGroupNodeComponent,
+  "params-text": ParamsNodeComponent,
+  "params-image": ParamsNodeComponent,
+  "params-video": ParamsNodeComponent,
 };
 
 export interface CanvasModel {
@@ -217,7 +221,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   // Connection handler with validation
   const onConnect: OnConnect = useCallback(
     (connection: Connection) => {
-      if (!isValidConnection(connection, nodes)) return;
+      if (!isValidConnection(connection, nodes, edges)) return;
       if (wouldCreateCycle(edges, connection.source!, connection.target!)) return;
       takeSnapshot();
       setEdges((eds) => addEdge(connection, eds));
@@ -247,7 +251,10 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     closeDropMenu();
   }, [closeDropMenu]);
 
+  const { screenToFlowPosition } = useReactFlow();
+
   // Add node (ensures conversation exists first)
+  // Places near toolbar (top-left area of visible canvas)
   const addNode = useCallback(
     async (type: CanvasNodeType) => {
       await ensureConversation();
@@ -255,16 +262,21 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       nodeIdCounter.current += 1;
       const id = `node-${nodeIdCounter.current}`;
       const data = getDefaultNodeData(type);
+      // Convert toolbar area (screen coords) to flow coords
+      const flowPos = screenToFlowPosition({ x: 120, y: 120 });
       const newNode: Node<CanvasNodeData> = {
         id,
         type,
-        position: { x: 250 + Math.random() * 200, y: 150 + Math.random() * 200 },
+        position: {
+          x: flowPos.x + Math.random() * 40,
+          y: flowPos.y + Math.random() * 40,
+        },
         data,
       };
       setNodes((nds) => [...nds, newNode]);
       setSelectedNodeId(id);
     },
-    [setNodes, ensureConversation, takeSnapshot]
+    [setNodes, ensureConversation, takeSnapshot, screenToFlowPosition]
   );
 
   // Update node data
@@ -290,7 +302,6 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   );
 
   // --- Drop-on-empty: create node from dangling connection ---
-  const { screenToFlowPosition } = useReactFlow();
   const connectStartRef = useRef<{
     nodeId: string;
     handleId: string;
@@ -533,8 +544,8 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
               Crear nodo
             </div>
             {pendingDropRef.current.options.map(({ type, label, handle }) => {
-              const iconMap: Record<string, typeof MessageSquare> = { text: MessageSquare, image: ImageIcon, video: Video, note: StickyNote, "static-text": Type, "static-image": ImagePlus, "static-image-group": Images };
-              const colorMap: Record<string, string> = { text: "text-blue-400", image: "text-purple-400", video: "text-amber-400", note: "text-amber-500", "static-text": "text-blue-400", "static-image": "text-emerald-400", "static-image-group": "text-teal-400" };
+              const iconMap: Record<string, typeof MessageSquare> = { text: MessageSquare, image: ImageIcon, video: Video, note: StickyNote, "static-text": Type, "static-image": ImagePlus, "static-image-group": Images, "params-text": Settings, "params-image": Settings, "params-video": Settings };
+              const colorMap: Record<string, string> = { text: "text-blue-400", image: "text-purple-400", video: "text-amber-400", note: "text-amber-500", "static-text": "text-blue-400", "static-image": "text-emerald-400", "static-image-group": "text-teal-400", "params-text": "text-yellow-400", "params-image": "text-yellow-400", "params-video": "text-yellow-400" };
               const isAI = !type.startsWith("static-");
               const Icon = iconMap[type] || MessageSquare;
               const color = colorMap[type] || "text-muted-foreground";
@@ -558,6 +569,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       {selectedNode && ["text", "image", "video"].includes(selectedNode.type!) && (
         <NodeConfigPanel
           node={selectedNode}
+          nodes={nodes}
           generationConfig={generationConfig}
           edges={edges}
           onUpdateData={updateNodeData}
@@ -587,7 +599,7 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps) {
   }, []);
 
   return (
-    <CanvasProvider value={{ projectId: props.projectId, openImagePicker }}>
+    <CanvasProvider value={{ projectId: props.projectId, generationConfig: props.generationConfig || [], openImagePicker }}>
       <ReactFlowProvider>
         <CanvasWorkspaceInner {...props} />
       </ReactFlowProvider>

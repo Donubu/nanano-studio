@@ -335,7 +335,7 @@ export async function POST(
 
           // Concatenar system instructions: modelo + proyecto + conversación
           const systemParts: string[] = [];
-          const isNanoBanana = effectiveModelId.includes("image-preview");
+          const isNanoBanana = effectiveModelId.includes("image-preview") || effectiveModelId.includes("flash-image");
           if (isNanoBanana) {
             // Nano Banana models: force single image generation, no collages
             systemParts.push("Generate exactly ONE single image per request. Do NOT create collages, grids, multi-panel compositions, or multiple images combined into one unless the user explicitly asks for it. Be concise, use only the user's prompt.");

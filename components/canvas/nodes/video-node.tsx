@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { Handle, Position, type NodeProps, useReactFlow } from "@xyflow/react";
 import { Video, Loader2, AlertCircle, Play } from "lucide-react";
 import { HANDLE_IDS, type VideoNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
@@ -16,6 +16,7 @@ const statusColors: Record<string, string> = {
 export const VideoNodeComponent = memo(function VideoNode({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as VideoNodeData;
   const status = nodeData.status || "idle";
+  const { updateNodeData } = useReactFlow();
 
   return (
     <div
@@ -29,7 +30,7 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected }
         position={Position.Left}
         id={HANDLE_IDS.INPUT_PROMPT}
         className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background"
-        style={{ top: "18%" }}
+        style={{ top: "14%" }}
         title="Prompt (texto)"
       />
       <Handle
@@ -37,7 +38,7 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected }
         position={Position.Left}
         id={HANDLE_IDS.INPUT_FIRST_FRAME}
         className="!w-3 !h-3 !bg-green-500 !border-2 !border-background"
-        style={{ top: "40%" }}
+        style={{ top: "30%" }}
         title="First frame (imagen)"
       />
       <Handle
@@ -45,7 +46,7 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected }
         position={Position.Left}
         id={HANDLE_IDS.INPUT_LAST_FRAME}
         className="!w-3 !h-3 !bg-orange-500 !border-2 !border-background"
-        style={{ top: "62%" }}
+        style={{ top: "50%" }}
         title="Last frame (imagen)"
       />
       <Handle
@@ -53,15 +54,23 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected }
         position={Position.Left}
         id={HANDLE_IDS.INPUT_REFERENCE}
         className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background"
-        style={{ top: "84%" }}
+        style={{ top: "68%" }}
         title="Referencia (imagen)"
+      />
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={HANDLE_IDS.INPUT_PARAMS}
+        className="!w-3 !h-3 !border-2 !border-background"
+        style={{ top: "86%", backgroundColor: "#fc0" }}
+        title="Parámetros"
       />
 
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
         <Video className="h-3.5 w-3.5 text-amber-400 shrink-0" />
         <AIBadge />
-        <span className="text-xs font-medium flex-1 truncate">{nodeData.label || "Video"}</span>
+        <input value={nodeData.label || ""} onChange={(e) => updateNodeData(id, { ...nodeData, label: e.target.value })} placeholder="Video" className="text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate placeholder:text-muted-foreground/50" />
         <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
           {nodeData.modelName && <span className="truncate max-w-[80px]">{nodeData.modelName}</span>}
           <span>{nodeData.duration}s</span>

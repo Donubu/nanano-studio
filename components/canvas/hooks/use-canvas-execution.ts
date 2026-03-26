@@ -71,6 +71,7 @@ interface ResolvedInputs {
   lastFrameUrl: string | null;
   referenceImageUrls: string[];
   mediaUrls: { url: string; type: "image" | "video" }[];
+  paramsOverride: Record<string, unknown> | null;
 }
 
 /**
@@ -88,6 +89,7 @@ function resolveNodeInputs(
   let lastFrameUrl: string | null = null;
   const referenceImageUrls: string[] = [];
   const mediaUrls: { url: string; type: "image" | "video" }[] = [];
+  let paramsOverride: Record<string, unknown> | null = null;
 
   for (const input of inputs) {
     const sourceNode = nodes.find((n) => n.id === input.sourceNodeId);
@@ -160,9 +162,15 @@ function resolveNodeInputs(
         }
       }
     }
+
+    if (input.targetHandle === HANDLE_IDS.INPUT_PARAMS) {
+      // Extract params data (strip base fields)
+      const { label: _l, status: _s, errorMessage: _e, outputMessageId: _o, modelName: _mn, locked: _lk, type: _t, ...params } = sourceData as Record<string, unknown>;
+      paramsOverride = params;
+    }
   }
 
-  return { promptContext, referenceImageUrl, firstFrameUrl, lastFrameUrl, referenceImageUrls, mediaUrls };
+  return { promptContext, referenceImageUrl, firstFrameUrl, lastFrameUrl, referenceImageUrls, mediaUrls, paramsOverride };
 }
 
 /**
@@ -217,7 +225,7 @@ export function useCanvasExecution({
       }
 
       // Resolve inputs from the live snapshot
-      const { promptContext, referenceImageUrl, firstFrameUrl, lastFrameUrl, referenceImageUrls, mediaUrls } = resolveNodeInputs(nodeId, liveNodes, edges);
+      const { promptContext, referenceImageUrl, firstFrameUrl, lastFrameUrl, referenceImageUrls, mediaUrls, paramsOverride } = resolveNodeInputs(nodeId, liveNodes, edges);
 
       // Set generating
       updateNodeStatus(setNodes, nodeId, { status: "generating", errorMessage: undefined } as Partial<CanvasNodeData>);
@@ -226,9 +234,14 @@ export function useCanvasExecution({
       try {
         let result: { outputUrl?: string; outputText?: string; messageId?: number } = {};
 
+        // Apply params override if connected
+        const effectiveData = paramsOverride
+          ? { ...nodeData, ...paramsOverride } as CanvasNodeData
+          : nodeData;
+
         switch (node.type) {
           case "text": {
-            const textData = nodeData as TextNodeData;
+            const textData = effectiveData as TextNodeData;
             const fullPrompt = promptContext
               ? `${promptContext}\n\n${textData.prompt}`
               : textData.prompt;
@@ -237,7 +250,7 @@ export function useCanvasExecution({
             break;
           }
           case "image": {
-            const imgData = nodeData as ImageNodeData;
+            const imgData = effectiveData as ImageNodeData;
             const fullPrompt = promptContext
               ? `${promptContext}\n\n${imgData.prompt}`
               : imgData.prompt;
@@ -250,7 +263,7 @@ export function useCanvasExecution({
             break;
           }
           case "video": {
-            const vidData = nodeData as VideoNodeData;
+            const vidData = effectiveData as VideoNodeData;
             const fullPrompt = promptContext
               ? `${promptContext}\n\n${vidData.prompt}`
               : vidData.prompt;

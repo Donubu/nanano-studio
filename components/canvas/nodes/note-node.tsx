@@ -23,7 +23,7 @@ export const NoteNodeComponent = memo(function NoteNode({ id, data, selected }: 
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-amber-300/30 dark:border-amber-700/30">
         <StickyNote className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-        <span className="text-xs font-medium flex-1 truncate text-amber-700 dark:text-amber-400">{nodeData.label || "Nota"}</span>
+        <input value={nodeData.label || ""} onChange={(e) => updateNodeData(id, { ...nodeData, content: nodeData.content, label: e.target.value })} placeholder="Nota" className="text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate text-amber-700 dark:text-amber-400 placeholder:text-amber-400/50" />
         <NodeDeleteButton nodeId={id} />
       </div>
 

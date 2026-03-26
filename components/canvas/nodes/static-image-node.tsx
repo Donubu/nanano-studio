@@ -51,7 +51,7 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
         <ImagePlus className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-        <span className="text-xs font-medium flex-1 truncate">{nodeData.label || "Imagen"}</span>
+        <input value={nodeData.label || ""} onChange={(e) => updateNodeData(id, { ...nodeData, imageUrl: nodeData.imageUrl, label: e.target.value })} placeholder="Imagen" className="text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate placeholder:text-muted-foreground/50" />
         <NodeDeleteButton nodeId={id} />
       </div>
 
