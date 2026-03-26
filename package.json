@@ -1,6 +1,6 @@
 {
   "name": "nanano",
-  "version": "7.2.35",
+  "version": "7.2.42",
   "private": true,
   "scripts": {
     "dev": "node scripts/bump-version.js && next dev",
@@ -34,6 +34,7 @@
     "@tiptap/pm": "^3.20.1",
     "@tiptap/react": "^3.20.1",
     "@tiptap/starter-kit": "^3.20.1",
+    "@xyflow/react": "^12.10.1",
     "bullmq": "^5.70.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

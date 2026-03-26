@@ -5,7 +5,7 @@ import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { z } from "zod";
 import { parseBody, getPagination, paginationMeta } from "@/lib/api-utils";
 
-type GenerationType = "text" | "image" | "video" | "audio" | "music" | "full";
+type GenerationType = "text" | "image" | "video" | "audio" | "music" | "full" | "canvas";
 // quality_tier kept in type for legacy DB column references
 type QualityTier = "normal" | "hq" | "chirp";
 
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
     const createConversationSchema = z.object({
       project_id: z.number().int().positive().nullable().optional(),
       model_id: z.number().int().positive().nullable().optional(),
-      generation_type: z.enum(["text", "image", "video", "audio", "music", "full"]).default("text"),
+      generation_type: z.enum(["text", "image", "video", "audio", "music", "full", "canvas"]).default("text"),
       quality_tier: z.string().nullable().optional(),
       selected_model_id: z.number().int().positive().nullable().optional(),
       title: z.string().max(500).default("Nueva conversación"),
@@ -169,7 +169,7 @@ export async function POST(request: NextRequest) {
     // Si hay proyecto, obtener modelo desde la configuracion del proyecto
     if (project_id) {
       // For "full" type, check that both image AND video are enabled, use image models
-      if (generation_type === "full") {
+      if (generation_type === "full" || generation_type === "canvas") {
         const [imgCheck] = await pool.execute<EnabledRow[]>(
           `SELECT is_enabled FROM project_generation_config WHERE project_id = ? AND generation_type = 'image'`,
           [project_id]
@@ -178,22 +178,36 @@ export async function POST(request: NextRequest) {
           `SELECT is_enabled FROM project_generation_config WHERE project_id = ? AND generation_type = 'video'`,
           [project_id]
         );
+        const requiredTypes = generation_type === "canvas" ? "texto, imagen y video" : "imagen y video";
         if (!imgCheck[0]?.is_enabled || !vidCheck[0]?.is_enabled) {
           return NextResponse.json(
-            { error: "El tipo 'full' requiere que tanto imagen como video estén habilitados" },
+            { error: `El tipo '${generation_type}' requiere que ${requiredTypes} estén habilitados` },
             { status: 400 }
           );
         }
-        // Use image models for the conversation's default model
+        if (generation_type === "canvas") {
+          const [txtCheck] = await pool.execute<EnabledRow[]>(
+            `SELECT is_enabled FROM project_generation_config WHERE project_id = ? AND generation_type = 'text'`,
+            [project_id]
+          );
+          if (!txtCheck[0]?.is_enabled) {
+            return NextResponse.json(
+              { error: `El tipo 'canvas' requiere que texto, imagen y video estén habilitados` },
+              { status: 400 }
+            );
+          }
+        }
+        // Use text models for canvas, image models for full
+        const modelType = generation_type === "canvas" ? "text" : "image";
         const [projectModels] = await pool.execute<ProjectModelRow[]>(
           `SELECT model_id, is_default FROM project_generation_models
-           WHERE project_id = ? AND generation_type = 'image'
+           WHERE project_id = ? AND generation_type = ?
            ORDER BY sort_order ASC`,
-          [project_id]
+          [project_id, modelType]
         );
         if (projectModels.length === 0) {
           return NextResponse.json(
-            { error: "No hay modelos de imagen configurados para este proyecto" },
+            { error: `No hay modelos de ${modelType} configurados para este proyecto` },
             { status: 400 }
           );
         }

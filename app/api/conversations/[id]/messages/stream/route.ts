@@ -50,7 +50,7 @@ interface MessageRow extends RowDataPacket {
   ignore_in_context: number;
 }
 
-type GenerationType = "text" | "image" | "video" | "audio" | "full";
+type GenerationType = "text" | "image" | "video" | "audio" | "full" | "canvas";
 type QualityTier = "normal" | "hq";
 
 interface ProjectModelRow extends RowDataPacket {
@@ -142,7 +142,7 @@ export async function POST(
     console.log(`[Stream][${reqId}] Time: ${new Date().toISOString()}`);
 
     const body = await request.json();
-    const { content, files, useProjectSystemInstruction = true, modelIdOverride, imageSettings, quality_tier, selected_model_id, generation_type_override, no_context = false, skip_user_message = false, google_search_enabled: reqGoogleSearchEnabled, google_image_search_enabled: reqGoogleImageSearchEnabled, thinking_level, include_thoughts } = body as {
+    const { content, files, useProjectSystemInstruction = true, modelIdOverride, imageSettings, quality_tier, selected_model_id, generation_type_override, no_context = false, skip_user_message = false, google_search_enabled: reqGoogleSearchEnabled, google_image_search_enabled: reqGoogleImageSearchEnabled, thinking_level, include_thoughts, system_instruction_override } = body as {
       content: string;
       files?: AttachedFile[];
       useProjectSystemInstruction?: boolean;
@@ -157,6 +157,7 @@ export async function POST(
       google_image_search_enabled?: boolean;
       thinking_level?: "none" | "low" | "medium" | "high";
       include_thoughts?: boolean;
+      system_instruction_override?: string;
     };
 
     console.log(`[Stream][${reqId}] Prompt: "${content?.slice(0, 50)}..." | skip_user_message: ${skip_user_message} | imageSize: ${imageSettings?.size || "default"} | numberOfImages: ${imageSettings?.numberOfImages || 1}`);
@@ -231,7 +232,9 @@ export async function POST(
 
           // Get the correct model from project_generation_config based on quality_tier
           // Use generation_type_override if provided (e.g., when video conversation is in image mode)
-          const generationType = generation_type_override || conversation.generation_type || "text";
+          // Canvas/full types resolve to "text" for model lookup in stream endpoint
+          const rawGenType = generation_type_override || conversation.generation_type || "text";
+          const generationType = (rawGenType === "canvas" || rawGenType === "full") ? "text" : rawGenType;
           if (generation_type_override) {
             console.log(`[Stream] Using generation_type_override: ${generation_type_override} (conversation type: ${conversation.generation_type})`);
           }
@@ -337,7 +340,10 @@ export async function POST(
             // Nano Banana models: force single image generation, no collages
             systemParts.push("Generate exactly ONE single image per request. Do NOT create collages, grids, multi-panel compositions, or multiple images combined into one unless the user explicitly asks for it. Be concise, use only the user's prompt.");
           }
-          if (conversation.generation_type !== "full") {
+          if (system_instruction_override) {
+            // Canvas/external override takes highest priority
+            systemParts.push(system_instruction_override);
+          } else if (conversation.generation_type !== "full") {
             if (conversation.model_system_instruction) systemParts.push(conversation.model_system_instruction);
             if (projectSystemInstruction) systemParts.push(projectSystemInstruction);
             if (conversation.system_instruction) systemParts.push(conversation.system_instruction);

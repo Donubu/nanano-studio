@@ -156,7 +156,7 @@ export async function POST(
     const conversation = conversations[0];
 
     // Verificar que el modelo soporta video (skip for "full" mode which uses image model as default)
-    if (!conversation.supports_video_generation && conversation.generation_type !== "full") {
+    if (!conversation.supports_video_generation && conversation.generation_type !== "full" && conversation.generation_type !== "canvas") {
       return new Response(JSON.stringify({ error: "El modelo seleccionado no soporta generación de video" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
@@ -197,7 +197,7 @@ export async function POST(
           let effectiveBackend = conversation.model_api_backend || undefined;
           let effectiveCostVideoPerSecond = Number(conversation.cost_video_per_second) || 0;
           // For "full" mode, use "video" config since full doesn't have its own model rows
-          const generationType = conversation.generation_type === "full" ? "video" : (conversation.generation_type || "video");
+          const generationType = (conversation.generation_type === "full" || conversation.generation_type === "canvas") ? "video" : (conversation.generation_type || "video");
 
           if (conversation.project_id) {
             const [projectModels] = await pool.execute<RowDataPacket[]>(`

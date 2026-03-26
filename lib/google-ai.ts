@@ -406,11 +406,9 @@ export async function sendMessage(
         thinkingBudget: settings.thinkingLevel === "low" ? 1024 : settings.thinkingLevel === "medium" ? 8192 : 24576,
       },
     }),
-    ...(settings.thinkingLevel === "none" && {
-      thinkingConfig: {
-        thinkingBudget: 0,
-      },
-    }),
+    // Note: thinkingBudget: 0 is not sent because some models (gemini-3.1-pro)
+    // require thinking mode and reject budget 0. Omitting thinkingConfig lets
+    // the model use its default behavior.
   };
 
   const response = await withRetry(
@@ -527,11 +525,9 @@ export async function sendMessageStream(
           ...(settings.includeThoughts && { includeThoughts: true }),
         },
       }),
-      ...(settings.thinkingLevel === "none" && {
-        thinkingConfig: {
-          thinkingBudget: 0,
-        },
-      }),
+      // Note: thinkingBudget: 0 is not sent because some models (gemini-3.1-pro)
+      // require thinking mode and reject budget 0. Omitting thinkingConfig lets
+      // the model use its default behavior.
     };
 
     // Debug: log final SDK config when thinking is enabled

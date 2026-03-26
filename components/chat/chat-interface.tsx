@@ -98,6 +98,7 @@ import {AudioVoiceId, AudioOutputFormat, AudioSpeakerConfig, AudioGenerationStat
 import {type MusicGenerationSettings, type MusicGenerationStatus, DEFAULT_MUSIC_SETTINGS} from "@/types/music";
 import {useNavigation, generateSlug} from "@/contexts/navigation-context";
 import {FullModeWorkspace} from "./full-mode-workspace";
+import {CanvasWorkspace} from "@/components/canvas/canvas-workspace";
 
 // Helper function to get the icon for a conversation based on its generation type
 function getConversationIcon(generationType: string | undefined, className: string) {
@@ -476,6 +477,7 @@ export function ChatInterface() {
     const isAudioConversation = currentConversation?.generation_type === "audio" || currentConversation?.generation_type === "audio_hd";
     const isMusicConversation = currentConversation?.generation_type === "music";
     const isFullConversation = currentConversation?.generation_type === "full";
+    const isCanvasConversation = currentConversation?.generation_type === "canvas";
 
     // Get current model based on conversation type, generation mode, and quality tier
     // For video conversations in image mode, use the image model
@@ -535,13 +537,13 @@ export function ChatInterface() {
         setMounted(true);
     }, []);
 
-    // Auto-collapse both sidebars for full (estudio) conversations
+    // Auto-collapse both sidebars for full (estudio) and canvas conversations
     useEffect(() => {
-        if (isFullConversation) {
+        if (isFullConversation || isCanvasConversation) {
             setLeftSidebarOpen(false);
             setRightSidebarOpen(false);
         }
-    }, [isFullConversation]);
+    }, [isFullConversation, isCanvasConversation]);
 
     // Fetch pending changelog on mount
     useEffect(() => {
@@ -1006,6 +1008,16 @@ export function ChatInterface() {
                     });
                 }
 
+                // Synthesize "canvas" type when text, image AND video are enabled
+                const txtConfig = configArray.find(c => c.generation_type === "text");
+                if (txtConfig?.is_enabled && txtConfig.models.length > 0 && imgConfig?.is_enabled && imgConfig.models.length > 0 && vidConfig?.is_enabled && vidConfig.models.length > 0) {
+                    configArray.push({
+                        generation_type: "canvas" as GenerationType,
+                        is_enabled: true,
+                        models: [...txtConfig.models, ...imgConfig.models, ...vidConfig.models],
+                    });
+                }
+
                 setGenerationConfig(configArray);
                 // Auto-select default type: prefer "full" (Estudio) if available, otherwise first enabled
                 const fullConfig = configArray.find((c) => c.generation_type === "full" && c.is_enabled);
@@ -1117,8 +1129,8 @@ export function ChatInterface() {
     }, [activeTabId, tabConversations]);
 
     useEffect(() => {
-        // Skip polling for full (estudio) conversations - FullModeWorkspace has its own polling
-        if (!activeTabId || isFullConversation) return;
+        // Skip polling for full (estudio) and canvas conversations - they have their own state management
+        if (!activeTabId || isFullConversation || isCanvasConversation) return;
 
         // Skip polling for draft tabs (no real conversation yet)
         const currentConvId = tabConversations[activeTabId]?.id;
@@ -3716,7 +3728,7 @@ export function ChatInterface() {
                         </Button>
 
                         {/* Floating toggle for right sidebar */}
-                        {activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && !isMusicConversation && !isFullConversation && (
+                        {activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && !isMusicConversation && !isFullConversation && !isCanvasConversation && (
                             <Button
                                 variant="ghost"
                                 size="icon"
@@ -3801,6 +3813,31 @@ export function ChatInterface() {
                             leftSidebarOpen={leftSidebarOpen}
                             onToggleLeftSidebar={() => setLeftSidebarOpen(!leftSidebarOpen)}
                             currentUserId={Number(session?.user?.id) || 0}
+                        />
+                    ) : isCanvasConversation && activeTabId !== null ? (
+                        /* Canvas Node Workspace */
+                        <CanvasWorkspace
+                            conversationId={tabConversations[activeTabId]?.id || 0}
+                            projectId={selectedProjectId!}
+                            generationConfig={generationConfig}
+                            onConversationCreated={(newId: number) => {
+                                if (!activeTabId) return;
+                                setTabConversations((prev) => ({
+                                    ...prev,
+                                    [activeTabId]: { ...prev[activeTabId], id: newId },
+                                }));
+                                setOpenTabs((prev) =>
+                                    prev.map((t) =>
+                                        t.id === activeTabId
+                                            ? { ...t, conversationId: newId, isDraft: false }
+                                            : t
+                                    )
+                                );
+                                // Update URL to reflect the new conversation
+                                if (navigation.projectSlug) {
+                                    navigation.replace(`/${navigation.projectSlug}/conversation/${newId}`);
+                                }
+                            }}
                         />
                     ) : isAudioConversation && activeTabId !== null ? (
                         /* TTS Composer View - Split layout with history column (expanded since no right sidebar) */
@@ -4340,7 +4377,7 @@ export function ChatInterface() {
                     )}
 
                     {/* Input Area - Hidden for gallery, archived, audio, and full conversations */}
-                    {activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && !isMusicConversation && !isFullConversation && (
+                    {activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && !isMusicConversation && !isFullConversation && !isCanvasConversation && (
                         activeTab?.isArchived ? (
                             <div className="p-4 border-t border-border/50 bg-orange-500/5">
                                 <div className="flex items-center justify-center gap-2 text-orange-400 text-sm">
@@ -4831,7 +4868,7 @@ export function ChatInterface() {
             )}
 
             {/* Right Sidebar - Settings (solo visible con conversación activa, no galería, no audio) */}
-            {selectedProjectId && rightSidebarOpen && activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && !isMusicConversation && !isFullConversation && (
+            {selectedProjectId && rightSidebarOpen && activeTabId !== null && !activeTab?.isGallery && !isAudioConversation && !isMusicConversation && !isFullConversation && !isCanvasConversation && (
                 <div className="w-72 border-l border-border/50 bg-sidebar overflow-y-auto relative">
                     {/* Close button */}
                     <Button

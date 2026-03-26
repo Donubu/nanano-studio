@@ -1,0 +1,164 @@
+import type { Connection, Node } from "@xyflow/react";
+import type { CanvasNode, CanvasNodeData, CanvasEdge } from "./canvas-types";
+import { HANDLE_IDS } from "./canvas-types";
+
+interface ConnectionRule {
+  sourceType: string;
+  sourceHandle: string;
+  targetType: string;
+  targetHandle: string;
+}
+
+const VALID_CONNECTIONS: ConnectionRule[] = [
+  // === AI Text output connections ===
+  { sourceType: "text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "image", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+  { sourceType: "text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "video", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+  { sourceType: "text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "text", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+
+  // === AI Image output connections ===
+  { sourceType: "image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "text", targetHandle: HANDLE_IDS.INPUT_MEDIA },
+  { sourceType: "image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_FIRST_FRAME },
+  { sourceType: "image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_LAST_FRAME },
+  { sourceType: "image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_REFERENCE },
+  { sourceType: "image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "image", targetHandle: HANDLE_IDS.INPUT_REFERENCE },
+
+  // === Static Text → same targets as AI Text ===
+  { sourceType: "static-text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "image", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+  { sourceType: "static-text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "video", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+  { sourceType: "static-text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "text", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+
+  // === Static Image → same targets as AI Image ===
+  { sourceType: "static-image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "text", targetHandle: HANDLE_IDS.INPUT_MEDIA },
+  { sourceType: "static-image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_FIRST_FRAME },
+  { sourceType: "static-image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_LAST_FRAME },
+  { sourceType: "static-image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_REFERENCE },
+  { sourceType: "static-image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "image", targetHandle: HANDLE_IDS.INPUT_REFERENCE },
+
+  // === AI Video output connections ===
+  { sourceType: "video", sourceHandle: HANDLE_IDS.OUTPUT_VIDEO, targetType: "text", targetHandle: HANDLE_IDS.INPUT_MEDIA },
+
+  // === Static Image Group → same targets as AI Image ===
+  { sourceType: "static-image-group", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "text", targetHandle: HANDLE_IDS.INPUT_MEDIA },
+  { sourceType: "static-image-group", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_FIRST_FRAME },
+  { sourceType: "static-image-group", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_LAST_FRAME },
+  { sourceType: "static-image-group", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_REFERENCE },
+  { sourceType: "static-image-group", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "image", targetHandle: HANDLE_IDS.INPUT_REFERENCE },
+];
+
+/**
+ * Checks if a proposed connection is valid based on node types and handles.
+ */
+export function isValidConnection(
+  connection: Connection,
+  nodes: Node[]
+): boolean {
+  const sourceNode = nodes.find((n) => n.id === connection.source);
+  const targetNode = nodes.find((n) => n.id === connection.target);
+
+  if (!sourceNode || !targetNode) return false;
+  // No self-connections
+  if (connection.source === connection.target) return false;
+
+  const sourceType = sourceNode.type;
+  const targetType = targetNode.type;
+
+  return VALID_CONNECTIONS.some(
+    (rule) =>
+      rule.sourceType === sourceType &&
+      rule.sourceHandle === connection.sourceHandle &&
+      rule.targetType === targetType &&
+      rule.targetHandle === connection.targetHandle
+  );
+}
+
+/**
+ * Given a source node type and handle, return the compatible target node types
+ * with their default target handle. Used for the "drop on empty" menu.
+ */
+export function getCompatibleTargetTypes(
+  sourceType: string,
+  sourceHandle: string
+): { type: string; label: string; targetHandle: string }[] {
+  const seen = new Set<string>();
+  const results: { type: string; label: string; targetHandle: string }[] = [];
+  const labels: Record<string, string> = { text: "Texto", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería" };
+
+  for (const rule of VALID_CONNECTIONS) {
+    if (rule.sourceType === sourceType && rule.sourceHandle === sourceHandle) {
+      if (!seen.has(rule.targetType)) {
+        seen.add(rule.targetType);
+        results.push({
+          type: rule.targetType,
+          label: labels[rule.targetType] || rule.targetType,
+          targetHandle: rule.targetHandle,
+        });
+      }
+    }
+  }
+  return results;
+}
+
+/**
+ * Given a target node type and handle, return the compatible source node types
+ * with their default source handle. Used when dragging from an input handle.
+ */
+export function getCompatibleSourceTypes(
+  targetType: string,
+  targetHandle: string
+): { type: string; label: string; sourceHandle: string }[] {
+  const seen = new Set<string>();
+  const results: { type: string; label: string; sourceHandle: string }[] = [];
+  const labels: Record<string, string> = { text: "Texto", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería" };
+
+  for (const rule of VALID_CONNECTIONS) {
+    if (rule.targetType === targetType && rule.targetHandle === targetHandle) {
+      if (!seen.has(rule.sourceType)) {
+        seen.add(rule.sourceType);
+        results.push({
+          type: rule.sourceType,
+          label: labels[rule.sourceType] || rule.sourceType,
+          sourceHandle: rule.sourceHandle,
+        });
+      }
+    }
+  }
+  return results;
+}
+
+/**
+ * Detects if adding an edge would create a cycle in the graph (DFS).
+ */
+export function wouldCreateCycle(
+  edges: CanvasEdge[],
+  newSource: string,
+  newTarget: string
+): boolean {
+  // Build adjacency list including the proposed new edge
+  const adj = new Map<string, string[]>();
+  for (const edge of edges) {
+    const list = adj.get(edge.source) || [];
+    list.push(edge.target);
+    adj.set(edge.source, list);
+  }
+  // Add proposed edge
+  const list = adj.get(newSource) || [];
+  list.push(newTarget);
+  adj.set(newSource, list);
+
+  // DFS from newTarget to see if we can reach newSource
+  const visited = new Set<string>();
+  const stack = [newTarget];
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (current === newSource) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    const neighbors = adj.get(current) || [];
+    for (const neighbor of neighbors) {
+      stack.push(neighbor);
+    }
+  }
+
+  return false;
+}

@@ -73,7 +73,7 @@ export async function POST(
       };
       quality_tier?: QualityTier;
       selected_model_id?: number;
-      generation_type_override?: "text" | "image" | "video" | "audio";
+      generation_type_override?: "text" | "image" | "video" | "audio" | "canvas";
       files?: Array<{
         dataUrl: string;
         mimeType: string;
@@ -114,7 +114,9 @@ export async function POST(
     let effectiveCostImage1k = Number(conversation.cost_image_1k) || 0;
     let effectiveCostImage2k = Number(conversation.cost_image_2k) || 0;
     let effectiveCostImage4k = Number(conversation.cost_image_4k) || 0;
-    const generationType = generation_type_override || conversation.generation_type || "image";
+    // Canvas and full types resolve to "image" for model lookup
+    const rawType = generation_type_override || conversation.generation_type || "image";
+    const generationType = (rawType === "canvas" || rawType === "full") ? "image" : rawType;
 
     if (conversation.project_id) {
       const [projectModels] = await pool.execute<RowDataPacket[]>(`

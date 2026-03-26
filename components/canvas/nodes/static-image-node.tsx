@@ -1,0 +1,110 @@
+"use client";
+
+import { memo, useCallback, useRef } from "react";
+import { Handle, Position, type NodeProps, useReactFlow } from "@xyflow/react";
+import { ImagePlus, Upload, FolderOpen } from "lucide-react";
+import { HANDLE_IDS, type StaticImageNodeData } from "../lib/canvas-types";
+import { NodeDeleteButton } from "./node-status";
+import { useCanvasContext } from "../canvas-context";
+
+export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data, selected }: NodeProps) {
+  const nodeData = data as unknown as StaticImageNodeData;
+  const { updateNodeData } = useReactFlow();
+  const { openImagePicker } = useCanvasContext();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const setImage = useCallback((url: string) => {
+    updateNodeData(id, { ...nodeData, imageUrl: url });
+  }, [id, nodeData, updateNodeData]);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => setImage(reader.result as string);
+    reader.readAsDataURL(file);
+  }, [setImage]);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+        const reader = new FileReader();
+        reader.onloadend = () => setImage(reader.result as string);
+        reader.readAsDataURL(file);
+        break;
+      }
+    }
+  }, [setImage]);
+
+  return (
+    <div
+      className={`group bg-card rounded-xl border-2 border-border ${
+        selected ? "ring-2 ring-primary/50" : ""
+      } min-w-[200px] max-w-[300px] transition-all`}
+      onPaste={handlePaste}
+    >
+      {/* Header */}
+      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
+        <ImagePlus className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+        <span className="text-xs font-medium flex-1 truncate">{nodeData.label || "Imagen"}</span>
+        <NodeDeleteButton nodeId={id} />
+      </div>
+
+      {/* Body */}
+      <div className="px-3 py-2">
+        {nodeData.imageUrl ? (
+          <div className="space-y-1.5">
+            <div className="relative rounded-md overflow-hidden bg-muted/50">
+              <img src={nodeData.imageUrl} alt={nodeData.caption || "Static"} className="w-full h-auto max-h-[180px] object-cover" />
+            </div>
+            <div className="flex gap-1">
+              <button
+                onClick={() => inputRef.current?.click()}
+                className="flex-1 py-1 text-[10px] rounded border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1 text-muted-foreground"
+              >
+                <Upload className="h-3 w-3" /> Subir
+              </button>
+              <button
+                onClick={() => openImagePicker(setImage)}
+                className="flex-1 py-1 text-[10px] rounded border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1 text-muted-foreground"
+              >
+                <FolderOpen className="h-3 w-3" /> Galería
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            <button
+              onClick={() => inputRef.current?.click()}
+              className="w-full py-4 rounded-md border-2 border-dashed border-border hover:border-primary/50 transition-colors flex flex-col items-center gap-1 text-muted-foreground hover:text-foreground"
+            >
+              <Upload className="h-4 w-4" />
+              <span className="text-[10px]">Click, pegar o arrastrar</span>
+            </button>
+            <button
+              onClick={() => openImagePicker(setImage)}
+              className="w-full py-2 rounded-md border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1.5 text-muted-foreground hover:text-foreground text-[11px]"
+            >
+              <FolderOpen className="h-3.5 w-3.5" /> Seleccionar de galería
+            </button>
+          </div>
+        )}
+        <input ref={inputRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden" />
+      </div>
+
+      {/* Output handle */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        id={HANDLE_IDS.OUTPUT_IMAGE}
+        className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background"
+        title="Image output"
+      />
+    </div>
+  );
+});
