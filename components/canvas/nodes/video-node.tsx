@@ -1,10 +1,11 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position, type NodeProps, useReactFlow } from "@xyflow/react";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Video, Loader2, AlertCircle, Play } from "lucide-react";
 import { HANDLE_IDS, type VideoNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
+import { useNodeUpdate } from "../hooks/use-node-update";
 
 const statusColors: Record<string, string> = {
   idle: "border-border",
@@ -16,7 +17,7 @@ const statusColors: Record<string, string> = {
 export const VideoNodeComponent = memo(function VideoNode({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as VideoNodeData;
   const status = nodeData.status || "idle";
-  const { updateNodeData } = useReactFlow();
+  const { updateNodeData } = useNodeUpdate();
 
   return (
     <div

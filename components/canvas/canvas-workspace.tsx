@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSession } from "next-auth/react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -40,6 +41,10 @@ import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Ty
 import { CanvasProvider } from "./canvas-context";
 import { LabeledEdge } from "./edges/labeled-edge";
 import { ImagePickerModal } from "@/components/chat/image-picker-modal";
+import { useCollaboration } from "./hooks/use-collaboration";
+import { CursorOverlay } from "./collaboration/cursor-overlay";
+import { PresenceBar } from "./collaboration/presence-bar";
+import { ConnectorGhost } from "./collaboration/connector-ghost";
 
 const edgeTypes = {
   labeled: LabeledEdge,
@@ -82,9 +87,10 @@ interface CanvasWorkspaceProps {
   projectId: number;
   generationConfig?: CanvasGenerationConfig[];
   onConversationCreated?: (newId: number) => void;
+  emitNodeDataRef?: React.MutableRefObject<(nodeId: string, updates: Record<string, unknown>) => void>;
 }
 
-function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = [], onConversationCreated }: CanvasWorkspaceProps) {
+function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = [], onConversationCreated, emitNodeDataRef }: CanvasWorkspaceProps) {
   const [nodes, setNodes, onNodesChangeBase] = useNodesState<Node>([] as Node[]);
   const [edges, setEdges, onEdgesChangeBase] = useEdgesState<Edge>([] as Edge[]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -93,18 +99,41 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   // Undo/redo
   const { takeSnapshot, undo, redo } = useUndoRedo(nodes, edges, setNodes, setEdges);
 
+  // Ref for collab emitters (avoids circular dependency with hooks declared later)
+  const collabRef = useRef<{
+    emitNodeMove: (id: string, x: number, y: number) => void;
+    emitEdgeRemove: (edgeId: string) => void;
+    emitNodeRemove: (nodeId: string) => void;
+  }>({ emitNodeMove: () => {}, emitEdgeRemove: () => {}, emitNodeRemove: () => {} });
+
   // Wrap onNodesChange/onEdgesChange to take snapshots
   const onNodesChange = useCallback((changes: Parameters<typeof onNodesChangeBase>[0]) => {
-    // Only snapshot for meaningful changes (not selection/position drag)
     const hasMeaningful = changes.some((c) => c.type === "remove" || c.type === "add");
     if (hasMeaningful) takeSnapshot();
     onNodesChangeBase(changes);
+
+    // Broadcast changes to other users
+    for (const change of changes) {
+      if (change.type === "position" && change.position && !change.dragging) {
+        collabRef.current.emitNodeMove(change.id, change.position.x, change.position.y);
+      }
+      if (change.type === "remove") {
+        collabRef.current.emitNodeRemove(change.id);
+      }
+    }
   }, [onNodesChangeBase, takeSnapshot]);
 
   const onEdgesChange = useCallback((changes: Parameters<typeof onEdgesChangeBase>[0]) => {
     const hasMeaningful = changes.some((c) => c.type === "remove" || c.type === "add");
     if (hasMeaningful) takeSnapshot();
     onEdgesChangeBase(changes);
+
+    // Broadcast edge removals
+    for (const change of changes) {
+      if (change.type === "remove") {
+        collabRef.current.emitEdgeRemove?.(change.id);
+      }
+    }
   }, [onEdgesChangeBase, takeSnapshot]);
   const [realConversationId, setRealConversationId] = useState(conversationId);
   const nodeIdCounter = useRef(0);
@@ -209,6 +238,75 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     enabled: isLoaded,
   });
 
+  // Collaboration
+  const { data: session } = useSession();
+  const collabUser = useMemo(() => {
+    if (!session?.user) return undefined;
+    return {
+      id: Number((session.user as unknown as { id: number }).id),
+      name: session.user.name || "Usuario",
+      image: session.user.image,
+    };
+  }, [session?.user]);
+
+  const collab = useCollaboration({
+    conversationId: realConversationId,
+    enabled: isLoaded && realConversationId > 0,
+    user: collabUser,
+  });
+
+  // Sync collab ref for use in callbacks declared before collab hook
+  collabRef.current.emitNodeMove = collab.emitNodeMove;
+  collabRef.current.emitEdgeRemove = collab.emitEdgeRemove;
+  collabRef.current.emitNodeRemove = collab.emitNodeRemove;
+  if (emitNodeDataRef) emitNodeDataRef.current = collab.emitNodeData;
+
+  // Handle remote canvas changes from other users
+  useEffect(() => {
+    collab.onRemoteChange.current = (event, data) => {
+      switch (event) {
+        case "node:data": {
+          const { nodeId, updates } = data as { nodeId: string; updates: Record<string, unknown> };
+          console.log("[Collab] Received node:data", nodeId, updates);
+          setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, ...updates } } : n));
+          break;
+        }
+        case "node:move": {
+          const { nodeId, x, y } = data as { nodeId: string; x: number; y: number };
+          setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, position: { x, y } } : n));
+          break;
+        }
+        case "node:add": {
+          const { node } = data as { node: Node };
+          setNodes((nds) => [...nds, node]);
+          break;
+        }
+        case "node:remove": {
+          const { nodeId } = data as { nodeId: string };
+          setNodes((nds) => nds.filter((n) => n.id !== nodeId));
+          setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
+          break;
+        }
+        case "edge:add": {
+          const { edge } = data as { edge: Edge };
+          setEdges((eds) => [...eds, edge]);
+          break;
+        }
+        case "edge:remove": {
+          const { edgeId } = data as { edgeId: string };
+          setEdges((eds) => eds.filter((e) => e.id !== edgeId));
+          break;
+        }
+        case "node:status": {
+          const { nodeId, status } = data as { nodeId: string; status: string };
+          setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, status } } : n));
+          break;
+        }
+      }
+    };
+    return () => { collab.onRemoteChange.current = null; };
+  }, [setNodes, setEdges]);
+
   // Execution
   const { executeNode, executeAll, isExecuting, executionProgress } = useCanvasExecution({
     conversationId: realConversationId,
@@ -224,9 +322,11 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       if (!isValidConnection(connection, nodes, edges)) return;
       if (wouldCreateCycle(edges, connection.source!, connection.target!)) return;
       takeSnapshot();
-      setEdges((eds) => addEdge(connection, eds));
+      const newEdge = { ...connection, animated: false };
+      setEdges((eds) => addEdge(newEdge, eds));
+      collab.emitEdgeAdd(newEdge as Record<string, unknown>);
     },
-    [nodes, edges, setEdges, takeSnapshot]
+    [nodes, edges, setEdges, takeSnapshot, collab.emitEdgeAdd]
   );
 
   const closeDropMenu = useCallback(() => {
@@ -237,19 +337,20 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   // Node selection
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     setSelectedNodeId(node.id);
-  }, []);
+    collab.emitNodeSelect(node.id);
+  }, [collab.emitNodeSelect]);
 
   const justOpenedDropMenuRef = useRef(false);
 
   const onPaneClick = useCallback(() => {
     setSelectedNodeId(null);
-    // Don't close drop menu if it was just opened (onConnectEnd fires right before onPaneClick)
+    collab.emitNodeSelect(null);
     if (justOpenedDropMenuRef.current) {
       justOpenedDropMenuRef.current = false;
       return;
     }
     closeDropMenu();
-  }, [closeDropMenu]);
+  }, [closeDropMenu, collab.emitNodeSelect]);
 
   const { screenToFlowPosition } = useReactFlow();
 
@@ -275,8 +376,9 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       };
       setNodes((nds) => [...nds, newNode]);
       setSelectedNodeId(id);
+      collab.emitNodeAdd(newNode as unknown as Record<string, unknown>);
     },
-    [setNodes, ensureConversation, takeSnapshot, screenToFlowPosition]
+    [setNodes, ensureConversation, takeSnapshot, screenToFlowPosition, collab.emitNodeAdd]
   );
 
   // Update node data
@@ -287,6 +389,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
           n.id === nodeId ? { ...n, data: { ...n.data, ...updates } } : n
         )
       );
+      collab.emitNodeData(nodeId, updates as Record<string, unknown>);
     },
     [setNodes]
   );
@@ -297,6 +400,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       setNodes((nds) => nds.filter((n) => n.id !== nodeId));
       setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
       if (selectedNodeId === nodeId) setSelectedNodeId(null);
+      collab.emitNodeRemove(nodeId);
     },
     [setNodes, setEdges, selectedNodeId]
   );
@@ -324,10 +428,12 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
         handleId: params.handleId,
         handleType: params.handleType,
       };
+      collab.emitConnectorStart(params.nodeId, params.handleId, params.handleType);
     }
   }, []);
 
   const onConnectEnd = useCallback((event: MouseEvent | TouchEvent, connectionState?: unknown) => {
+    collab.emitConnectorEnd();
     const start = connectStartRef.current;
     connectStartRef.current = null;
     if (!start) return;
@@ -504,6 +610,10 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
           onNodeClick={onNodeClick}
           onPaneClick={onPaneClick}
           onMoveEnd={onMoveEnd}
+          onMouseMove={(e: React.MouseEvent) => {
+            const flowPos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+            collab.emitCursorMove(flowPos.x, flowPos.y);
+          }}
           nodeTypes={nodeTypes}
           defaultViewport={defaultViewport}
           fitView={!isLoaded || nodes.length === 0}
@@ -529,6 +639,15 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
               nodeCount={nodes.length}
             />
           </Panel>
+          <Panel position="top-right">
+            <PresenceBar
+              remoteUsers={collab.remoteUsers}
+              localUser={collabUser && collab.myColor ? { name: collabUser.name, image: collabUser.image, color: collab.myColor } : undefined}
+              isConnected={collab.isConnected}
+            />
+          </Panel>
+          <CursorOverlay remoteUsers={collab.remoteUsers} />
+          <ConnectorGhost remoteUsers={collab.remoteUsers} />
         </ReactFlow>
       </div>
 
@@ -598,10 +717,16 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps) {
     setPickerState({ isOpen: false, onSelect: null, title: "" });
   }, []);
 
+  // Ref for collab emitNodeData - populated by CanvasWorkspaceInner
+  const emitNodeDataRef = useRef<(nodeId: string, updates: Record<string, unknown>) => void>(() => {});
+  const emitNodeDataStable = useCallback((nodeId: string, updates: Record<string, unknown>) => {
+    emitNodeDataRef.current(nodeId, updates);
+  }, []);
+
   return (
-    <CanvasProvider value={{ projectId: props.projectId, generationConfig: props.generationConfig || [], openImagePicker }}>
+    <CanvasProvider value={{ projectId: props.projectId, generationConfig: props.generationConfig || [], openImagePicker, emitNodeData: emitNodeDataStable }}>
       <ReactFlowProvider>
-        <CanvasWorkspaceInner {...props} />
+        <CanvasWorkspaceInner {...props} emitNodeDataRef={emitNodeDataRef} />
       </ReactFlowProvider>
 
       {/* Image picker modal - rendered outside ReactFlow to avoid transform issues */}

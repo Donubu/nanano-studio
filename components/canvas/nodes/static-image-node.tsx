@@ -1,15 +1,16 @@
 "use client";
 
 import { memo, useCallback, useRef } from "react";
-import { Handle, Position, type NodeProps, useReactFlow } from "@xyflow/react";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { ImagePlus, Upload, FolderOpen } from "lucide-react";
 import { HANDLE_IDS, type StaticImageNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
 import { useCanvasContext } from "../canvas-context";
+import { useNodeUpdate } from "../hooks/use-node-update";
 
 export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as StaticImageNodeData;
-  const { updateNodeData } = useReactFlow();
+  const { updateNodeData } = useNodeUpdate();
   const { openImagePicker } = useCanvasContext();
   const inputRef = useRef<HTMLInputElement>(null);
 

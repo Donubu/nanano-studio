@@ -1,11 +1,12 @@
 "use client";
 
 import { memo, useCallback } from "react";
-import { Handle, Position, type NodeProps, useReactFlow } from "@xyflow/react";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Settings, MessageSquare, ImageIcon, Video } from "lucide-react";
 import { HANDLE_IDS, type ParamsTextNodeData, type ParamsImageNodeData, type ParamsVideoNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
 import { useCanvasContext } from "../canvas-context";
+import { useNodeUpdate } from "../hooks/use-node-update";
 import type { CanvasGenerationConfig } from "../canvas-workspace";
 
 type ParamsData = ParamsTextNodeData | ParamsImageNodeData | ParamsVideoNodeData;
@@ -25,7 +26,7 @@ const paramsToGenType: Record<string, string> = {
 
 export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected, type }: NodeProps) {
   const nodeData = data as unknown as ParamsData;
-  const { updateNodeData } = useReactFlow();
+  const { updateNodeData } = useNodeUpdate();
   const { projectId, generationConfig } = useCanvasContext();
   const config = subtypeConfig[type as keyof typeof subtypeConfig] || subtypeConfig["params-text"];
   const Icon = config.icon;

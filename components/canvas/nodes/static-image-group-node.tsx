@@ -1,15 +1,16 @@
 "use client";
 
 import { memo, useCallback, useRef } from "react";
-import { Handle, Position, type NodeProps, useReactFlow } from "@xyflow/react";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Images, Plus, X, FolderOpen } from "lucide-react";
 import { HANDLE_IDS, type StaticImageGroupNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
 import { useCanvasContext } from "../canvas-context";
+import { useNodeUpdate } from "../hooks/use-node-update";
 
 export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as StaticImageGroupNodeData;
-  const { updateNodeData } = useReactFlow();
+  const { updateNodeData } = useNodeUpdate();
   const { openImagePicker } = useCanvasContext();
   const inputRef = useRef<HTMLInputElement>(null);
   const images = nodeData.images || [];

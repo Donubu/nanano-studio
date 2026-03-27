@@ -1,10 +1,11 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position, type NodeProps, useReactFlow } from "@xyflow/react";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { ImageIcon, Loader2, AlertCircle } from "lucide-react";
 import { HANDLE_IDS, type ImageNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
+import { useNodeUpdate } from "../hooks/use-node-update";
 
 const statusColors: Record<string, string> = {
   idle: "border-border",
@@ -16,7 +17,7 @@ const statusColors: Record<string, string> = {
 export const ImageNodeComponent = memo(function ImageNode({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as ImageNodeData;
   const status = nodeData.status || "idle";
-  const { updateNodeData } = useReactFlow();
+  const { updateNodeData } = useNodeUpdate();
 
   return (
     <div

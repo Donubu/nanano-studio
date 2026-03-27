@@ -25,6 +25,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN npm run build
 RUN npm run build:worker
+RUN npm run build:collab
 
 # ---- runner ----
 FROM node:20-alpine AS runner
@@ -52,10 +53,14 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/scripts/migrate.js ./scripts/migrate.js
 COPY --from=builder /app/scripts/migrations ./scripts/migrations
 COPY --from=builder /app/scripts/docker-start.sh ./scripts/docker-start.sh
+COPY --from=builder /app/scripts/server-wrapper.js ./scripts/server-wrapper.js
 RUN chmod +x ./scripts/docker-start.sh
 
 # Copy worker build
 COPY --from=builder /app/worker/dist ./worker/dist
+
+# Copy collab server build
+COPY --from=builder /app/lib/collaboration/dist ./lib/collaboration/dist
 
 EXPOSE 3000
 

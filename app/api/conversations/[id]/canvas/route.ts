@@ -34,11 +34,10 @@ interface ConversationCheckRow extends RowDataPacket {
   user_id: number;
 }
 
-async function verifyConversationAccess(conversationId: string, userId: number, role: string) {
-  const isAdmin = role === "admin";
+async function verifyConversationAccess(conversationId: string) {
   const [rows] = await pool.execute<ConversationCheckRow[]>(
-    `SELECT id, user_id FROM conversations WHERE id = ? AND deleted_at IS NULL ${isAdmin ? "" : "AND user_id = ?"}`,
-    isAdmin ? [conversationId] : [conversationId, userId]
+    `SELECT id, user_id FROM conversations WHERE id = ? AND deleted_at IS NULL`,
+    [conversationId]
   );
   return rows.length > 0 ? rows[0] : null;
 }
@@ -55,7 +54,7 @@ export async function GET(
     }
 
     const { id } = await params;
-    const conversation = await verifyConversationAccess(id, Number(session.user.id), session.user.role);
+    const conversation = await verifyConversationAccess(id);
     if (!conversation) {
       return NextResponse.json({ error: "Conversación no encontrada" }, { status: 404 });
     }
@@ -113,7 +112,7 @@ export async function PUT(
     }
 
     const { id } = await params;
-    const conversation = await verifyConversationAccess(id, Number(session.user.id), session.user.role);
+    const conversation = await verifyConversationAccess(id);
     if (!conversation) {
       return NextResponse.json({ error: "Conversación no encontrada" }, { status: 404 });
     }

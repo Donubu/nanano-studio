@@ -1,14 +1,15 @@
 "use client";
 
 import { memo, useCallback } from "react";
-import { type NodeProps, useReactFlow } from "@xyflow/react";
+import { type NodeProps } from "@xyflow/react";
 import { StickyNote } from "lucide-react";
 import type { NoteNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
+import { useNodeUpdate } from "../hooks/use-node-update";
 
 export const NoteNodeComponent = memo(function NoteNode({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as NoteNodeData;
-  const { updateNodeData } = useReactFlow();
+  const { updateNodeData } = useNodeUpdate();
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     updateNodeData(id, { ...nodeData, content: e.target.value });

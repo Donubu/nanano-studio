@@ -14,6 +14,6 @@ else
   node /app/scripts/migrate.js
 
   # Start the application (standalone mode)
-  echo "Starting Next.js server..."
-  exec node server.js
+  echo "Starting Next.js server with collaboration..."
+  exec node scripts/server-wrapper.js
 fi

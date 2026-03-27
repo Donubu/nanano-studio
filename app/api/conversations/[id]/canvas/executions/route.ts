@@ -58,9 +58,7 @@ export async function GET(
     const isAdmin = session.user.role === "admin";
 
     const [convRows] = await pool.execute<ConversationCheckRow[]>(
-      `SELECT id, user_id FROM conversations WHERE id = ? AND deleted_at IS NULL ${isAdmin ? "" : "AND user_id = ?"}`,
-      isAdmin ? [id] : [id, Number(session.user.id)]
-    );
+      `SELECT id, user_id FROM conversations WHERE id = ? AND deleted_at IS NULL`, [id]);
     if (convRows.length === 0) {
       return NextResponse.json({ error: "Conversación no encontrada" }, { status: 404 });
     }

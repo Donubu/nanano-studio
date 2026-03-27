@@ -1,14 +1,15 @@
 "use client";
 
 import { memo, useCallback } from "react";
-import { Handle, Position, type NodeProps, useReactFlow } from "@xyflow/react";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Type } from "lucide-react";
 import { HANDLE_IDS, type StaticTextNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
+import { useNodeUpdate } from "../hooks/use-node-update";
 
 export const StaticTextNodeComponent = memo(function StaticTextNode({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as StaticTextNodeData;
-  const { updateNodeData } = useReactFlow();
+  const { updateNodeData } = useNodeUpdate();
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     updateNodeData(id, { ...nodeData, content: e.target.value });
