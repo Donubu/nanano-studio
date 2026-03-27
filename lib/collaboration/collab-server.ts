@@ -37,61 +37,6 @@ function getPresence(room: string): CollabUser[] {
   return Array.from(roomPresence.get(room)?.values() || []);
 }
 
-/**
- * Decode NextAuth v5 JWT from cookie.
- * NextAuth v5 uses JWE (encrypted). We use jose to decrypt.
- */
-async function decodeSessionToken(token: string): Promise<{ id: number; name: string; image: string | null; role: string } | null> {
-  try {
-    const { jwtDecrypt } = await import("jose");
-    const secret = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
-    if (!secret) return null;
-
-    // NextAuth v5 derives the encryption key from the secret
-    const enc = new TextEncoder();
-    const { subtle } = globalThis.crypto;
-    const keyMaterial = await subtle.importKey("raw", enc.encode(secret), { name: "HKDF" }, false, ["deriveKey"]);
-    const derivedKey = await subtle.deriveKey(
-      { name: "HKDF", hash: "SHA-256", salt: enc.encode(""), info: enc.encode("Auth.js Generated Encryption Key") },
-      keyMaterial,
-      { name: "AES-GCM", length: 256 },
-      false,
-      ["encrypt", "decrypt"]
-    );
-
-    // Wrap as JWK for jose
-    const exported = await subtle.exportKey("raw", derivedKey);
-    const key = await subtle.importKey("raw", exported, { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
-    const jwk = await subtle.exportKey("jwk", key);
-    const { createSecretKey } = await import("crypto");
-    const secretKey = createSecretKey(Buffer.from(jwk.k!, "base64url"));
-
-    const { payload } = await jwtDecrypt(token, secretKey, { clockTolerance: 15 });
-    return {
-      id: payload.id as number,
-      name: (payload.name as string) || "Usuario",
-      image: (payload.image as string) || null,
-      role: (payload.role as string) || "user",
-    };
-  } catch (err) {
-    console.error("[Collab] JWT decode error:", err);
-    return null;
-  }
-}
-
-/**
- * Extract session token from cookie header.
- */
-function extractTokenFromCookies(cookieHeader: string): string | null {
-  const cookies = cookieHeader.split(";").map((c) => c.trim());
-  for (const cookie of cookies) {
-    // NextAuth v5 uses different cookie names depending on secure context
-    if (cookie.startsWith("authjs.session-token=") || cookie.startsWith("__Secure-authjs.session-token=")) {
-      return cookie.split("=").slice(1).join("=");
-    }
-  }
-  return null;
-}
 
 /**
  * Initialize the collaboration WebSocket server.
@@ -126,28 +71,19 @@ export function initCollabServer(httpServer: HTTPServer): SocketIOServer | null 
     // Canvas namespace
     const canvasNsp = io.of("/canvas");
 
-    // Auth middleware
+    // Auth middleware — uses auth data sent by client from session
     canvasNsp.use(async (socket, next) => {
-      const cookieHeader = socket.handshake.headers.cookie;
-      if (!cookieHeader) {
-        return next(new Error("No auth cookie"));
-      }
-
-      const token = extractTokenFromCookies(cookieHeader);
-      if (!token) {
-        return next(new Error("No session token"));
-      }
-
-      const user = await decodeSessionToken(token);
-      if (!user) {
-        return next(new Error("Invalid session"));
+      const auth = socket.handshake.auth || {};
+      const userId = Number(auth.userId);
+      if (!userId) {
+        return next(new Error("No userId in auth"));
       }
 
       (socket as CollabSocket).data = {
-        userId: user.id,
-        name: user.name,
-        image: user.image,
-        color: getUserColor(user.id),
+        userId,
+        name: (auth.name as string) || `User ${userId}`,
+        image: (auth.image as string) || null,
+        color: getUserColor(userId),
       };
 
       next();
