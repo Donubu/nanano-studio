@@ -1,41 +1,38 @@
 /**
  * Server wrapper that attaches socket.io to the Next.js standalone server.
- * This file replaces the direct `node server.js` call in docker-start.sh.
- *
- * It monkey-patches http.createServer to capture the HTTP server instance,
- * attaches the collaboration WebSocket server, then lets Next.js proceed normally.
+ * Replaces `node server.js` in docker-start.sh for production.
  */
 const http = require("http");
 const path = require("path");
 
-// Store original createServer
 const originalCreateServer = http.createServer;
-
-// Flag to only patch once
 let serverCaptured = false;
 
-// Monkey-patch http.createServer to capture the server instance
 http.createServer = function (...args) {
   const server = originalCreateServer.apply(this, args);
 
   if (!serverCaptured) {
     serverCaptured = true;
+    console.log("[Server Wrapper] HTTP server captured, attaching collaboration...");
 
-    // Attach socket.io collaboration server
     try {
-      // The collab-server module is compiled as part of the Next.js build
-      // and available in the standalone output
-      const { initCollabServer } = require("../lib/collaboration/dist/collab-server");
-      initCollabServer(server);
-      console.log("[Server Wrapper] Collaboration server attached");
+      const collabPath = path.resolve(__dirname, "../lib/collaboration/dist/collab-server.js");
+      console.log("[Server Wrapper] Loading collab server from:", collabPath);
+      const { initCollabServer } = require(collabPath);
+      const io = initCollabServer(server);
+      if (io) {
+        console.log("[Server Wrapper] Collaboration server attached successfully");
+      } else {
+        console.warn("[Server Wrapper] Collaboration server returned null (Redis may not be available)");
+      }
     } catch (err) {
-      console.warn("[Server Wrapper] Could not attach collaboration server:", err.message);
-      // Non-fatal: app works without collaboration
+      console.error("[Server Wrapper] Failed to attach collaboration server:");
+      console.error(err.stack || err.message || err);
     }
   }
 
   return server;
 };
 
-// Now load and run the original Next.js standalone server
+console.log("[Server Wrapper] Starting Next.js standalone server...");
 require(path.resolve(__dirname, "..", "server.js"));
