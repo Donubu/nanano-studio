@@ -22,7 +22,7 @@ import { ProjectModel as ConfigModel } from "./quality-selector";
 import { ReasoningSelector, type ThinkingLevel } from "./reasoning-selector";
 import { cn, formatDateTimeLocal } from "@/lib/utils";
 import { useNavigation } from "@/contexts/navigation-context";
-import type { ImagenAspectRatio } from "./image-settings";
+import { type ImagenAspectRatio, getDailyPin } from "./image-settings";
 
 // ---- Types ----
 
@@ -156,6 +156,7 @@ interface FullModeWorkspaceProps {
   onImageSettingsChange: (settings: { aspectRatio?: string; size?: string; negativePrompt?: string; numberOfImages?: number }) => void;
   reusePrompt: string | null;
   onReusePromptUsed: () => void;
+  isAdmin?: boolean;
   leftSidebarOpen: boolean;
   onToggleLeftSidebar: () => void;
   currentUserId: number;
@@ -255,6 +256,7 @@ export function FullModeWorkspace({
   onImageSettingsChange,
   reusePrompt,
   onReusePromptUsed,
+  isAdmin = false,
   leftSidebarOpen,
   onToggleLeftSidebar,
   currentUserId,
@@ -281,6 +283,9 @@ export function FullModeWorkspace({
   const [format, setFormat] = useState<FullFormat>("image");
   const [videoMode, setVideoMode] = useState<VideoMode>("none");
   const [numVariations, setNumVariations] = useState(1);
+  const [pinDialogFor, setPinDialogFor] = useState<number | null>(null);
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [gridSize, setGridSizeState] = useState<"S" | "M" | "L">(() => {
@@ -2233,7 +2238,7 @@ export function FullModeWorkspace({
 
           {/* Pagination controls */}
           {!activeCollectionId && totalFilteredCount > 20 && (
-            <div className="relative z-30 mx-auto mt-4 mb-2 flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm px-4 py-3 shadow-sm">
+            <div className="relative z-10 mx-auto mt-4 mb-20 flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm px-4 py-3 shadow-sm">
               <div className="flex items-center gap-1.5">
                 <span className="text-xs text-muted-foreground mr-1">Mostrar:</span>
                 {[20, 50, 150, 200, 0].map(size => (
@@ -2563,17 +2568,46 @@ export function FullModeWorkspace({
                               <label className="text-xs text-muted-foreground">Res.</label>
                               <div className="flex gap-0.5">
                                 {supportedImageResolutions.map(r => (
-                                  <button key={r} onClick={() => onImageSettingsChange({ size: r })} className={cn("px-1.5 py-1 rounded text-xs font-medium transition-colors", imageSize === r ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground")}>{r}</button>
+                                  <button key={r} onClick={() => {
+                                    if (r === "4K" && imageSize !== "4K") {
+                                      if (!window.confirm("La generacion en 4K tarda en promedio 4 minutos. Deseas continuar?")) return;
+                                    }
+                                    onImageSettingsChange({ size: r });
+                                  }} className={cn("px-1.5 py-1 rounded text-xs font-medium transition-colors", imageSize === r ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground")}>{r}</button>
                                 ))}
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
                               <label className="text-xs text-muted-foreground">Cant.</label>
+                              {isAdmin && <span className="text-[10px] text-muted-foreground/40 font-mono">{getDailyPin()}</span>}
                               <div className="flex gap-0.5">
                                 {[1, 2, 3, 4].map(n => (
-                                  <button key={n} onClick={() => setNumVariations(n)} className={cn("w-6 py-1 rounded text-xs font-medium transition-colors text-center", numVariations === n ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground")}>{n}</button>
+                                  <button key={n} onClick={() => {
+                                    if (n >= 3 && format === "image") {
+                                      setPinDialogFor(n); setPinInput(""); setPinError(false);
+                                    } else {
+                                      setNumVariations(n);
+                                    }
+                                  }} className={cn("w-6 py-1 rounded text-xs font-medium transition-colors text-center", numVariations === n ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground")}>{n}</button>
                                 ))}
                               </div>
+                              {pinDialogFor !== null && format === "image" && (
+                                <div className="flex items-center gap-1">
+                                  <input type="text" inputMode="numeric" maxLength={6} value={pinInput}
+                                    onChange={(e) => { setPinInput(e.target.value.replace(/\D/g, "").slice(0, 6)); setPinError(false); }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") { if (pinInput === getDailyPin()) { setNumVariations(pinDialogFor); setPinDialogFor(null); } else { setPinError(true); } }
+                                      else if (e.key === "Escape") { setPinDialogFor(null); }
+                                    }}
+                                    placeholder="PIN"
+                                    className={cn("w-20 px-1.5 py-1 text-xs rounded border bg-background outline-none", pinError ? "border-red-500" : "border-border")}
+                                    autoFocus
+                                  />
+                                  <button onClick={() => { if (pinInput === getDailyPin()) { setNumVariations(pinDialogFor); setPinDialogFor(null); } else { setPinError(true); } }}
+                                    className="px-1.5 py-1 text-xs rounded bg-primary text-primary-foreground">OK</button>
+                                  <button onClick={() => setPinDialogFor(null)} className="text-xs text-muted-foreground hover:text-foreground">&times;</button>
+                                </div>
+                              )}
                             </div>
                           </div>
                         ) : (
@@ -2671,9 +2705,15 @@ export function FullModeWorkspace({
                   {format !== "text" && (
                   <button
                     onClick={() => {
-                      const maxVar = format === "video" ? maxVideoVariations : 4;
-                      const next = numVariations >= maxVar ? 1 : numVariations + 1;
-                      setNumVariations(next);
+                      if (format === "image") {
+                        // For images: cycle 1 → 2 only (3+ requires PIN via settings panel)
+                        const next = numVariations >= 2 ? 1 : numVariations + 1;
+                        setNumVariations(next);
+                      } else {
+                        const maxVar = maxVideoVariations;
+                        const next = numVariations >= maxVar ? 1 : numVariations + 1;
+                        setNumVariations(next);
+                      }
                     }}
                     className={cn(
                       "shrink-0 w-10 h-10 rounded-lg text-xs font-bold border transition-colors",

@@ -3810,6 +3810,7 @@ export function ChatInterface() {
                             }}
                             reusePrompt={reusePrompt}
                             onReusePromptUsed={() => setReusePrompt(null)}
+                            isAdmin={session?.user?.role === "admin"}
                             leftSidebarOpen={leftSidebarOpen}
                             onToggleLeftSidebar={() => setLeftSidebarOpen(!leftSidebarOpen)}
                             currentUserId={Number(session?.user?.id) || 0}
@@ -4991,6 +4992,7 @@ export function ChatInterface() {
                                         numberOfImages={numberOfImages}
                                         negativePrompt={imageNegativePrompt}
                                         disabled={isSending}
+                                        isAdmin={session?.user?.role === "admin"}
                                         onChange={(settings) => {
                                             if (settings.aspectRatio !== undefined) {
                                                 setImageAspectRatio(settings.aspectRatio);
@@ -5193,6 +5195,7 @@ export function ChatInterface() {
                                         numberOfImages={numberOfImages}
                                         negativePrompt={imageNegativePrompt}
                                         disabled={isSending}
+                                        isAdmin={session?.user?.role === "admin"}
                                         onChange={(settings) => {
                                             if (settings.aspectRatio !== undefined) {
                                                 setImageAspectRatio(settings.aspectRatio);

@@ -20,12 +20,29 @@ interface ImageSettingsProps {
   negativePrompt?: string;
   disabled?: boolean;
   modelId?: string;
+  isAdmin?: boolean;
   onChange: (settings: {
     aspectRatio?: ImagenAspectRatio;
     resolution?: ImagenResolution;
     numberOfImages?: number;
     negativePrompt?: string;
   }) => void;
+}
+
+/**
+ * Calculate daily PIN: DDYYYY - 1500
+ */
+/**
+ * Daily PIN: always 6 digits.
+ * Formula: DDMMYY → reverse to YYMMDD → add 1234 → take last 6 digits
+ */
+export function getDailyPin(): string {
+  const now = new Date();
+  const dd = String(now.getDate()).padStart(2, "0");
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const yy = String(now.getFullYear()).slice(2);
+  const reversed = parseInt(`${yy}${mm}${dd}`, 10);
+  return String(reversed + 1234).slice(-6).padStart(6, "0");
 }
 
 export function ImageSettings({
@@ -35,9 +52,13 @@ export function ImageSettings({
   negativePrompt = "",
   disabled = false,
   modelId,
+  isAdmin = false,
   onChange,
 }: ImageSettingsProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [pinDialogFor, setPinDialogFor] = useState<number | null>(null);
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState(false);
 
   const isGrok = modelId?.includes("grok-imagine-image") ?? false;
   const isKling = modelId?.includes("kling-omni-image") ?? false;
@@ -144,7 +165,12 @@ export function ImageSettings({
             <button
               key={r.value}
               disabled={disabled}
-              onClick={() => onChange({ resolution: r.value })}
+              onClick={() => {
+                if (r.value === "4K" && resolution !== "4K") {
+                  if (!window.confirm("La generacion en 4K tarda en promedio 4 minutos. Deseas continuar?")) return;
+                }
+                onChange({ resolution: r.value });
+              }}
               className={`flex-1 py-2 px-3 text-sm rounded-md border transition-colors ${
                 resolution === r.value
                   ? "bg-primary text-primary-foreground border-primary"
@@ -162,13 +188,24 @@ export function ImageSettings({
 
       {/* Number of Images */}
       <div className="space-y-2">
-        <Label className="text-xs text-muted-foreground">Cantidad de imagenes</Label>
+        <div className="flex items-center gap-2">
+          <Label className="text-xs text-muted-foreground">Cantidad de imagenes</Label>
+          {isAdmin && <span className="text-xs text-muted-foreground/50 font-mono">PIN: {getDailyPin()}</span>}
+        </div>
         <div className="flex gap-2">
           {imageCountOptions.map((n) => (
             <button
               key={n}
               disabled={disabled}
-              onClick={() => onChange({ numberOfImages: n })}
+              onClick={() => {
+                if (n >= 3) {
+                  setPinDialogFor(n);
+                  setPinInput("");
+                  setPinError(false);
+                } else {
+                  onChange({ numberOfImages: n });
+                }
+              }}
               className={`flex-1 py-2 px-3 text-sm rounded-md border transition-colors ${
                 numberOfImages === n
                   ? "bg-primary text-primary-foreground border-primary"
@@ -179,6 +216,55 @@ export function ImageSettings({
             </button>
           ))}
         </div>
+        {/* PIN Dialog */}
+        {pinDialogFor !== null && (
+          <div className="flex items-center gap-2 mt-2 p-2 rounded-md bg-muted/50 border border-border">
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              value={pinInput}
+              onChange={(e) => {
+                setPinInput(e.target.value.replace(/\D/g, "").slice(0, 6));
+                setPinError(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  if (pinInput === getDailyPin()) {
+                    onChange({ numberOfImages: pinDialogFor });
+                    setPinDialogFor(null);
+                  } else {
+                    setPinError(true);
+                  }
+                } else if (e.key === "Escape") {
+                  setPinDialogFor(null);
+                }
+              }}
+              placeholder={`PIN para generar ${pinDialogFor} imagenes`}
+              className={`flex-1 px-2 py-1 text-sm rounded border bg-background outline-none ${pinError ? "border-red-500" : "border-border"}`}
+              autoFocus
+            />
+            <button
+              onClick={() => {
+                if (pinInput === getDailyPin()) {
+                  onChange({ numberOfImages: pinDialogFor });
+                  setPinDialogFor(null);
+                } else {
+                  setPinError(true);
+                }
+              }}
+              className="px-3 py-1 text-sm rounded bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              OK
+            </button>
+            <button
+              onClick={() => setPinDialogFor(null)}
+              className="px-2 py-1 text-sm rounded text-muted-foreground hover:text-foreground"
+            >
+              &times;
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Opciones avanzadas (only for models that support negative prompt) */}

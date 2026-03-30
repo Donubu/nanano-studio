@@ -73,6 +73,17 @@ interface CostSummary {
 }
 
 /**
+ * Format a Date as YYYY-MM-DD in local timezone (America/Santiago)
+ * Avoids the UTC offset issue of toISOString() which shifts dates by -3h
+ */
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
  * Get the full BigQuery table name for billing data
  */
 function getBillingTableName(): string {
@@ -95,7 +106,7 @@ export async function syncGcpCosts(daysBack: number = 2): Promise<SyncResult> {
     // Query BigQuery for billing data
     const query = `
       SELECT
-        DATE(usage_start_time) as cost_date,
+        DATE(usage_start_time, "America/Santiago") as cost_date,
         service.id as service_id,
         service.description as service_description,
         sku.id as sku_id,
@@ -109,7 +120,7 @@ export async function syncGcpCosts(daysBack: number = 2): Promise<SyncResult> {
         ANY_VALUE(usage.unit) as usage_unit,
         ANY_VALUE(currency) as currency
       FROM ${tableName}
-      WHERE DATE(usage_start_time) >= DATE_SUB(CURRENT_DATE(), INTERVAL @daysBack DAY)
+      WHERE DATE(usage_start_time, "America/Santiago") >= DATE_SUB(CURRENT_DATE("America/Santiago"), INTERVAL @daysBack DAY)
       GROUP BY 1, 2, 3, 4, 5, 6, 7
       HAVING net_cost != 0
       ORDER BY cost_date DESC, net_cost DESC
@@ -243,7 +254,7 @@ async function logSync(
  * Get costs for a specific date
  */
 export async function getGcpDailyCosts(date: Date): Promise<GcpDailyCost[]> {
-  const dateStr = date.toISOString().split("T")[0];
+  const dateStr = formatLocalDate(date);
 
   const [rows] = await pool.execute<GcpDailyCost[]>(
     `SELECT * FROM gcp_daily_costs
@@ -263,8 +274,8 @@ export async function getGcpCostsByRange(
   endDate: Date,
   serviceFilter?: string
 ): Promise<GcpDailyCost[]> {
-  const startStr = startDate.toISOString().split("T")[0];
-  const endStr = endDate.toISOString().split("T")[0];
+  const startStr = formatLocalDate(startDate);
+  const endStr = formatLocalDate(endDate);
 
   let query = `
     SELECT * FROM gcp_daily_costs
@@ -290,8 +301,8 @@ export async function getGcpCostsByService(
   startDate: Date,
   endDate: Date
 ): Promise<Array<{ service_id: string; service_description: string; total_cost: number }>> {
-  const startStr = startDate.toISOString().split("T")[0];
-  const endStr = endDate.toISOString().split("T")[0];
+  const startStr = formatLocalDate(startDate);
+  const endStr = formatLocalDate(endDate);
 
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT
@@ -319,8 +330,8 @@ export async function getGcpDailyTotals(
   startDate: Date,
   endDate: Date
 ): Promise<Array<{ date: string; total_cost: number }>> {
-  const startStr = startDate.toISOString().split("T")[0];
-  const endStr = endDate.toISOString().split("T")[0];
+  const startStr = formatLocalDate(startDate);
+  const endStr = formatLocalDate(endDate);
 
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT
@@ -354,22 +365,22 @@ export async function getGcpCostsSummary(): Promise<CostSummary> {
   // Get totals
   const [todayResult] = await pool.execute<RowDataPacket[]>(
     `SELECT COALESCE(SUM(net_cost), 0) as total FROM gcp_daily_costs WHERE cost_date = ?`,
-    [today.toISOString().split("T")[0]]
+    [formatLocalDate(today)]
   );
 
   const [yesterdayResult] = await pool.execute<RowDataPacket[]>(
     `SELECT COALESCE(SUM(net_cost), 0) as total FROM gcp_daily_costs WHERE cost_date = ?`,
-    [yesterday.toISOString().split("T")[0]]
+    [formatLocalDate(yesterday)]
   );
 
   const [thisMonthResult] = await pool.execute<RowDataPacket[]>(
     `SELECT COALESCE(SUM(net_cost), 0) as total FROM gcp_daily_costs WHERE cost_date >= ?`,
-    [thisMonthStart.toISOString().split("T")[0]]
+    [formatLocalDate(thisMonthStart)]
   );
 
   const [lastMonthResult] = await pool.execute<RowDataPacket[]>(
     `SELECT COALESCE(SUM(net_cost), 0) as total FROM gcp_daily_costs WHERE cost_date BETWEEN ? AND ?`,
-    [lastMonthStart.toISOString().split("T")[0], lastMonthEnd.toISOString().split("T")[0]]
+    [formatLocalDate(lastMonthStart), formatLocalDate(lastMonthEnd)]
   );
 
   // Get by service for this month

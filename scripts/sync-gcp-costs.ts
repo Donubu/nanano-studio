@@ -84,7 +84,7 @@ async function main() {
 
     const query = `
       SELECT
-        DATE(usage_start_time) as cost_date,
+        DATE(usage_start_time, "America/Santiago") as cost_date,
         service.id as service_id,
         service.description as service_description,
         sku.id as sku_id,
@@ -98,7 +98,7 @@ async function main() {
         ANY_VALUE(usage.unit) as usage_unit,
         ANY_VALUE(currency) as currency
       FROM ${tableName}
-      WHERE DATE(usage_start_time) >= DATE_SUB(CURRENT_DATE(), INTERVAL @daysBack DAY)
+      WHERE DATE(usage_start_time, "America/Santiago") >= DATE_SUB(CURRENT_DATE("America/Santiago"), INTERVAL @daysBack DAY)
       GROUP BY 1, 2, 3, 4, 5, 6, 7
       HAVING net_cost != 0
       ORDER BY cost_date DESC, net_cost DESC
