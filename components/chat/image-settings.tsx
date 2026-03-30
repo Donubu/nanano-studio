@@ -59,6 +59,10 @@ export function ImageSettings({
   const [pinDialogFor, setPinDialogFor] = useState<number | null>(null);
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState(false);
+  const [pinUnlocked, setPinUnlocked] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return sessionStorage.getItem("img_pin_unlocked") === getDailyPin();
+  });
 
   const isGrok = modelId?.includes("grok-imagine-image") ?? false;
   const isKling = modelId?.includes("kling-omni-image") ?? false;
@@ -198,7 +202,7 @@ export function ImageSettings({
               key={n}
               disabled={disabled}
               onClick={() => {
-                if (n >= 3) {
+                if (n >= 3 && !pinUnlocked) {
                   setPinDialogFor(n);
                   setPinInput("");
                   setPinError(false);
@@ -218,7 +222,7 @@ export function ImageSettings({
         </div>
         {/* PIN Dialog */}
         {pinDialogFor !== null && (
-          <div className="flex items-center gap-2 mt-2 p-2 rounded-md bg-muted/50 border border-border">
+          <div className="flex items-center gap-1.5 mt-2 p-1.5 rounded-md bg-muted/50 border border-border">
             <input
               type="text"
               inputMode="numeric"
@@ -231,6 +235,8 @@ export function ImageSettings({
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   if (pinInput === getDailyPin()) {
+                    setPinUnlocked(true);
+                    sessionStorage.setItem("img_pin_unlocked", getDailyPin());
                     onChange({ numberOfImages: pinDialogFor });
                     setPinDialogFor(null);
                   } else {
@@ -240,26 +246,28 @@ export function ImageSettings({
                   setPinDialogFor(null);
                 }
               }}
-              placeholder={`PIN para generar ${pinDialogFor} imagenes`}
-              className={`flex-1 px-2 py-1 text-sm rounded border bg-background outline-none ${pinError ? "border-red-500" : "border-border"}`}
+              placeholder="PIN 6 digitos"
+              className={`w-28 px-2 py-1 text-xs rounded border bg-background outline-none ${pinError ? "border-red-500" : "border-border"}`}
               autoFocus
             />
             <button
               onClick={() => {
                 if (pinInput === getDailyPin()) {
+                  setPinUnlocked(true);
+                  sessionStorage.setItem("img_pin_unlocked", getDailyPin());
                   onChange({ numberOfImages: pinDialogFor });
                   setPinDialogFor(null);
                 } else {
                   setPinError(true);
                 }
               }}
-              className="px-3 py-1 text-sm rounded bg-primary text-primary-foreground hover:bg-primary/90"
+              className="px-2 py-1 text-xs rounded bg-primary text-primary-foreground hover:bg-primary/90"
             >
               OK
             </button>
             <button
               onClick={() => setPinDialogFor(null)}
-              className="px-2 py-1 text-sm rounded text-muted-foreground hover:text-foreground"
+              className="px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground"
             >
               &times;
             </button>

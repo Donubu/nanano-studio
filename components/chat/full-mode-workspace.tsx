@@ -286,6 +286,10 @@ export function FullModeWorkspace({
   const [pinDialogFor, setPinDialogFor] = useState<number | null>(null);
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState(false);
+  const [pinUnlocked, setPinUnlocked] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return sessionStorage.getItem("img_pin_unlocked") === getDailyPin();
+  });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [gridSize, setGridSizeState] = useState<"S" | "M" | "L">(() => {
@@ -2583,7 +2587,7 @@ export function FullModeWorkspace({
                               <div className="flex gap-0.5">
                                 {[1, 2, 3, 4].map(n => (
                                   <button key={n} onClick={() => {
-                                    if (n >= 3 && format === "image") {
+                                    if (n >= 3 && format === "image" && !pinUnlocked) {
                                       setPinDialogFor(n); setPinInput(""); setPinError(false);
                                     } else {
                                       setNumVariations(n);
@@ -2591,24 +2595,28 @@ export function FullModeWorkspace({
                                   }} className={cn("w-6 py-1 rounded text-xs font-medium transition-colors text-center", numVariations === n ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground")}>{n}</button>
                                 ))}
                               </div>
-                              {pinDialogFor !== null && format === "image" && (
-                                <div className="flex items-center gap-1">
-                                  <input type="text" inputMode="numeric" maxLength={6} value={pinInput}
-                                    onChange={(e) => { setPinInput(e.target.value.replace(/\D/g, "").slice(0, 6)); setPinError(false); }}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") { if (pinInput === getDailyPin()) { setNumVariations(pinDialogFor); setPinDialogFor(null); } else { setPinError(true); } }
-                                      else if (e.key === "Escape") { setPinDialogFor(null); }
-                                    }}
-                                    placeholder="PIN"
-                                    className={cn("w-20 px-1.5 py-1 text-xs rounded border bg-background outline-none", pinError ? "border-red-500" : "border-border")}
-                                    autoFocus
-                                  />
-                                  <button onClick={() => { if (pinInput === getDailyPin()) { setNumVariations(pinDialogFor); setPinDialogFor(null); } else { setPinError(true); } }}
-                                    className="px-1.5 py-1 text-xs rounded bg-primary text-primary-foreground">OK</button>
-                                  <button onClick={() => setPinDialogFor(null)} className="text-xs text-muted-foreground hover:text-foreground">&times;</button>
-                                </div>
-                              )}
                             </div>
+                            {pinDialogFor !== null && format === "image" && (
+                              <div className="flex items-center gap-1">
+                                <input type="text" inputMode="numeric" maxLength={6} value={pinInput}
+                                  onChange={(e) => { setPinInput(e.target.value.replace(/\D/g, "").slice(0, 6)); setPinError(false); }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      if (pinInput === getDailyPin()) { setPinUnlocked(true); sessionStorage.setItem("img_pin_unlocked", getDailyPin()); setNumVariations(pinDialogFor); setPinDialogFor(null); }
+                                      else { setPinError(true); }
+                                    } else if (e.key === "Escape") { setPinDialogFor(null); }
+                                  }}
+                                  placeholder="PIN"
+                                  className={cn("w-20 px-1.5 py-1 text-xs rounded border bg-background outline-none", pinError ? "border-red-500" : "border-border")}
+                                  autoFocus
+                                />
+                                <button onClick={() => {
+                                  if (pinInput === getDailyPin()) { setPinUnlocked(true); sessionStorage.setItem("img_pin_unlocked", getDailyPin()); setNumVariations(pinDialogFor); setPinDialogFor(null); }
+                                  else { setPinError(true); }
+                                }} className="px-1.5 py-1 text-xs rounded bg-primary text-primary-foreground">OK</button>
+                                <button onClick={() => setPinDialogFor(null)} className="text-xs text-muted-foreground hover:text-foreground">&times;</button>
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <>
@@ -2706,8 +2714,8 @@ export function FullModeWorkspace({
                   <button
                     onClick={() => {
                       if (format === "image") {
-                        // For images: cycle 1 → 2 only (3+ requires PIN via settings panel)
-                        const next = numVariations >= 2 ? 1 : numVariations + 1;
+                        const maxImg = pinUnlocked ? 4 : 2;
+                        const next = numVariations >= maxImg ? 1 : numVariations + 1;
                         setNumVariations(next);
                       } else {
                         const maxVar = maxVideoVariations;
