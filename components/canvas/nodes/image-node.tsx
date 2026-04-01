@@ -76,7 +76,7 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected }
             <img
               src={nodeData.outputUrl}
               alt="Generated"
-              className="w-full h-auto max-h-[160px] object-cover"
+              className="w-full h-auto rounded-md"
             />
           </div>
         )}

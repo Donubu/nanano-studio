@@ -99,8 +99,8 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
           <div className="space-y-1.5">
             <div className="grid grid-cols-3 gap-1">
               {images.map((img, i) => (
-                <div key={i} className="relative rounded overflow-hidden bg-muted/50 aspect-square group/img">
-                  <img src={img.url} alt="" className="w-full h-full object-cover" />
+                <div key={i} className="relative rounded overflow-hidden bg-muted/50 group/img">
+                  <img src={img.url} alt="" className="w-full h-auto" />
                   <button
                     onClick={(e) => { e.stopPropagation(); removeImage(i); }}
                     className="absolute top-0.5 right-0.5 p-0.5 rounded bg-black/50 text-white opacity-0 group-hover/img:opacity-100 transition-opacity"

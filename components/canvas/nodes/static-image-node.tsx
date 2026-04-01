@@ -76,7 +76,7 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
         ) : nodeData.imageUrl ? (
           <div className="space-y-1.5">
             <div className="relative rounded-md overflow-hidden bg-muted/50">
-              <img src={nodeData.imageUrl} alt={nodeData.caption || "Static"} className="w-full h-auto max-h-[180px] object-cover" />
+              <img src={nodeData.imageUrl} alt={nodeData.caption || "Static"} className="w-full h-auto rounded-md" />
             </div>
             <div className="flex gap-1">
               <button
