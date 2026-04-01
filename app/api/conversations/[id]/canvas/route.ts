@@ -59,15 +59,23 @@ export async function GET(
       return NextResponse.json({ error: "Conversación no encontrada" }, { status: 404 });
     }
 
-    const [nodeRows] = await pool.execute<CanvasNodeRow[]>(
-      `SELECT * FROM canvas_nodes WHERE conversation_id = ? ORDER BY created_at ASC`,
-      [id]
-    );
-
-    const [edgeRows] = await pool.execute<CanvasEdgeRow[]>(
-      `SELECT * FROM canvas_edges WHERE conversation_id = ? ORDER BY created_at ASC`,
-      [id]
-    );
+    const conn = await pool.getConnection();
+    let nodeRows: CanvasNodeRow[];
+    let edgeRows: CanvasEdgeRow[];
+    try {
+      // Increase sort buffer for this session to handle large JSON/TEXT columns
+      await conn.execute("SET SESSION sort_buffer_size = 8388608");
+      [nodeRows] = await conn.execute<CanvasNodeRow[]>(
+        `SELECT * FROM canvas_nodes WHERE conversation_id = ? ORDER BY created_at ASC`,
+        [id]
+      );
+      [edgeRows] = await conn.execute<CanvasEdgeRow[]>(
+        `SELECT * FROM canvas_edges WHERE conversation_id = ? ORDER BY created_at ASC`,
+        [id]
+      );
+    } finally {
+      conn.release();
+    }
 
     const nodes = nodeRows.map((row) => ({
       id: row.id,

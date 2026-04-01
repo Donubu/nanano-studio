@@ -1,30 +1,42 @@
 "use client";
 
-import { memo, useCallback, useRef } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { ImagePlus, Upload, FolderOpen } from "lucide-react";
+import { ImagePlus, Upload, FolderOpen, Loader2 } from "lucide-react";
 import { HANDLE_IDS, type StaticImageNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
 import { useCanvasContext } from "../canvas-context";
 import { useNodeUpdate } from "../hooks/use-node-update";
+import { uploadFileToS3 } from "../lib/canvas-upload";
 
 export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as StaticImageNodeData;
   const { updateNodeData } = useNodeUpdate();
-  const { openImagePicker } = useCanvasContext();
+  const { openImagePicker, projectId } = useCanvasContext();
   const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
 
   const setImage = useCallback((url: string) => {
     updateNodeData(id, { ...nodeData, imageUrl: url });
   }, [id, nodeData, updateNodeData]);
 
+  const uploadAndSetImage = useCallback(async (file: File) => {
+    setUploading(true);
+    try {
+      const url = await uploadFileToS3(file, projectId);
+      setImage(url);
+    } catch (err) {
+      console.error("Error uploading image:", err);
+    } finally {
+      setUploading(false);
+    }
+  }, [projectId, setImage]);
+
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => setImage(reader.result as string);
-    reader.readAsDataURL(file);
-  }, [setImage]);
+    uploadAndSetImage(file);
+  }, [uploadAndSetImage]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
@@ -34,13 +46,11 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
         e.preventDefault();
         const file = item.getAsFile();
         if (!file) continue;
-        const reader = new FileReader();
-        reader.onloadend = () => setImage(reader.result as string);
-        reader.readAsDataURL(file);
+        uploadAndSetImage(file);
         break;
       }
     }
-  }, [setImage]);
+  }, [uploadAndSetImage]);
 
   return (
     <div
@@ -58,7 +68,12 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
 
       {/* Body */}
       <div className="px-3 py-2">
-        {nodeData.imageUrl ? (
+        {uploading ? (
+          <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin mb-1" />
+            <span className="text-[10px]">Subiendo...</span>
+          </div>
+        ) : nodeData.imageUrl ? (
           <div className="space-y-1.5">
             <div className="relative rounded-md overflow-hidden bg-muted/50">
               <img src={nodeData.imageUrl} alt={nodeData.caption || "Static"} className="w-full h-auto max-h-[180px] object-cover" />

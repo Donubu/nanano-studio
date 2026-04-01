@@ -1,19 +1,21 @@
 "use client";
 
-import { memo, useCallback, useRef } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Images, Plus, X, FolderOpen } from "lucide-react";
+import { Images, Plus, X, FolderOpen, Loader2 } from "lucide-react";
 import { HANDLE_IDS, type StaticImageGroupNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
 import { useCanvasContext } from "../canvas-context";
 import { useNodeUpdate } from "../hooks/use-node-update";
+import { uploadFileToS3 } from "../lib/canvas-upload";
 
 export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as StaticImageGroupNodeData;
   const { updateNodeData } = useNodeUpdate();
-  const { openImagePicker } = useCanvasContext();
+  const { openImagePicker, projectId } = useCanvasContext();
   const inputRef = useRef<HTMLInputElement>(null);
   const images = nodeData.images || [];
+  const [uploading, setUploading] = useState(false);
 
   const existingUrls = new Set(images.map((img) => img.url));
 
@@ -23,22 +25,22 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
     updateNodeData(id, { ...nodeData, images: newImages });
   }, [id, nodeData, images, updateNodeData, existingUrls]);
 
-  const addImages = useCallback((files: FileList) => {
-    const promises = Array.from(files).map(
-      (file) =>
-        new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(file);
-        })
-    );
-    Promise.all(promises).then((urls) => {
+  const addImages = useCallback(async (files: FileList) => {
+    setUploading(true);
+    try {
+      const urls = await Promise.all(
+        Array.from(files).map((file) => uploadFileToS3(file, projectId))
+      );
       const deduped = urls.filter((url) => !existingUrls.has(url));
       if (deduped.length === 0) return;
       const newImages = [...images, ...deduped.map((url) => ({ url }))];
       updateNodeData(id, { ...nodeData, images: newImages });
-    });
-  }, [id, nodeData, images, updateNodeData, existingUrls]);
+    } catch (err) {
+      console.error("Error uploading images:", err);
+    } finally {
+      setUploading(false);
+    }
+  }, [id, nodeData, images, updateNodeData, existingUrls, projectId]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -87,6 +89,12 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
 
       {/* Body - image grid */}
       <div className="px-2 py-2">
+        {uploading && (
+          <div className="flex items-center justify-center gap-1.5 py-2 text-muted-foreground mb-1.5">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <span className="text-[10px]">Subiendo...</span>
+          </div>
+        )}
         {images.length > 0 ? (
           <div className="space-y-1.5">
             <div className="grid grid-cols-3 gap-1">
