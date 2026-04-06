@@ -1866,18 +1866,18 @@ export function ChatInterface() {
                 // Update URL to reflect new active tab (only if not from navigation back)
                 if (!fromNavigation && navigation.projectSlug) {
                     if (newActiveTab.isGallery) {
-                        navigation.replace(`/${navigation.projectSlug}/gallery`);
+                        navigation.replace(`/${navigation.clientSlug}/${navigation.projectSlug}/gallery`);
                     } else if (newActiveTab.conversationId) {
-                        navigation.replace(`/${navigation.projectSlug}/conversation/${newActiveTab.conversationId}`);
+                        navigation.replace(`/${navigation.clientSlug}/${navigation.projectSlug}/conversation/${newActiveTab.conversationId}`);
                     } else {
-                        navigation.replace(`/${navigation.projectSlug}`);
+                        navigation.replace(`/${navigation.clientSlug}/${navigation.projectSlug}`);
                     }
                 }
             } else {
                 setActiveTabId(null);
                 // No tabs left, go back to project base URL
                 if (!fromNavigation && navigation.projectSlug) {
-                    navigation.replace(`/${navigation.projectSlug}`);
+                    navigation.replace(`/${navigation.clientSlug}/${navigation.projectSlug}`);
                 }
             }
         }
@@ -3836,7 +3836,7 @@ export function ChatInterface() {
                                 );
                                 // Update URL to reflect the new conversation
                                 if (navigation.projectSlug) {
-                                    navigation.replace(`/${navigation.projectSlug}/conversation/${newId}`);
+                                    navigation.replace(`/${navigation.clientSlug}/${navigation.projectSlug}/conversation/${newId}`);
                                 }
                             }}
                         />
