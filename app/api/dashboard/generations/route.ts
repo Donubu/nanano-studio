@@ -8,6 +8,7 @@ interface GenerationRow extends RowDataPacket {
   id: number;
   conversation_id: number;
   conversation_title: string;
+  conversation_generation_type: string;
   project_id: number | null;
   project_name: string | null;
   client_id: number | null;
@@ -157,6 +158,9 @@ export async function GET(request: NextRequest) {
       conditions.push("m.music_url IS NOT NULL AND m.music_url != ''");
     } else if (type === "text") {
       conditions.push("m.image_url IS NULL AND m.video_url IS NULL AND m.audio_url IS NULL AND m.music_url IS NULL");
+    } else if (type === "audio_hd" || type === "full" || type === "canvas") {
+      conditions.push("c.generation_type = ?");
+      queryParams.push(type);
     }
 
     // Project filter
@@ -226,6 +230,7 @@ export async function GET(request: NextRequest) {
           m.id,
           c.id as conversation_id,
           c.title as conversation_title,
+          c.generation_type as conversation_generation_type,
           p.id as project_id,
           p.title as project_name,
           cl.id as client_id,
@@ -301,8 +306,11 @@ export async function GET(request: NextRequest) {
 
     // Determine type for each generation
     const result = generations.map(gen => {
-      let generationType: "image" | "video" | "audio" | "music" | "text" = "text";
-      if (gen.video_url) {
+      let generationType: string = "text";
+      const convType = gen.conversation_generation_type;
+      if (convType === "canvas" || convType === "full" || convType === "audio_hd") {
+        generationType = convType;
+      } else if (gen.video_url) {
         generationType = "video";
       } else if (gen.music_url) {
         generationType = "music";
@@ -760,6 +768,7 @@ async function handleAllGenerations(
         m.id,
         c.id as conversation_id,
         c.title as conversation_title,
+        c.generation_type as conversation_generation_type,
         p.id as project_id,
         p.title as project_name,
         cl.id as client_id,
@@ -881,7 +890,7 @@ async function handleAllGenerations(
   // Transform and combine all results
   type CombinedGeneration = {
     id: number;
-    type: "image" | "video" | "audio" | "music" | "text" | "topaz_image" | "topaz_video";
+    type: string;
     conversation_id: number;
     conversation_title: string;
     project_id: number | null;
@@ -927,8 +936,11 @@ async function handleAllGenerations(
 
   // Add messages
   for (const msg of messages) {
-    let generationType: "image" | "video" | "audio" | "music" | "text" = "text";
-    if (msg.video_url) generationType = "video";
+    const convType = msg.conversation_generation_type;
+    let generationType: string = "text";
+    if (convType === "canvas" || convType === "full" || convType === "audio_hd") {
+      generationType = convType;
+    } else if (msg.video_url) generationType = "video";
     else if (msg.music_url) generationType = "music";
     else if (msg.audio_url) generationType = "audio";
     else if (msg.image_url) generationType = "image";

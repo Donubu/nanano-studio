@@ -35,6 +35,9 @@ import {
   Calendar,
   Trash2,
   Sparkles,
+  AudioLines,
+  LayoutGrid,
+  Workflow,
 } from "lucide-react";
 
 interface Generation {
@@ -119,7 +122,7 @@ interface ApiResponse {
   };
 }
 
-type TypeFilter = "all" | "image" | "video" | "audio" | "music" | "text" | "topaz_image" | "topaz_video";
+type TypeFilter = "all" | "image" | "video" | "audio" | "audio_hd" | "music" | "text" | "full" | "canvas" | "topaz_image" | "topaz_video";
 
 export default function GenerationsPage() {
   const [data, setData] = useState<ApiResponse | null>(null);
@@ -222,8 +225,14 @@ export default function GenerationsPage() {
         return <Video className="h-4 w-4 text-orange-400" />;
       case "audio":
         return <Music className="h-4 w-4 text-green-400" />;
+      case "audio_hd":
+        return <AudioLines className="h-4 w-4 text-emerald-400" />;
       case "music":
         return <Music className="h-4 w-4 text-teal-400" />;
+      case "full":
+        return <LayoutGrid className="h-4 w-4 text-indigo-400" />;
+      case "canvas":
+        return <Workflow className="h-4 w-4 text-cyan-400" />;
       case "topaz_image":
         return <Sparkles className="h-4 w-4 text-purple-400" />;
       case "topaz_video":
@@ -241,8 +250,14 @@ export default function GenerationsPage() {
         return "Video";
       case "audio":
         return "Audio";
+      case "audio_hd":
+        return "Audio HD";
       case "music":
-        return "Musica";
+        return "Música";
+      case "full":
+        return "Estudio";
+      case "canvas":
+        return "Canvas";
       case "topaz_image":
         return "Topaz Img";
       case "topaz_video":
@@ -420,6 +435,9 @@ export default function GenerationsPage() {
                 <SelectItem value="audio">Audios</SelectItem>
                 <SelectItem value="music">Musica</SelectItem>
                 <SelectItem value="text">Texto</SelectItem>
+                <SelectItem value="audio_hd">Audio HD</SelectItem>
+                <SelectItem value="full">Estudio</SelectItem>
+                <SelectItem value="canvas">Canvas</SelectItem>
                 <SelectItem value="topaz_image">Topaz Imagen</SelectItem>
                 <SelectItem value="topaz_video">Topaz Video</SelectItem>
               </SelectContent>

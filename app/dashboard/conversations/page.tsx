@@ -35,6 +35,7 @@ import {
   Music,
   AudioLines,
   LayoutGrid,
+  Workflow,
   Search,
   ChevronLeft,
   ChevronRight,
@@ -188,6 +189,7 @@ export default function ConversationsPage() {
       case "audio_hd": return <AudioLines className="h-4 w-4 text-emerald-400" />;
       case "music": return <Music className="h-4 w-4 text-teal-400" />;
       case "full": return <LayoutGrid className="h-4 w-4 text-indigo-400" />;
+      case "canvas": return <Workflow className="h-4 w-4 text-cyan-400" />;
       default: return <MessageSquare className="h-4 w-4 text-blue-400" />;
     }
   };
@@ -200,6 +202,7 @@ export default function ConversationsPage() {
       case "audio_hd": return "Audio HD";
       case "music": return "Música";
       case "full": return "Estudio";
+      case "canvas": return "Canvas";
       default: return "Texto";
     }
   };
@@ -298,6 +301,7 @@ export default function ConversationsPage() {
                 <SelectItem value="audio_hd">Audio HD</SelectItem>
                 <SelectItem value="music">Música</SelectItem>
                 <SelectItem value="full">Estudio</SelectItem>
+                <SelectItem value="canvas">Canvas</SelectItem>
               </SelectContent>
             </Select>
 
