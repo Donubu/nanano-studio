@@ -1,10 +1,11 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useCallback } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Video, Loader2, AlertCircle, Play } from "lucide-react";
 import { HANDLE_IDS, type VideoNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
+import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
 
 const statusColors: Record<string, string> = {
@@ -19,53 +20,61 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected }
   const status = nodeData.status || "idle";
   const { updateNodeData } = useNodeUpdate();
 
+  const history = nodeData.outputHistory || [];
+  const totalOutputs = history.length;
+
+  const activeIndex = totalOutputs > 0
+    ? history.findIndex((h) => h.url === nodeData.outputUrl && h.messageId === nodeData.outputMessageId)
+    : -1;
+  const effectiveIndex = activeIndex >= 0 ? activeIndex : totalOutputs - 1;
+
+  const navigateTo = useCallback((index: number) => {
+    const entry = history[index];
+    if (!entry) return;
+    updateNodeData(id, {
+      ...nodeData,
+      outputUrl: entry.url,
+      outputMessageId: entry.messageId,
+    });
+  }, [id, history, nodeData, updateNodeData]);
+
+  const deleteFromHistory = useCallback((index: number) => {
+    const updated = history.filter((_, i) => i !== index);
+    if (updated.length === 0) {
+      updateNodeData(id, { ...nodeData, outputHistory: [], outputUrl: undefined, outputMessageId: undefined, status: "idle" });
+      return;
+    }
+    const newIndex = Math.min(index, updated.length - 1);
+    const entry = updated[newIndex];
+    updateNodeData(id, {
+      ...nodeData,
+      outputHistory: updated,
+      outputUrl: entry.url,
+      outputMessageId: entry.messageId,
+    });
+  }, [id, history, nodeData, updateNodeData]);
+
+  const displayUrl = nodeData.outputUrl;
+  const isViewingLatest = effectiveIndex === totalOutputs - 1;
+  const isVertical = nodeData.aspectRatio === "9:16";
+
   return (
     <div
       className={`group bg-card rounded-xl border-2 ${statusColors[status]} ${
         selected ? "ring-2 ring-primary/50" : ""
-      } min-w-[260px] max-w-[300px] transition-all`}
+      } ${isVertical ? "min-w-[200px] max-w-[220px]" : "min-w-[260px] max-w-[300px]"} transition-all`}
     >
       {/* Input handles */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id={HANDLE_IDS.INPUT_PROMPT}
-        className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background"
-        style={{ top: "14%" }}
-        title="Prompt (texto)"
-      />
-      <Handle
-        type="target"
-        position={Position.Left}
-        id={HANDLE_IDS.INPUT_FIRST_FRAME}
-        className="!w-3 !h-3 !bg-green-500 !border-2 !border-background"
-        style={{ top: "30%" }}
-        title="First frame (imagen)"
-      />
-      <Handle
-        type="target"
-        position={Position.Left}
-        id={HANDLE_IDS.INPUT_LAST_FRAME}
-        className="!w-3 !h-3 !bg-orange-500 !border-2 !border-background"
-        style={{ top: "50%" }}
-        title="Last frame (imagen)"
-      />
-      <Handle
-        type="target"
-        position={Position.Left}
-        id={HANDLE_IDS.INPUT_REFERENCE}
-        className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background"
-        style={{ top: "68%" }}
-        title="Referencia (imagen)"
-      />
-      <Handle
-        type="target"
-        position={Position.Left}
-        id={HANDLE_IDS.INPUT_PARAMS}
-        className="!w-3 !h-3 !border-2 !border-background"
-        style={{ top: "86%", backgroundColor: "#fc0" }}
-        title="Parámetros"
-      />
+      <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_PROMPT}
+        className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background" style={{ top: "14%" }} title="Prompt (texto)" />
+      <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_FIRST_FRAME}
+        className="!w-3 !h-3 !bg-green-500 !border-2 !border-background" style={{ top: "30%" }} title="First frame (imagen)" />
+      <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_LAST_FRAME}
+        className="!w-3 !h-3 !bg-orange-500 !border-2 !border-background" style={{ top: "50%" }} title="Last frame (imagen)" />
+      <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_REFERENCE}
+        className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background" style={{ top: "68%" }} title="Referencia (imagen)" />
+      <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_PARAMS}
+        className="!w-3 !h-3 !border-2 !border-background" style={{ top: "86%", backgroundColor: "#fc0" }} title="Parámetros" />
 
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
@@ -98,27 +107,41 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected }
           {nodeData.prompt || "Sin prompt configurado"}
         </p>
 
-        {status === "completed" && nodeData.outputUrl && (
-          <div className="mt-1 rounded-md overflow-hidden bg-muted/50 relative">
-            <video
-              src={nodeData.outputUrl}
-              className="w-full h-auto max-h-[160px] object-cover"
-              muted
-              playsInline
-              preload="metadata"
-            />
-            <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-              <Play className="h-8 w-8 text-white/80" />
+        {displayUrl ? (
+          <div className="mt-1 space-y-1">
+            <div className={`rounded-md overflow-hidden bg-muted/50 relative ${isVertical ? "mx-auto" : ""}`}>
+              <video
+                src={displayUrl}
+                className="w-full h-auto object-contain"
+                style={{ aspectRatio: isVertical ? "9/16" : "16/9" }}
+                muted playsInline preload="metadata"
+              />
+              <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                <Play className="h-8 w-8 text-white/80" />
+              </div>
+              {!isViewingLatest && effectiveIndex >= 0 && (
+                <div className="absolute top-1 left-1 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded">
+                  {history[effectiveIndex]?.modelName || "Anterior"}
+                </div>
+              )}
             </div>
+            <HistoryNav history={history} effectiveIndex={effectiveIndex} onNavigate={navigateTo} onDelete={deleteFromHistory} />
           </div>
-        )}
-
-        {status === "generating" && (
-          <div className="flex items-center gap-1.5 text-xs text-amber-400">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Generando...
+        ) : status === "generating" ? (
+          <div
+            className={`mt-1 rounded-md bg-muted/30 border border-dashed border-border/50 flex items-center justify-center ${isVertical ? "mx-auto" : ""}`}
+            style={{ aspectRatio: isVertical ? "9/16" : "16/9", maxHeight: "160px" }}
+          >
+            <Loader2 className="h-5 w-5 text-amber-400 animate-spin" />
           </div>
-        )}
+        ) : status !== "error" ? (
+          <div
+            className={`mt-1 rounded-md bg-muted/30 border border-dashed border-border/50 flex items-center justify-center ${isVertical ? "mx-auto" : ""}`}
+            style={{ aspectRatio: isVertical ? "9/16" : "16/9", maxHeight: "160px" }}
+          >
+            <Video className="h-5 w-5 text-muted-foreground/30" />
+          </div>
+        ) : null}
 
         {status === "error" && nodeData.errorMessage && (
           <div className="flex items-center gap-1.5 text-xs text-red-400">
@@ -129,13 +152,8 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected }
       </div>
 
       {/* Output handle */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id={HANDLE_IDS.OUTPUT_VIDEO}
-        className="!w-3 !h-3 !bg-amber-500 !border-2 !border-background"
-        title="Video output"
-      />
+      <Handle type="source" position={Position.Right} id={HANDLE_IDS.OUTPUT_VIDEO}
+        className="!w-3 !h-3 !bg-amber-500 !border-2 !border-background" title="Video output" />
     </div>
   );
 });

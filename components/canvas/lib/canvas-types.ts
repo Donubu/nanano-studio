@@ -3,6 +3,15 @@ import type { Node, Edge, BuiltInNode } from "@xyflow/react";
 // --- Node Status ---
 export type CanvasNodeStatus = "idle" | "generating" | "completed" | "error";
 
+// --- Output History ---
+export interface OutputHistoryEntry {
+  url?: string;        // outputUrl for images/videos
+  text?: string;       // outputText for text nodes
+  messageId?: number;
+  modelName?: string;
+  createdAt: string;   // ISO timestamp
+}
+
 // --- Base Node Data ---
 export interface BaseNodeData {
   label: string;
@@ -25,6 +34,7 @@ export interface TextNodeData extends BaseNodeData {
   thinkingLevel?: string;
   outputAsPrompt: boolean; // Forces output to be a clean prompt for downstream nodes
   outputText?: string;
+  outputHistory?: OutputHistoryEntry[];
 }
 
 // --- Image Node ---
@@ -38,6 +48,7 @@ export interface ImageNodeData extends BaseNodeData {
   seed?: number;
   numberOfImages?: number;
   outputUrl?: string;
+  outputHistory?: OutputHistoryEntry[];
 }
 
 // --- Video Node ---
@@ -54,6 +65,7 @@ export interface VideoNodeData extends BaseNodeData {
   lastFrameUrl?: string;
   referenceImageUrls?: string[];
   outputUrl?: string;
+  outputHistory?: OutputHistoryEntry[];
 }
 
 // --- Static Nodes (no AI generation) ---

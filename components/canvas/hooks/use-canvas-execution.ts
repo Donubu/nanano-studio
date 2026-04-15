@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { Node } from "@xyflow/react";
-import type { CanvasNodeData, CanvasNodeStatus, ExecutionProgress, ImageNodeData, TextNodeData, VideoNodeData, StaticTextNodeData, StaticImageNodeData, StaticImageGroupNodeData } from "../lib/canvas-types";
+import type { CanvasNodeData, CanvasNodeStatus, ExecutionProgress, ImageNodeData, TextNodeData, VideoNodeData, StaticTextNodeData, StaticImageNodeData, StaticImageGroupNodeData, OutputHistoryEntry } from "../lib/canvas-types";
 import { HANDLE_IDS } from "../lib/canvas-types";
 import { topologicalSort, getDirectInputs } from "../lib/topological-sort";
 import type { CanvasEdge } from "../lib/canvas-types";
@@ -62,6 +62,20 @@ function updateNodeStatus(
       n.id === nodeId ? { ...n, data: { ...n.data, ...updates } } : n
     )
   );
+}
+
+/** Max history entries per node to prevent unbounded growth */
+const MAX_HISTORY = 20;
+
+/**
+ * Append a new output to the node's history array.
+ * outputHistory contains ALL outputs (including the latest).
+ */
+function appendToHistory(
+  currentHistory: OutputHistoryEntry[] | undefined,
+  entry: OutputHistoryEntry
+): OutputHistoryEntry[] {
+  return [...(currentHistory || []), entry].slice(-MAX_HISTORY);
 }
 
 interface ResolvedInputs {
@@ -273,12 +287,34 @@ export function useCanvasExecution({
           }
         }
 
+        // Append new result to outputHistory (history keeps ALL outputs)
+        // Migrate pre-existing output from canvas created before history feature
+        let prevHistory = (nodeData as Record<string, unknown>).outputHistory as OutputHistoryEntry[] | undefined;
+        if ((!prevHistory || prevHistory.length === 0) && (nodeData.outputUrl || (nodeData as TextNodeData).outputText)) {
+          prevHistory = [{
+            url: (nodeData as ImageNodeData | VideoNodeData).outputUrl,
+            text: (nodeData as TextNodeData).outputText,
+            messageId: nodeData.outputMessageId,
+            modelName: nodeData.modelName,
+            createdAt: new Date().toISOString(),
+          }];
+        }
+        const newEntry: OutputHistoryEntry = {
+          url: result.outputUrl,
+          text: result.outputText,
+          messageId: result.messageId,
+          modelName: (nodeData as Record<string, unknown>).modelName as string | undefined,
+          createdAt: new Date().toISOString(),
+        };
+        const updatedHistory = appendToHistory(prevHistory, newEntry);
+
         const completedData: Partial<CanvasNodeData> = {
           status: "completed",
           outputUrl: result.outputUrl,
           outputText: result.outputText,
           outputMessageId: result.messageId,
           errorMessage: undefined,
+          outputHistory: updatedHistory,
         };
 
         // Update React state
@@ -393,7 +429,7 @@ export function useCanvasExecution({
     // Create a mutable snapshot
     const liveNodes = nodes.map((n) => ({ ...n, data: { ...n.data } }));
 
-    // Reset all AI nodes to idle before running (clear previous outputs)
+    // Reset all AI nodes to idle (history is preserved, new outputs appended on completion)
     const aiNodeTypes = new Set(["text", "image", "video"]);
     const resetData: Partial<CanvasNodeData> = {
       status: "idle",

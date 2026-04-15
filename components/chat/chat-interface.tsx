@@ -1009,12 +1009,17 @@ export function ChatInterface() {
                 }
 
                 // Synthesize "canvas" type when text, image AND video are enabled
+                // Canvas only supports Gemini models (exclude xai, kling, grok, etc.)
                 const txtConfig = configArray.find(c => c.generation_type === "text");
-                if (txtConfig?.is_enabled && txtConfig.models.length > 0 && imgConfig?.is_enabled && imgConfig.models.length > 0 && vidConfig?.is_enabled && vidConfig.models.length > 0) {
+                const isGeminiModel = (m: ConfigModel) => !m.api_backend || m.api_backend === "gemini" || m.api_backend === "vertex";
+                const canvasTxtModels = txtConfig?.is_enabled ? txtConfig.models.filter(isGeminiModel) : [];
+                const canvasImgModels = imgConfig?.is_enabled ? imgConfig.models.filter(isGeminiModel) : [];
+                const canvasVidModels = vidConfig?.is_enabled ? vidConfig.models.filter(isGeminiModel) : [];
+                if (canvasTxtModels.length > 0 && canvasImgModels.length > 0 && canvasVidModels.length > 0) {
                     configArray.push({
                         generation_type: "canvas" as GenerationType,
                         is_enabled: true,
-                        models: [...txtConfig.models, ...imgConfig.models, ...vidConfig.models],
+                        models: [...canvasTxtModels, ...canvasImgModels, ...canvasVidModels],
                     });
                 }
 

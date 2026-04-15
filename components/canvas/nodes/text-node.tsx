@@ -1,10 +1,11 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useCallback } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Loader2, AlertCircle, Brain, Sparkles, FileText } from "lucide-react";
 import { HANDLE_IDS, type TextNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
+import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
 
 const statusColors: Record<string, string> = {
@@ -19,6 +20,43 @@ export const TextNodeComponent = memo(function TextNode({ id, data, selected }: 
   const status = nodeData.status || "idle";
   const { updateNodeData } = useNodeUpdate();
 
+  const history = nodeData.outputHistory || [];
+  const totalOutputs = history.length;
+
+  const activeIndex = totalOutputs > 0
+    ? history.findIndex((h) => h.text === nodeData.outputText && h.messageId === nodeData.outputMessageId)
+    : -1;
+  const effectiveIndex = activeIndex >= 0 ? activeIndex : totalOutputs - 1;
+
+  const navigateTo = useCallback((index: number) => {
+    const entry = history[index];
+    if (!entry) return;
+    updateNodeData(id, {
+      ...nodeData,
+      outputText: entry.text,
+      outputMessageId: entry.messageId,
+    });
+  }, [id, history, nodeData, updateNodeData]);
+
+  const deleteFromHistory = useCallback((index: number) => {
+    const updated = history.filter((_, i) => i !== index);
+    if (updated.length === 0) {
+      updateNodeData(id, { ...nodeData, outputHistory: [], outputText: undefined, outputMessageId: undefined, status: "idle" });
+      return;
+    }
+    const newIndex = Math.min(index, updated.length - 1);
+    const entry = updated[newIndex];
+    updateNodeData(id, {
+      ...nodeData,
+      outputHistory: updated,
+      outputText: entry.text,
+      outputMessageId: entry.messageId,
+    });
+  }, [id, history, nodeData, updateNodeData]);
+
+  const displayText = nodeData.outputText;
+  const isViewingLatest = effectiveIndex === totalOutputs - 1;
+
   return (
     <div
       className={`group bg-card rounded-xl border-2 ${statusColors[status]} ${
@@ -26,30 +64,12 @@ export const TextNodeComponent = memo(function TextNode({ id, data, selected }: 
       } min-w-[260px] max-w-[300px] transition-all`}
     >
       {/* Input handles */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id={HANDLE_IDS.INPUT_PROMPT}
-        className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background"
-        style={{ top: "25%" }}
-        title="Prompt (texto)"
-      />
-      <Handle
-        type="target"
-        position={Position.Left}
-        id={HANDLE_IDS.INPUT_MEDIA}
-        className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background"
-        style={{ top: "55%" }}
-        title="Media (imagen/video)"
-      />
-      <Handle
-        type="target"
-        position={Position.Left}
-        id={HANDLE_IDS.INPUT_PARAMS}
-        className="!w-3 !h-3 !border-2 !border-background"
-        style={{ top: "85%", backgroundColor: "#fc0" }}
-        title="Parámetros"
-      />
+      <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_PROMPT}
+        className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background" style={{ top: "25%" }} title="Prompt (texto)" />
+      <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_MEDIA}
+        className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background" style={{ top: "55%" }} title="Media (imagen/video)" />
+      <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_PARAMS}
+        className="!w-3 !h-3 !border-2 !border-background" style={{ top: "85%", backgroundColor: "#fc0" }} title="Parámetros" />
 
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
@@ -83,18 +103,24 @@ export const TextNodeComponent = memo(function TextNode({ id, data, selected }: 
           {nodeData.prompt || "Sin prompt configurado"}
         </p>
 
-        {status === "completed" && nodeData.outputText && (
-          <div className="bg-muted/50 rounded-md p-2 mt-1">
-            <p className="text-xs line-clamp-3">{nodeData.outputText}</p>
+        {displayText ? (
+          <div className="mt-1 space-y-1">
+            <div className="bg-muted/50 rounded-md p-2 relative">
+              <p className="text-xs line-clamp-3">{displayText}</p>
+              {!isViewingLatest && effectiveIndex >= 0 && (
+                <span className="absolute top-1 right-1 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded">
+                  {history[effectiveIndex]?.modelName || "Anterior"}
+                </span>
+              )}
+            </div>
+            <HistoryNav history={history} effectiveIndex={effectiveIndex} onNavigate={navigateTo} onDelete={deleteFromHistory} />
           </div>
-        )}
-
-        {status === "generating" && (
+        ) : status === "generating" ? (
           <div className="flex items-center gap-1.5 text-xs text-blue-400">
             <Loader2 className="h-3 w-3 animate-spin" />
             Generando...
           </div>
-        )}
+        ) : null}
 
         {status === "error" && nodeData.errorMessage && (
           <div className="flex items-center gap-1.5 text-xs text-red-400">
@@ -105,13 +131,8 @@ export const TextNodeComponent = memo(function TextNode({ id, data, selected }: 
       </div>
 
       {/* Output handle */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id={HANDLE_IDS.OUTPUT_TEXT}
-        className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background"
-        title="Text output"
-      />
+      <Handle type="source" position={Position.Right} id={HANDLE_IDS.OUTPUT_TEXT}
+        className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background" title="Text output" />
     </div>
   );
 });

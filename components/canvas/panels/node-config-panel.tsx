@@ -399,12 +399,13 @@ function ImageSettings({ data, onUpdate }: { data: ImageNodeData; onUpdate: (u: 
 }
 
 function VideoSettings({ data, onUpdate }: { data: VideoNodeData; onUpdate: (u: Partial<VideoNodeData>) => void }) {
+  // Canvas only uses Gemini (VEO) models — durations, resolutions, and aspect ratios match VEO specs
   return (
     <>
       <div className="space-y-1.5">
         <Label className="text-xs">Duration</Label>
         <div className="flex gap-1.5 flex-wrap">
-          {[4, 6, 8, 10, 15].map((d) => (
+          {[4, 6, 8].map((d) => (
             <button
               key={d}
               onClick={() => onUpdate({ duration: d })}
@@ -422,7 +423,7 @@ function VideoSettings({ data, onUpdate }: { data: VideoNodeData; onUpdate: (u: 
       <div className="space-y-1.5">
         <Label className="text-xs">Aspect Ratio</Label>
         <div className="flex gap-1.5 flex-wrap">
-          {["16:9", "9:16", "1:1"].map((ar) => (
+          {["16:9", "9:16"].map((ar) => (
             <button
               key={ar}
               onClick={() => onUpdate({ aspectRatio: ar })}
@@ -440,19 +441,30 @@ function VideoSettings({ data, onUpdate }: { data: VideoNodeData; onUpdate: (u: 
       <div className="space-y-1.5">
         <Label className="text-xs">Resolution</Label>
         <div className="flex gap-1.5">
-          {["480p", "720p", "1080p"].map((res) => (
-            <button
-              key={res}
-              onClick={() => onUpdate({ resolution: res })}
-              className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${
-                data.resolution === res
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "border-border hover:bg-accent"
-              }`}
-            >
-              {res}
-            </button>
-          ))}
+          {(["720p", "1080p", "4K"] as const).map((res) => {
+            const needsDuration8 = res === "1080p" || res === "4K";
+            return (
+              <button
+                key={res}
+                onClick={() => {
+                  const updates: Partial<VideoNodeData> = { resolution: res };
+                  if (needsDuration8 && data.duration !== 8) updates.duration = 8;
+                  onUpdate(updates);
+                }}
+                className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${
+                  data.resolution === res
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border hover:bg-accent"
+                }`}
+                title={needsDuration8 ? "Solo disponible con duración de 8s" : undefined}
+              >
+                {res}{needsDuration8 ? " (8s)" : ""}
+              </button>
+            );
+          })}
+          {data.resolution && !["720p", "1080p", "4K"].includes(data.resolution) && (
+            <p className="text-[10px] text-amber-500 mt-1">Resolución no soportada, selecciona otra</p>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-2">

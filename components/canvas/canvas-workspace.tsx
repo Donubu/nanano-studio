@@ -736,9 +736,9 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps) {
         onClose={closeImagePicker}
         onSelect={(imageUrl) => {
           pickerState.onSelect?.(imageUrl);
-          closeImagePicker();
         }}
         title={pickerState.title}
+        multiSelect
       />
     </CanvasProvider>
   );
