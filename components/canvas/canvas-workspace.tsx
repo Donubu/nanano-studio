@@ -23,6 +23,7 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import { TextNodeComponent } from "./nodes/text-node";
+import { TextPracticanteNodeComponent } from "./nodes/text-practicante-node";
 import { ImageNodeComponent } from "./nodes/image-node";
 import { VideoNodeComponent } from "./nodes/video-node";
 import { NoteNodeComponent } from "./nodes/note-node";
@@ -32,12 +33,14 @@ import { StaticImageGroupNodeComponent } from "./nodes/static-image-group-node";
 import { ParamsNodeComponent } from "./nodes/params-node";
 import { CanvasToolbar } from "./canvas-toolbar";
 import { NodeConfigPanel } from "./panels/node-config-panel";
+import { PracticanteConfigPanel } from "./panels/practicante-config-panel";
+import { DryRunPanel } from "./panels/dryrun-panel";
 import { useAutoSave } from "./hooks/use-auto-save";
 import { useCanvasExecution } from "./hooks/use-canvas-execution";
 import { useUndoRedo } from "./hooks/use-undo-redo";
 import { isValidConnection, wouldCreateCycle, getCompatibleTargetTypes, getCompatibleSourceTypes } from "./lib/connection-rules";
 import { getDefaultNodeData, type CanvasNodeType, type CanvasNodeData, HANDLE_IDS } from "./lib/canvas-types";
-import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Type, Settings } from "lucide-react";
+import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Type, Settings, Bot } from "lucide-react";
 import { CanvasProvider } from "./canvas-context";
 import { LabeledEdge } from "./edges/labeled-edge";
 import { ImagePickerModal } from "@/components/chat/image-picker-modal";
@@ -57,6 +60,7 @@ const defaultEdgeOptions = {
 
 const nodeTypes: NodeTypes = {
   text: TextNodeComponent,
+  "text-practicante": TextPracticanteNodeComponent,
   image: ImageNodeComponent,
   video: VideoNodeComponent,
   "note": NoteNodeComponent,
@@ -189,8 +193,16 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     }
   }, [realConversationId, projectId, generationConfig, onConversationCreated]);
 
-  // Load canvas state on mount
+  // Load canvas state when the active conversation changes.
+  // Reset local state first (with isLoaded=false so autosave doesn't write
+  // stale nodes/edges into the newly-selected conversation).
   useEffect(() => {
+    setIsLoaded(false);
+    setNodes([]);
+    setEdges([]);
+    setSelectedNodeId(null);
+    nodeIdCounter.current = 0;
+
     if (!realConversationId) {
       setIsLoaded(true);
       return;
@@ -200,16 +212,15 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
         const res = await fetch(`/api/conversations/${realConversationId}/canvas`);
         if (res.ok) {
           const data = await res.json();
-          if (data.nodes?.length > 0 || data.edges?.length > 0) {
-            setNodes(data.nodes || []);
-            setEdges(data.edges || []);
-            // Set counter to highest existing node number
-            const maxId = data.nodes.reduce((max: number, n: Node) => {
-              const num = parseInt(n.id.replace("node-", ""), 10);
-              return isNaN(num) ? max : Math.max(max, num);
-            }, 0);
-            nodeIdCounter.current = maxId;
-          }
+          const loadedNodes: Node[] = data.nodes || [];
+          const loadedEdges: Edge[] = data.edges || [];
+          setNodes(loadedNodes);
+          setEdges(loadedEdges);
+          const maxId = loadedNodes.reduce((max: number, n: Node) => {
+            const num = parseInt(n.id.replace("node-", ""), 10);
+            return isNaN(num) ? max : Math.max(max, num);
+          }, 0);
+          nodeIdCounter.current = maxId;
         }
       } catch (err) {
         console.error("Error loading canvas:", err);
@@ -663,8 +674,8 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
               Crear nodo
             </div>
             {pendingDropRef.current.options.map(({ type, label, handle }) => {
-              const iconMap: Record<string, typeof MessageSquare> = { text: MessageSquare, image: ImageIcon, video: Video, note: StickyNote, "static-text": Type, "static-image": ImagePlus, "static-image-group": Images, "params-text": Settings, "params-image": Settings, "params-video": Settings };
-              const colorMap: Record<string, string> = { text: "text-blue-400", image: "text-purple-400", video: "text-amber-400", note: "text-amber-500", "static-text": "text-blue-400", "static-image": "text-emerald-400", "static-image-group": "text-teal-400", "params-text": "text-yellow-400", "params-image": "text-yellow-400", "params-video": "text-yellow-400" };
+              const iconMap: Record<string, typeof MessageSquare> = { text: MessageSquare, "text-practicante": Bot, image: ImageIcon, video: Video, note: StickyNote, "static-text": Type, "static-image": ImagePlus, "static-image-group": Images, "params-text": Settings, "params-image": Settings, "params-video": Settings };
+              const colorMap: Record<string, string> = { text: "text-blue-400", "text-practicante": "text-amber-400", image: "text-purple-400", video: "text-amber-400", note: "text-amber-500", "static-text": "text-blue-400", "static-image": "text-emerald-400", "static-image-group": "text-teal-400", "params-text": "text-yellow-400", "params-image": "text-yellow-400", "params-video": "text-yellow-400" };
               const isAI = !type.startsWith("static-");
               const Icon = iconMap[type] || MessageSquare;
               const color = colorMap[type] || "text-muted-foreground";
@@ -698,6 +709,28 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
           onClose={() => setSelectedNodeId(null)}
         />
       )}
+
+      {/* Practicante config panel */}
+      {selectedNode && selectedNode.type === "text-practicante" && (
+        <PracticanteConfigPanel
+          node={selectedNode}
+          edges={edges}
+          onUpdateData={updateNodeData}
+          onDelete={deleteNode}
+          onExecute={executeNode}
+          isExecuting={isExecuting}
+          onClose={() => setSelectedNodeId(null)}
+        />
+      )}
+
+      {/* Dry-run analysis panel (third column) */}
+      {selectedNode &&
+        selectedNode.type === "text-practicante" &&
+        (selectedNode.data as { dryRunResponse?: string } | null)?.dryRunResponse && (
+          <DryRunPanel node={selectedNode} onClose={() => {
+            updateNodeData(selectedNode.id, { dryRunResponse: undefined } as Record<string, unknown>);
+          }} />
+        )}
     </div>
   );
 }

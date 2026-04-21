@@ -14,9 +14,17 @@ const VALID_CONNECTIONS: ConnectionRule[] = [
   { sourceType: "text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "image", targetHandle: HANDLE_IDS.INPUT_PROMPT },
   { sourceType: "text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "video", targetHandle: HANDLE_IDS.INPUT_PROMPT },
   { sourceType: "text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "text", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+  { sourceType: "text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "text-practicante", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+
+  // === Text Practicante output connections (mirrors AI Text) ===
+  { sourceType: "text-practicante", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "image", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+  { sourceType: "text-practicante", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "video", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+  { sourceType: "text-practicante", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "text", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+  { sourceType: "text-practicante", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "text-practicante", targetHandle: HANDLE_IDS.INPUT_PROMPT },
 
   // === AI Image output connections ===
   { sourceType: "image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "text", targetHandle: HANDLE_IDS.INPUT_MEDIA },
+  { sourceType: "image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "text-practicante", targetHandle: HANDLE_IDS.INPUT_MEDIA },
   { sourceType: "image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_FIRST_FRAME },
   { sourceType: "image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_LAST_FRAME },
   { sourceType: "image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_REFERENCE },
@@ -26,9 +34,11 @@ const VALID_CONNECTIONS: ConnectionRule[] = [
   { sourceType: "static-text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "image", targetHandle: HANDLE_IDS.INPUT_PROMPT },
   { sourceType: "static-text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "video", targetHandle: HANDLE_IDS.INPUT_PROMPT },
   { sourceType: "static-text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "text", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+  { sourceType: "static-text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "text-practicante", targetHandle: HANDLE_IDS.INPUT_PROMPT },
 
   // === Static Image → same targets as AI Image ===
   { sourceType: "static-image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "text", targetHandle: HANDLE_IDS.INPUT_MEDIA },
+  { sourceType: "static-image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "text-practicante", targetHandle: HANDLE_IDS.INPUT_MEDIA },
   { sourceType: "static-image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_FIRST_FRAME },
   { sourceType: "static-image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_LAST_FRAME },
   { sourceType: "static-image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_REFERENCE },
@@ -36,9 +46,11 @@ const VALID_CONNECTIONS: ConnectionRule[] = [
 
   // === AI Video output connections ===
   { sourceType: "video", sourceHandle: HANDLE_IDS.OUTPUT_VIDEO, targetType: "text", targetHandle: HANDLE_IDS.INPUT_MEDIA },
+  { sourceType: "video", sourceHandle: HANDLE_IDS.OUTPUT_VIDEO, targetType: "text-practicante", targetHandle: HANDLE_IDS.INPUT_MEDIA },
 
   // === Static Image Group → same targets as AI Image ===
   { sourceType: "static-image-group", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "text", targetHandle: HANDLE_IDS.INPUT_MEDIA },
+  { sourceType: "static-image-group", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "text-practicante", targetHandle: HANDLE_IDS.INPUT_MEDIA },
   { sourceType: "static-image-group", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_FIRST_FRAME },
   { sourceType: "static-image-group", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_LAST_FRAME },
   { sourceType: "static-image-group", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_REFERENCE },
@@ -97,7 +109,7 @@ export function getCompatibleTargetTypes(
 ): { type: string; label: string; targetHandle: string }[] {
   const seen = new Set<string>();
   const results: { type: string; label: string; targetHandle: string }[] = [];
-  const labels: Record<string, string> = { text: "Texto", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video" };
+  const labels: Record<string, string> = { text: "Texto", "text-practicante": "Practicante", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video" };
 
   for (const rule of VALID_CONNECTIONS) {
     if (rule.sourceType === sourceType && rule.sourceHandle === sourceHandle) {
@@ -124,7 +136,7 @@ export function getCompatibleSourceTypes(
 ): { type: string; label: string; sourceHandle: string }[] {
   const seen = new Set<string>();
   const results: { type: string; label: string; sourceHandle: string }[] = [];
-  const labels: Record<string, string> = { text: "Texto", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video" };
+  const labels: Record<string, string> = { text: "Texto", "text-practicante": "Practicante", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video" };
 
   for (const rule of VALID_CONNECTIONS) {
     if (rule.targetType === targetType && rule.targetHandle === targetHandle) {

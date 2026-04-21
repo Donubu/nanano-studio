@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { Node } from "@xyflow/react";
-import type { CanvasNodeData, CanvasNodeStatus, ExecutionProgress, ImageNodeData, TextNodeData, VideoNodeData, StaticTextNodeData, StaticImageNodeData, StaticImageGroupNodeData, OutputHistoryEntry } from "../lib/canvas-types";
+import type { CanvasNodeData, CanvasNodeStatus, ExecutionProgress, ImageNodeData, TextNodeData, TextPracticanteNodeData, VideoNodeData, StaticTextNodeData, StaticImageNodeData, StaticImageGroupNodeData, OutputHistoryEntry, PracticanteFile } from "../lib/canvas-types";
 import { HANDLE_IDS } from "../lib/canvas-types";
 import { topologicalSort, getDirectInputs } from "../lib/topological-sort";
 import type { CanvasEdge } from "../lib/canvas-types";
@@ -115,6 +115,7 @@ function resolveNodeInputs(
     const getTextOutput = (): string | null => {
       if (sourceNode.type === "static-text") return (sourceData as StaticTextNodeData).content || null;
       if (sourceNode.type === "text") return (sourceData as TextNodeData).outputText || null;
+      if (sourceNode.type === "text-practicante") return (sourceData as TextPracticanteNodeData).outputText || null;
       return null;
     };
 
@@ -246,6 +247,116 @@ export function useCanvasExecution({
       const startTime = Date.now();
 
       try {
+        // Practicante has its own completion shape — handle separately and return.
+        if (node.type === "text-practicante") {
+          const practicanteData = nodeData as TextPracticanteNodeData;
+          const basePrompt = practicanteData.prompt || "";
+          const fullPrompt = promptContext ? `${promptContext}\n\n${basePrompt}` : basePrompt;
+
+          const practicanteFiles: Array<{ filename: string; publicUrl: string; mimeType: string }> =
+            mediaUrls.map((m, i) => {
+              const urlPath = m.url.split("?")[0];
+              const urlName = urlPath.split("/").pop() || `media-${i}`;
+              const ext = urlName.includes(".") ? urlName.split(".").pop()!.toLowerCase() : (m.type === "video" ? "mp4" : "png");
+              const mimeType = m.type === "video"
+                ? (ext === "mov" ? "video/quicktime" : ext === "webm" ? "video/webm" : "video/mp4")
+                : (ext === "jpg" || ext === "jpeg" ? "image/jpeg" : ext === "webp" ? "image/webp" : "image/png");
+              return { filename: urlName, publicUrl: m.url, mimeType };
+            });
+
+          // Build a promptSuffix when the node must emit a clean prompt for downstream nodes.
+          // Skipped in dry-run because there the user wants the full analysis text.
+          const wantsCleanPrompt = practicanteData.outputAsPrompt && !practicanteData.dryRun;
+          const downstream = wantsCleanPrompt ? getDownstreamContext(nodeId, liveNodes, edges) : null;
+          const promptSuffix = wantsCleanPrompt && downstream ? buildPracticantePromptSuffix(downstream) : undefined;
+          // End-of-message restriction: most reliable way to get an agent with its own
+          // strong system prompt to actually respect the format rules.
+          const messageWithRestriction = wantsCleanPrompt && downstream
+            ? wrapMessageWithOutputContract(fullPrompt, downstream)
+            : fullPrompt;
+
+          const result = await executeTextPracticanteNode(
+            messageWithRestriction,
+            practicanteData,
+            practicanteFiles,
+            promptSuffix,
+            wantsCleanPrompt ? true : undefined,
+          );
+
+          // Defensive fallback: practicante now filters intermediate turns server-side via
+          // returnOnlyFinalText, but keep the client-side strip to catch the rare case where
+          // an agent emits a "---" organically inside its final turn (e.g. markdown hr).
+          const cleanResponse = wantsCleanPrompt ? stripProcessNarration(result.response) : result.response;
+
+          const completedData: Partial<TextPracticanteNodeData> = {
+            status: "completed",
+            errorMessage: undefined,
+            delegatedTo: result.delegatedTo,
+            toolsUsed: result.toolsUsed,
+            files: result.files,
+            tokensUsed: result.tokensUsed,
+            estimatedCost: result.estimatedCost,
+            conversationId: result.conversationId || practicanteData.conversationId,
+          };
+
+          if (practicanteData.dryRun) {
+            completedData.dryRunResponse = result.response;
+            // Keep outputText untouched in dry-run so downstream nodes don't get the analysis as prompt
+          } else {
+            completedData.outputText = cleanResponse;
+            completedData.outputMessageId = undefined;
+            completedData.dryRunResponse = undefined;
+
+            // Append to output history (text-only for practicante)
+            const prevHistory = practicanteData.outputHistory;
+            const newEntry: OutputHistoryEntry = {
+              text: cleanResponse,
+              createdAt: new Date().toISOString(),
+              modelName: result.delegatedTo,
+            };
+            completedData.outputHistory = appendToHistory(prevHistory, newEntry);
+          }
+
+          updateNodeStatus(setNodes, nodeId, completedData as Partial<CanvasNodeData>);
+
+          const liveNode = liveNodes.find((n) => n.id === nodeId);
+          if (liveNode) {
+            (liveNode as Node).data = { ...liveNode.data, ...completedData };
+          }
+
+          // Persist core fields via PATCH; the rest of the config is saved by autosave.
+          await fetch(`/api/conversations/${conversationId}/canvas/nodes`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              nodeId,
+              updates: {
+                status: "completed",
+                output_text: practicanteData.dryRun ? null : cleanResponse,
+                output_url: null,
+                output_message_id: null,
+              },
+            }),
+          }).catch(() => {});
+
+          const durationMs = Date.now() - startTime;
+          fetch(`/api/conversations/${conversationId}/canvas/executions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              node_id: nodeId,
+              node_type: node.type,
+              run_id: currentRunIdRef.current,
+              model_name: result.delegatedTo || practicanteData.agentName || "Orquestador",
+              status: "completed",
+              duration_ms: durationMs,
+              output_message_id: null,
+            }),
+          }).catch(() => {});
+
+          return;
+        }
+
         let result: { outputUrl?: string; outputText?: string; messageId?: number } = {};
 
         // Apply params override if connected
@@ -430,7 +541,7 @@ export function useCanvasExecution({
     const liveNodes = nodes.map((n) => ({ ...n, data: { ...n.data } }));
 
     // Reset all AI nodes to idle (history is preserved, new outputs appended on completion)
-    const aiNodeTypes = new Set(["text", "image", "video"]);
+    const aiNodeTypes = new Set(["text", "text-practicante", "image", "video"]);
     const resetData: Partial<CanvasNodeData> = {
       status: "idle",
       outputUrl: undefined,
@@ -544,6 +655,161 @@ Responde en español salvo instrucción contraria.`;
   }
 
   return instruction;
+}
+
+interface PracticanteRunResult {
+  response: string;
+  conversationId?: string;
+  delegatedTo?: string;
+  toolsUsed?: string[];
+  files?: PracticanteFile[];
+  tokensUsed?: { inputTokens: number; outputTokens: number };
+  estimatedCost?: number;
+}
+
+const DOWNSTREAM_TYPE_LABELS: Record<string, string> = {
+  image: "generación de imagen",
+  video: "generación de video",
+  text: "otro nodo de texto",
+  "text-practicante": "otro agente de Practicante",
+};
+
+function describeDownstream(downstream: { types: string[] }): string {
+  if (downstream.types.length === 0) return "un pipeline automatizado downstream";
+  return downstream.types.map((t) => DOWNSTREAM_TYPE_LABELS[t] || t).join(" y ");
+}
+
+function buildPracticantePromptSuffix(downstream: { types: string[]; prompts: string[] }): string {
+  const targetDesc = describeDownstream(downstream);
+
+  let suffix = `MODO PIPELINE — restricción de salida (solo esta solicitud):
+Tu respuesta final será consumida LITERALMENTE por ${targetDesc}, sin pasar por un humano.
+Entrega SOLO el texto útil que resuelve la solicitud. Nada más.
+
+Importante: usa español de Chile (tuteo, no voseo). No uses formas como "devolvé", "usalo", "agregás", "tené", "mirá".
+
+Responde en UN SOLO turno, sin dividir la respuesta en pasos. No narres tu proceso antes de contestar ("Voy a revisar...", "Déjame analizar...", "Primero voy a...", "Permíteme...", "Con todo el material revisado..."). Ve directo al contenido.
+
+PROHIBIDO (el pipeline se rompe si aparecen):
+- Prefijos y saludos: "Aquí tienes", "Acá va el prompt", "Listo", "Perfecto", "Hecho"
+- Narración de proceso: "Voy a...", "Déjame...", "Primero voy a...", "Permíteme...", "Con todo el material revisado..."
+- Respuestas en varios turnos separados por "---"
+- Headers markdown (##, ###), separadores (---), tablas de racional o fuentes
+- Code fences \`\`\` salvo que la salida misma sea código
+- Secciones extras tipo "VARIABLES MODULABLES", "POR QUÉ CUMPLE", "VARIACIONES SUGERIDAS"
+- Versiones en varios idiomas ("PROMPT EN INGLÉS" / "VERSIÓN EN ESPAÑOL") — entrega una sola
+- Preguntas de cierre ("¿Quieres variaciones?", "¿Te parece?", "¿Te sirve así?")
+- Cualquier meta-comentario sobre el prompt
+
+Si tu respuesta requiere más de un bloque o lleva título, estás rompiendo la restricción.`;
+
+  if (downstream.prompts.length > 0) {
+    suffix += `\n\nContexto de los nodos downstream (úsalo para enfocar, NUNCA lo repitas en la salida):\n${downstream.prompts.join("\n")}`;
+  }
+
+  return suffix;
+}
+
+function wrapMessageWithOutputContract(userMessage: string, downstream: { types: string[]; prompts: string[] }): string {
+  const targetDesc = describeDownstream(downstream);
+  return `<user_request>
+${userMessage}
+</user_request>
+
+<output_contract>
+La respuesta a <user_request> se inyecta TAL CUAL en ${targetDesc}.
+Entrega SOLO el contenido útil, en un único bloque de texto plano, sin ornamentos, en UN SOLO turno.
+
+Idioma: español de Chile (tuteo). No uses voseo argentino ("devolvé", "usalo", "agregás", "tené").
+
+No narres tu proceso antes de responder: nada de "Voy a revisar...", "Déjame analizar...", "Primero voy a...", "Permíteme...", "Con todo el material revisado...". Ve directo al contenido.
+
+No uses: prefijos ("Aquí tienes...", "Acá va...", "Listo..."), headers markdown, tablas, code fences, separadores (---), secciones múltiples, variantes en otros idiomas, preguntas finales, ni explicaciones sobre cómo se construyó.
+
+Si la solicitud es un prompt, entrega el prompt crudo. Si es un texto, entrega el texto. Punto.
+</output_contract>`;
+}
+
+/**
+ * Safety net for practicante's "multi-turn joined with ---" behavior. When the agent
+ * narrates its process in a first turn and then returns the actual content in a later
+ * turn, practicante joins them with a "---" separator. Detect and strip that leading
+ * narration if present.
+ */
+function stripProcessNarration(text: string): string {
+  const trimmed = text.trimStart();
+  // Find the first "---" on its own line within the preamble zone (first ~500 chars).
+  const match = trimmed.match(/^([\s\S]{1,500}?)\n+---+\n+([\s\S]+)$/);
+  if (!match) return text;
+  const [, preamble, rest] = match;
+  const preambleTrimmed = preamble.trim();
+  const restTrimmed = rest.trim();
+  // Only strip if the preamble is short (looks like narration, not real content)
+  // and the remaining content is substantial.
+  if (preambleTrimmed.length < 400 && restTrimmed.length > 30) {
+    return restTrimmed;
+  }
+  return text;
+}
+
+async function executeTextPracticanteNode(
+  prompt: string,
+  config: TextPracticanteNodeData,
+  files: Array<{ filename: string; publicUrl: string; mimeType: string }>,
+  promptSuffix?: string,
+  returnOnlyFinalText?: boolean
+): Promise<PracticanteRunResult> {
+  if (!prompt.trim()) {
+    throw new Error("El prompt está vacío. Escribe una instrucción para Practicante.");
+  }
+
+  const body: Record<string, unknown> = {
+    message: prompt,
+    dryRun: config.dryRun === true,
+  };
+  if (config.agentId) body.agentId = config.agentId;
+  if (config.agentName) body.agentName = config.agentName;
+  if (config.conversationId) body.existingConversationId = config.conversationId;
+  if (files.length > 0) body.files = files;
+  if (promptSuffix) body.promptSuffix = promptSuffix;
+  if (typeof returnOnlyFinalText === "boolean") body.returnOnlyFinalText = returnOnlyFinalText;
+
+  const res = await fetch(`/api/practicante/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  const responseBody = await res.json().catch(() => ({} as Record<string, unknown>));
+
+  if (!res.ok) {
+    const errMsg = typeof responseBody.error === "string" ? responseBody.error : `Practicante ${res.status}`;
+    const code = typeof responseBody.code === "string" ? ` [${responseBody.code}]` : "";
+    throw new Error(`${errMsg}${code}`);
+  }
+
+  if (responseBody.status === "failed") {
+    const errMsg = typeof responseBody.error === "string" ? responseBody.error : "Ejecución fallida en Practicante";
+    throw new Error(errMsg);
+  }
+
+  const response = typeof responseBody.response === "string" ? responseBody.response : "";
+  const tokenUsage = responseBody.tokenUsage as
+    | { inputTokens?: number; outputTokens?: number; estimatedCost?: number }
+    | undefined;
+
+  return {
+    response,
+    conversationId: typeof responseBody.conversationId === "string" ? responseBody.conversationId : undefined,
+    delegatedTo: typeof responseBody.delegatedTo === "string" ? responseBody.delegatedTo : undefined,
+    toolsUsed: Array.isArray(responseBody.toolsUsed) ? (responseBody.toolsUsed as string[]) : undefined,
+    files: Array.isArray(responseBody.files) ? (responseBody.files as PracticanteFile[]) : undefined,
+    tokensUsed:
+      tokenUsage && typeof tokenUsage.inputTokens === "number" && typeof tokenUsage.outputTokens === "number"
+        ? { inputTokens: tokenUsage.inputTokens, outputTokens: tokenUsage.outputTokens }
+        : undefined,
+    estimatedCost: tokenUsage && typeof tokenUsage.estimatedCost === "number" ? tokenUsage.estimatedCost : undefined,
+  };
 }
 
 async function executeTextNode(

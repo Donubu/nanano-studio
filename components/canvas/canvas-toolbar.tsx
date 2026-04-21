@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ImageIcon, Video, MessageSquare, Play, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings } from "lucide-react";
+import { ImageIcon, Video, MessageSquare, Play, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CanvasNodeType, ExecutionProgress } from "./lib/canvas-types";
 
@@ -19,6 +19,7 @@ interface CanvasToolbarProps {
 
 const nodeOptions: { type: CanvasNodeType; icon: typeof MessageSquare; label: string; isAI: boolean }[] = [
   { type: "text", icon: MessageSquare, label: "Texto", isAI: true },
+  { type: "text-practicante", icon: Bot, label: "Practicante", isAI: true },
   { type: "image", icon: ImageIcon, label: "Imagen", isAI: true },
   { type: "video", icon: Video, label: "Video", isAI: true },
   { type: "note", icon: StickyNote, label: "Nota", isAI: false },

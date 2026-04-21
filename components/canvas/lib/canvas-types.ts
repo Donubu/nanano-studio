@@ -37,6 +37,31 @@ export interface TextNodeData extends BaseNodeData {
   outputHistory?: OutputHistoryEntry[];
 }
 
+// --- Text Practicante Node (delegates to Practicante orchestrator/agents) ---
+export interface PracticanteFile {
+  name: string;
+  url: string;
+  mimeType?: string;
+}
+
+export interface TextPracticanteNodeData extends BaseNodeData {
+  type: "text-practicante";
+  prompt: string;
+  agentId?: string; // Empty = orchestrator picks the agent
+  agentName?: string; // Cached display name of the selected agent
+  dryRun: boolean;
+  outputAsPrompt: boolean; // If true, injects a promptSuffix to force clean output for downstream nodes
+  outputText?: string;
+  outputHistory?: OutputHistoryEntry[];
+  files?: PracticanteFile[]; // URLs returned by agent tools
+  conversationId?: string; // Reused across re-executions of the same node
+  delegatedTo?: string; // Agent that actually handled the request
+  toolsUsed?: string[];
+  tokensUsed?: { inputTokens: number; outputTokens: number };
+  estimatedCost?: number;
+  dryRunResponse?: string; // Dry-run analysis shown in the third column
+}
+
 // --- Image Node ---
 export interface ImageNodeData extends BaseNodeData {
   type: "image";
@@ -123,10 +148,11 @@ export interface ParamsVideoNodeData extends BaseNodeData {
 }
 
 // --- Union Types ---
-export type CanvasNodeData = TextNodeData | ImageNodeData | VideoNodeData | NoteNodeData | StaticTextNodeData | StaticImageNodeData | StaticImageGroupNodeData | ParamsTextNodeData | ParamsImageNodeData | ParamsVideoNodeData;
-export type CanvasNodeType = "text" | "image" | "video" | "note" | "static-text" | "static-image" | "static-image-group" | "params-text" | "params-image" | "params-video";
+export type CanvasNodeData = TextNodeData | TextPracticanteNodeData | ImageNodeData | VideoNodeData | NoteNodeData | StaticTextNodeData | StaticImageNodeData | StaticImageGroupNodeData | ParamsTextNodeData | ParamsImageNodeData | ParamsVideoNodeData;
+export type CanvasNodeType = "text" | "text-practicante" | "image" | "video" | "note" | "static-text" | "static-image" | "static-image-group" | "params-text" | "params-image" | "params-video";
 
 export type TextNode = Node<TextNodeData, "text">;
+export type TextPracticanteNode = Node<TextPracticanteNodeData, "text-practicante">;
 export type ImageNode = Node<ImageNodeData, "image">;
 export type VideoNode = Node<VideoNodeData, "video">;
 export type NoteNode = Node<NoteNodeData, "note">;
@@ -136,7 +162,7 @@ export type StaticImageGroupNode = Node<StaticImageGroupNodeData, "static-image-
 export type ParamsTextNode = Node<ParamsTextNodeData, "params-text">;
 export type ParamsImageNode = Node<ParamsImageNodeData, "params-image">;
 export type ParamsVideoNode = Node<ParamsVideoNodeData, "params-video">;
-export type CanvasNode = TextNode | ImageNode | VideoNode | NoteNode | StaticTextNode | StaticImageNode | StaticImageGroupNode | ParamsTextNode | ParamsImageNode | ParamsVideoNode;
+export type CanvasNode = TextNode | TextPracticanteNode | ImageNode | VideoNode | NoteNode | StaticTextNode | StaticImageNode | StaticImageGroupNode | ParamsTextNode | ParamsImageNode | ParamsVideoNode;
 
 export type CanvasEdge = Edge;
 
@@ -170,6 +196,15 @@ export function getDefaultNodeData(type: CanvasNodeType): CanvasNodeData {
         prompt: "",
         temperature: 1.0,
         maxOutputTokens: 8192,
+        outputAsPrompt: true,
+      };
+    case "text-practicante":
+      return {
+        ...base,
+        type: "text-practicante",
+        label: "Practicante",
+        prompt: "",
+        dryRun: false,
         outputAsPrompt: true,
       };
     case "image":

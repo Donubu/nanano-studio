@@ -4,10 +4,15 @@
  */
 import { createServer } from "http";
 import next from "next";
+import { loadEnvConfig } from "@next/env";
 import { Server as SocketIOServer } from "socket.io";
 import { getUserColor } from "./lib/collaboration/colors";
 
 const dev = process.env.NODE_ENV !== "production";
+// Load .env* files into process.env before reading PORT / HOSTNAME so
+// values placed in .env.local are honored by the custom server.
+loadEnvConfig(process.cwd(), dev);
+
 const hostname = process.env.HOSTNAME || "localhost";
 const port = parseInt(process.env.PORT || "3000", 10);
 
