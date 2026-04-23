@@ -2,7 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Loader2, TrendingUp, Wallet, Settings, ArrowDown, ArrowUp, FileDown } from "lucide-react";
+import {
+  Loader2,
+  TrendingUp,
+  Wallet,
+  Settings,
+  ArrowDown,
+  ArrowUp,
+  FileDown,
+  ImageIcon,
+  Video,
+  FileText,
+  Volume2,
+  Music,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,14 +28,24 @@ interface WeekInfo {
   label: string;
 }
 
+interface PieceCounts {
+  images: number;
+  videos: number;
+  texts: number;
+  audios: number;
+  music: number;
+}
+
 interface ClientBucket {
   clientId: number;
   name: string;
   isInternal: boolean;
   perWeek: Record<string, number>;
+  countsPerWeek: Record<string, PieceCounts>;
   trackedTotal: number;
   proratedTotal: number;
   grandTotal: number;
+  countsTotal: PieceCounts;
 }
 
 interface UserBucket {
@@ -30,9 +53,11 @@ interface UserBucket {
   name: string;
   email: string | null;
   perWeek: Record<string, number>;
+  countsPerWeek: Record<string, PieceCounts>;
   trackedTotal: number;
   proratedTotal: number;
   grandTotal: number;
+  countsTotal: PieceCounts;
 }
 
 interface WeeklyReport {
@@ -52,7 +77,68 @@ interface BreakdownRow {
   italic?: boolean;
   badge?: string;
   perWeek: Record<string, number>;
+  countsPerWeek: Record<string, PieceCounts>;
   grandTotal: number;
+  countsTotal: PieceCounts;
+}
+
+const EMPTY_COUNTS: PieceCounts = { images: 0, videos: 0, texts: 0, audios: 0, music: 0 };
+
+function addCounts(a: PieceCounts, b: PieceCounts): PieceCounts {
+  return {
+    images: a.images + b.images,
+    videos: a.videos + b.videos,
+    texts: a.texts + b.texts,
+    audios: a.audios + b.audios,
+    music: a.music + b.music,
+  };
+}
+
+function CountsRow({ c }: { c: PieceCounts }) {
+  const items: Array<{ key: keyof PieceCounts; icon: typeof ImageIcon }> = [
+    { key: "images", icon: ImageIcon },
+    { key: "videos", icon: Video },
+    { key: "texts", icon: FileText },
+    { key: "audios", icon: Volume2 },
+    { key: "music", icon: Music },
+  ];
+  const any = items.some((it) => c[it.key] > 0);
+  if (!any) return null;
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[10px] text-muted-foreground font-normal">
+      {items.map((it) =>
+        c[it.key] > 0 ? (
+          <span key={it.key} className="inline-flex items-center gap-0.5">
+            <it.icon className="h-3 w-3" />
+            {c[it.key]}
+          </span>
+        ) : null
+      )}
+    </span>
+  );
+}
+
+function CountsLegend() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      <span className="font-medium">Piezas:</span>
+      <span className="inline-flex items-center gap-1">
+        <ImageIcon className="h-3.5 w-3.5" /> imágenes
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <Video className="h-3.5 w-3.5" /> videos
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <FileText className="h-3.5 w-3.5" /> textos
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <Volume2 className="h-3.5 w-3.5" /> audios
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <Music className="h-3.5 w-3.5" /> música
+      </span>
+    </div>
+  );
 }
 
 interface MonthGroup {
@@ -68,6 +154,7 @@ function BreakdownTable({
   rows,
   grandTotal,
   toDisplay,
+  showCounts,
 }: {
   firstColLabel: string;
   weeks: WeekInfo[];
@@ -75,6 +162,7 @@ function BreakdownTable({
   rows: BreakdownRow[];
   grandTotal: number;
   toDisplay: (usd: number) => string;
+  showCounts: boolean;
 }) {
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
 
@@ -162,6 +250,7 @@ function BreakdownTable({
               </td>
               {weeks.map((w) => {
                 const val = r.perWeek[w.start] || 0;
+                const counts = r.countsPerWeek[w.start] || EMPTY_COUNTS;
                 return (
                   <td
                     key={w.start}
@@ -169,12 +258,18 @@ function BreakdownTable({
                       w.index % 2 === 0 ? "bg-muted/20" : ""
                     } ${val === 0 ? "text-muted-foreground/40" : ""}`}
                   >
-                    {val === 0 ? "—" : toDisplay(val)}
+                    <div className="flex flex-col items-end leading-tight">
+                      <span>{val === 0 ? "—" : toDisplay(val)}</span>
+                      {showCounts && <CountsRow c={counts} />}
+                    </div>
                   </td>
                 );
               })}
               <td className="text-right px-3 py-2 font-semibold whitespace-nowrap bg-muted/50">
-                {toDisplay(r.grandTotal)}
+                <div className="flex flex-col items-end leading-tight">
+                  <span>{toDisplay(r.grandTotal)}</span>
+                  {showCounts && <CountsRow c={r.countsTotal} />}
+                </div>
               </td>
             </tr>
           ))}
@@ -183,6 +278,10 @@ function BreakdownTable({
             <td className="sticky left-0 bg-muted/40 px-3 py-2 z-10">TOTAL</td>
             {weeks.map((w) => {
               const weekTotal = rows.reduce((s, r) => s + (r.perWeek[w.start] || 0), 0);
+              const weekCounts = rows.reduce(
+                (s, r) => addCounts(s, r.countsPerWeek[w.start] || EMPTY_COUNTS),
+                EMPTY_COUNTS
+              );
               return (
                 <td
                   key={w.start}
@@ -190,12 +289,22 @@ function BreakdownTable({
                     w.index % 2 === 0 ? "bg-muted/60" : ""
                   } ${weekTotal === 0 ? "text-muted-foreground/40" : ""}`}
                 >
-                  {weekTotal === 0 ? "—" : toDisplay(weekTotal)}
+                  <div className="flex flex-col items-end leading-tight">
+                    <span>{weekTotal === 0 ? "—" : toDisplay(weekTotal)}</span>
+                    {showCounts && <CountsRow c={weekCounts} />}
+                  </div>
                 </td>
               );
             })}
             <td className="text-right px-3 py-2 whitespace-nowrap bg-muted">
-              {toDisplay(grandTotal)}
+              <div className="flex flex-col items-end leading-tight">
+                <span>{toDisplay(grandTotal)}</span>
+                {showCounts && (
+                  <CountsRow
+                    c={rows.reduce((s, r) => addCounts(s, r.countsTotal), EMPTY_COUNTS)}
+                  />
+                )}
+              </div>
             </td>
           </tr>
         </tbody>
@@ -228,6 +337,7 @@ export default function WeeklyReportPage() {
   const [report, setReport] = useState<WeeklyReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showCounts, setShowCounts] = useState(true);
 
   const rate = useMemo(() => {
     const n = Number(rateStr);
@@ -274,7 +384,9 @@ export default function WeeklyReportPage() {
       italic: c.clientId === 0,
       badge: c.isInternal ? "interno" : undefined,
       perWeek: c.perWeek,
+      countsPerWeek: c.countsPerWeek,
       grandTotal: c.grandTotal,
+      countsTotal: c.countsTotal,
     }));
   }, [report]);
 
@@ -286,7 +398,9 @@ export default function WeeklyReportPage() {
       name: u.name,
       subtitle: u.email ?? undefined,
       perWeek: u.perWeek,
+      countsPerWeek: u.countsPerWeek,
       grandTotal: u.grandTotal,
+      countsTotal: u.countsTotal,
     }));
   }, [report]);
 
@@ -430,6 +544,31 @@ export default function WeeklyReportPage() {
                 Ingresa una tasa válida para ver valores en CLP.
               </p>
             )}
+
+            <div className="space-y-1.5">
+              <Label>Piezas generadas</Label>
+              <div className="inline-flex rounded-md border border-input overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowCounts(true)}
+                  className={`px-3 h-9 text-sm ${
+                    showCounts ? "bg-primary text-primary-foreground" : "bg-background"
+                  }`}
+                  title="Imagenes | Videos | Textos | Audios | Música"
+                >
+                  Mostrar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCounts(false)}
+                  className={`px-3 h-9 text-sm ${
+                    !showCounts ? "bg-primary text-primary-foreground" : "bg-background"
+                  }`}
+                >
+                  Ocultar
+                </button>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -489,6 +628,12 @@ export default function WeeklyReportPage() {
         </CardContent>
       </Card>
 
+      {showCounts && (
+        <div className="no-print">
+          <CountsLegend />
+        </div>
+      )}
+
       {/* Tabla clientes */}
       <Card data-print-section="clients">
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
@@ -521,6 +666,7 @@ export default function WeeklyReportPage() {
               rows={clientRows}
               grandTotal={report.totals.grand}
               toDisplay={toDisplay}
+              showCounts={showCounts}
             />
           )}
         </CardContent>
@@ -558,6 +704,7 @@ export default function WeeklyReportPage() {
               rows={userRows}
               grandTotal={report.totals.grand}
               toDisplay={toDisplay}
+              showCounts={showCounts}
             />
           )}
         </CardContent>

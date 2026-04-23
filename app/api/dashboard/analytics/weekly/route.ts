@@ -15,6 +15,11 @@ interface TrackedRow extends RowDataPacket {
   is_internal: number | null;
   hidden: number | null;
   tracked: string; // DECIMAL viene como string
+  images: number;
+  videos: number;
+  texts: number;
+  audios: number;
+  music_pcs: number;
 }
 
 interface UserTrackedRow extends RowDataPacket {
@@ -23,7 +28,41 @@ interface UserTrackedRow extends RowDataPacket {
   user_name: string | null;
   user_email: string | null;
   tracked: string;
+  images: number;
+  videos: number;
+  texts: number;
+  audios: number;
+  music_pcs: number;
 }
+
+interface PieceCounts {
+  images: number;
+  videos: number;
+  texts: number;
+  audios: number;
+  music: number;
+}
+
+const EMPTY_COUNTS: PieceCounts = { images: 0, videos: 0, texts: 0, audios: 0, music: 0 };
+
+// Fragmento SQL común para contar piezas por mensaje (role='model'):
+//   - imágenes, videos, música, audios (incluye HD/chirp) -> presencia de URL
+//   - textos -> mensajes sin ninguna URL multimedia (respuesta de texto puro)
+const PIECE_COUNT_SQL = `
+  SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) AS images,
+  SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) AS videos,
+  SUM(CASE WHEN
+        (m.image_url IS NULL OR m.image_url = '')
+    AND (m.video_url IS NULL OR m.video_url = '')
+    AND (m.audio_url IS NULL OR m.audio_url = '')
+    AND (m.music_url IS NULL OR m.music_url = '')
+    AND m.quality_tier <> 'chirp'
+  THEN 1 ELSE 0 END) AS texts,
+  SUM(CASE WHEN
+    (m.audio_url IS NOT NULL AND m.audio_url != '') OR m.quality_tier = 'chirp'
+  THEN 1 ELSE 0 END) AS audios,
+  SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) AS music_pcs
+`;
 
 interface InfraRow extends RowDataPacket {
   week_start: string;
@@ -46,9 +85,11 @@ interface ClientBucket {
   name: string;
   isInternal: boolean;
   perWeek: Record<string, number>; // key = week start YYYY-MM-DD, value = total USD (tracked + prorateado)
+  countsPerWeek: Record<string, PieceCounts>;
   trackedTotal: number;
   proratedTotal: number;
   grandTotal: number;
+  countsTotal: PieceCounts;
 }
 
 interface UserBucket {
@@ -56,9 +97,11 @@ interface UserBucket {
   name: string;
   email: string | null;
   perWeek: Record<string, number>;
+  countsPerWeek: Record<string, PieceCounts>;
   trackedTotal: number;
   proratedTotal: number;
   grandTotal: number;
+  countsTotal: PieceCounts;
 }
 
 function fmtDate(d: Date): string {
@@ -144,7 +187,8 @@ export async function GET(request: NextRequest) {
          c.name AS client_name,
          c.is_internal AS is_internal,
          c.hidden AS hidden,
-         COALESCE(SUM(m.estimated_cost), 0) AS tracked
+         COALESCE(SUM(m.estimated_cost), 0) AS tracked,
+         ${PIECE_COUNT_SQL}
        FROM messages m
        LEFT JOIN conversations conv ON conv.id = m.conversation_id
        LEFT JOIN projects p ON p.id = conv.project_id
@@ -164,7 +208,8 @@ export async function GET(request: NextRequest) {
          u.id AS user_id,
          u.name AS user_name,
          u.email AS user_email,
-         COALESCE(SUM(m.estimated_cost), 0) AS tracked
+         COALESCE(SUM(m.estimated_cost), 0) AS tracked,
+         ${PIECE_COUNT_SQL}
        FROM messages m
        JOIN conversations conv ON conv.id = m.conversation_id
        JOIN users u ON u.id = conv.user_id
@@ -210,6 +255,7 @@ export async function GET(request: NextRequest) {
 
     // Build per-(week, client) tracked map + total tracked per week
     const trackedByWeekClient = new Map<string, Map<number, number>>();
+    const countsByWeekClient = new Map<string, Map<number, PieceCounts>>();
     const trackedByWeek = new Map<string, number>();
     const clientsMeta = new Map<number, { name: string; isInternal: boolean }>();
 
@@ -225,6 +271,15 @@ export async function GET(request: NextRequest) {
       inner.set(clientId, (inner.get(clientId) || 0) + tracked);
       trackedByWeek.set(week, (trackedByWeek.get(week) || 0) + tracked);
 
+      if (!countsByWeekClient.has(week)) countsByWeekClient.set(week, new Map());
+      countsByWeekClient.get(week)!.set(clientId, {
+        images: Number(r.images) || 0,
+        videos: Number(r.videos) || 0,
+        texts: Number(r.texts) || 0,
+        audios: Number(r.audios) || 0,
+        music: Number(r.music_pcs) || 0,
+      });
+
       if (!clientsMeta.has(clientId)) {
         clientsMeta.set(clientId, { name, isInternal });
       }
@@ -238,9 +293,11 @@ export async function GET(request: NextRequest) {
         name: meta.name,
         isInternal: meta.isInternal,
         perWeek: {},
+        countsPerWeek: {},
         trackedTotal: 0,
         proratedTotal: 0,
         grandTotal: 0,
+        countsTotal: { ...EMPTY_COUNTS },
       };
 
       for (const w of weeks) {
@@ -254,6 +311,16 @@ export async function GET(request: NextRequest) {
         bucket.trackedTotal += clientTracked;
         bucket.proratedTotal += prorated;
         bucket.grandTotal += total;
+
+        const counts = countsByWeekClient.get(w.start)?.get(clientId);
+        if (counts) {
+          bucket.countsPerWeek[w.start] = counts;
+          bucket.countsTotal.images += counts.images;
+          bucket.countsTotal.videos += counts.videos;
+          bucket.countsTotal.texts += counts.texts;
+          bucket.countsTotal.audios += counts.audios;
+          bucket.countsTotal.music += counts.music;
+        }
       }
 
       clients.push(bucket);
@@ -270,6 +337,7 @@ export async function GET(request: NextRequest) {
     // Usa el MISMO total tracked por semana que los clientes, para que el prorateo
     // de infra sea consistente (share_usuario × infra_semana).
     const trackedByWeekUser = new Map<string, Map<number, number>>();
+    const countsByWeekUser = new Map<string, Map<number, PieceCounts>>();
     const usersMeta = new Map<number, { name: string; email: string | null }>();
 
     for (const r of userTrackedRows) {
@@ -279,6 +347,15 @@ export async function GET(request: NextRequest) {
 
       if (!trackedByWeekUser.has(week)) trackedByWeekUser.set(week, new Map());
       trackedByWeekUser.get(week)!.set(userId, (trackedByWeekUser.get(week)!.get(userId) || 0) + tracked);
+
+      if (!countsByWeekUser.has(week)) countsByWeekUser.set(week, new Map());
+      countsByWeekUser.get(week)!.set(userId, {
+        images: Number(r.images) || 0,
+        videos: Number(r.videos) || 0,
+        texts: Number(r.texts) || 0,
+        audios: Number(r.audios) || 0,
+        music: Number(r.music_pcs) || 0,
+      });
 
       if (!usersMeta.has(userId)) {
         usersMeta.set(userId, { name: r.user_name ?? "(sin nombre)", email: r.user_email });
@@ -292,9 +369,11 @@ export async function GET(request: NextRequest) {
         name: meta.name,
         email: meta.email,
         perWeek: {},
+        countsPerWeek: {},
         trackedTotal: 0,
         proratedTotal: 0,
         grandTotal: 0,
+        countsTotal: { ...EMPTY_COUNTS },
       };
 
       for (const w of weeks) {
@@ -308,6 +387,16 @@ export async function GET(request: NextRequest) {
         bucket.trackedTotal += userTracked;
         bucket.proratedTotal += prorated;
         bucket.grandTotal += total;
+
+        const counts = countsByWeekUser.get(w.start)?.get(userId);
+        if (counts) {
+          bucket.countsPerWeek[w.start] = counts;
+          bucket.countsTotal.images += counts.images;
+          bucket.countsTotal.videos += counts.videos;
+          bucket.countsTotal.texts += counts.texts;
+          bucket.countsTotal.audios += counts.audios;
+          bucket.countsTotal.music += counts.music;
+        }
       }
 
       users.push(bucket);
