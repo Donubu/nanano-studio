@@ -21,9 +21,19 @@ import {
     Activity,
     Sparkles,
     ScrollText,
+    TrendingUp,
+    Wallet,
 } from "lucide-react";
 
-const menuItems = [
+type MenuItem = {
+    title: string;
+    href: string;
+    icon: typeof Users;
+    target?: string;
+    children?: MenuItem[];
+};
+
+const menuItems: MenuItem[] = [
     {
         title: "Dashboard",
         href: "/dashboard",
@@ -33,6 +43,13 @@ const menuItems = [
         title: "Estadísticas",
         href: "/dashboard/analytics",
         icon: BarChart3,
+        children: [
+            {
+                title: "Semanal por Cliente",
+                href: "/dashboard/analytics/weekly",
+                icon: TrendingUp,
+            },
+        ],
     },
     {
         title: "Conversaciones",
@@ -95,6 +112,11 @@ const menuItems = [
         icon: MessageSquare,
     },
     {
+        title: "Ajustes Financieros",
+        href: "/dashboard/settings/finance",
+        icon: Wallet,
+    },
+    {
         title: "Costos GCP",
         href: "/dashboard/billing",
         icon: Cloud,
@@ -108,6 +130,23 @@ const menuItems = [
 
 ];
 
+function isItemActive(item: MenuItem, pathname: string): boolean {
+    if (pathname === item.href) return true;
+    if (item.href === "/dashboard" || item.href === "/") return false;
+    // Active si estamos en esta ruta exacta o en una sub-ruta que NO pertenezca a un child
+    if (pathname.startsWith(item.href)) {
+        if (item.children) {
+            for (const child of item.children) {
+                if (pathname === child.href || pathname.startsWith(child.href + "/")) {
+                    return false; // deja que el child tome el estado activo
+                }
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 export function Sidebar() {
     const pathname = usePathname();
 
@@ -115,25 +154,44 @@ export function Sidebar() {
         <aside className="w-60 border-r border-border/50 bg-sidebar min-h-[calc(100vh-3.5rem)] flex flex-col">
             <nav className="p-3 space-y-1 flex-1">
                 {menuItems.map((item) => {
-                    const isActive =
-                        pathname === item.href ||
-                        (item.href !== "/dashboard" && item.href !== "/" && pathname.startsWith(item.href));
+                    const isActive = isItemActive(item, pathname);
 
                     return (
-                        <Link
-                            key={item.href}
-                            href={item.href}
-                            target={item.target??'_self'}
-                            className={cn(
-                                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
-                                isActive
-                                    ? "bg-primary/10 text-primary"
-                                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                            )}
-                        >
-                            <item.icon className={cn("h-5 w-5", isActive && "text-primary")}/>
-                            {item.title}
-                        </Link>
+                        <div key={item.href}>
+                            <Link
+                                href={item.href}
+                                target={item.target ?? '_self'}
+                                className={cn(
+                                    "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
+                                    isActive
+                                        ? "bg-primary/10 text-primary"
+                                        : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                                )}
+                            >
+                                <item.icon className={cn("h-5 w-5", isActive && "text-primary")}/>
+                                {item.title}
+                            </Link>
+
+                            {item.children && item.children.map((child) => {
+                                const childActive =
+                                    pathname === child.href || pathname.startsWith(child.href + "/");
+                                return (
+                                    <Link
+                                        key={child.href}
+                                        href={child.href}
+                                        className={cn(
+                                            "flex items-center gap-3 pl-9 pr-3 py-2 rounded-lg text-sm transition-all ml-3 border-l border-border/50",
+                                            childActive
+                                                ? "text-primary font-medium"
+                                                : "text-muted-foreground hover:text-foreground"
+                                        )}
+                                    >
+                                        <child.icon className={cn("h-4 w-4", childActive && "text-primary")}/>
+                                        {child.title}
+                                    </Link>
+                                );
+                            })}
+                        </div>
                     );
                 })}
             </nav>
