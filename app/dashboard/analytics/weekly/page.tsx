@@ -155,6 +155,9 @@ function BreakdownTable({
   grandTotal,
   toDisplay,
   showCounts,
+  rangeFrom,
+  rangeTo,
+  showSubtotal,
 }: {
   firstColLabel: string;
   weeks: WeekInfo[];
@@ -163,16 +166,79 @@ function BreakdownTable({
   grandTotal: number;
   toDisplay: (usd: number) => string;
   showCounts: boolean;
+  rangeFrom?: string;
+  rangeTo?: string;
+  showSubtotal?: boolean;
 }) {
+  const [sortKey, setSortKey] = useState<"subtotal" | "total">("total");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
+
+  const isInRange = useCallback(
+    (weekStart: string) => {
+      if (!rangeFrom || !rangeTo) return false;
+      return weekStart >= rangeFrom && weekStart <= rangeTo;
+    },
+    [rangeFrom, rangeTo]
+  );
+
+  const subtotalForRow = useCallback(
+    (r: BreakdownRow): number => {
+      if (!rangeFrom || !rangeTo) return 0;
+      let sum = 0;
+      for (const w of weeks) {
+        if (isInRange(w.start)) sum += r.perWeek[w.start] || 0;
+      }
+      return sum;
+    },
+    [rangeFrom, rangeTo, weeks, isInRange]
+  );
+
+  const subtotalCountsForRow = useCallback(
+    (r: BreakdownRow): PieceCounts => {
+      if (!rangeFrom || !rangeTo) return EMPTY_COUNTS;
+      let acc: PieceCounts = { ...EMPTY_COUNTS };
+      for (const w of weeks) {
+        if (isInRange(w.start)) {
+          const c = r.countsPerWeek[w.start];
+          if (c) acc = addCounts(acc, c);
+        }
+      }
+      return acc;
+    },
+    [rangeFrom, rangeTo, weeks, isInRange]
+  );
 
   const sortedRows = useMemo(() => {
     const arr = [...rows];
-    arr.sort((a, b) =>
-      sortDir === "desc" ? b.grandTotal - a.grandTotal : a.grandTotal - b.grandTotal
-    );
+    arr.sort((a, b) => {
+      const aVal = sortKey === "subtotal" ? subtotalForRow(a) : a.grandTotal;
+      const bVal = sortKey === "subtotal" ? subtotalForRow(b) : b.grandTotal;
+      return sortDir === "desc" ? bVal - aVal : aVal - bVal;
+    });
     return arr;
-  }, [rows, sortDir]);
+  }, [rows, sortKey, sortDir, subtotalForRow]);
+
+  const onSortClick = (key: "subtotal" | "total") => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  };
+
+  const subtotalGrand = useMemo(
+    () => (showSubtotal ? rows.reduce((s, r) => s + subtotalForRow(r), 0) : 0),
+    [rows, showSubtotal, subtotalForRow]
+  );
+
+  const subtotalGrandCounts = useMemo(
+    () =>
+      showSubtotal
+        ? rows.reduce((s, r) => addCounts(s, subtotalCountsForRow(r)), { ...EMPTY_COUNTS })
+        : EMPTY_COUNTS,
+    [rows, showSubtotal, subtotalCountsForRow]
+  );
 
   return (
     <div className="overflow-x-auto">
@@ -198,36 +264,60 @@ function BreakdownTable({
                 {g.label}
               </th>
             ))}
+            {showSubtotal && (
+              <th
+                rowSpan={2}
+                className="text-right font-semibold px-3 py-2 whitespace-nowrap bg-amber-100 dark:bg-amber-950 align-bottom cursor-pointer select-none hover:bg-amber-200 dark:hover:bg-amber-900"
+                onClick={() => onSortClick("subtotal")}
+                title="Ordenar por subtotal del rango"
+              >
+                <span className="inline-flex items-center gap-1">
+                  Subtotal
+                  {sortKey === "subtotal" &&
+                    (sortDir === "desc" ? (
+                      <ArrowDown className="h-3.5 w-3.5" />
+                    ) : (
+                      <ArrowUp className="h-3.5 w-3.5" />
+                    ))}
+                </span>
+              </th>
+            )}
             <th
               rowSpan={2}
               className="text-right font-semibold px-3 py-2 whitespace-nowrap bg-muted align-bottom cursor-pointer select-none hover:bg-muted/80"
-              onClick={() => setSortDir((d) => (d === "desc" ? "asc" : "desc"))}
+              onClick={() => onSortClick("total")}
               title="Ordenar por total"
             >
               <span className="inline-flex items-center gap-1">
                 Total
-                {sortDir === "desc" ? (
-                  <ArrowDown className="h-3.5 w-3.5" />
-                ) : (
-                  <ArrowUp className="h-3.5 w-3.5" />
-                )}
+                {sortKey === "total" &&
+                  (sortDir === "desc" ? (
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  ) : (
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  ))}
               </span>
             </th>
           </tr>
           <tr className="border-b">
-            {weeks.map((w) => (
-              <th
-                key={w.start}
-                className={`text-right font-medium px-2 py-2 whitespace-nowrap text-slate-900 dark:text-slate-100 ${
-                  w.index % 2 === 0
-                    ? "bg-slate-300 dark:bg-slate-700"
-                    : "bg-slate-200 dark:bg-slate-800"
-                }`}
-                title={`${w.start} → ${w.end}`}
-              >
-                S{w.index}
-              </th>
-            ))}
+            {weeks.map((w) => {
+              const inRange = isInRange(w.start);
+              return (
+                <th
+                  key={w.start}
+                  className={`text-right font-medium px-2 py-2 whitespace-nowrap text-slate-900 dark:text-slate-100 ${
+                    inRange
+                      ? "bg-amber-200 dark:bg-amber-900 ring-1 ring-amber-400 dark:ring-amber-700"
+                      : w.index % 2 === 0
+                      ? "bg-slate-300 dark:bg-slate-700"
+                      : "bg-slate-200 dark:bg-slate-800"
+                  }`}
+                  title={`${w.start} → ${w.end}`}
+                >
+                  S{w.index}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
@@ -251,11 +341,16 @@ function BreakdownTable({
               {weeks.map((w) => {
                 const val = r.perWeek[w.start] || 0;
                 const counts = r.countsPerWeek[w.start] || EMPTY_COUNTS;
+                const inRange = isInRange(w.start);
                 return (
                   <td
                     key={w.start}
                     className={`text-right px-2 py-2 whitespace-nowrap ${
-                      w.index % 2 === 0 ? "bg-muted/20" : ""
+                      inRange
+                        ? "bg-amber-50 dark:bg-amber-950/40"
+                        : w.index % 2 === 0
+                        ? "bg-muted/20"
+                        : ""
                     } ${val === 0 ? "text-muted-foreground/40" : ""}`}
                   >
                     <div className="flex flex-col items-end leading-tight">
@@ -265,6 +360,21 @@ function BreakdownTable({
                   </td>
                 );
               })}
+              {showSubtotal && (
+                <td className="text-right px-3 py-2 font-semibold whitespace-nowrap bg-amber-100/70 dark:bg-amber-950/60">
+                  {(() => {
+                    const sub = subtotalForRow(r);
+                    return (
+                      <div className="flex flex-col items-end leading-tight">
+                        <span className={sub === 0 ? "text-muted-foreground/60" : ""}>
+                          {sub === 0 ? "—" : toDisplay(sub)}
+                        </span>
+                        {showCounts && <CountsRow c={subtotalCountsForRow(r)} />}
+                      </div>
+                    );
+                  })()}
+                </td>
+              )}
               <td className="text-right px-3 py-2 font-semibold whitespace-nowrap bg-muted/50">
                 <div className="flex flex-col items-end leading-tight">
                   <span>{toDisplay(r.grandTotal)}</span>
@@ -282,11 +392,16 @@ function BreakdownTable({
                 (s, r) => addCounts(s, r.countsPerWeek[w.start] || EMPTY_COUNTS),
                 EMPTY_COUNTS
               );
+              const inRange = isInRange(w.start);
               return (
                 <td
                   key={w.start}
                   className={`text-right px-2 py-2 whitespace-nowrap ${
-                    w.index % 2 === 0 ? "bg-muted/60" : ""
+                    inRange
+                      ? "bg-amber-100 dark:bg-amber-900/60"
+                      : w.index % 2 === 0
+                      ? "bg-muted/60"
+                      : ""
                   } ${weekTotal === 0 ? "text-muted-foreground/40" : ""}`}
                 >
                   <div className="flex flex-col items-end leading-tight">
@@ -296,6 +411,14 @@ function BreakdownTable({
                 </td>
               );
             })}
+            {showSubtotal && (
+              <td className="text-right px-3 py-2 whitespace-nowrap bg-amber-200 dark:bg-amber-900">
+                <div className="flex flex-col items-end leading-tight">
+                  <span>{toDisplay(subtotalGrand)}</span>
+                  {showCounts && <CountsRow c={subtotalGrandCounts} />}
+                </div>
+              </td>
+            )}
             <td className="text-right px-3 py-2 whitespace-nowrap bg-muted">
               <div className="flex flex-col items-end leading-tight">
                 <span>{toDisplay(grandTotal)}</span>
@@ -329,6 +452,11 @@ function fmtClp(n: number): string {
   return `$${Math.round(n).toLocaleString("es-CL")}`;
 }
 
+function rangeLabel(report: WeeklyReport | null, weekStart: string): string {
+  const w = report?.weeks.find((x) => x.start === weekStart);
+  return w ? `S${w.index}` : weekStart;
+}
+
 export default function WeeklyReportPage() {
   const [year, setYear] = useState<number>(CURRENT_YEAR);
   const [currency, setCurrency] = useState<"USD" | "CLP">("USD");
@@ -338,6 +466,8 @@ export default function WeeklyReportPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCounts, setShowCounts] = useState(true);
+  const [weekFrom, setWeekFrom] = useState<string>("");
+  const [weekTo, setWeekTo] = useState<string>("");
 
   const rate = useMemo(() => {
     const n = Number(rateStr);
@@ -374,6 +504,54 @@ export default function WeeklyReportPage() {
   useEffect(() => {
     void fetchReport(year);
   }, [year, fetchReport]);
+
+  // Reinicia el rango cuando cambia el reporte (cambio de año o recarga).
+  useEffect(() => {
+    if (report && report.weeks.length > 0) {
+      setWeekFrom(report.weeks[0].start);
+      setWeekTo(report.weeks[report.weeks.length - 1].start);
+    } else {
+      setWeekFrom("");
+      setWeekTo("");
+    }
+  }, [report]);
+
+  // Normaliza el rango (asegura from <= to) y detecta si cubre el año entero.
+  const effectiveRange = useMemo(() => {
+    if (!report || report.weeks.length === 0 || !weekFrom || !weekTo) return null;
+    const from = weekFrom <= weekTo ? weekFrom : weekTo;
+    const to = weekFrom <= weekTo ? weekTo : weekFrom;
+    return { from, to };
+  }, [report, weekFrom, weekTo]);
+
+  const rangeIsFull = useMemo(() => {
+    if (!report || !effectiveRange) return true;
+    return (
+      effectiveRange.from === report.weeks[0].start &&
+      effectiveRange.to === report.weeks[report.weeks.length - 1].start
+    );
+  }, [report, effectiveRange]);
+
+  const showSubtotal = !rangeIsFull && !!effectiveRange;
+
+  // Subtotal global del rango (suma tracked + prorrateo de las semanas en rango).
+  const rangeSubtotal = useMemo(() => {
+    if (!report || !effectiveRange) return 0;
+    let sum = 0;
+    for (const w of report.weeks) {
+      if (w.start >= effectiveRange.from && w.start <= effectiveRange.to) {
+        sum += report.clients.reduce((s, c) => s + (c.perWeek[w.start] || 0), 0);
+      }
+    }
+    return sum;
+  }, [report, effectiveRange]);
+
+  const resetRange = useCallback(() => {
+    if (report && report.weeks.length > 0) {
+      setWeekFrom(report.weeks[0].start);
+      setWeekTo(report.weeks[report.weeks.length - 1].start);
+    }
+  }, [report]);
 
   // Rows para la tabla de clientes (shape unificado de BreakdownTable)
   const clientRows: BreakdownRow[] = useMemo(() => {
@@ -500,6 +678,52 @@ export default function WeeklyReportPage() {
                 ))}
               </select>
             </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="week-from">Desde semana</Label>
+              <select
+                id="week-from"
+                value={weekFrom}
+                onChange={(e) => setWeekFrom(e.target.value)}
+                disabled={!report || report.weeks.length === 0}
+                className="h-9 max-w-[260px] rounded-md border border-input bg-background px-3 text-sm disabled:opacity-50"
+              >
+                {report?.weeks.map((w) => (
+                  <option key={w.start} value={w.start}>
+                    {w.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="week-to">Hasta semana</Label>
+              <select
+                id="week-to"
+                value={weekTo}
+                onChange={(e) => setWeekTo(e.target.value)}
+                disabled={!report || report.weeks.length === 0}
+                className="h-9 max-w-[260px] rounded-md border border-input bg-background px-3 text-sm disabled:opacity-50"
+              >
+                {report?.weeks.map((w) => (
+                  <option key={w.start} value={w.start}>
+                    {w.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {showSubtotal && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={resetRange}
+                className="self-end h-9"
+              >
+                Año completo
+              </Button>
+            )}
 
             <div className="space-y-1.5">
               <Label>Moneda</Label>
@@ -637,7 +861,20 @@ export default function WeeklyReportPage() {
       {/* Tabla clientes */}
       <Card data-print-section="clients">
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle>Desglose por cliente · Año {year}</CardTitle>
+          <div>
+            <CardTitle>Desglose por cliente · Año {year}</CardTitle>
+            {showSubtotal && effectiveRange && (
+              <p className="text-xs text-muted-foreground mt-1" data-range-subtitle>
+                Subtotal rango{" "}
+                <span className="font-medium">
+                  {rangeLabel(report, effectiveRange.from)} → {rangeLabel(report, effectiveRange.to)}
+                </span>
+                : <span className="font-semibold text-foreground">{toDisplay(rangeSubtotal)}</span>
+                {" · "}
+                Total año: <span className="font-semibold text-foreground">{toDisplay(report?.totals.grand ?? 0)}</span>
+              </p>
+            )}
+          </div>
           <Button
             variant="outline"
             size="sm"
@@ -667,6 +904,9 @@ export default function WeeklyReportPage() {
               grandTotal={report.totals.grand}
               toDisplay={toDisplay}
               showCounts={showCounts}
+              rangeFrom={effectiveRange?.from}
+              rangeTo={effectiveRange?.to}
+              showSubtotal={showSubtotal}
             />
           )}
         </CardContent>
@@ -675,7 +915,20 @@ export default function WeeklyReportPage() {
       {/* Tabla usuarios */}
       <Card data-print-section="users">
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle>Desglose por usuario · Año {year}</CardTitle>
+          <div>
+            <CardTitle>Desglose por usuario · Año {year}</CardTitle>
+            {showSubtotal && effectiveRange && (
+              <p className="text-xs text-muted-foreground mt-1" data-range-subtitle>
+                Subtotal rango{" "}
+                <span className="font-medium">
+                  {rangeLabel(report, effectiveRange.from)} → {rangeLabel(report, effectiveRange.to)}
+                </span>
+                : <span className="font-semibold text-foreground">{toDisplay(rangeSubtotal)}</span>
+                {" · "}
+                Total año: <span className="font-semibold text-foreground">{toDisplay(report?.totals.grand ?? 0)}</span>
+              </p>
+            )}
+          </div>
           <Button
             variant="outline"
             size="sm"
@@ -705,6 +958,9 @@ export default function WeeklyReportPage() {
               grandTotal={report.totals.grand}
               toDisplay={toDisplay}
               showCounts={showCounts}
+              rangeFrom={effectiveRange?.from}
+              rangeTo={effectiveRange?.to}
+              showSubtotal={showSubtotal}
             />
           )}
         </CardContent>
@@ -753,6 +1009,9 @@ export default function WeeklyReportPage() {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
+  /* Asegura que el subtítulo del rango sea legible incluso en dark mode */
+  [data-print-section] [data-range-subtitle],
+  [data-print-section] [data-range-subtitle] * { color: #1f2937 !important; }
 }
 `,
         }}
