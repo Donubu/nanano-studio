@@ -60,6 +60,14 @@ interface UserBucket {
   countsTotal: PieceCounts;
 }
 
+interface PieceAverage {
+  count: number;
+  tracked: number;
+  infra: number;
+  total: number;
+  avg: number;
+}
+
 interface WeeklyReport {
   year: number;
   currency: "USD";
@@ -67,6 +75,7 @@ interface WeeklyReport {
   clients: ClientBucket[];
   users: UserBucket[];
   totals: { tracked: number; infra: number; grand: number };
+  pieceAverages: Record<keyof PieceCounts, PieceAverage>;
   globalSpentUsd: number;
 }
 
@@ -837,6 +846,58 @@ export default function WeeklyReportPage() {
           <CountsLegend />
         </div>
       )}
+
+      {/* Promedio por pieza (incluye prorrateo de infra GCP) */}
+      <Card data-print-section="piece-averages">
+        <CardHeader>
+          <CardTitle>Costo promedio por pieza · Año {year}</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Incluye el prorrateo de infraestructura GCP. Multiplicar el promedio por la cantidad de
+            piezas de un cliente da una estimación cercana a su total real.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : !report ? (
+            <p className="text-sm text-muted-foreground">Sin datos.</p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              {(
+                [
+                  { key: "images", label: "Imágenes", icon: ImageIcon },
+                  { key: "videos", label: "Videos", icon: Video },
+                  { key: "texts", label: "Textos", icon: FileText },
+                  { key: "audios", label: "Audios", icon: Volume2 },
+                  { key: "music", label: "Música", icon: Music },
+                ] as const
+              ).map(({ key, label, icon: Icon }) => {
+                const p = report.pieceAverages[key];
+                return (
+                  <div
+                    key={key}
+                    className="rounded-md border border-border/60 bg-muted/20 px-3 py-2"
+                  >
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Icon className="h-3.5 w-3.5" />
+                      {label}
+                    </div>
+                    <div className="text-lg font-semibold mt-0.5">
+                      {p.count > 0 ? toDisplay(p.avg) : "—"}
+                      <span className="text-[10px] text-muted-foreground font-normal"> / pieza</span>
+                    </div>
+                    <div className="text-[11px] text-muted-foreground leading-tight">
+                      {p.count.toLocaleString("es-CL")} piezas · total {toDisplay(p.total)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Tabla clientes */}
       <Card data-print-section="clients">

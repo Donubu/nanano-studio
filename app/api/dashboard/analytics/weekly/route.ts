@@ -165,12 +165,21 @@ export async function GET(request: NextRequest) {
     const weeks = buildWeeksOfYear(year, capDate);
 
     if (weeks.length === 0) {
+      const emptyAvg = { count: 0, tracked: 0, infra: 0, total: 0, avg: 0 };
       return NextResponse.json({
         year,
         currency: "USD",
         weeks: [],
         clients: [],
+        users: [],
         totals: { tracked: 0, infra: 0, grand: 0 },
+        pieceAverages: {
+          images: emptyAvg,
+          videos: emptyAvg,
+          texts: emptyAvg,
+          audios: emptyAvg,
+          music: emptyAvg,
+        },
         globalSpentUsd: 0,
       });
     }
@@ -245,6 +254,57 @@ export async function GET(request: NextRequest) {
          FROM gcp_daily_costs
         WHERE LOWER(service_description) NOT REGEXP ?`,
       [AI_SERVICE_REGEX]
+    );
+
+    // 4) Costo y cantidad por tipo de pieza dentro del rango del año.
+    //    Se usa para calcular el promedio por pieza, prorrateando la infra
+    //    GCP del año según el % de tracked de cada tipo. Así, multiplicar el
+    //    promedio por las piezas de un cliente da una estimación cercana a su
+    //    total real (incluyendo infra).
+    interface PieceCostRow extends RowDataPacket {
+      images_cost: string; images_count: number;
+      videos_cost: string; videos_count: number;
+      music_cost: string; music_count: number;
+      audios_cost: string; audios_count: number;
+      texts_cost: string; texts_count: number;
+    }
+    const [pieceCostRows] = await pool.execute<PieceCostRow[]>(
+      `SELECT
+         COALESCE(SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != ''
+                           THEN m.estimated_cost ELSE 0 END), 0) AS images_cost,
+         SUM(CASE WHEN m.image_url IS NOT NULL AND m.image_url != '' THEN 1 ELSE 0 END) AS images_count,
+         COALESCE(SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != ''
+                           THEN m.estimated_cost ELSE 0 END), 0) AS videos_cost,
+         SUM(CASE WHEN m.video_url IS NOT NULL AND m.video_url != '' THEN 1 ELSE 0 END) AS videos_count,
+         COALESCE(SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != ''
+                           THEN m.estimated_cost ELSE 0 END), 0) AS music_cost,
+         SUM(CASE WHEN m.music_url IS NOT NULL AND m.music_url != '' THEN 1 ELSE 0 END) AS music_count,
+         COALESCE(SUM(CASE WHEN
+              (m.audio_url IS NOT NULL AND m.audio_url != '') OR m.quality_tier = 'chirp'
+              THEN m.estimated_cost ELSE 0 END), 0) AS audios_cost,
+         SUM(CASE WHEN
+              (m.audio_url IS NOT NULL AND m.audio_url != '') OR m.quality_tier = 'chirp'
+              THEN 1 ELSE 0 END) AS audios_count,
+         COALESCE(SUM(CASE WHEN
+                  (m.image_url IS NULL OR m.image_url = '')
+              AND (m.video_url IS NULL OR m.video_url = '')
+              AND (m.audio_url IS NULL OR m.audio_url = '')
+              AND (m.music_url IS NULL OR m.music_url = '')
+              AND m.quality_tier <> 'chirp'
+              THEN m.estimated_cost ELSE 0 END), 0) AS texts_cost,
+         SUM(CASE WHEN
+                  (m.image_url IS NULL OR m.image_url = '')
+              AND (m.video_url IS NULL OR m.video_url = '')
+              AND (m.audio_url IS NULL OR m.audio_url = '')
+              AND (m.music_url IS NULL OR m.music_url = '')
+              AND m.quality_tier <> 'chirp'
+              THEN 1 ELSE 0 END) AS texts_count
+       FROM messages m
+       WHERE m.role = 'model'
+         AND m.estimated_cost IS NOT NULL
+         AND m.created_at >= ?
+         AND m.created_at < DATE_ADD(?, INTERVAL 1 DAY)`,
+      [rangeStart, rangeEnd]
     );
 
     // Build per-week infra map
@@ -411,6 +471,41 @@ export async function GET(request: NextRequest) {
     const globalSpentUsd =
       Number(totalTrackedHist[0]?.total || 0) + Number(totalInfraHist[0]?.total || 0);
 
+    // Promedio por tipo de pieza con prorrateo de infra del año.
+    // share_tipo = tracked_tipo / tracked_total → infra_tipo = share_tipo × infra_total
+    // avg_tipo = (tracked_tipo + infra_tipo) / count_tipo
+    const pcr = pieceCostRows[0];
+    const piecesAggregate: Record<keyof PieceCounts, { tracked: number; count: number }> = {
+      images: { tracked: Number(pcr?.images_cost || 0), count: Number(pcr?.images_count || 0) },
+      videos: { tracked: Number(pcr?.videos_cost || 0), count: Number(pcr?.videos_count || 0) },
+      texts: { tracked: Number(pcr?.texts_cost || 0), count: Number(pcr?.texts_count || 0) },
+      audios: { tracked: Number(pcr?.audios_cost || 0), count: Number(pcr?.audios_count || 0) },
+      music: { tracked: Number(pcr?.music_cost || 0), count: Number(pcr?.music_count || 0) },
+    };
+    const pieceAverages: Record<
+      keyof PieceCounts,
+      { count: number; tracked: number; infra: number; total: number; avg: number }
+    > = {
+      images: { count: 0, tracked: 0, infra: 0, total: 0, avg: 0 },
+      videos: { count: 0, tracked: 0, infra: 0, total: 0, avg: 0 },
+      texts: { count: 0, tracked: 0, infra: 0, total: 0, avg: 0 },
+      audios: { count: 0, tracked: 0, infra: 0, total: 0, avg: 0 },
+      music: { count: 0, tracked: 0, infra: 0, total: 0, avg: 0 },
+    };
+    for (const k of Object.keys(piecesAggregate) as Array<keyof PieceCounts>) {
+      const { tracked, count } = piecesAggregate[k];
+      const share = rangeTracked > 0 ? tracked / rangeTracked : 0;
+      const infra = share * rangeProrated;
+      const total = tracked + infra;
+      pieceAverages[k] = {
+        count,
+        tracked,
+        infra,
+        total,
+        avg: count > 0 ? total / count : 0,
+      };
+    }
+
     return NextResponse.json({
       year,
       currency: "USD",
@@ -422,6 +517,7 @@ export async function GET(request: NextRequest) {
         infra: rangeProrated,
         grand: rangeGrand,
       },
+      pieceAverages,
       globalSpentUsd,
     });
   } catch (error) {
