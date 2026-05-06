@@ -163,12 +163,6 @@ export const TextPracticanteNodeComponent = memo(function TextPracticanteNode({ 
           </div>
         )}
 
-        {typeof nodeData.estimatedCost === "number" && (
-          <div className="text-[9px] text-muted-foreground">
-            ~${nodeData.estimatedCost.toFixed(4)} USD
-          </div>
-        )}
-
         {status === "error" && nodeData.errorMessage && (
           <div className="flex items-center gap-1.5 text-xs text-red-400">
             <AlertCircle className="h-3 w-3" />

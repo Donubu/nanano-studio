@@ -274,11 +274,6 @@ export function PracticanteConfigPanel({
                 </div>
               </div>
             )}
-            {typeof data.estimatedCost === "number" && data.tokensUsed && (
-              <p className="text-[10px] text-muted-foreground">
-                {data.tokensUsed.inputTokens} in / {data.tokensUsed.outputTokens} out tokens · ~${data.estimatedCost.toFixed(4)} USD
-              </p>
-            )}
             {data.outputText && !data.dryRun && (
               <div className="space-y-1">
                 <Label className="text-xs">Resultado</Label>
