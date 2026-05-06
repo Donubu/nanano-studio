@@ -76,9 +76,10 @@ export async function DELETE(
 
     const message = messages[0];
 
-    // Check if already deleted
+    // Idempotente: si ya estaba borrado, respondemos OK para que el frontend
+    // pueda quitarlo de la vista sin trabarse en un loop de 400.
     if (message.deleted_at) {
-      return NextResponse.json({ error: "El mensaje ya está eliminado" }, { status: 400 });
+      return NextResponse.json({ success: true, alreadyDeleted: true });
     }
 
     // Soft delete

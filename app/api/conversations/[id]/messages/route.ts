@@ -68,7 +68,7 @@ export async function GET(
               u.name as user_name, u.image as user_image, u.email as user_email
        FROM messages m
        LEFT JOIN users u ON m.user_id = u.id
-       WHERE m.conversation_id = ?
+       WHERE m.conversation_id = ? AND m.deleted_at IS NULL
        ORDER BY m.created_at ASC`,
       [id]
     );
