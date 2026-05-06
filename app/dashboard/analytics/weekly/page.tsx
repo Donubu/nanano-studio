@@ -147,10 +147,28 @@ interface MonthGroup {
   span: number;
 }
 
+const MONTHS_ES = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
+function computeMonthGroups(weeks: WeekInfo[]): MonthGroup[] {
+  const groups: MonthGroup[] = [];
+  for (const w of weeks) {
+    const key = w.start.slice(0, 7);
+    const monthIdx = Number(w.start.slice(5, 7)) - 1;
+    if (groups.length === 0 || groups[groups.length - 1].key !== key) {
+      groups.push({ key, label: MONTHS_ES[monthIdx] ?? key, span: 1 });
+    } else {
+      groups[groups.length - 1].span++;
+    }
+  }
+  return groups;
+}
+
 function BreakdownTable({
   firstColLabel,
   weeks,
-  monthGroups,
   rows,
   grandTotal,
   toDisplay,
@@ -161,7 +179,6 @@ function BreakdownTable({
 }: {
   firstColLabel: string;
   weeks: WeekInfo[];
-  monthGroups: MonthGroup[];
   rows: BreakdownRow[];
   grandTotal: number;
   toDisplay: (usd: number) => string;
@@ -173,39 +190,37 @@ function BreakdownTable({
   const [sortKey, setSortKey] = useState<"subtotal" | "total">("total");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
 
-  const isInRange = useCallback(
-    (weekStart: string) => {
-      if (!rangeFrom || !rangeTo) return false;
-      return weekStart >= rangeFrom && weekStart <= rangeTo;
-    },
-    [rangeFrom, rangeTo]
-  );
+  // Cuando hay un rango parcial, ocultamos las semanas fuera de rango por completo
+  // (en pantalla y en PDF). Así el reporte se enfoca solo en las semanas elegidas
+  // y la columna "Total" sigue mostrando el total anual como referencia.
+  const visibleWeeks = useMemo(() => {
+    if (!showSubtotal || !rangeFrom || !rangeTo) return weeks;
+    return weeks.filter((w) => w.start >= rangeFrom && w.start <= rangeTo);
+  }, [weeks, rangeFrom, rangeTo, showSubtotal]);
+
+  const monthGroups = useMemo(() => computeMonthGroups(visibleWeeks), [visibleWeeks]);
 
   const subtotalForRow = useCallback(
     (r: BreakdownRow): number => {
-      if (!rangeFrom || !rangeTo) return 0;
+      if (!showSubtotal) return 0;
       let sum = 0;
-      for (const w of weeks) {
-        if (isInRange(w.start)) sum += r.perWeek[w.start] || 0;
-      }
+      for (const w of visibleWeeks) sum += r.perWeek[w.start] || 0;
       return sum;
     },
-    [rangeFrom, rangeTo, weeks, isInRange]
+    [visibleWeeks, showSubtotal]
   );
 
   const subtotalCountsForRow = useCallback(
     (r: BreakdownRow): PieceCounts => {
-      if (!rangeFrom || !rangeTo) return EMPTY_COUNTS;
+      if (!showSubtotal) return EMPTY_COUNTS;
       let acc: PieceCounts = { ...EMPTY_COUNTS };
-      for (const w of weeks) {
-        if (isInRange(w.start)) {
-          const c = r.countsPerWeek[w.start];
-          if (c) acc = addCounts(acc, c);
-        }
+      for (const w of visibleWeeks) {
+        const c = r.countsPerWeek[w.start];
+        if (c) acc = addCounts(acc, c);
       }
       return acc;
     },
-    [rangeFrom, rangeTo, weeks, isInRange]
+    [visibleWeeks, showSubtotal]
   );
 
   const sortedRows = useMemo(() => {
@@ -300,24 +315,19 @@ function BreakdownTable({
             </th>
           </tr>
           <tr className="border-b">
-            {weeks.map((w) => {
-              const inRange = isInRange(w.start);
-              return (
-                <th
-                  key={w.start}
-                  className={`text-right font-medium px-2 py-2 whitespace-nowrap text-slate-900 dark:text-slate-100 ${
-                    inRange
-                      ? "bg-amber-200 dark:bg-amber-900 ring-1 ring-amber-400 dark:ring-amber-700"
-                      : w.index % 2 === 0
-                      ? "bg-slate-300 dark:bg-slate-700"
-                      : "bg-slate-200 dark:bg-slate-800"
-                  }`}
-                  title={`${w.start} → ${w.end}`}
-                >
-                  S{w.index}
-                </th>
-              );
-            })}
+            {visibleWeeks.map((w) => (
+              <th
+                key={w.start}
+                className={`text-right font-medium px-2 py-2 whitespace-nowrap text-slate-900 dark:text-slate-100 ${
+                  w.index % 2 === 0
+                    ? "bg-slate-300 dark:bg-slate-700"
+                    : "bg-slate-200 dark:bg-slate-800"
+                }`}
+                title={`${w.start} → ${w.end}`}
+              >
+                S{w.index}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -338,19 +348,14 @@ function BreakdownTable({
                   )}
                 </div>
               </td>
-              {weeks.map((w) => {
+              {visibleWeeks.map((w) => {
                 const val = r.perWeek[w.start] || 0;
                 const counts = r.countsPerWeek[w.start] || EMPTY_COUNTS;
-                const inRange = isInRange(w.start);
                 return (
                   <td
                     key={w.start}
                     className={`text-right px-2 py-2 whitespace-nowrap ${
-                      inRange
-                        ? "bg-amber-50 dark:bg-amber-950/40"
-                        : w.index % 2 === 0
-                        ? "bg-muted/20"
-                        : ""
+                      w.index % 2 === 0 ? "bg-muted/20" : ""
                     } ${val === 0 ? "text-muted-foreground/40" : ""}`}
                   >
                     <div className="flex flex-col items-end leading-tight">
@@ -386,22 +391,17 @@ function BreakdownTable({
           {/* Fila de totales por semana */}
           <tr className="border-t-2 font-semibold bg-muted/40">
             <td className="sticky left-0 bg-muted/40 px-3 py-2 z-10">TOTAL</td>
-            {weeks.map((w) => {
+            {visibleWeeks.map((w) => {
               const weekTotal = rows.reduce((s, r) => s + (r.perWeek[w.start] || 0), 0);
               const weekCounts = rows.reduce(
                 (s, r) => addCounts(s, r.countsPerWeek[w.start] || EMPTY_COUNTS),
                 EMPTY_COUNTS
               );
-              const inRange = isInRange(w.start);
               return (
                 <td
                   key={w.start}
                   className={`text-right px-2 py-2 whitespace-nowrap ${
-                    inRange
-                      ? "bg-amber-100 dark:bg-amber-900/60"
-                      : w.index % 2 === 0
-                      ? "bg-muted/60"
-                      : ""
+                    w.index % 2 === 0 ? "bg-muted/60" : ""
                   } ${weekTotal === 0 ? "text-muted-foreground/40" : ""}`}
                 >
                   <div className="flex flex-col items-end leading-tight">
@@ -580,26 +580,6 @@ export default function WeeklyReportPage() {
       grandTotal: u.grandTotal,
       countsTotal: u.countsTotal,
     }));
-  }, [report]);
-
-  // Agrupa semanas por mes (del lunes w.start) para encabezado de cortes mensuales
-  const monthGroups = useMemo(() => {
-    if (!report) return [];
-    const MONTHS_ES = [
-      "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-      "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
-    ];
-    const groups: { key: string; label: string; span: number }[] = [];
-    for (const w of report.weeks) {
-      const key = w.start.slice(0, 7); // YYYY-MM
-      const monthIdx = Number(w.start.slice(5, 7)) - 1;
-      if (groups.length === 0 || groups[groups.length - 1].key !== key) {
-        groups.push({ key, label: MONTHS_ES[monthIdx] ?? key, span: 1 });
-      } else {
-        groups[groups.length - 1].span++;
-      }
-    }
-    return groups;
   }, [report]);
 
   // Conversión según currency actual
@@ -899,7 +879,6 @@ export default function WeeklyReportPage() {
             <BreakdownTable
               firstColLabel="Cliente"
               weeks={report.weeks}
-              monthGroups={monthGroups}
               rows={clientRows}
               grandTotal={report.totals.grand}
               toDisplay={toDisplay}
@@ -953,7 +932,6 @@ export default function WeeklyReportPage() {
             <BreakdownTable
               firstColLabel="Usuario"
               weeks={report.weeks}
-              monthGroups={monthGroups}
               rows={userRows}
               grandTotal={report.totals.grand}
               toDisplay={toDisplay}
