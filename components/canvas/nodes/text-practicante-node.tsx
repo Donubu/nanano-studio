@@ -7,6 +7,7 @@ import { HANDLE_IDS, type TextPracticanteNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton } from "./node-status";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
+import { useUpstreamPromptLabel } from "../hooks/use-upstream-prompt-label";
 
 const statusColors: Record<string, string> = {
   idle: "border-border",
@@ -19,6 +20,7 @@ export const TextPracticanteNodeComponent = memo(function TextPracticanteNode({ 
   const nodeData = data as unknown as TextPracticanteNodeData;
   const status = nodeData.status || "idle";
   const { updateNodeData } = useNodeUpdate();
+  const upstreamLabel = useUpstreamPromptLabel();
 
   const history = nodeData.outputHistory || [];
   const totalOutputs = history.length;
@@ -106,8 +108,8 @@ export const TextPracticanteNodeComponent = memo(function TextPracticanteNode({ 
           )}
         </div>
 
-        <p className="text-xs text-muted-foreground line-clamp-2">
-          {nodeData.prompt || "Sin prompt configurado"}
+        <p className={`text-xs line-clamp-2 ${nodeData.prompt ? "text-muted-foreground" : upstreamLabel ? "text-violet-400/80 italic" : "text-muted-foreground"}`}>
+          {nodeData.prompt || upstreamLabel || "Sin prompt configurado"}
         </p>
 
         {displayText ? (

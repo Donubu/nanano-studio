@@ -5,6 +5,7 @@ import { createContext, useContext } from "react";
 import type { CanvasGenerationConfig } from "./canvas-workspace";
 interface CanvasContextValue {
   projectId: number;
+  conversationId: number;
   generationConfig: CanvasGenerationConfig[];
   openImagePicker: (onSelect: (imageUrl: string) => void, title?: string) => void;
   emitNodeData: (nodeId: string, updates: Record<string, unknown>) => void;
@@ -12,6 +13,7 @@ interface CanvasContextValue {
 
 const CanvasContext = createContext<CanvasContextValue>({
   projectId: 0,
+  conversationId: 0,
   generationConfig: [],
   openImagePicker: () => {},
   emitNodeData: () => {},

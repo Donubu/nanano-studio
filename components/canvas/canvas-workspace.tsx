@@ -31,16 +31,20 @@ import { StaticTextNodeComponent } from "./nodes/static-text-node";
 import { StaticImageNodeComponent } from "./nodes/static-image-node";
 import { StaticImageGroupNodeComponent } from "./nodes/static-image-group-node";
 import { ParamsNodeComponent } from "./nodes/params-node";
+import { ScriptNodeComponent } from "./nodes/script-node";
+import { SceneNodeComponent } from "./nodes/scene-node";
+import { ParamsSceneNodeComponent } from "./nodes/params-scene-node";
 import { CanvasToolbar } from "./canvas-toolbar";
 import { NodeConfigPanel } from "./panels/node-config-panel";
 import { PracticanteConfigPanel } from "./panels/practicante-config-panel";
+import { ScriptConfigPanel } from "./panels/script-config-panel";
 import { DryRunPanel } from "./panels/dryrun-panel";
 import { useAutoSave } from "./hooks/use-auto-save";
 import { useCanvasExecution } from "./hooks/use-canvas-execution";
 import { useUndoRedo } from "./hooks/use-undo-redo";
 import { isValidConnection, wouldCreateCycle, getCompatibleTargetTypes, getCompatibleSourceTypes } from "./lib/connection-rules";
 import { getDefaultNodeData, type CanvasNodeType, type CanvasNodeData, HANDLE_IDS } from "./lib/canvas-types";
-import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Type, Settings, Bot } from "lucide-react";
+import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Type, Settings, Bot, Sparkles, Film } from "lucide-react";
 import { CanvasProvider } from "./canvas-context";
 import { LabeledEdge } from "./edges/labeled-edge";
 import { ImagePickerModal } from "@/components/chat/image-picker-modal";
@@ -70,6 +74,9 @@ const nodeTypes: NodeTypes = {
   "params-text": ParamsNodeComponent,
   "params-image": ParamsNodeComponent,
   "params-video": ParamsNodeComponent,
+  "params-scene": ParamsSceneNodeComponent,
+  "script": ScriptNodeComponent,
+  "scene": SceneNodeComponent,
 };
 
 export interface CanvasModel {
@@ -92,9 +99,10 @@ interface CanvasWorkspaceProps {
   generationConfig?: CanvasGenerationConfig[];
   onConversationCreated?: (newId: number) => void;
   emitNodeDataRef?: React.MutableRefObject<(nodeId: string, updates: Record<string, unknown>) => void>;
+  openImagePicker?: (onSelect: (url: string) => void, title?: string) => void;
 }
 
-function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = [], onConversationCreated, emitNodeDataRef }: CanvasWorkspaceProps) {
+function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = [], onConversationCreated, emitNodeDataRef, openImagePicker }: CanvasWorkspaceProps) {
   const [nodes, setNodes, onNodesChangeBase] = useNodesState<Node>([] as Node[]);
   const [edges, setEdges, onEdgesChangeBase] = useEdgesState<Edge>([] as Edge[]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -112,12 +120,57 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
 
   // Wrap onNodesChange/onEdgesChange to take snapshots
   const onNodesChange = useCallback((changes: Parameters<typeof onNodesChangeBase>[0]) => {
-    const hasMeaningful = changes.some((c) => c.type === "remove" || c.type === "add");
+    // Cascade-remove: when a script or scene is deleted, also remove all its
+    // downstream descendants (chained scenes, generated targets, etc.).
+    // Scenes can't live without their script.
+    const additionalRemoves = new Set<string>();
+    for (const change of changes) {
+      if (change.type !== "remove") continue;
+      const node = nodes.find((n) => n.id === change.id);
+      if (!node) continue;
+      if (node.type !== "script" && node.type !== "scene") continue;
+
+      const queue: string[] = [change.id];
+      const visited = new Set<string>([change.id]);
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        for (const e of edges) {
+          if (e.source === current && !visited.has(e.target)) {
+            visited.add(e.target);
+            additionalRemoves.add(e.target);
+            queue.push(e.target);
+          }
+        }
+      }
+    }
+
+    const expandedChanges: Parameters<typeof onNodesChangeBase>[0] = [...changes];
+    for (const id of additionalRemoves) {
+      if (!changes.some((c) => c.type === "remove" && c.id === id)) {
+        expandedChanges.push({ type: "remove", id });
+      }
+    }
+
+    const hasMeaningful = expandedChanges.some((c) => c.type === "remove" || c.type === "add");
     if (hasMeaningful) takeSnapshot();
-    onNodesChangeBase(changes);
+    onNodesChangeBase(expandedChanges);
+
+    // Build set of all node IDs being removed and clean orphan edges that
+    // touch any of them. Without this, edges remain in state pointing to
+    // non-existent nodes, get persisted by autosave, and break re-materialize
+    // with duplicate-ID errors.
+    const allRemovedIds = new Set<string>();
+    for (const change of expandedChanges) {
+      if (change.type === "remove") allRemovedIds.add(change.id);
+    }
+    if (allRemovedIds.size > 0) {
+      setEdges((eds) =>
+        eds.filter((e) => !allRemovedIds.has(e.source) && !allRemovedIds.has(e.target))
+      );
+    }
 
     // Broadcast changes to other users
-    for (const change of changes) {
+    for (const change of expandedChanges) {
       if (change.type === "position" && change.position && !change.dragging) {
         collabRef.current.emitNodeMove(change.id, change.position.x, change.position.y);
       }
@@ -125,7 +178,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
         collabRef.current.emitNodeRemove(change.id);
       }
     }
-  }, [onNodesChangeBase, takeSnapshot]);
+  }, [onNodesChangeBase, takeSnapshot, nodes, edges, setEdges]);
 
   const onEdgesChange = useCallback((changes: Parameters<typeof onEdgesChangeBase>[0]) => {
     const hasMeaningful = changes.some((c) => c.type === "remove" || c.type === "add");
@@ -578,36 +631,66 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   useEffect(() => {
     const el = canvasContainerRef.current;
     if (!el) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        e.preventDefault();
-        if (dropMenu) {
-          closeDropMenu();
-        } else if (selectedNodeId) {
-          setSelectedNodeId(null);
-        }
+
+    // Escape stays in CAPTURE so it pre-empts the conversation modal close.
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      e.preventDefault();
+      if (dropMenu) {
+        closeDropMenu();
+      } else if (selectedNodeId) {
+        setSelectedNodeId(null);
       }
-      // Undo: Ctrl+Z / Cmd+Z
-      if (e.key === "z" && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+    };
+
+    // Undo/Redo runs in BUBBLE so inner nodes (e.g. script-node with local
+    // history) can intercept first via stopPropagation. Native browser undo
+    // inside form fields is preserved by skipping editable targets here.
+    const handleUndoRedo = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest("input, textarea, select, [contenteditable='true']")) {
+        return; // let the browser handle native undo within inputs
+      }
+
+      if (e.key === "z" && !e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
         undo();
-      }
-      // Redo: Ctrl+Y / Cmd+Y or Ctrl+Shift+Z / Cmd+Shift+Z
-      if ((e.key === "y" && (e.ctrlKey || e.metaKey)) || (e.key === "z" && (e.ctrlKey || e.metaKey) && e.shiftKey)) {
+      } else if (e.key === "y" || (e.key === "z" && e.shiftKey)) {
         e.preventDefault();
         e.stopPropagation();
         redo();
       }
     };
-    el.addEventListener("keydown", handleKeyDown, true);
-    return () => el.removeEventListener("keydown", handleKeyDown, true);
+
+    el.addEventListener("keydown", handleEscape, true);
+    el.addEventListener("keydown", handleUndoRedo, false);
+    return () => {
+      el.removeEventListener("keydown", handleEscape, true);
+      el.removeEventListener("keydown", handleUndoRedo, false);
+    };
   }, [dropMenu, selectedNodeId, closeDropMenu, undo, redo]);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
+  // Stable emit fn for context (always points to current collab impl)
+  const emitNodeDataStable = useCallback((nodeId: string, updates: Record<string, unknown>) => {
+    collab.emitNodeData(nodeId, updates);
+  }, [collab.emitNodeData]);
+
   return (
+    <CanvasProvider
+      value={{
+        projectId,
+        conversationId: realConversationId,
+        generationConfig,
+        openImagePicker: openImagePicker || (() => {}),
+        emitNodeData: emitNodeDataStable,
+      }}
+    >
     <div ref={canvasContainerRef} className="flex h-full w-full relative" tabIndex={-1}>
       <div className="flex-1 h-full">
         <ReactFlow
@@ -674,9 +757,9 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
               Crear nodo
             </div>
             {pendingDropRef.current.options.map(({ type, label, handle }) => {
-              const iconMap: Record<string, typeof MessageSquare> = { text: MessageSquare, "text-practicante": Bot, image: ImageIcon, video: Video, note: StickyNote, "static-text": Type, "static-image": ImagePlus, "static-image-group": Images, "params-text": Settings, "params-image": Settings, "params-video": Settings };
-              const colorMap: Record<string, string> = { text: "text-blue-400", "text-practicante": "text-amber-400", image: "text-purple-400", video: "text-amber-400", note: "text-amber-500", "static-text": "text-blue-400", "static-image": "text-emerald-400", "static-image-group": "text-teal-400", "params-text": "text-yellow-400", "params-image": "text-yellow-400", "params-video": "text-yellow-400" };
-              const isAI = !type.startsWith("static-");
+              const iconMap: Record<string, typeof MessageSquare> = { text: MessageSquare, "text-practicante": Bot, image: ImageIcon, video: Video, note: StickyNote, "static-text": Type, "static-image": ImagePlus, "static-image-group": Images, "params-text": Settings, "params-image": Settings, "params-video": Settings, "params-scene": Settings, script: Sparkles, scene: Film };
+              const colorMap: Record<string, string> = { text: "text-blue-400", "text-practicante": "text-amber-400", image: "text-purple-400", video: "text-amber-400", note: "text-amber-500", "static-text": "text-blue-400", "static-image": "text-emerald-400", "static-image-group": "text-teal-400", "params-text": "text-yellow-400", "params-image": "text-yellow-400", "params-video": "text-yellow-400", "params-scene": "text-yellow-400", script: "text-fuchsia-400", scene: "text-violet-400" };
+              const isAI = !type.startsWith("static-") && type !== "scene" && type !== "note";
               const Icon = iconMap[type] || MessageSquare;
               const color = colorMap[type] || "text-muted-foreground";
               return (
@@ -723,6 +806,18 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
         />
       )}
 
+      {/* Script config panel */}
+      {selectedNode && selectedNode.type === "script" && (
+        <ScriptConfigPanel
+          node={selectedNode}
+          generationConfig={generationConfig}
+          edges={edges}
+          onUpdateData={updateNodeData}
+          onDelete={deleteNode}
+          onClose={() => setSelectedNodeId(null)}
+        />
+      )}
+
       {/* Dry-run analysis panel (third column) */}
       {selectedNode &&
         selectedNode.type === "text-practicante" &&
@@ -732,6 +827,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
           }} />
         )}
     </div>
+    </CanvasProvider>
   );
 }
 
@@ -752,14 +848,11 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps) {
 
   // Ref for collab emitNodeData - populated by CanvasWorkspaceInner
   const emitNodeDataRef = useRef<(nodeId: string, updates: Record<string, unknown>) => void>(() => {});
-  const emitNodeDataStable = useCallback((nodeId: string, updates: Record<string, unknown>) => {
-    emitNodeDataRef.current(nodeId, updates);
-  }, []);
 
   return (
-    <CanvasProvider value={{ projectId: props.projectId, generationConfig: props.generationConfig || [], openImagePicker, emitNodeData: emitNodeDataStable }}>
+    <>
       <ReactFlowProvider>
-        <CanvasWorkspaceInner {...props} emitNodeDataRef={emitNodeDataRef} />
+        <CanvasWorkspaceInner {...props} emitNodeDataRef={emitNodeDataRef} openImagePicker={openImagePicker} />
       </ReactFlowProvider>
 
       {/* Image picker modal - rendered outside ReactFlow to avoid transform issues */}
@@ -773,6 +866,6 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps) {
         title={pickerState.title}
         multiSelect
       />
-    </CanvasProvider>
+    </>
   );
 }

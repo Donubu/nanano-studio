@@ -7,6 +7,7 @@ import { HANDLE_IDS, type TextNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
+import { useUpstreamPromptLabel } from "../hooks/use-upstream-prompt-label";
 
 const statusColors: Record<string, string> = {
   idle: "border-border",
@@ -19,6 +20,7 @@ export const TextNodeComponent = memo(function TextNode({ id, data, selected }: 
   const nodeData = data as unknown as TextNodeData;
   const status = nodeData.status || "idle";
   const { updateNodeData } = useNodeUpdate();
+  const upstreamLabel = useUpstreamPromptLabel();
 
   const history = nodeData.outputHistory || [];
   const totalOutputs = history.length;
@@ -99,8 +101,8 @@ export const TextNodeComponent = memo(function TextNode({ id, data, selected }: 
 
       {/* Body */}
       <div className="px-3 py-2 space-y-1.5">
-        <p className="text-xs text-muted-foreground line-clamp-2">
-          {nodeData.prompt || "Sin prompt configurado"}
+        <p className={`text-xs line-clamp-2 ${nodeData.prompt ? "text-muted-foreground" : upstreamLabel ? "text-violet-400/80 italic" : "text-muted-foreground"}`}>
+          {nodeData.prompt || upstreamLabel || "Sin prompt configurado"}
         </p>
 
         {displayText ? (

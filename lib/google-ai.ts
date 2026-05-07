@@ -202,6 +202,9 @@ export interface GenerationSettings {
   googleImageSearchEnabled?: boolean;
   thinkingLevel?: ThinkingLevelSetting;
   includeThoughts?: boolean;
+  // Structured output (JSON mode)
+  responseMimeType?: string;
+  responseSchema?: object;
 }
 
 export interface Labels {
@@ -406,6 +409,9 @@ export async function sendMessage(
         thinkingBudget: settings.thinkingLevel === "low" ? 1024 : settings.thinkingLevel === "medium" ? 8192 : 24576,
       },
     }),
+    // Structured JSON output
+    ...(settings.responseMimeType && { responseMimeType: settings.responseMimeType }),
+    ...(settings.responseSchema && { responseSchema: settings.responseSchema as never }),
     // Note: thinkingBudget: 0 is not sent because some models (gemini-3.1-pro)
     // require thinking mode and reject budget 0. Omitting thinkingConfig lets
     // the model use its default behavior.

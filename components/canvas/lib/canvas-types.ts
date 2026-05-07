@@ -147,9 +147,80 @@ export interface ParamsVideoNodeData extends BaseNodeData {
   negativePrompt?: string;
 }
 
+// Params Escena: definición de estilo, técnica, visual; se conecta sólo a Escenas.
+// Su content se concatena al prompt del nodo destino (image/video/practicante)
+// que está aguas abajo de la Escena.
+export interface ParamsSceneNodeData extends BaseNodeData {
+  type: "params-scene";
+  content: string;
+}
+
+// --- Script & Scene Nodes ---
+
+export type SceneTargetNodeType = "image" | "video" | "text-practicante" | "none";
+
+export interface ScriptCharacter {
+  name: string;
+  description: string;
+}
+
+export interface ScriptSetting {
+  name: string;
+  description: string;
+}
+
+export interface ScriptGeneralInfo {
+  synopsis: string;
+  tone: string;
+  genre: string;
+  visualStyle: string;
+  characters: ScriptCharacter[];
+  settings: ScriptSetting[];
+}
+
+export interface ScriptSceneAnalysis {
+  index: number;            // 1-based
+  text: string;             // literal del guion, sin modificar
+  targetNodeType: SceneTargetNodeType;
+}
+
+export interface ScriptAnalysis {
+  generalInfo: ScriptGeneralInfo;
+  scenes: ScriptSceneAnalysis[];
+  analyzedAt: string;       // ISO timestamp
+  modelUsed: string;
+}
+
+export interface ScriptNodeData extends BaseNodeData {
+  type: "script";
+  prompt: string;           // el guion completo, ingresado por el usuario
+  modelId?: number;
+  temperature?: number;
+  maxOutputTokens?: number;
+  systemInstruction?: string;
+  thinkingLevel?: string;
+  scriptAnalysis?: ScriptAnalysis;
+  // Si true, al materializar se conecta el output de cada nodo destino con el
+  // del siguiente para mantener continuidad visual (image→image como REFERENCE,
+  // image→video como FIRST_FRAME, etc.).
+  linkPreviousOutput?: boolean;
+}
+
+export interface SceneNodeData extends BaseNodeData {
+  type: "scene";
+  sceneIndex: number;       // 1-based
+  totalScenes: number;
+  text: string;             // texto íntegro de la escena, no editable
+  scriptNodeId: string;     // referencia al nodo Guión origen
+  generalInfo?: ScriptGeneralInfo; // copia self-contained para inyección de contexto
+  targetNodeType?: SceneTargetNodeType;
+}
+
+export const MAX_SCENES_PER_SCRIPT = 30;
+
 // --- Union Types ---
-export type CanvasNodeData = TextNodeData | TextPracticanteNodeData | ImageNodeData | VideoNodeData | NoteNodeData | StaticTextNodeData | StaticImageNodeData | StaticImageGroupNodeData | ParamsTextNodeData | ParamsImageNodeData | ParamsVideoNodeData;
-export type CanvasNodeType = "text" | "text-practicante" | "image" | "video" | "note" | "static-text" | "static-image" | "static-image-group" | "params-text" | "params-image" | "params-video";
+export type CanvasNodeData = TextNodeData | TextPracticanteNodeData | ImageNodeData | VideoNodeData | NoteNodeData | StaticTextNodeData | StaticImageNodeData | StaticImageGroupNodeData | ParamsTextNodeData | ParamsImageNodeData | ParamsVideoNodeData | ParamsSceneNodeData | ScriptNodeData | SceneNodeData;
+export type CanvasNodeType = "text" | "text-practicante" | "image" | "video" | "note" | "static-text" | "static-image" | "static-image-group" | "params-text" | "params-image" | "params-video" | "params-scene" | "script" | "scene";
 
 export type TextNode = Node<TextNodeData, "text">;
 export type TextPracticanteNode = Node<TextPracticanteNodeData, "text-practicante">;
@@ -162,7 +233,10 @@ export type StaticImageGroupNode = Node<StaticImageGroupNodeData, "static-image-
 export type ParamsTextNode = Node<ParamsTextNodeData, "params-text">;
 export type ParamsImageNode = Node<ParamsImageNodeData, "params-image">;
 export type ParamsVideoNode = Node<ParamsVideoNodeData, "params-video">;
-export type CanvasNode = TextNode | TextPracticanteNode | ImageNode | VideoNode | NoteNode | StaticTextNode | StaticImageNode | StaticImageGroupNode | ParamsTextNode | ParamsImageNode | ParamsVideoNode;
+export type ParamsSceneNode = Node<ParamsSceneNodeData, "params-scene">;
+export type ScriptNode = Node<ScriptNodeData, "script">;
+export type SceneNode = Node<SceneNodeData, "scene">;
+export type CanvasNode = TextNode | TextPracticanteNode | ImageNode | VideoNode | NoteNode | StaticTextNode | StaticImageNode | StaticImageGroupNode | ParamsTextNode | ParamsImageNode | ParamsVideoNode | ParamsSceneNode | ScriptNode | SceneNode;
 
 export type CanvasEdge = Edge;
 
@@ -178,6 +252,9 @@ export const HANDLE_IDS = {
   INPUT_MEDIA: "input-media",
   INPUT_PARAMS: "input-params",
   OUTPUT_PARAMS: "output-params",
+  INPUT_SCRIPT_CHAIN: "input-script-chain",
+  OUTPUT_SCRIPT_CHAIN: "output-script-chain",
+  INPUT_SCENE_PARAMS: "input-scene-params",
 } as const;
 
 // --- Default configs for new nodes ---
@@ -289,6 +366,35 @@ export function getDefaultNodeData(type: CanvasNodeType): CanvasNodeData {
         aspectRatio: "16:9",
         resolution: "720p",
         audioEnabled: true,
+      };
+    case "script":
+      return {
+        ...base,
+        type: "script",
+        label: "Guión",
+        prompt: "",
+        temperature: 0.4,
+        maxOutputTokens: 16384,
+      };
+    case "scene":
+      return {
+        ...base,
+        type: "scene",
+        label: "Escena",
+        status: "completed",
+        sceneIndex: 1,
+        totalScenes: 1,
+        text: "",
+        scriptNodeId: "",
+        targetNodeType: "image",
+      };
+    case "params-scene":
+      return {
+        ...base,
+        type: "params-scene",
+        label: "Params Escena",
+        status: "completed",
+        content: "",
       };
   }
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { Node } from "@xyflow/react";
-import type { CanvasNodeData, CanvasNodeStatus, ExecutionProgress, ImageNodeData, TextNodeData, TextPracticanteNodeData, VideoNodeData, StaticTextNodeData, StaticImageNodeData, StaticImageGroupNodeData, OutputHistoryEntry, PracticanteFile } from "../lib/canvas-types";
+import type { CanvasNodeData, CanvasNodeStatus, ExecutionProgress, ImageNodeData, TextNodeData, TextPracticanteNodeData, VideoNodeData, StaticTextNodeData, StaticImageNodeData, StaticImageGroupNodeData, OutputHistoryEntry, PracticanteFile, SceneNodeData, ParamsSceneNodeData } from "../lib/canvas-types";
 import { HANDLE_IDS } from "../lib/canvas-types";
 import { topologicalSort, getDirectInputs } from "../lib/topological-sort";
 import type { CanvasEdge } from "../lib/canvas-types";
@@ -116,6 +116,7 @@ function resolveNodeInputs(
       if (sourceNode.type === "static-text") return (sourceData as StaticTextNodeData).content || null;
       if (sourceNode.type === "text") return (sourceData as TextNodeData).outputText || null;
       if (sourceNode.type === "text-practicante") return (sourceData as TextPracticanteNodeData).outputText || null;
+      if (sourceNode.type === "scene") return (sourceData as SceneNodeData).text || null;
       return null;
     };
 
@@ -189,6 +190,102 @@ function resolveNodeInputs(
 }
 
 /**
+ * If the node receives input from a Scene on INPUT_PROMPT, build the full
+ * script context (sent as systemInstruction to the destination model):
+ *   - generalInfo of the script
+ *   - literal text of all upstream scenes (chained via INPUT_SCRIPT_CHAIN)
+ *   - Params Escena content (style/visual/technique) connected to the current Scene
+ *   - the task instruction
+ * The Scene's own text and the destination node's prompt remain in the
+ * primary prompt — only narrative/style context lives here.
+ * Returns null when there's no scene in the prompt path.
+ */
+function resolveScriptContext(
+  nodeId: string,
+  nodes: Node[],
+  edges: CanvasEdge[]
+): string | null {
+  const inputs = getDirectInputs(nodeId, edges);
+  const promptInput = inputs.find((i) => i.targetHandle === HANDLE_IDS.INPUT_PROMPT);
+  if (!promptInput) return null;
+  const sceneNode = nodes.find((n) => n.id === promptInput.sourceNodeId);
+  if (!sceneNode || sceneNode.type !== "scene") return null;
+  const sceneData = sceneNode.data as SceneNodeData;
+
+  // Walk upstream through the chain to collect previous scenes (oldest first)
+  const previousScenes: SceneNodeData[] = [];
+  let cursor = sceneNode.id;
+  const visited = new Set<string>([cursor]);
+  while (true) {
+    const upChain = edges.find(
+      (e) => e.target === cursor && e.targetHandle === HANDLE_IDS.INPUT_SCRIPT_CHAIN
+    );
+    if (!upChain) break;
+    if (visited.has(upChain.source)) break;
+    visited.add(upChain.source);
+    const prev = nodes.find((n) => n.id === upChain.source);
+    if (!prev) break;
+    if (prev.type !== "scene") break;
+    previousScenes.unshift(prev.data as SceneNodeData);
+    cursor = prev.id;
+  }
+
+  // Look up Params Escena connected to the current Scene
+  let sceneParamsContent: string | null = null;
+  const paramsEdge = edges.find(
+    (e) => e.target === sceneNode.id && e.targetHandle === HANDLE_IDS.INPUT_SCENE_PARAMS
+  );
+  if (paramsEdge) {
+    const paramsNode = nodes.find((n) => n.id === paramsEdge.source);
+    if (paramsNode && paramsNode.type === "params-scene") {
+      const c = (paramsNode.data as ParamsSceneNodeData).content?.trim();
+      if (c && c.length > 0) sceneParamsContent = c;
+    }
+  }
+
+  const parts: string[] = [];
+  const generalInfo = sceneData.generalInfo;
+  if (generalInfo) {
+    const lines: string[] = ["[Información general del guion]"];
+    if (generalInfo.synopsis) lines.push(`Sinopsis: ${generalInfo.synopsis}`);
+    if (generalInfo.tone) lines.push(`Tono: ${generalInfo.tone}`);
+    if (generalInfo.genre) lines.push(`Género: ${generalInfo.genre}`);
+    if (generalInfo.visualStyle) lines.push(`Estilo visual: ${generalInfo.visualStyle}`);
+    if (generalInfo.characters?.length) {
+      lines.push("Personajes:");
+      for (const c of generalInfo.characters) lines.push(`- ${c.name}: ${c.description}`);
+    }
+    if (generalInfo.settings?.length) {
+      lines.push("Locaciones:");
+      for (const s of generalInfo.settings) lines.push(`- ${s.name}: ${s.description}`);
+    }
+    parts.push(lines.join("\n"));
+  }
+
+  if (previousScenes.length > 0) {
+    const lines: string[] = ["[Escenas anteriores (texto íntegro)]"];
+    for (const s of previousScenes) {
+      lines.push(`--- Escena ${s.sceneIndex} ---`);
+      lines.push(s.text);
+    }
+    parts.push(lines.join("\n"));
+  }
+
+  if (sceneParamsContent) {
+    parts.push(`[Estilo / Visual / Técnica]\n${sceneParamsContent}`);
+  }
+
+  // If we got nothing useful, don't inject empty context.
+  if (parts.length === 0) return null;
+
+  parts.push(
+    `[Tu tarea]\nVas a generar contenido para la Escena ${sceneData.sceneIndex} de ${sceneData.totalScenes}. El prompt que recibes es el texto literal de esa escena (más el prompt local del nodo si lo hay). Aplica la información general, las escenas anteriores y las directrices de estilo como contexto — no las repitas en la salida.`
+  );
+
+  return parts.join("\n\n");
+}
+
+/**
  * Check if all upstream dependencies are completed.
  */
 function areUpstreamReady(
@@ -241,6 +338,7 @@ export function useCanvasExecution({
 
       // Resolve inputs from the live snapshot
       const { promptContext, referenceImageUrl, firstFrameUrl, lastFrameUrl, referenceImageUrls, mediaUrls, paramsOverride } = resolveNodeInputs(nodeId, liveNodes, edges);
+      const scriptContext = resolveScriptContext(nodeId, liveNodes, edges);
 
       // Set generating
       updateNodeStatus(setNodes, nodeId, { status: "generating", errorMessage: undefined } as Partial<CanvasNodeData>);
@@ -268,7 +366,15 @@ export function useCanvasExecution({
           // Skipped in dry-run because there the user wants the full analysis text.
           const wantsCleanPrompt = practicanteData.outputAsPrompt && !practicanteData.dryRun;
           const downstream = wantsCleanPrompt ? getDownstreamContext(nodeId, liveNodes, edges) : null;
-          const promptSuffix = wantsCleanPrompt && downstream ? buildPracticantePromptSuffix(downstream) : undefined;
+          let promptSuffix = wantsCleanPrompt && downstream ? buildPracticantePromptSuffix(downstream) : undefined;
+          if (scriptContext) {
+            // Prepend script context as additional context for the agent. Place it before
+            // any output contract so the agent reads narrative context first, then the
+            // formatting restrictions (when present).
+            promptSuffix = promptSuffix
+              ? `${scriptContext}\n\n${promptSuffix}`
+              : scriptContext;
+          }
           // End-of-message restriction: most reliable way to get an agent with its own
           // strong system prompt to actually respect the format rules.
           const messageWithRestriction = wantsCleanPrompt && downstream
@@ -371,7 +477,7 @@ export function useCanvasExecution({
               ? `${promptContext}\n\n${textData.prompt}`
               : textData.prompt;
 
-            result = await executeTextNode(conversationId, fullPrompt, textData, nodeId, liveNodes, edges, mediaUrls);
+            result = await executeTextNode(conversationId, fullPrompt, textData, nodeId, liveNodes, edges, mediaUrls, scriptContext);
             break;
           }
           case "image": {
@@ -381,9 +487,11 @@ export function useCanvasExecution({
               : imgData.prompt;
 
             if (isNanoBananaModel(imgData.modelId, generationConfig)) {
-              result = await executeNanoBananaNode(conversationId, fullPrompt, imgData, referenceImageUrls);
+              result = await executeNanoBananaNode(conversationId, fullPrompt, imgData, referenceImageUrls, scriptContext);
             } else {
-              result = await executeImageNode(conversationId, fullPrompt, imgData, referenceImageUrls);
+              // Imagen endpoint doesn't accept systemInstruction → prepend context to prompt
+              const promptWithContext = scriptContext ? `${scriptContext}\n\n${fullPrompt}` : fullPrompt;
+              result = await executeImageNode(conversationId, promptWithContext, imgData, referenceImageUrls);
             }
             break;
           }
@@ -392,8 +500,10 @@ export function useCanvasExecution({
             const fullPrompt = promptContext
               ? `${promptContext}\n\n${vidData.prompt}`
               : vidData.prompt;
+            // Video endpoint doesn't accept systemInstruction → prepend context to prompt
+            const promptWithContext = scriptContext ? `${scriptContext}\n\n${fullPrompt}` : fullPrompt;
 
-            result = await executeVideoNode(conversationId, fullPrompt, vidData, { firstFrameUrl, lastFrameUrl, referenceImageUrls });
+            result = await executeVideoNode(conversationId, promptWithContext, vidData, { firstFrameUrl, lastFrameUrl, referenceImageUrls });
             break;
           }
         }
@@ -819,10 +929,14 @@ async function executeTextNode(
   nodeId: string,
   allNodes: Node[],
   allEdges: CanvasEdge[],
-  mediaUrls: { url: string; type: "image" | "video" }[] = []
+  mediaUrls: { url: string; type: "image" | "video" }[] = [],
+  scriptContext: string | null = null
 ): Promise<{ outputText?: string; messageId?: number }> {
   // Build system instruction override
   const systemParts: string[] = [];
+  if (scriptContext) {
+    systemParts.push(scriptContext);
+  }
   if (config.outputAsPrompt) {
     const downstream = getDownstreamContext(nodeId, allNodes, allEdges);
     systemParts.push(buildPromptModeInstruction(downstream));
@@ -915,7 +1029,8 @@ async function executeNanoBananaNode(
   conversationId: number,
   prompt: string,
   config: ImageNodeData,
-  referenceImageUrls: string[]
+  referenceImageUrls: string[],
+  scriptContext: string | null = null
 ): Promise<{ outputUrl?: string; messageId?: number }> {
   const body: Record<string, unknown> = {
     content: prompt,
@@ -928,6 +1043,9 @@ async function executeNanoBananaNode(
       numberOfImages: 1,
     },
   };
+  if (scriptContext) {
+    body.system_instruction_override = scriptContext;
+  }
 
   // Pass all reference images as file attachments — convert URLs to base64
   if (referenceImageUrls.length > 0) {

@@ -60,6 +60,19 @@ const VALID_CONNECTIONS: ConnectionRule[] = [
   { sourceType: "params-text", sourceHandle: HANDLE_IDS.OUTPUT_PARAMS, targetType: "text", targetHandle: HANDLE_IDS.INPUT_PARAMS },
   { sourceType: "params-image", sourceHandle: HANDLE_IDS.OUTPUT_PARAMS, targetType: "image", targetHandle: HANDLE_IDS.INPUT_PARAMS },
   { sourceType: "params-video", sourceHandle: HANDLE_IDS.OUTPUT_PARAMS, targetType: "video", targetHandle: HANDLE_IDS.INPUT_PARAMS },
+
+  // === Script → Scene chain ===
+  { sourceType: "script", sourceHandle: HANDLE_IDS.OUTPUT_SCRIPT_CHAIN, targetType: "scene", targetHandle: HANDLE_IDS.INPUT_SCRIPT_CHAIN },
+  { sourceType: "scene", sourceHandle: HANDLE_IDS.OUTPUT_SCRIPT_CHAIN, targetType: "scene", targetHandle: HANDLE_IDS.INPUT_SCRIPT_CHAIN },
+
+  // === Scene → AI generation (as prompt) ===
+  { sourceType: "scene", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "image", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+  { sourceType: "scene", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "video", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+  { sourceType: "scene", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "text", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+  { sourceType: "scene", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "text-practicante", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+
+  // === Params Escena → Scene (estilo/visual/técnica) ===
+  { sourceType: "params-scene", sourceHandle: HANDLE_IDS.OUTPUT_PARAMS, targetType: "scene", targetHandle: HANDLE_IDS.INPUT_SCENE_PARAMS },
 ];
 
 /**
@@ -96,6 +109,14 @@ export function isValidConnection(
     if (alreadyHasParams) return false;
   }
 
+  // Enforce: only 1 params-scene per Scene
+  if (connection.targetHandle === HANDLE_IDS.INPUT_SCENE_PARAMS && edges) {
+    const alreadyHasSceneParams = edges.some(
+      (e) => e.target === connection.target && e.targetHandle === HANDLE_IDS.INPUT_SCENE_PARAMS
+    );
+    if (alreadyHasSceneParams) return false;
+  }
+
   return true;
 }
 
@@ -109,7 +130,7 @@ export function getCompatibleTargetTypes(
 ): { type: string; label: string; targetHandle: string }[] {
   const seen = new Set<string>();
   const results: { type: string; label: string; targetHandle: string }[] = [];
-  const labels: Record<string, string> = { text: "Texto", "text-practicante": "Practicante", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video" };
+  const labels: Record<string, string> = { text: "Texto", "text-practicante": "Practicante", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video", "params-scene": "Params Escena", script: "Guión", scene: "Escena" };
 
   for (const rule of VALID_CONNECTIONS) {
     if (rule.sourceType === sourceType && rule.sourceHandle === sourceHandle) {
@@ -136,7 +157,7 @@ export function getCompatibleSourceTypes(
 ): { type: string; label: string; sourceHandle: string }[] {
   const seen = new Set<string>();
   const results: { type: string; label: string; sourceHandle: string }[] = [];
-  const labels: Record<string, string> = { text: "Texto", "text-practicante": "Practicante", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video" };
+  const labels: Record<string, string> = { text: "Texto", "text-practicante": "Practicante", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video", "params-scene": "Params Escena", script: "Guión", scene: "Escena" };
 
   for (const rule of VALID_CONNECTIONS) {
     if (rule.targetType === targetType && rule.targetHandle === targetHandle) {
