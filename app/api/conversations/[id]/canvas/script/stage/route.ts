@@ -4,6 +4,9 @@ import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { stageScript } from "@/lib/script-stager";
 
+// Generous timeout — staging can take ~30-60s with thinking-enabled models.
+export const maxDuration = 300;
+
 interface ConversationRow extends RowDataPacket {
   id: number;
   user_id: number;

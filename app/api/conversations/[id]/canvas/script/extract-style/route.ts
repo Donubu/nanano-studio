@@ -4,6 +4,9 @@ import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { extractStyleFromImages } from "@/lib/style-extractor";
 
+// Generous timeout — multimodal vision call with up to 10 images.
+export const maxDuration = 300;
+
 interface ConversationRow extends RowDataPacket {
   id: number;
   user_id: number;

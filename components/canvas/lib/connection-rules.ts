@@ -87,6 +87,13 @@ const VALID_CONNECTIONS: ConnectionRule[] = [
   // to the Script. When present, materialize wires that node to all scenes
   // instead of creating a fresh determinístic params-scene.
   { sourceType: "params-scene", sourceHandle: HANDLE_IDS.OUTPUT_PARAMS, targetType: "script", targetHandle: HANDLE_IDS.INPUT_PARAMS_SCENE_REF },
+
+  // === Texto → Script (reglas adicionales para todas las escenas) ===
+  // Static text, AI text, or practicante can feed extra rules / golden rules
+  // / things to keep/ignore that apply to every scene downstream.
+  { sourceType: "static-text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "script", targetHandle: HANDLE_IDS.INPUT_RULES },
+  { sourceType: "text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "script", targetHandle: HANDLE_IDS.INPUT_RULES },
+  { sourceType: "text-practicante", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "script", targetHandle: HANDLE_IDS.INPUT_RULES },
 ];
 
 /**
@@ -145,6 +152,14 @@ export function isValidConnection(
       (e) => e.target === connection.target && e.targetHandle === HANDLE_IDS.INPUT_PARAMS_SCENE_REF
     );
     if (alreadyHasParamsSceneRef) return false;
+  }
+
+  // Enforce: only 1 rules input per Script
+  if (connection.targetHandle === HANDLE_IDS.INPUT_RULES && edges) {
+    const alreadyHasRules = edges.some(
+      (e) => e.target === connection.target && e.targetHandle === HANDLE_IDS.INPUT_RULES
+    );
+    if (alreadyHasRules) return false;
   }
 
   return true;

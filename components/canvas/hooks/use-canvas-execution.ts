@@ -190,6 +190,76 @@ function resolveNodeInputs(
 }
 
 /**
+ * Strip non-visual lines from a staged scene text before sending it to an
+ * image/video model. The staged format includes:
+ *   ESCENA N - INT./EXT. ... — header (location context, not to render)
+ *   ACCIÓN: ...               — the visual description (KEEP)
+ *   VO: ...                   — narration (DO NOT render as text on image)
+ *   DIÁLOGO X: ...            — character dialogue (DO NOT render)
+ *   S.I: ...                  — super impuesto (KEEP, the ONLY text to render)
+ *
+ * Returns the filtered text. If the text doesn't use the staged format,
+ * returns it unchanged so manual scenes still work.
+ */
+function filterSceneTextForVisuals(text: string): string {
+  if (!text) return text;
+  const lines = text.split("\n");
+  const TAG_RE = /^(ESCENA\s+\d+|ACCI[ÓO]N|VO|VOZ|DI[ÁA]LOGO|S\.?I|SUPER)\b/i;
+  const hasStagedTags = lines.some((l) => TAG_RE.test(l.trim()));
+  if (!hasStagedTags) return text;
+
+  const out: string[] = [];
+  let inAction = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (inAction && out.length > 0 && out[out.length - 1] !== "") out.push("");
+      continue;
+    }
+
+    // Header / location: skip but mention location once for context
+    if (/^ESCENA\s+\d+/i.test(trimmed)) {
+      const headerParts = trimmed.split(/[-—]/).slice(1).join("-").trim();
+      if (headerParts) out.push(`Locación: ${headerParts}`);
+      inAction = false;
+      continue;
+    }
+
+    // ACCIÓN: visual description — KEEP (without the label)
+    const accionMatch = trimmed.match(/^ACCI[ÓO]N\s*:\s*(.*)$/i);
+    if (accionMatch) {
+      if (accionMatch[1]) out.push(accionMatch[1]);
+      inAction = true;
+      continue;
+    }
+
+    // S.I or SUPER: convert to an unambiguous instruction so the model knows
+    // this is the ONLY on-screen text it should render.
+    const siMatch = trimmed.match(/^(?:S\.?I|SUPER)\s*:\s*(.*)$/i);
+    if (siMatch) {
+      const siText = siMatch[1].trim();
+      if (siText) {
+        out.push(`Texto sobre-impreso (único permitido en la imagen): "${siText}"`);
+      }
+      inAction = false;
+      continue;
+    }
+
+    // VO / DIÁLOGO: narration / spoken — DO NOT render as on-image text
+    if (/^(VO|VOZ|DI[ÁA]LOGO)/i.test(trimmed)) {
+      inAction = false;
+      continue;
+    }
+
+    // Continuation of ACCIÓN block (no leading tag)
+    if (inAction) out.push(trimmed);
+  }
+
+  const result = out.join("\n").trim();
+  return result || text;
+}
+
+/**
  * If the node receives input from a Scene on INPUT_PROMPT, build the full
  * script context (sent as systemInstruction to the destination model):
  *   - generalInfo of the script
@@ -213,7 +283,10 @@ function resolveScriptContext(
   const sceneData = sceneNode.data as SceneNodeData;
 
   // Walk upstream through the chain to collect previous scenes (oldest first)
+  // and to identify the originating Script node so we can read its connected
+  // rules input.
   const previousScenes: SceneNodeData[] = [];
+  let scriptNodeIdFound: string | null = null;
   let cursor = sceneNode.id;
   const visited = new Set<string>([cursor]);
   while (true) {
@@ -225,9 +298,44 @@ function resolveScriptContext(
     visited.add(upChain.source);
     const prev = nodes.find((n) => n.id === upChain.source);
     if (!prev) break;
-    if (prev.type !== "scene") break;
-    previousScenes.unshift(prev.data as SceneNodeData);
-    cursor = prev.id;
+    if (prev.type === "scene") {
+      previousScenes.unshift(prev.data as SceneNodeData);
+      cursor = prev.id;
+      continue;
+    }
+    if (prev.type === "script") {
+      scriptNodeIdFound = prev.id;
+    }
+    break;
+  }
+  // Fallback: scene data carries the originating scriptNodeId in case the
+  // chain is broken (manual disconnects).
+  if (!scriptNodeIdFound && sceneData.scriptNodeId) {
+    scriptNodeIdFound = sceneData.scriptNodeId;
+  }
+
+  // Look up extra rules text wired to the Script's INPUT_RULES handle. Source
+  // can be static-text (content), text (outputText after running), or
+  // text-practicante (outputText after running).
+  let rulesText: string | null = null;
+  if (scriptNodeIdFound) {
+    const rulesEdge = edges.find(
+      (e) => e.target === scriptNodeIdFound && e.targetHandle === HANDLE_IDS.INPUT_RULES
+    );
+    if (rulesEdge) {
+      const rulesNode = nodes.find((n) => n.id === rulesEdge.source);
+      if (rulesNode) {
+        let raw: string | undefined;
+        if (rulesNode.type === "static-text") {
+          raw = (rulesNode.data as StaticTextNodeData).content;
+        } else if (rulesNode.type === "text") {
+          raw = (rulesNode.data as TextNodeData).outputText;
+        } else if (rulesNode.type === "text-practicante") {
+          raw = (rulesNode.data as TextPracticanteNodeData).outputText;
+        }
+        if (raw && raw.trim()) rulesText = raw.trim();
+      }
+    }
   }
 
   // Look up Params Escena connected to the current Scene
@@ -275,11 +383,28 @@ function resolveScriptContext(
     parts.push(`[Estilo / Visual / Técnica]\n${sceneParamsContent}`);
   }
 
-  // If we got nothing useful, don't inject empty context.
-  if (parts.length === 0) return null;
+  if (rulesText) {
+    parts.push(
+      `[Reglas adicionales del usuario]\nRespeta estrictamente las siguientes indicaciones para todas las escenas. Tienen prioridad sobre interpretaciones libres del prompt:\n${rulesText}`
+    );
+  }
+
+  // Always-on guardrails for downstream visual generation.
+  parts.push(
+    `[Reglas obligatorias para la imagen/video generado]
+- REGLA DE ORO: NUNCA generes subtítulos, captions, leyendas, texto narrativo ni cartelas dentro de la imagen o frame del video. La salida es visualmente pura, sin texto sobre-impreso.
+- El prompt principal puede contener etiquetas tipo ACCIÓN, VO, DIÁLOGO, S.I, ESCENA. NO interpretes ningún texto que NO esté marcado como "Texto sobre-impreso" o "S.I" como algo a renderizar visualmente.
+- VO y DIÁLOGO son narración hablada FUERA de la imagen. JAMÁS los pongas como texto en pantalla.
+- Sólo es permitido renderizar exactamente UN bloque de texto sobre-impreso, y SÓLO si el prompt lo declara explícitamente con "S.I:", "SUPER:" o "Texto sobre-impreso". Una línea, contenido literal, sin agregados.
+- Si el prompt no menciona ningún S.I, la imagen va SIN ningún texto en pantalla. Cero. Ni firmas, ni marcas de agua, ni decoración tipográfica.
+- Si por límite del modelo no puedes evitar texto, prefiere imagen sin texto a imagen con texto inventado.`
+  );
+
+  // If we got nothing useful aside from the rules, don't inject empty context.
+  if (parts.length === 1) return null;
 
   parts.push(
-    `[Tu tarea]\nVas a generar contenido para la Escena ${sceneData.sceneIndex} de ${sceneData.totalScenes}. El prompt que recibes es el texto literal de esa escena (más el prompt local del nodo si lo hay). Aplica la información general, las escenas anteriores y las directrices de estilo como contexto — no las repitas en la salida.`
+    `[Tu tarea]\nVas a generar contenido para la Escena ${sceneData.sceneIndex} de ${sceneData.totalScenes}. El prompt que recibes es el texto literal de esa escena (más el prompt local del nodo si lo hay). Aplica la información general, las escenas anteriores y las directrices de estilo como contexto — no las repitas en la salida. Respeta SIEMPRE las reglas obligatorias de arriba.`
   );
 
   return parts.join("\n\n");
@@ -482,8 +607,12 @@ export function useCanvasExecution({
           }
           case "image": {
             const imgData = effectiveData as ImageNodeData;
-            const fullPrompt = promptContext
-              ? `${promptContext}\n\n${imgData.prompt}`
+            // Filter out VO/DIÁLOGO/headers from staged scene text — those are
+            // narrative cues, not visual content, and the model otherwise
+            // renders them as on-screen text.
+            const cleanContext = scriptContext ? filterSceneTextForVisuals(promptContext) : promptContext;
+            const fullPrompt = cleanContext
+              ? `${cleanContext}\n\n${imgData.prompt}`
               : imgData.prompt;
 
             if (isNanoBananaModel(imgData.modelId, generationConfig)) {
@@ -497,8 +626,9 @@ export function useCanvasExecution({
           }
           case "video": {
             const vidData = effectiveData as VideoNodeData;
-            const fullPrompt = promptContext
-              ? `${promptContext}\n\n${vidData.prompt}`
+            const cleanContext = scriptContext ? filterSceneTextForVisuals(promptContext) : promptContext;
+            const fullPrompt = cleanContext
+              ? `${cleanContext}\n\n${vidData.prompt}`
               : vidData.prompt;
             // Video endpoint doesn't accept systemInstruction → prepend context to prompt
             const promptWithContext = scriptContext ? `${scriptContext}\n\n${fullPrompt}` : fullPrompt;
@@ -1032,8 +1162,19 @@ async function executeNanoBananaNode(
   referenceImageUrls: string[],
   scriptContext: string | null = null
 ): Promise<{ outputUrl?: string; messageId?: number }> {
+  // When reference images are attached, append an explicit hint so the model
+  // doesn't ignore them in favor of a vivid prompt. Nano-banana otherwise
+  // tends to prioritize textual descriptions.
+  let effectivePrompt = prompt;
+  if (referenceImageUrls.length > 0) {
+    effectivePrompt += `\n\n[Imágenes de referencia adjuntas: úsalas como contexto visual obligatorio. Incorpora sus elementos clave (personajes, props, marca, paleta cromática, estilo gráfico) en la imagen generada. No las ignores aunque el prompt no las nombre explícitamente.]`;
+  }
+
+  console.log(`[Canvas] nano-banana with ${referenceImageUrls.length} reference image(s)`,
+    referenceImageUrls.map((u) => u.slice(0, 80)));
+
   const body: Record<string, unknown> = {
-    content: prompt,
+    content: effectivePrompt,
     generation_type_override: "image",
     selected_model_id: config.modelId,
     no_context: true,
@@ -1050,12 +1191,20 @@ async function executeNanoBananaNode(
   // Pass all reference images as file attachments — convert URLs to base64
   if (referenceImageUrls.length > 0) {
     const files = await Promise.all(
-      referenceImageUrls.map(async (url, i) => ({
-        dataUrl: await urlToDataUrl(url),
-        mimeType: "image/png",
-        name: `reference-${i}.png`,
-        type: "image" as const,
-      }))
+      referenceImageUrls.map(async (url, i) => {
+        try {
+          const dataUrl = await urlToDataUrl(url);
+          return {
+            dataUrl,
+            mimeType: "image/png",
+            name: `reference-${i}.png`,
+            type: "image" as const,
+          };
+        } catch (err) {
+          console.error(`[Canvas] Failed to load reference image ${i}: ${url}`, err);
+          throw new Error(`No se pudo cargar la imagen de referencia ${i + 1}: ${url.slice(0, 100)}`);
+        }
+      })
     );
     body.files = files;
   }
@@ -1116,8 +1265,18 @@ async function executeImageNode(
   config: ImageNodeData,
   referenceImageUrls: string[]
 ): Promise<{ outputUrl?: string; messageId?: number }> {
+  // Same hint as nano-banana — Imagen-style models can also prioritize the
+  // textual prompt over reference images.
+  let effectivePrompt = prompt;
+  if (referenceImageUrls.length > 0) {
+    effectivePrompt += `\n\n[Imágenes de referencia adjuntas: úsalas como contexto visual obligatorio. Incorpora sus elementos clave (personajes, props, marca, paleta cromática, estilo gráfico) en la imagen generada.]`;
+  }
+
+  console.log(`[Canvas] Imagen with ${referenceImageUrls.length} reference image(s)`,
+    referenceImageUrls.map((u) => u.slice(0, 80)));
+
   const body: Record<string, unknown> = {
-    content: prompt,
+    content: effectivePrompt,
     generation_type_override: "image",
     selected_model_id: config.modelId,
     imageSettings: {

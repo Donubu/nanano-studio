@@ -48,6 +48,29 @@ function stopProp(e: React.SyntheticEvent) {
   e.stopPropagation();
 }
 
+// Read a fetch response, returning the parsed JSON body or a safe fallback.
+// Avoids the cryptic "Unexpected end of JSON input" when the server returns
+// an empty body (timeout, gateway error, crashed handler) and surfaces a
+// useful message instead.
+async function parseResponse(res: Response): Promise<{ error?: string; [k: string]: unknown }> {
+  const rawText = await res.text().catch(() => "");
+  if (!rawText) {
+    return {
+      error:
+        res.ok
+          ? "El servidor devolvió una respuesta vacía. Puede ser un timeout — vuelve a intentar."
+          : `Error ${res.status} ${res.statusText || ""}`.trim(),
+    };
+  }
+  try {
+    return JSON.parse(rawText) as { error?: string; [k: string]: unknown };
+  } catch {
+    return {
+      error: `Respuesta no-JSON del servidor (HTTP ${res.status}): ${rawText.slice(0, 200)}`,
+    };
+  }
+}
+
 export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as ScriptNodeData;
   const status = nodeData.status || "idle";
@@ -323,7 +346,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
             systemInstruction: baseData.systemInstruction,
           }),
         });
-        const body = await res.json();
+        const body = await parseResponse(res);
         if (!res.ok) throw new Error(body.error || `Error ${res.status}`);
 
         const alternatives: ScriptAnalysisAlt[] = Array.isArray(body.analyses) ? body.analyses : [];
@@ -393,7 +416,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
           thinkingLevel: nodeData.thinkingLevel,
         }),
       });
-      const body = await res.json();
+      const body = await parseResponse(res);
       if (!res.ok) throw new Error(body.error || `Error ${res.status}`);
 
       stagedPrompt = body.stagedPrompt as string;
@@ -872,8 +895,20 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
         position={Position.Left}
         id={HANDLE_IDS.INPUT_VISUAL_REFERENCE}
         className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background"
-        style={{ top: "65%" }}
+        style={{ top: "55%" }}
         title="Galería de referencia visual (alimenta a la primera escena)"
+      />
+
+      {/* Input handle: extra rules/instructions (text, static-text or
+          practicante) — appended to the systemInstruction of every scene
+          downstream. Useful for "things to keep", "things to avoid", etc. */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={HANDLE_IDS.INPUT_RULES}
+        className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background"
+        style={{ top: "70%" }}
+        title="Reglas adicionales (texto, IA o practicante) aplicadas a todas las escenas"
       />
 
       {/* Input handle: custom Params Escena reference. When connected,

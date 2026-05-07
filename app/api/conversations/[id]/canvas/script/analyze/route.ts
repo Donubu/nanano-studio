@@ -5,6 +5,9 @@ import { RowDataPacket } from "mysql2";
 import { analyzeScript } from "@/lib/script-analyzer";
 import type { ScriptAnalysisAlt, ScriptNodeData } from "@/components/canvas/lib/canvas-types";
 
+// Generous timeout — 3 alternatives + structured output can take ~60-90s.
+export const maxDuration = 300;
+
 interface ConversationRow extends RowDataPacket {
   id: number;
   user_id: number;

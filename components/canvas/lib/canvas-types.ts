@@ -273,6 +273,7 @@ export const HANDLE_IDS = {
   INPUT_SCENE_PARAMS: "input-scene-params",
   INPUT_VISUAL_REFERENCE: "input-visual-reference",
   INPUT_PARAMS_SCENE_REF: "input-params-scene-ref",
+  INPUT_RULES: "input-rules",
 } as const;
 
 // --- Default configs for new nodes ---
