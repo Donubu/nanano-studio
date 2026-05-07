@@ -2,19 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
-import { analyzeScript } from "@/lib/script-analyzer";
-import type { ScriptAnalysisAlt, ScriptNodeData } from "@/components/canvas/lib/canvas-types";
+import { stageScript } from "@/lib/script-stager";
 
 interface ConversationRow extends RowDataPacket {
   id: number;
   user_id: number;
   project_id: number;
-}
-
-interface NodeRow extends RowDataPacket {
-  id: string;
-  type: string;
-  config: string;
 }
 
 interface ModelRow extends RowDataPacket {
@@ -32,7 +25,10 @@ interface UserRow extends RowDataPacket {
   name: string | null;
 }
 
-// POST - Analyze a script (call Gemini with structured output) and persist scriptAnalysis on the node
+// POST - Take a raw script/idea and return a staged screenplay (with INT./EXT.,
+// action, VO/dialogue, super impuestos). The result REPLACES the prompt of the
+// Script node on the frontend; this endpoint does NOT persist to the node's
+// config — the frontend handles that via autosave or PATCH.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -55,35 +51,20 @@ export async function POST(
     const conversation = convRows[0];
 
     const body = await request.json();
-    const { nodeId, prompt, modelId, temperature, maxOutputTokens, systemInstruction } = body as {
-      nodeId: string;
+    const { prompt, modelId, temperature, maxOutputTokens, systemInstruction, thinkingLevel } = body as {
       prompt: string;
       modelId?: number;
       temperature?: number;
       maxOutputTokens?: number;
       systemInstruction?: string;
+      thinkingLevel?: "none" | "low" | "medium" | "high";
     };
 
-    if (!nodeId || typeof nodeId !== "string") {
-      return NextResponse.json({ error: "nodeId requerido" }, { status: 400 });
-    }
     if (!prompt || typeof prompt !== "string" || prompt.trim().length === 0) {
-      return NextResponse.json({ error: "El guion está vacío" }, { status: 400 });
+      return NextResponse.json({ error: "El texto está vacío" }, { status: 400 });
     }
 
-    // Verificar que el nodo exista y sea de tipo script
-    const [nodeRows] = await pool.execute<NodeRow[]>(
-      `SELECT id, type, config FROM canvas_nodes WHERE id = ? AND conversation_id = ?`,
-      [nodeId, id]
-    );
-    if (nodeRows.length === 0) {
-      return NextResponse.json({ error: "Nodo no encontrado" }, { status: 404 });
-    }
-    if (nodeRows[0].type !== "script") {
-      return NextResponse.json({ error: "El nodo no es de tipo Guión" }, { status: 400 });
-    }
-
-    // Resolver modelo: si llega modelId numérico, busca en DB; si no, usa el default de generation_type=text
+    // Resolve model: explicit modelId from frontend, else default text model of the project
     let modelString: string | null = null;
     let apiBackend: string | undefined = undefined;
     let modelDisplayName: string | null = null;
@@ -99,11 +80,7 @@ export async function POST(
         modelDisplayName = modelRows[0].display_name;
       }
     }
-
     if (!modelString) {
-      // Fallback: primer modelo de texto disponible para el proyecto.
-      // Requires project_generation_config.is_enabled = 1 for text and at least
-      // one row in project_generation_models for that project + generation_type.
       const [defaultRows] = await pool.execute<ModelRow[]>(
         `SELECT m.id, m.model_id, m.display_name, m.api_backend
          FROM models m
@@ -123,12 +100,10 @@ export async function POST(
         modelDisplayName = defaultRows[0].display_name;
       }
     }
-
     if (!modelString) {
       return NextResponse.json({ error: "No hay un modelo de texto disponible" }, { status: 400 });
     }
 
-    // Etiquetas para Vertex AI
     const [projectRows] = await pool.execute<ProjectRow[]>(
       `SELECT title FROM projects WHERE id = ?`,
       [conversation.project_id]
@@ -142,61 +117,28 @@ export async function POST(
       user_name: userRows[0]?.name || undefined,
     };
 
-    // Llamar al analyzer
-    let result;
     try {
-      result = await analyzeScript({
+      const result = await stageScript({
         modelString,
         apiBackend,
         prompt,
         temperature,
         maxOutputTokens,
         systemInstruction,
+        thinkingLevel,
         labels,
       });
+      return NextResponse.json({
+        stagedPrompt: result.stagedPrompt,
+        tokenCount: result.tokenCount,
+        modelName: modelDisplayName,
+      });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Error analizando el guion";
+      const msg = err instanceof Error ? err.message : "Error escenificando el guion";
       return NextResponse.json({ error: msg }, { status: 500 });
     }
-
-    // Persistir alternativas en config del nodo (merge con config existente).
-    // La primera alternativa queda como "activa" — script-node muestra los tabs
-    // y al cambiar de tab, el frontend sincroniza scriptAnalysis con la elegida.
-    let existingConfig: Record<string, unknown> = {};
-    try {
-      const raw = nodeRows[0].config;
-      existingConfig = JSON.parse(typeof raw === "string" ? raw : JSON.stringify(raw)) as Record<string, unknown>;
-    } catch {}
-
-    const alternatives: ScriptAnalysisAlt[] = result.analyses;
-    const activeIndex = 0;
-
-    // NOTE: we deliberately do NOT overwrite `prompt` in the persisted config.
-    // The frontend may be analyzing a staged version of the text (Escenificar)
-    // while keeping the user's original prompt visible in the textarea. The
-    // frontend persists prompt/model fields via autosave; this endpoint only
-    // owns scriptAnalysis + scriptAnalysisAlternatives.
-    const newConfig: Record<string, unknown> = {
-      ...existingConfig,
-      scriptAnalysis: alternatives[activeIndex] satisfies ScriptNodeData["scriptAnalysis"],
-      scriptAnalysisAlternatives: alternatives,
-      activeAnalysisIndex: activeIndex,
-    };
-
-    await pool.execute(
-      `UPDATE canvas_nodes SET config = ?, status = 'completed', error_message = NULL WHERE id = ? AND conversation_id = ?`,
-      [JSON.stringify(newConfig), nodeId, id]
-    );
-
-    return NextResponse.json({
-      analyses: alternatives,
-      activeAnalysisIndex: activeIndex,
-      warnings: result.warnings,
-      tokenCount: result.tokenCount,
-      modelName: modelDisplayName,
-    });
   } catch (error) {
-    console.error("Error analyzing script:", error);
+    console.error("Error in stage endpoint:", error);
     const msg = error instanceof Error ? error.message : "Error interno del servidor";
     return NextResponse.json({ error: msg }, { status: 500 });
   }

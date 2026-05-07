@@ -72,7 +72,7 @@ export const SceneNodeComponent = memo(function SceneNode({ id, data, selected }
 
       {/* Body: literal scene text (read-only) */}
       <div className="px-3 py-2">
-        <div className="bg-muted/40 rounded-md p-2 max-h-[180px] overflow-y-auto">
+        <div className="nowheel bg-muted/40 rounded-md p-2 max-h-[180px] overflow-y-auto">
           <p className="text-xs whitespace-pre-wrap">{nodeData.text || "(sin texto)"}</p>
         </div>
       </div>

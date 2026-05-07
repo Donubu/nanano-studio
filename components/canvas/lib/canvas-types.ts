@@ -191,6 +191,14 @@ export interface ScriptAnalysis {
   modelUsed: string;
 }
 
+// ScriptAnalysisAlt extends ScriptAnalysis with display metadata about how the
+// scenes were segmented in this alternative ("Detallada" / "Equilibrada" /
+// "Compacta"). Returned by the analyzer when 3 alternatives are produced.
+export interface ScriptAnalysisAlt extends ScriptAnalysis {
+  label?: string;           // e.g. "Detallada", "Equilibrada", "Compacta"
+  approach?: string;        // 1-line description of the segmentation criterion
+}
+
 export interface ScriptNodeData extends BaseNodeData {
   type: "script";
   prompt: string;           // el guion completo, ingresado por el usuario
@@ -199,7 +207,15 @@ export interface ScriptNodeData extends BaseNodeData {
   maxOutputTokens?: number;
   systemInstruction?: string;
   thinkingLevel?: string;
+  // Active analysis (mirrors scriptAnalysisAlternatives[activeAnalysisIndex]).
+  // The materialize endpoint reads this field — keeping it in sync makes that
+  // path agnostic to the multi-alternative feature.
   scriptAnalysis?: ScriptAnalysis;
+  // Up to 3 segmentation alternatives produced by "Leer guion".
+  scriptAnalysisAlternatives?: ScriptAnalysisAlt[];
+  // Index into scriptAnalysisAlternatives for the alternative currently shown
+  // and used when materializing scenes. Defaults to 0.
+  activeAnalysisIndex?: number;
   // Si true, al materializar se conecta el output de cada nodo destino con el
   // del siguiente para mantener continuidad visual (image→image como REFERENCE,
   // image→video como FIRST_FRAME, etc.).
@@ -255,6 +271,8 @@ export const HANDLE_IDS = {
   INPUT_SCRIPT_CHAIN: "input-script-chain",
   OUTPUT_SCRIPT_CHAIN: "output-script-chain",
   INPUT_SCENE_PARAMS: "input-scene-params",
+  INPUT_VISUAL_REFERENCE: "input-visual-reference",
+  INPUT_PARAMS_SCENE_REF: "input-params-scene-ref",
 } as const;
 
 // --- Default configs for new nodes ---

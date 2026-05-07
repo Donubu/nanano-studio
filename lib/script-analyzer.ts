@@ -1,86 +1,136 @@
 import { sendMessage, type Labels } from "./google-ai";
-import type { ScriptAnalysis, ScriptGeneralInfo, ScriptSceneAnalysis } from "@/components/canvas/lib/canvas-types";
+import type {
+  ScriptAnalysis,
+  ScriptAnalysisAlt,
+  ScriptGeneralInfo,
+  ScriptSceneAnalysis,
+} from "@/components/canvas/lib/canvas-types";
 import { MAX_SCENES_PER_SCRIPT } from "@/components/canvas/lib/canvas-types";
 
-const SCRIPT_RESPONSE_SCHEMA: object = {
+const generalInfoSchema = {
   type: "object",
-  required: ["generalInfo", "scenes"],
+  required: ["synopsis", "tone", "genre", "visualStyle", "characters", "settings"],
   properties: {
-    generalInfo: {
-      type: "object",
-      required: ["synopsis", "tone", "genre", "visualStyle", "characters", "settings"],
-      properties: {
-        synopsis: { type: "string" },
-        tone: { type: "string" },
-        genre: { type: "string" },
-        visualStyle: { type: "string" },
-        characters: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["name", "description"],
-            properties: {
-              name: { type: "string" },
-              description: { type: "string" },
-            },
-          },
-        },
-        settings: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["name", "description"],
-            properties: {
-              name: { type: "string" },
-              description: { type: "string" },
-            },
-          },
-        },
-      },
-    },
-    scenes: {
+    synopsis: { type: "string" },
+    tone: { type: "string" },
+    genre: { type: "string" },
+    visualStyle: { type: "string" },
+    characters: {
       type: "array",
       items: {
         type: "object",
-        required: ["index", "text"],
+        required: ["name", "description"],
         properties: {
-          index: { type: "integer" },
-          text: { type: "string" },
+          name: { type: "string" },
+          description: { type: "string" },
+        },
+      },
+    },
+    settings: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["name", "description"],
+        properties: {
+          name: { type: "string" },
+          description: { type: "string" },
         },
       },
     },
   },
 };
 
-const SYSTEM_INSTRUCTION = `Eres un analista de guiones audiovisuales. Vas a recibir un guion del usuario.
+const scenesSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    required: ["index", "text"],
+    properties: {
+      index: { type: "integer" },
+      text: { type: "string" },
+    },
+  },
+};
 
-REGLA CRÍTICA: Bajo NINGÚN concepto puedes modificar, parafrasear, traducir, resumir, corregir, "limpiar" ni reescribir el texto del guion. Cada porción que devuelvas como escena debe contener una sub-cadena LITERAL del guion original — exactamente los mismos caracteres, sin agregar ni quitar nada (incluidos saltos de línea, mayúsculas, encabezados de escena, acotaciones, signos de puntuación). Si modificas una sola palabra, rompes el contrato.
+const SCRIPT_RESPONSE_SCHEMA: object = {
+  type: "object",
+  required: ["alternatives"],
+  properties: {
+    alternatives: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["label", "approach", "generalInfo", "scenes"],
+        properties: {
+          label: { type: "string" },
+          approach: { type: "string" },
+          generalInfo: generalInfoSchema,
+          scenes: scenesSchema,
+        },
+      },
+    },
+  },
+};
 
-Tu tarea es analizar el guion y devolver un JSON con dos campos: "generalInfo" (lo escribes tú) y "scenes" (texto literal extraído del guion).
+const SYSTEM_INSTRUCTION = `Eres un analista de guiones audiovisuales. Vas a recibir del usuario un texto que puede ser:
+- un guion formal (con encabezados tipo "INT./EXT. LUGAR - DÍA/NOCHE"),
+- prosa narrativa libre (cuento, narración, brief publicitario),
+- o algo mixto.
 
-generalInfo (lo escribes tú, en español de Chile, tuteo):
-- synopsis: 2 a 4 oraciones que resumen la historia general.
-- tone: tono dominante (ej: "drama íntimo", "comedia ligera", "thriller psicológico").
-- genre: género principal.
-- visualStyle: estilo visual sugerido por el guion (paleta, encuadres, ritmo).
-- characters: array con personajes principales — cada uno con name y description.
-- settings: array con locaciones principales — cada uno con name y description.
+REGLA CRÍTICA: Bajo NINGÚN concepto puedes modificar, parafrasear, traducir, resumir, corregir, "limpiar" ni reescribir el texto del guion. Cada porción que devuelvas como "scene.text" debe ser una sub-cadena LITERAL del texto original — exactamente los mismos caracteres (incluidos saltos de línea, mayúsculas, encabezados de escena, acotaciones, signos de puntuación). Si modificas una sola palabra, rompes el contrato.
 
-scenes (texto literal del guion):
-- Divide el guion en escenas naturales: cambios de ubicación, tiempo o secuencia narrativa (típicamente marcados por encabezados tipo "INT./EXT. LUGAR – DÍA/NOCHE").
-- Cada scene.text debe ser una porción CONTIGUA y LITERAL del guion. No combines escenas que no estén juntas, no editorialices, no completes elipsis.
-- index parte en 1 y avanza secuencialmente.
-- Máximo ${MAX_SCENES_PER_SCRIPT} escenas. Si el guion supera ese número, agrupa secuencias narrativas afines en bloques contiguos del texto original.
-- No incluyas ningún texto fuera de las porciones literales: no agregues comentarios, encabezados propios, ni resúmenes.`;
+Tu tarea es analizar el texto y devolver EXACTAMENTE 3 ALTERNATIVAS de análisis del MISMO texto, cada una con un criterio de segmentación distinto. El JSON tiene la forma { "alternatives": [Alt1, Alt2, Alt3] }.
+
+ALTERNATIVA 1 — label: "Detallada"
+- Segmentación fina: cada cambio sutil cuenta como nueva escena.
+- Inicia escena en cualquier cambio de ubicación, salto temporal (incluso pequeño), entrada/salida de personajes que cambia la dinámica, cambio de modalidad (interior/exterior, sueño, recuerdo, flashback).
+- Tiende a producir más escenas, más cortas.
+
+ALTERNATIVA 2 — label: "Equilibrada"
+- Segmentación clásica: cada beat narrativo completo es una escena.
+- Inicia escena en encabezados formales (si los hay), cambios significativos de lugar/tiempo, transiciones narrativas claras.
+- Equilibrio entre detalle y agrupación.
+
+ALTERNATIVA 3 — label: "Compacta"
+- Segmentación amplia: bloques narrativos sustanciales que agrupan secuencias afines del mismo arco.
+- Tiende a producir menos escenas, más extensas.
+
+Para cada alternativa devuelve:
+- "label": exactamente "Detallada", "Equilibrada" o "Compacta".
+- "approach": una oración en español de Chile (tuteo) que describe el criterio de segmentación aplicado.
+- "generalInfo": (lo escribes tú, en español de Chile, tuteo)
+  - synopsis: 2 a 4 oraciones que resumen la historia general.
+  - tone: tono dominante (ej: "drama íntimo", "comedia ligera", "thriller psicológico").
+  - genre: género principal.
+  - visualStyle: estilo visual sugerido (paleta, encuadres, ritmo).
+  - characters: array con personajes principales (name, description).
+  - settings: array con locaciones principales (name, description).
+- "scenes": array donde cada escena es una porción CONTIGUA y LITERAL del texto original.
+  - "index" parte en 1 y avanza secuencialmente.
+  - "text" es la porción literal.
+  - Máximo ${MAX_SCENES_PER_SCRIPT} escenas por alternativa.
+
+Reglas de segmentación que aplican a las 3 alternativas:
+- NO requieras encabezados formales para detectar escenas. Si el texto es prosa libre, segmenta por los criterios narrativos descritos arriba.
+- Si tienes dudas sobre cortar un beat, prefiere escena más larga que más corta — NO partas un beat narrativo a la mitad.
+- Si el texto es muy corto y describe una sola unidad de acción contigua, está bien que las 3 alternativas devuelvan UNA sola escena. No fuerces divisiones artificiales.
+- "generalInfo" puede coincidir entre las 3 alternativas (es el mismo guion). Lo que VARÍA realmente es la granularidad de "scenes".
+- NO dejes ninguna parte del texto fuera de las escenas. La concatenación de scene.text de cualquier alternativa debe poder reconstruir el contenido relevante del guion (puede haber whitespace de transición entre escenas).`;
 
 interface RawScene {
   index: number;
   text: string;
 }
 
-interface RawAnalysis {
+interface RawAlternative {
+  label: string;
+  approach: string;
   generalInfo: ScriptGeneralInfo;
   scenes: RawScene[];
+}
+
+interface RawAnalysis {
+  alternatives: RawAlternative[];
 }
 
 export interface AnalyzeScriptInput {
@@ -94,15 +144,16 @@ export interface AnalyzeScriptInput {
 }
 
 export interface AnalyzeScriptResult {
-  analysis: ScriptAnalysis;
-  warnings: string[];        // ej: "se truncaron escenas a 30", "una escena no es literal"
+  analyses: ScriptAnalysisAlt[]; // hasta 3 alternativas
+  warnings: string[];
   tokenCount: { input: number; output: number };
 }
 
 /**
  * Llama a Gemini con structured output, valida que el modelo no haya modificado
  * el guion (cada scene.text debe aparecer literal en el prompt original) y
- * devuelve el análisis junto con warnings sobre truncado o inconsistencias.
+ * devuelve hasta 3 alternativas de análisis junto con warnings sobre truncado
+ * o inconsistencias.
  */
 export async function analyzeScript(input: AnalyzeScriptInput): Promise<AnalyzeScriptResult> {
   const { modelString, apiBackend, prompt, temperature, maxOutputTokens, systemInstruction, labels } = input;
@@ -117,7 +168,8 @@ export async function analyzeScript(input: AnalyzeScriptInput): Promise<AnalyzeS
     fullSystem,
     {
       temperature: temperature ?? 0.4,
-      maxOutputTokens: maxOutputTokens ?? 16384,
+      // Three alternatives need more output room than a single analysis.
+      maxOutputTokens: maxOutputTokens ?? 32768,
       responseMimeType: "application/json",
       responseSchema: SCRIPT_RESPONSE_SCHEMA,
     },
@@ -132,57 +184,65 @@ export async function analyzeScript(input: AnalyzeScriptInput): Promise<AnalyzeS
     throw new Error("El modelo no devolvió un JSON válido. Intenta nuevamente.");
   }
 
-  if (!raw.generalInfo || !Array.isArray(raw.scenes)) {
-    throw new Error("El JSON devuelto no tiene la estructura esperada.");
+  if (!raw.alternatives || !Array.isArray(raw.alternatives) || raw.alternatives.length === 0) {
+    throw new Error("El JSON devuelto no tiene la estructura esperada (sin alternatives).");
   }
 
   const warnings: string[] = [];
-
-  // Truncar a MAX_SCENES_PER_SCRIPT
-  let scenes = raw.scenes;
-  if (scenes.length > MAX_SCENES_PER_SCRIPT) {
-    warnings.push(`El modelo devolvió ${scenes.length} escenas; se truncaron a ${MAX_SCENES_PER_SCRIPT}.`);
-    scenes = scenes.slice(0, MAX_SCENES_PER_SCRIPT);
-  }
-
-  if (scenes.length === 0) {
-    throw new Error("El modelo no detectó ninguna escena en el guion.");
-  }
-
-  // Validar literalidad: cada scene.text debe aparecer en el prompt original.
-  // Tolerante a diferencias menores de whitespace para no fallar por trim del modelo.
   const normalizedPrompt = prompt.replace(/\s+/g, " ").trim();
-  const validatedScenes: ScriptSceneAnalysis[] = [];
-  let nonLiteralCount = 0;
+  const analyses: ScriptAnalysisAlt[] = [];
+  const analyzedAt = new Date().toISOString();
 
-  for (let i = 0; i < scenes.length; i++) {
-    const s = scenes[i];
-    if (!s.text || typeof s.text !== "string") continue;
+  for (let aIdx = 0; aIdx < raw.alternatives.length; aIdx++) {
+    const alt = raw.alternatives[aIdx];
+    if (!alt.generalInfo || !Array.isArray(alt.scenes)) {
+      warnings.push(`Alternativa ${aIdx + 1} ignorada (estructura inválida).`);
+      continue;
+    }
 
-    const normalizedScene = s.text.replace(/\s+/g, " ").trim();
-    const isLiteral = normalizedPrompt.includes(normalizedScene);
-    if (!isLiteral) nonLiteralCount++;
+    let scenes = alt.scenes;
+    if (scenes.length > MAX_SCENES_PER_SCRIPT) {
+      warnings.push(`Alternativa "${alt.label || aIdx + 1}" devolvió ${scenes.length} escenas; se truncaron a ${MAX_SCENES_PER_SCRIPT}.`);
+      scenes = scenes.slice(0, MAX_SCENES_PER_SCRIPT);
+    }
+    if (scenes.length === 0) {
+      warnings.push(`Alternativa "${alt.label || aIdx + 1}" no detectó ninguna escena, se omite.`);
+      continue;
+    }
 
-    validatedScenes.push({
-      index: i + 1,                  // re-numerar 1..N por seguridad
-      text: s.text,                  // mantener formato original tal cual lo devolvió
-      targetNodeType: "image",       // default — el usuario puede cambiar por escena
+    const validatedScenes: ScriptSceneAnalysis[] = [];
+    let nonLiteralCount = 0;
+    for (let i = 0; i < scenes.length; i++) {
+      const s = scenes[i];
+      if (!s.text || typeof s.text !== "string") continue;
+      const normalizedScene = s.text.replace(/\s+/g, " ").trim();
+      if (!normalizedPrompt.includes(normalizedScene)) nonLiteralCount++;
+      validatedScenes.push({
+        index: i + 1,
+        text: s.text,
+        targetNodeType: "image",
+      });
+    }
+    if (nonLiteralCount > 0) {
+      warnings.push(`Alternativa "${alt.label || aIdx + 1}": ${nonLiteralCount} escena(s) podrían no ser literales del guion.`);
+    }
+
+    analyses.push({
+      label: alt.label,
+      approach: alt.approach,
+      generalInfo: alt.generalInfo,
+      scenes: validatedScenes,
+      analyzedAt,
+      modelUsed: modelString,
     });
   }
 
-  if (nonLiteralCount > 0) {
-    warnings.push(`${nonLiteralCount} escena(s) podrían no ser literales del guion. Revísalas antes de generar.`);
+  if (analyses.length === 0) {
+    throw new Error("Ninguna alternativa válida fue devuelta por el modelo.");
   }
 
-  const analysis: ScriptAnalysis = {
-    generalInfo: raw.generalInfo,
-    scenes: validatedScenes,
-    analyzedAt: new Date().toISOString(),
-    modelUsed: modelString,
-  };
-
   return {
-    analysis,
+    analyses,
     warnings,
     tokenCount: result.tokenCount,
   };

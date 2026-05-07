@@ -380,15 +380,18 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     generationConfig,
   });
 
-  // Connection handler with validation
+  // Connection handler with validation. We generate a short edge ID instead of
+  // letting xyflow concatenate source+sourceHandle+target+targetHandle, which
+  // can exceed canvas_edges.id VARCHAR(255) when handles and node IDs stack up.
   const onConnect: OnConnect = useCallback(
     (connection: Connection) => {
       if (!isValidConnection(connection, nodes, edges)) return;
       if (wouldCreateCycle(edges, connection.source!, connection.target!)) return;
       takeSnapshot();
-      const newEdge = { ...connection, animated: false };
+      const id = `e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const newEdge: Edge = { ...connection, id, animated: false };
       setEdges((eds) => addEdge(newEdge, eds));
-      collab.emitEdgeAdd(newEdge as Record<string, unknown>);
+      collab.emitEdgeAdd(newEdge as unknown as Record<string, unknown>);
     },
     [nodes, edges, setEdges, takeSnapshot, collab.emitEdgeAdd]
   );

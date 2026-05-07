@@ -1,12 +1,13 @@
 "use client";
 
 import { Fragment, memo, useCallback, useMemo, useRef, useState } from "react";
-import { Handle, Position, useReactFlow, type NodeProps, type Edge, type Node as RFNode } from "@xyflow/react";
-import { Loader2, AlertCircle, FileText, Sparkles, Wand2, ChevronDown, ChevronRight, ImageIcon, Video, Bot, MinusCircle, ArrowUp, ArrowDown, X, Plus } from "lucide-react";
-import { HANDLE_IDS, type ScriptAnalysis, type ScriptNodeData, type ScriptSceneAnalysis, type SceneTargetNodeType } from "../lib/canvas-types";
+import { Handle, Position, useHandleConnections, useReactFlow, type NodeProps, type Edge, type Node as RFNode } from "@xyflow/react";
+import { Loader2, AlertCircle, FileText, Sparkles, Wand2, ChevronDown, ChevronRight, ImageIcon, Video, Bot, MinusCircle, ArrowUp, ArrowDown, X, Plus, Drama } from "lucide-react";
+import { HANDLE_IDS, type ScriptAnalysis, type ScriptAnalysisAlt, type ScriptNodeData, type ScriptSceneAnalysis, type SceneTargetNodeType } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useCanvasContext } from "../canvas-context";
+import { NodeTextarea } from "./node-textarea";
 
 const statusColors: Record<string, string> = {
   idle: "border-fuchsia-500/40",
@@ -55,6 +56,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
   const { setNodes, setEdges } = useReactFlow();
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isStaging, setIsStaging] = useState(false);
   const [isMaterializing, setIsMaterializing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -73,14 +75,44 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
   const analysis = nodeData.scriptAnalysis;
   const sceneCount = analysis?.scenes.length || 0;
 
+  // Live connections to INPUT_VISUAL_REFERENCE (gallery/static-image as visual
+  // context). Read from state so we don't depend on autosave having flushed
+  // the edge to DB yet.
+  const visualRefConnections = useHandleConnections({
+    type: "target",
+    id: HANDLE_IDS.INPUT_VISUAL_REFERENCE,
+  });
+  const visualReferenceSourceId = visualRefConnections[0]?.source ?? null;
+
+  // Live connection to INPUT_PARAMS_SCENE_REF: when the user wires their own
+  // Params Escena (with custom gallery / content) to the script, we want
+  // materialize to use THAT node instead of creating a fresh determinístic
+  // params-scene-${scriptId}.
+  const paramsSceneRefConnections = useHandleConnections({
+    type: "target",
+    id: HANDLE_IDS.INPUT_PARAMS_SCENE_REF,
+  });
+  const paramsSceneSourceId = paramsSceneRefConnections[0]?.source ?? null;
+
   const handlePromptChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      updateNodeData(id, { ...nodeData, prompt: e.target.value });
+    (value: string) => {
+      updateNodeData(id, { ...nodeData, prompt: value });
     },
     [id, nodeData, updateNodeData]
   );
 
   // --- Scene mutations (all re-number indices) ---
+
+  // Helper: compute the next alternatives array with the active slot updated
+  // to keep multi-alternative state in sync with the live scriptAnalysis.
+  const syncActiveSlot = (
+    nextAnalysis: ScriptAnalysis
+  ): ScriptAnalysisAlt[] | undefined => {
+    const alts = nodeData.scriptAnalysisAlternatives;
+    if (!alts || alts.length === 0) return undefined;
+    const activeIdx = nodeData.activeAnalysisIndex ?? 0;
+    return alts.map((alt, i) => (i === activeIdx ? { ...alt, ...nextAnalysis } : alt));
+  };
 
   const writeAnalysis = useCallback(
     (updater: (a: ScriptAnalysis) => ScriptAnalysis, opts?: { isTextEdit?: boolean }) => {
@@ -104,7 +136,10 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
       }
 
       const next = updater(base);
-      updateNodeData(id, { ...nodeData, scriptAnalysis: next });
+      const updates: Partial<ScriptNodeData> = { scriptAnalysis: next };
+      const syncedAlts = syncActiveSlot(next);
+      if (syncedAlts) updates.scriptAnalysisAlternatives = syncedAlts;
+      updateNodeData(id, { ...nodeData, ...updates });
     },
     [analysis, id, nodeData, updateNodeData]
   );
@@ -118,7 +153,10 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
     setLocalHistory((h) => h.slice(0, -1));
     setLocalFuture((f) => [...f, JSON.parse(JSON.stringify(current))].slice(-HISTORY_LIMIT));
     lastTextEditAtRef.current = 0;
-    updateNodeData(id, { ...nodeData, scriptAnalysis: prev });
+    const updates: Partial<ScriptNodeData> = { scriptAnalysis: prev };
+    const syncedAlts = syncActiveSlot(prev);
+    if (syncedAlts) updates.scriptAnalysisAlternatives = syncedAlts;
+    updateNodeData(id, { ...nodeData, ...updates });
     return true;
   }, [analysis, id, localHistory, nodeData, updateNodeData]);
 
@@ -129,9 +167,32 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
     setLocalFuture((f) => f.slice(0, -1));
     setLocalHistory((h) => [...h, JSON.parse(JSON.stringify(current))].slice(-HISTORY_LIMIT));
     lastTextEditAtRef.current = 0;
-    updateNodeData(id, { ...nodeData, scriptAnalysis: next });
+    const updates: Partial<ScriptNodeData> = { scriptAnalysis: next };
+    const syncedAlts = syncActiveSlot(next);
+    if (syncedAlts) updates.scriptAnalysisAlternatives = syncedAlts;
+    updateNodeData(id, { ...nodeData, ...updates });
     return true;
   }, [analysis, id, localFuture, nodeData, updateNodeData]);
+
+  // Switch active alternative tab. Resets local history (it's stack of the
+  // previous alternative's edits — would be confusing to apply across tabs).
+  const handleSelectAlternative = useCallback(
+    (index: number) => {
+      const alts = nodeData.scriptAnalysisAlternatives;
+      if (!alts || index < 0 || index >= alts.length) return;
+      if ((nodeData.activeAnalysisIndex ?? 0) === index) return;
+      const selected = alts[index];
+      setLocalHistory([]);
+      setLocalFuture([]);
+      lastTextEditAtRef.current = 0;
+      updateNodeData(id, {
+        ...nodeData,
+        scriptAnalysis: selected,
+        activeAnalysisIndex: index,
+      });
+    },
+    [id, nodeData, updateNodeData]
+  );
 
   const handleNodeKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -231,11 +292,79 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
     [writeAnalysis]
   );
 
-  // --- Read script (analyze with AI) ---
+  // --- Internal: call /analyze with a given prompt and apply the result ---
 
-  const handleReadScript = useCallback(async () => {
+  // Returns true on success, false on error. Mutates state (alternatives,
+  // analysis, history reset). Used by handleReadScript and as a follow-up to
+  // handleStageScript so that staging produces ready-to-pick alternatives in
+  // a single user action.
+  const runAnalyze = useCallback(
+    async (promptToAnalyze: string, baseData: ScriptNodeData): Promise<boolean> => {
+      if (!conversationId) {
+        setAnalysisError("Esperando conversación...");
+        return false;
+      }
+
+      setIsAnalyzing(true);
+      setAnalysisError(null);
+      setWarnings([]);
+      updateNodeData(id, { ...baseData, status: "generating", errorMessage: undefined });
+
+      try {
+        const res = await fetch(`/api/conversations/${conversationId}/canvas/script/analyze`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            nodeId: id,
+            prompt: promptToAnalyze,
+            modelId: baseData.modelId,
+            temperature: baseData.temperature,
+            maxOutputTokens: baseData.maxOutputTokens,
+            systemInstruction: baseData.systemInstruction,
+          }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || `Error ${res.status}`);
+
+        const alternatives: ScriptAnalysisAlt[] = Array.isArray(body.analyses) ? body.analyses : [];
+        const activeIdx = typeof body.activeAnalysisIndex === "number" ? body.activeAnalysisIndex : 0;
+        const activeAnalysis = alternatives[activeIdx] ?? alternatives[0];
+        if (!activeAnalysis) throw new Error("El servidor no devolvió alternativas válidas.");
+
+        setLocalHistory([]);
+        setLocalFuture([]);
+        lastTextEditAtRef.current = 0;
+
+        updateNodeData(id, {
+          ...baseData,
+          status: "completed",
+          errorMessage: undefined,
+          scriptAnalysis: activeAnalysis,
+          scriptAnalysisAlternatives: alternatives,
+          activeAnalysisIndex: activeIdx,
+          modelName: body.modelName || baseData.modelName,
+        });
+        if (Array.isArray(body.warnings)) setWarnings(body.warnings);
+        return true;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Error analizando el guion";
+        setAnalysisError(msg);
+        updateNodeData(id, { ...baseData, status: "error", errorMessage: msg });
+        return false;
+      } finally {
+        setIsAnalyzing(false);
+      }
+    },
+    [conversationId, id, updateNodeData]
+  );
+
+  // --- Stage script: turn raw text/idea into a structured screenplay,
+  // then automatically run /analyze on the staged text so the user gets
+  // ready-to-pick alternatives in one click. ---
+
+  const handleStageScript = useCallback(async () => {
     if (!nodeData.prompt?.trim()) {
-      setAnalysisError("Ingresa el guion antes de leer.");
+      setAnalysisError("Ingresa el guion antes de escenificar.");
       return;
     }
     if (!conversationId) {
@@ -243,45 +372,72 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
       return;
     }
 
-    setIsAnalyzing(true);
+    setIsStaging(true);
     setAnalysisError(null);
     setWarnings([]);
     updateNodeData(id, { ...nodeData, status: "generating", errorMessage: undefined });
 
+    let stagedPrompt: string | null = null;
+    let modelNameFromStage: string | undefined;
+
     try {
-      const res = await fetch(`/api/conversations/${conversationId}/canvas/script/analyze`, {
+      const res = await fetch(`/api/conversations/${conversationId}/canvas/script/stage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          nodeId: id,
           prompt: nodeData.prompt,
           modelId: nodeData.modelId,
           temperature: nodeData.temperature,
           maxOutputTokens: nodeData.maxOutputTokens,
           systemInstruction: nodeData.systemInstruction,
+          thinkingLevel: nodeData.thinkingLevel,
         }),
       });
       const body = await res.json();
-      if (!res.ok) {
-        throw new Error(body.error || `Error ${res.status}`);
-      }
+      if (!res.ok) throw new Error(body.error || `Error ${res.status}`);
 
-      updateNodeData(id, {
-        ...nodeData,
-        status: "completed",
-        errorMessage: undefined,
-        scriptAnalysis: body.analysis,
-        modelName: body.modelName || nodeData.modelName,
-      });
-      if (Array.isArray(body.warnings)) setWarnings(body.warnings);
+      stagedPrompt = body.stagedPrompt as string;
+      modelNameFromStage = body.modelName as string | undefined;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Error analizando el guion";
+      const msg = err instanceof Error ? err.message : "Error escenificando el guion";
       setAnalysisError(msg);
       updateNodeData(id, { ...nodeData, status: "error", errorMessage: msg });
-    } finally {
-      setIsAnalyzing(false);
+      setIsStaging(false);
+      return;
     }
-  }, [conversationId, id, nodeData, updateNodeData]);
+
+    setIsStaging(false);
+
+    // Run /analyze on the STAGED text but keep the user's prompt textarea
+    // intact. Alternatives that appear under the textarea reference the
+    // staged text (scenes are literal pieces of stagedPrompt, not of the
+    // original raw prompt).
+    if (stagedPrompt) {
+      // Reset local history — old snapshots referenced previous analysis
+      setLocalHistory([]);
+      setLocalFuture([]);
+      lastTextEditAtRef.current = 0;
+
+      const baseDataForAnalyze: ScriptNodeData = {
+        ...nodeData,
+        // prompt is intentionally the user's original — only the analysis
+        // operates on stagedPrompt
+        modelName: modelNameFromStage || nodeData.modelName,
+        scriptAnalysis: undefined,
+        scriptAnalysisAlternatives: undefined,
+        activeAnalysisIndex: undefined,
+      };
+      await runAnalyze(stagedPrompt, baseDataForAnalyze);
+    }
+  }, [conversationId, id, nodeData, runAnalyze, updateNodeData]);
+
+  const handleReadScript = useCallback(async () => {
+    if (!nodeData.prompt?.trim()) {
+      setAnalysisError("Ingresa el guion antes de leer.");
+      return;
+    }
+    await runAnalyze(nodeData.prompt, nodeData);
+  }, [nodeData, runAnalyze]);
 
   // --- Materialize scenes into canvas nodes ---
 
@@ -345,6 +501,8 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
           scriptNodeId: id,
           sceneTargets,
           linkPreviousOutput: !!nodeData.linkPreviousOutput,
+          visualReferenceSourceId,
+          paramsSceneSourceId,
         }),
       });
       const body = await res.json();
@@ -398,7 +556,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
     } finally {
       setIsMaterializing(false);
     }
-  }, [analysis, conversationId, id, nodeData, setNodes, setEdges]);
+  }, [analysis, conversationId, id, nodeData, setNodes, setEdges, visualReferenceSourceId, paramsSceneSourceId]);
 
   const promptPreview = nodeData.prompt
     ? nodeData.prompt.length > 120
@@ -454,7 +612,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
           <FileText className="h-3 w-3 text-muted-foreground" />
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Guion</span>
         </div>
-        <textarea
+        <NodeTextarea
           value={nodeData.prompt || ""}
           onChange={handlePromptChange}
           onKeyDown={stopProp}
@@ -462,32 +620,54 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
           className="nodrag w-full text-xs bg-muted/30 rounded-md px-2 py-1.5 border-none outline-none resize-y min-h-[80px] max-h-[200px] placeholder:text-muted-foreground/50"
           rows={4}
         />
-        <div className="flex gap-1.5">
-          <button
-            onClick={handleReadScript}
-            disabled={isAnalyzing || !nodeData.prompt?.trim()}
-            className="nodrag flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded-md bg-fuchsia-500/15 text-fuchsia-400 hover:bg-fuchsia-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {isAnalyzing ? (
-              <>
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Leyendo guion...
-              </>
-            ) : (
-              <>
-                <Wand2 className="h-3 w-3" />
-                {hasAnalysis ? "Re-leer guion" : "Leer guion"}
-              </>
-            )}
-          </button>
+        <div className="space-y-1.5">
+          <div className="flex gap-1.5">
+            <button
+              onClick={handleReadScript}
+              disabled={isAnalyzing || isStaging || isMaterializing || !nodeData.prompt?.trim()}
+              className="nodrag flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded-md bg-fuchsia-500/15 text-fuchsia-400 hover:bg-fuchsia-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title="Segmenta el texto actual literalmente en escenas (3 alternativas)"
+            >
+              {isAnalyzing ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Leyendo...
+                </>
+              ) : (
+                <>
+                  <Wand2 className="h-3 w-3" />
+                  {hasAnalysis ? "Re-leer guion" : "Leer guion"}
+                </>
+              )}
+            </button>
+            <button
+              onClick={handleStageScript}
+              disabled={isStaging || isAnalyzing || isMaterializing || !nodeData.prompt?.trim()}
+              className="nodrag flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded-md bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title="Transforma el texto en guion estructurado (locación, acción, VO, S.I)"
+            >
+              {isStaging ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Escenificando...
+                </>
+              ) : (
+                <>
+                  <Drama className="h-3 w-3" />
+                  Escenificar
+                </>
+              )}
+            </button>
+          </div>
           {!hasAnalysis && (
             <button
               onClick={() => addSceneAt(0)}
-              className="nodrag flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded-md bg-muted/40 hover:bg-muted/60 transition-colors"
-              title="Agregar escena manual sin leer guion"
+              disabled={isAnalyzing || isStaging || isMaterializing}
+              className="nodrag w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded-md bg-muted/40 hover:bg-muted/60 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title="Agregar escena manual sin leer ni escenificar"
             >
               <Plus className="h-3 w-3" />
-              Manual
+              Empezar manual
             </button>
           )}
         </div>
@@ -511,6 +691,42 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
           </div>
         )}
       </div>
+
+      {/* Alternative selector (tabs) — only when there are multiple */}
+      {nodeData.scriptAnalysisAlternatives && nodeData.scriptAnalysisAlternatives.length > 1 && (
+        <div className="px-3 pt-2 pb-1 space-y-1">
+          <div className="flex gap-1 p-1 bg-muted/30 rounded-md border border-border/30">
+            {nodeData.scriptAnalysisAlternatives.map((alt, i) => {
+              const isActive = (nodeData.activeAnalysisIndex ?? 0) === i;
+              return (
+                <button
+                  key={i}
+                  onClick={() => handleSelectAlternative(i)}
+                  className={`nodrag flex-1 px-2 py-1.5 text-[10px] rounded transition-colors ${
+                    isActive
+                      ? "bg-fuchsia-500/20 text-fuchsia-400 font-semibold"
+                      : "text-muted-foreground hover:bg-muted/60"
+                  }`}
+                  title={alt.approach || ""}
+                >
+                  <div className="flex flex-col items-center leading-tight">
+                    <span>{alt.label || `Alt ${i + 1}`}</span>
+                    <span className="text-[9px] opacity-70">{alt.scenes.length} esc</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {(() => {
+            const activeAlt =
+              nodeData.scriptAnalysisAlternatives[nodeData.activeAnalysisIndex ?? 0];
+            if (!activeAlt?.approach) return null;
+            return (
+              <p className="text-[10px] text-muted-foreground italic px-1">{activeAlt.approach}</p>
+            );
+          })()}
+        </div>
+      )}
 
       {/* Analysis section */}
       {hasAnalysis && (
@@ -575,7 +791,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
                 Escenas ({sceneCount})
               </span>
             </div>
-            <div className="space-y-1 max-h-[420px] overflow-y-auto">
+            <div className="nowheel space-y-1 max-h-[420px] overflow-y-auto">
               {/* Insert at start */}
               <InsertButton onClick={() => addSceneAt(0)} label="Insertar al inicio" />
 
@@ -623,7 +839,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
           {/* Materialize button */}
           <button
             onClick={handleMaterialize}
-            disabled={isMaterializing || sceneCount === 0}
+            disabled={isMaterializing || isAnalyzing || isStaging || sceneCount === 0}
             className="nodrag w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded-md bg-violet-500/15 text-violet-400 hover:bg-violet-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {isMaterializing ? (
@@ -647,6 +863,31 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
           <span className="truncate">{nodeData.errorMessage}</span>
         </div>
       )}
+
+      {/* Input handle: visual reference (gallery/static-image) — feeds the
+          first generated destination as visual context (the first scene has no
+          previous output to reference). */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={HANDLE_IDS.INPUT_VISUAL_REFERENCE}
+        className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background"
+        style={{ top: "65%" }}
+        title="Galería de referencia visual (alimenta a la primera escena)"
+      />
+
+      {/* Input handle: custom Params Escena reference. When connected,
+          materialize wires THAT node to all scenes instead of auto-creating
+          one. Use this when you want a reusable Params Escena with its own
+          gallery / extracted style. */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={HANDLE_IDS.INPUT_PARAMS_SCENE_REF}
+        className="!w-3 !h-3 !border-2 !border-background"
+        style={{ top: "85%", backgroundColor: "#fc0" }}
+        title="Params Escena custom (se conecta a todas las escenas al generar)"
+      />
 
       {/* Output handle: chain to first scene */}
       <Handle
@@ -749,9 +990,9 @@ function SceneCard({
           <X className="h-2.5 w-2.5" />
         </button>
       </div>
-      <textarea
+      <NodeTextarea
         value={scene.text}
-        onChange={(e) => onTextChange(e.target.value)}
+        onChange={onTextChange}
         onKeyDown={stopProp}
         placeholder="Texto de la escena..."
         className="nodrag w-full text-[10px] bg-background/50 rounded px-1.5 py-1 border border-border/30 outline-none resize-y min-h-[60px] max-h-[160px] whitespace-pre-wrap placeholder:text-muted-foreground/50"

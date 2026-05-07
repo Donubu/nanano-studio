@@ -73,6 +73,20 @@ const VALID_CONNECTIONS: ConnectionRule[] = [
 
   // === Params Escena → Scene (estilo/visual/técnica) ===
   { sourceType: "params-scene", sourceHandle: HANDLE_IDS.OUTPUT_PARAMS, targetType: "scene", targetHandle: HANDLE_IDS.INPUT_SCENE_PARAMS },
+
+  // === Galería/Imagen estática → Script y Params Escena (referencia visual) ===
+  // Used as visual context: feed into the first generated target downstream of
+  // the Script, or as source for "Extract style" in Params Escena.
+  { sourceType: "static-image-group", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "script", targetHandle: HANDLE_IDS.INPUT_VISUAL_REFERENCE },
+  { sourceType: "static-image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "script", targetHandle: HANDLE_IDS.INPUT_VISUAL_REFERENCE },
+  { sourceType: "static-image-group", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "params-scene", targetHandle: HANDLE_IDS.INPUT_VISUAL_REFERENCE },
+  { sourceType: "static-image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "params-scene", targetHandle: HANDLE_IDS.INPUT_VISUAL_REFERENCE },
+
+  // === Params Escena → Script (referencia para reuso en materialize) ===
+  // The user can connect their own Params Escena (with gallery, content, etc.)
+  // to the Script. When present, materialize wires that node to all scenes
+  // instead of creating a fresh determinístic params-scene.
+  { sourceType: "params-scene", sourceHandle: HANDLE_IDS.OUTPUT_PARAMS, targetType: "script", targetHandle: HANDLE_IDS.INPUT_PARAMS_SCENE_REF },
 ];
 
 /**
@@ -115,6 +129,22 @@ export function isValidConnection(
       (e) => e.target === connection.target && e.targetHandle === HANDLE_IDS.INPUT_SCENE_PARAMS
     );
     if (alreadyHasSceneParams) return false;
+  }
+
+  // Enforce: only 1 visual reference per Script or Params Escena
+  if (connection.targetHandle === HANDLE_IDS.INPUT_VISUAL_REFERENCE && edges) {
+    const alreadyHasVisualRef = edges.some(
+      (e) => e.target === connection.target && e.targetHandle === HANDLE_IDS.INPUT_VISUAL_REFERENCE
+    );
+    if (alreadyHasVisualRef) return false;
+  }
+
+  // Enforce: only 1 Params Escena reference per Script
+  if (connection.targetHandle === HANDLE_IDS.INPUT_PARAMS_SCENE_REF && edges) {
+    const alreadyHasParamsSceneRef = edges.some(
+      (e) => e.target === connection.target && e.targetHandle === HANDLE_IDS.INPUT_PARAMS_SCENE_REF
+    );
+    if (alreadyHasParamsSceneRef) return false;
   }
 
   return true;

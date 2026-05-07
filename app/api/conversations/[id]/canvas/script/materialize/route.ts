@@ -77,10 +77,19 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { scriptNodeId, sceneTargets, linkPreviousOutput } = body as {
+    const { scriptNodeId, sceneTargets, linkPreviousOutput, visualReferenceSourceId, paramsSceneSourceId } = body as {
       scriptNodeId: string;
       sceneTargets?: SceneTargetOverride[];
       linkPreviousOutput?: boolean;
+      // Frontend-supplied ID of the gallery/static-image connected to the
+      // script's INPUT_VISUAL_REFERENCE. We trust the frontend over the DB read
+      // because autosave is debounced — the edge may not be persisted yet.
+      visualReferenceSourceId?: string | null;
+      // Frontend-supplied ID of a custom Params Escena connected to the
+      // script's INPUT_PARAMS_SCENE_REF. When present, that node is wired to
+      // all scenes (preserving the user's gallery/content) instead of
+      // auto-creating params-scene-${scriptNodeId}.
+      paramsSceneSourceId?: string | null;
     };
 
     if (!scriptNodeId) {
@@ -149,16 +158,25 @@ export async function POST(
     const targetIdFor = (idx: number) => `dst-${scriptNodeId}-${idx}`;
     const chainEdgeId = (idx: number) => `edge-chain-${scriptNodeId}-${idx}`;
     const targetEdgeId = (idx: number) => `edge-target-${scriptNodeId}-${idx}`;
-    const paramsSceneId = `params-scene-${scriptNodeId}`;
+
+    // Params Escena resolution: if the user wired their own Params Escena to
+    // the script's INPUT_PARAMS_SCENE_REF, use THAT node id. Otherwise fall
+    // back to the determinístic id (auto-create / reuse).
+    const paramsSceneId = paramsSceneSourceId || `params-scene-${scriptNodeId}`;
+    const usingCustomParamsScene = !!paramsSceneSourceId;
     const paramsSceneEdgeId = (idx: number) => `edge-params-scene-${scriptNodeId}-${idx}`;
 
-    // Reuse existing params-scene if user already created/edited one (preserves
-    // their typed style content across re-materializations).
-    const [existingParamsRows] = await pool.execute<NodeRow[]>(
-      `SELECT id, type, position_x, position_y, config FROM canvas_nodes WHERE id = ? AND conversation_id = ?`,
-      [paramsSceneId, id]
-    );
-    const paramsSceneExists = existingParamsRows.length > 0;
+    // Reuse existing params-scene (auto or custom). Custom is assumed to
+    // exist since the user wired it; the auto one we check explicitly to
+    // decide whether to create it fresh or reuse the prior content.
+    let paramsSceneExists = usingCustomParamsScene;
+    if (!usingCustomParamsScene) {
+      const [existingParamsRows] = await pool.execute<NodeRow[]>(
+        `SELECT id, type, position_x, position_y, config FROM canvas_nodes WHERE id = ? AND conversation_id = ?`,
+        [paramsSceneId, id]
+      );
+      paramsSceneExists = existingParamsRows.length > 0;
+    }
 
     const totalScenes = scenes.length;
     const generalInfo = analysis.generalInfo;
@@ -259,6 +277,42 @@ export async function POST(
         target: sceneIdFor(scene.index),
         targetHandle: HANDLE_IDS.INPUT_SCENE_PARAMS,
       });
+    }
+
+    // Visual reference: if there's a gallery (or static image) connected to
+    // the Script's INPUT_VISUAL_REFERENCE, wire it to the FIRST scene's
+    // destination so the first image/video has visual context (it has no
+    // previous output to reference yet).
+    //
+    // We prefer the frontend-supplied ID (visualReferenceSourceId) because the
+    // user may have just connected the gallery and the autosave PUT hasn't
+    // fired yet — DB would show no edge. Fallback to scanning DB for legacy
+    // calls or when the frontend doesn't supply the field.
+    let visualRefSource: string | null = visualReferenceSourceId || null;
+    if (!visualRefSource) {
+      const visualRefEdge = allEdges.find(
+        (e) => e.target_node_id === scriptNodeId && e.target_handle === HANDLE_IDS.INPUT_VISUAL_REFERENCE
+      );
+      if (visualRefEdge) visualRefSource = visualRefEdge.source_node_id;
+    }
+    if (visualRefSource && scenes.length > 0) {
+      const firstScene = scenes[0];
+      if (firstScene.targetNodeType && firstScene.targetNodeType !== "none") {
+        const firstTargetId = targetIdFor(firstScene.index);
+        let targetHandle: string | null = null;
+        if (firstScene.targetNodeType === "image") targetHandle = HANDLE_IDS.INPUT_REFERENCE;
+        else if (firstScene.targetNodeType === "video") targetHandle = HANDLE_IDS.INPUT_FIRST_FRAME;
+        else if (firstScene.targetNodeType === "text-practicante") targetHandle = HANDLE_IDS.INPUT_MEDIA;
+        if (targetHandle) {
+          addedEdges.push({
+            id: `edge-visual-ref-${scriptNodeId}`,
+            source: visualRefSource,
+            sourceHandle: HANDLE_IDS.OUTPUT_IMAGE,
+            target: firstTargetId,
+            targetHandle,
+          });
+        }
+      }
     }
 
     // Auto-link: connect output of destination N to input of destination N+1
