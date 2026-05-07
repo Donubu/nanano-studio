@@ -19,6 +19,7 @@ import { NodeDeleteButton } from "./node-status";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useCanvasContext } from "../canvas-context";
 import { NodeTextarea } from "./node-textarea";
+import { ResizeHandle, nodeSizeClass } from "./resize-handle";
 
 function stopProp(e: React.SyntheticEvent) {
   e.stopPropagation();
@@ -28,6 +29,8 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
   id,
   data,
   selected,
+  width,
+  height,
 }: NodeProps) {
   const nodeData = data as unknown as ParamsSceneNodeData;
   const { updateNodeData } = useNodeUpdate();
@@ -109,7 +112,7 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
     <div
       className={`group bg-card rounded-xl border-2 border-dashed border-yellow-400/40 ${
         selected ? "ring-2 ring-yellow-400/40" : ""
-      } min-w-[260px] max-w-[320px] transition-all`}
+      } transition-all overflow-hidden flex flex-col ${nodeSizeClass(width, height, "min-w-[260px] max-w-[320px]")}`}
     >
       {/* Input handle: gallery / static-image as visual reference for "Extract style" */}
       <Handle
@@ -198,6 +201,8 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
         style={{ backgroundColor: "#fc0" }}
         title="Params Escena output"
       />
+
+      <ResizeHandle minWidth={240} minHeight={160} />
     </div>
   );
 });

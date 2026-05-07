@@ -8,8 +8,9 @@ import { NodeDeleteButton } from "./node-status";
 import { useCanvasContext } from "../canvas-context";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { uploadFileToS3 } from "../lib/canvas-upload";
+import { ResizeHandle, nodeSizeClass } from "./resize-handle";
 
-export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode({ id, data, selected }: NodeProps) {
+export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode({ id, data, selected, width, height }: NodeProps) {
   const nodeData = data as unknown as StaticImageGroupNodeData;
   const { updateNodeData } = useNodeUpdate();
   const { openImagePicker, projectId } = useCanvasContext();
@@ -76,7 +77,7 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
     <div
       className={`group bg-card rounded-xl border-2 border-border ${
         selected ? "ring-2 ring-primary/50" : ""
-      } min-w-[220px] max-w-[340px] transition-all`}
+      } transition-all overflow-hidden flex flex-col ${nodeSizeClass(width, height, "min-w-[220px] max-w-[340px]")}`}
       onPaste={handlePaste}
     >
       {/* Header */}
@@ -153,6 +154,8 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
         className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background"
         title="Image output"
       />
+
+      <ResizeHandle minWidth={200} minHeight={140} />
     </div>
   );
 });

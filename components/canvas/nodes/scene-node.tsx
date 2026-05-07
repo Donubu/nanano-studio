@@ -5,6 +5,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Film, ImageIcon, Video, Bot } from "lucide-react";
 import { HANDLE_IDS, type SceneNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
+import { ResizeHandle, nodeSizeClass } from "./resize-handle";
 
 const targetIconMap = {
   image: ImageIcon,
@@ -20,7 +21,7 @@ const targetLabelMap: Record<string, string> = {
   none: "—",
 };
 
-export const SceneNodeComponent = memo(function SceneNode({ id, data, selected }: NodeProps) {
+export const SceneNodeComponent = memo(function SceneNode({ id, data, selected, width, height }: NodeProps) {
   const nodeData = data as unknown as SceneNodeData;
   const targetType = nodeData.targetNodeType || "none";
   const TargetIcon = targetIconMap[targetType];
@@ -29,7 +30,7 @@ export const SceneNodeComponent = memo(function SceneNode({ id, data, selected }
     <div
       className={`group bg-card rounded-xl border-2 border-violet-500/40 ${
         selected ? "ring-2 ring-violet-500/50" : ""
-      } min-w-[240px] max-w-[300px] transition-all`}
+      } transition-all overflow-hidden flex flex-col ${nodeSizeClass(width, height, "min-w-[240px] max-w-[300px]")}`}
     >
       {/* Input handle: chain from script or previous scene */}
       <Handle
@@ -95,6 +96,8 @@ export const SceneNodeComponent = memo(function SceneNode({ id, data, selected }
         className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background"
         title="Texto de la escena (prompt)"
       />
+
+      <ResizeHandle minWidth={220} minHeight={140} />
     </div>
   );
 });

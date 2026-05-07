@@ -13,7 +13,8 @@ interface HistoryNavProps {
 
 export function HistoryNav({ history, effectiveIndex, onNavigate, onDelete }: HistoryNavProps) {
   const total = history.length;
-  if (total <= 1) return null;
+  if (total === 0) return null;
+  const isSingle = total === 1;
 
   const current = history[effectiveIndex];
 
@@ -57,33 +58,38 @@ export function HistoryNav({ history, effectiveIndex, onNavigate, onDelete }: Hi
     <div className="flex items-center justify-center gap-2 py-1">
       <button
         onClick={handleDownload}
-        className="p-1.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+        className="nodrag p-1.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
         title="Descargar"
       >
         <Download className="h-4 w-4" />
       </button>
-      <button
-        onClick={() => onNavigate(effectiveIndex - 1)}
-        disabled={effectiveIndex <= 0}
-        className="p-1.5 rounded hover:bg-accent disabled:opacity-30 disabled:cursor-default transition-colors"
-      >
-        <ChevronLeft className="h-4 w-4" />
-      </button>
-      <span className="text-xs font-medium text-muted-foreground tabular-nums min-w-[32px] text-center">
-        {effectiveIndex + 1}/{total}
-      </span>
-      <button
-        onClick={() => onNavigate(effectiveIndex + 1)}
-        disabled={effectiveIndex >= total - 1}
-        className="p-1.5 rounded hover:bg-accent disabled:opacity-30 disabled:cursor-default transition-colors"
-      >
-        <ChevronRight className="h-4 w-4" />
-      </button>
+      {!isSingle && (
+        <>
+          <button
+            onClick={() => onNavigate(effectiveIndex - 1)}
+            disabled={effectiveIndex <= 0}
+            className="nodrag p-1.5 rounded hover:bg-accent disabled:opacity-30 disabled:cursor-default transition-colors"
+            title="Anterior"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <span className="text-xs font-medium text-muted-foreground tabular-nums min-w-[32px] text-center">
+            {effectiveIndex + 1}/{total}
+          </span>
+          <button
+            onClick={() => onNavigate(effectiveIndex + 1)}
+            disabled={effectiveIndex >= total - 1}
+            className="nodrag p-1.5 rounded hover:bg-accent disabled:opacity-30 disabled:cursor-default transition-colors"
+            title="Siguiente"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </>
+      )}
       <button
         onClick={handleDelete}
-        disabled={total <= 1}
-        className="p-1.5 rounded hover:bg-red-500/15 text-muted-foreground hover:text-red-400 disabled:opacity-30 disabled:cursor-default transition-colors"
-        title="Eliminar del historial"
+        className="nodrag p-1.5 rounded hover:bg-red-500/15 text-muted-foreground hover:text-red-400 transition-colors"
+        title={isSingle ? "Eliminar generación" : "Eliminar del historial"}
       >
         <Trash2 className="h-4 w-4" />
       </button>

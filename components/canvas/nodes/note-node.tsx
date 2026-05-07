@@ -6,8 +6,9 @@ import { StickyNote } from "lucide-react";
 import type { NoteNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
 import { useNodeUpdate } from "../hooks/use-node-update";
+import { ResizeHandle, nodeSizeClass } from "./resize-handle";
 
-export const NoteNodeComponent = memo(function NoteNode({ id, data, selected }: NodeProps) {
+export const NoteNodeComponent = memo(function NoteNode({ id, data, selected, width, height }: NodeProps) {
   const nodeData = data as unknown as NoteNodeData;
   const { updateNodeData } = useNodeUpdate();
 
@@ -19,7 +20,7 @@ export const NoteNodeComponent = memo(function NoteNode({ id, data, selected }: 
     <div
       className={`group bg-amber-50 dark:bg-amber-950/30 rounded-xl border-2 border-amber-300/50 dark:border-amber-700/50 ${
         selected ? "ring-2 ring-amber-400/50" : ""
-      } min-w-[180px] max-w-[280px] transition-all`}
+      } transition-all overflow-hidden flex flex-col ${nodeSizeClass(width, height, "min-w-[180px] max-w-[280px]")}`}
     >
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-amber-300/30 dark:border-amber-700/30">
@@ -40,6 +41,7 @@ export const NoteNodeComponent = memo(function NoteNode({ id, data, selected }: 
       </div>
 
       {/* No handles - notes don't connect to anything */}
+      <ResizeHandle minWidth={160} minHeight={80} />
     </div>
   );
 });

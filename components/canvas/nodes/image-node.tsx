@@ -8,6 +8,7 @@ import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useUpstreamPromptLabel } from "../hooks/use-upstream-prompt-label";
+import { ResizeHandle, nodeSizeClass } from "./resize-handle";
 
 const statusColors: Record<string, string> = {
   idle: "border-border",
@@ -16,7 +17,7 @@ const statusColors: Record<string, string> = {
   error: "border-red-500",
 };
 
-export const ImageNodeComponent = memo(function ImageNode({ id, data, selected }: NodeProps) {
+export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, width, height }: NodeProps) {
   const nodeData = data as unknown as ImageNodeData;
   const status = nodeData.status || "idle";
   const { updateNodeData } = useNodeUpdate();
@@ -64,7 +65,7 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected }
     <div
       className={`group bg-card rounded-xl border-2 ${statusColors[status]} ${
         selected ? "ring-2 ring-primary/50" : ""
-      } min-w-[260px] max-w-[300px] transition-all`}
+      } transition-all overflow-hidden flex flex-col ${nodeSizeClass(width, height, "min-w-[260px] max-w-[300px]")}`}
     >
       {/* Input handles */}
       <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_PROMPT}
@@ -124,6 +125,8 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected }
       {/* Output handle */}
       <Handle type="source" position={Position.Right} id={HANDLE_IDS.OUTPUT_IMAGE}
         className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background" title="Image output" />
+
+      <ResizeHandle minWidth={220} minHeight={140} />
     </div>
   );
 });
