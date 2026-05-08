@@ -1,14 +1,15 @@
 "use client";
 
-import { memo, useCallback } from "react";
+import { memo, useCallback, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { ImageIcon, Loader2, AlertCircle } from "lucide-react";
+import { ImageIcon, Loader2, AlertCircle, ZoomIn } from "lucide-react";
 import { HANDLE_IDS, type ImageNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useUpstreamPromptLabel } from "../hooks/use-upstream-prompt-label";
 import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { MediaViewerModal, type MediaViewerEntry } from "./media-viewer-modal";
 
 const statusColors: Record<string, string> = {
   idle: "border-border",
@@ -60,6 +61,17 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
 
   const displayUrl = nodeData.outputUrl;
   const isViewingLatest = effectiveIndex === totalOutputs - 1;
+  const isResized = width != null || height != null;
+
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const viewerEntries: MediaViewerEntry[] = history
+    .filter((h) => !!h.url)
+    .map((h) => ({
+      url: h.url!,
+      type: "image" as const,
+      modelName: h.modelName,
+      createdAt: h.createdAt,
+    }));
 
   return (
     <div
@@ -90,20 +102,38 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
       </div>
 
       {/* Body */}
-      <div className="px-3 py-2 space-y-1.5">
+      <div className={`px-3 py-2 space-y-1.5 ${isResized ? "flex-1 min-h-0 flex flex-col" : ""}`}>
         <p className={`text-xs line-clamp-2 ${nodeData.prompt ? "text-muted-foreground" : upstreamLabel ? "text-violet-400/80 italic" : "text-muted-foreground"}`}>
           {nodeData.prompt || upstreamLabel || "Sin prompt configurado"}
         </p>
 
         {displayUrl ? (
-          <div className="mt-1 space-y-1">
-            <div className="rounded-md overflow-hidden bg-muted/50 relative">
-              <img src={displayUrl} alt="Generated" className="max-w-full max-h-[28vh] mx-auto object-contain rounded-md" />
+          <div className={`mt-1 space-y-1 ${isResized ? "flex-1 min-h-0 flex flex-col" : ""}`}>
+            <div className={`rounded-md overflow-hidden bg-muted/50 relative ${isResized ? "flex-1 min-h-0" : ""}`}>
+              <img
+                src={displayUrl}
+                alt="Generated"
+                className={
+                  isResized
+                    ? "w-full h-full object-contain rounded-md"
+                    : "max-w-full max-h-[28vh] mx-auto object-contain rounded-md"
+                }
+              />
               {!isViewingLatest && effectiveIndex >= 0 && (
                 <div className="absolute top-1 left-1 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded">
                   {history[effectiveIndex]?.modelName || "Anterior"}
                 </div>
               )}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setViewerOpen(true);
+                }}
+                className="nodrag absolute top-1 right-1 p-1.5 rounded-md bg-black/60 hover:bg-black/80 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                title="Ver en grande"
+              >
+                <ZoomIn className="h-3.5 w-3.5" />
+              </button>
             </div>
             <HistoryNav history={history} effectiveIndex={effectiveIndex} onNavigate={navigateTo} onDelete={deleteFromHistory} />
           </div>
@@ -127,6 +157,26 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
         className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background" title="Image output" />
 
       <ResizeHandle minWidth={220} minHeight={140} />
+
+      {viewerOpen && displayUrl && (
+        <MediaViewerModal
+          entries={viewerEntries.length > 0 ? viewerEntries : undefined}
+          entry={
+            viewerEntries.length > 0
+              ? undefined
+              : { url: displayUrl, type: "image" }
+          }
+          initialIndex={effectiveIndex >= 0 ? effectiveIndex : 0}
+          metadata={{
+            label: nodeData.label,
+            prompt: nodeData.prompt,
+            modelName: nodeData.modelName,
+            aspectRatio: nodeData.aspectRatio,
+            resolution: nodeData.resolution,
+          }}
+          onClose={() => setViewerOpen(false)}
+        />
+      )}
     </div>
   );
 });

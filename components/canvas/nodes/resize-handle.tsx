@@ -7,6 +7,15 @@ interface ResizeHandleProps {
   minWidth?: number;
   /** Minimum height in px the user can shrink the node to. */
   minHeight?: number;
+  /**
+   * Lock the aspect ratio while dragging — making the node wider also makes
+   * it taller (and vice versa). Use for media nodes (image, video) where
+   * stretching only horizontally would let the rendered media overflow and
+   * push the action buttons (history nav, download, delete) out of reach.
+   * Text-only nodes (text, practicante, params, scene, script, note) should
+   * leave this off so the user can adjust width and height independently.
+   */
+  keepAspectRatio?: boolean;
 }
 
 /**
@@ -14,20 +23,18 @@ interface ResizeHandleProps {
  * (low opacity) and brightens on hover. Drop inside any canvas node alongside
  * the existing handles. Pair with `nodeSizeClass()` to make the node's
  * root element grow with the resized wrapper.
- *
- * Resizing preserves the node's current aspect ratio: making it wider also
- * makes it taller (and vice versa). Without this, dragging only-horizontally
- * stretches the box but leaves its height unchanged, which causes the
- * generated image to overflow and push the action buttons (history nav,
- * download, delete) off-screen / out of reach.
  */
-export function ResizeHandle({ minWidth = 200, minHeight = 80 }: ResizeHandleProps) {
+export function ResizeHandle({
+  minWidth = 200,
+  minHeight = 80,
+  keepAspectRatio = false,
+}: ResizeHandleProps) {
   return (
     <NodeResizeControl
       position="bottom-right"
       minWidth={minWidth}
       minHeight={minHeight}
-      keepAspectRatio
+      keepAspectRatio={keepAspectRatio}
       style={{
         background: "transparent",
         border: "none",

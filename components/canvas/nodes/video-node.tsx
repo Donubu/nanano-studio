@@ -1,14 +1,15 @@
 "use client";
 
-import { memo, useCallback } from "react";
+import { memo, useCallback, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Video, Loader2, AlertCircle, Play } from "lucide-react";
+import { Video, Loader2, AlertCircle, Play, ZoomIn } from "lucide-react";
 import { HANDLE_IDS, type VideoNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useUpstreamPromptLabel } from "../hooks/use-upstream-prompt-label";
 import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { MediaViewerModal, type MediaViewerEntry } from "./media-viewer-modal";
 
 const statusColors: Record<string, string> = {
   idle: "border-border",
@@ -60,6 +61,17 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected, 
   const displayUrl = nodeData.outputUrl;
   const isViewingLatest = effectiveIndex === totalOutputs - 1;
   const isVertical = nodeData.aspectRatio === "9:16";
+  const isResized = width != null || height != null;
+
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const viewerEntries: MediaViewerEntry[] = history
+    .filter((h) => !!h.url)
+    .map((h) => ({
+      url: h.url!,
+      type: "video" as const,
+      modelName: h.modelName,
+      createdAt: h.createdAt,
+    }));
 
   return (
     <div
@@ -105,28 +117,51 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected, 
       </div>
 
       {/* Body */}
-      <div className="px-3 py-2 space-y-1.5">
+      <div className={`px-3 py-2 space-y-1.5 ${isResized ? "flex-1 min-h-0 flex flex-col" : ""}`}>
         <p className={`text-xs line-clamp-2 ${nodeData.prompt ? "text-muted-foreground" : upstreamLabel ? "text-violet-400/80 italic" : "text-muted-foreground"}`}>
           {nodeData.prompt || upstreamLabel || "Sin prompt configurado"}
         </p>
 
         {displayUrl ? (
-          <div className="mt-1 space-y-1">
-            <div className={`rounded-md overflow-hidden bg-muted/50 relative mx-auto max-h-[28vh] ${isVertical ? "max-w-[160px]" : "w-full"}`}>
+          <div className={`mt-1 space-y-1 ${isResized ? "flex-1 min-h-0 flex flex-col" : ""}`}>
+            <div
+              className={
+                isResized
+                  ? `rounded-md overflow-hidden bg-muted/50 relative mx-auto flex-1 min-h-0 ${isVertical ? "max-w-[60%]" : "w-full"}`
+                  : `rounded-md overflow-hidden bg-muted/50 relative mx-auto max-h-[28vh] ${isVertical ? "max-w-[160px]" : "w-full"}`
+              }
+            >
               <video
                 src={displayUrl}
                 className="w-full h-full object-contain"
-                style={{ aspectRatio: isVertical ? "9/16" : "16/9" }}
+                style={isResized ? undefined : { aspectRatio: isVertical ? "9/16" : "16/9" }}
                 muted playsInline preload="metadata"
               />
-              <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setViewerOpen(true);
+                }}
+                className="nodrag absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/40 transition-colors"
+                title="Reproducir en grande"
+              >
                 <Play className="h-8 w-8 text-white/80" />
-              </div>
+              </button>
               {!isViewingLatest && effectiveIndex >= 0 && (
-                <div className="absolute top-1 left-1 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded">
+                <div className="absolute top-1 left-1 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded pointer-events-none">
                   {history[effectiveIndex]?.modelName || "Anterior"}
                 </div>
               )}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setViewerOpen(true);
+                }}
+                className="nodrag absolute top-1 right-1 p-1.5 rounded-md bg-black/60 hover:bg-black/80 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                title="Ver detalle"
+              >
+                <ZoomIn className="h-3.5 w-3.5" />
+              </button>
             </div>
             <HistoryNav history={history} effectiveIndex={effectiveIndex} onNavigate={navigateTo} onDelete={deleteFromHistory} />
           </div>
@@ -159,6 +194,27 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected, 
         className="!w-3 !h-3 !bg-amber-500 !border-2 !border-background" title="Video output" />
 
       <ResizeHandle minWidth={isVertical ? 180 : 220} minHeight={140} />
+
+      {viewerOpen && displayUrl && (
+        <MediaViewerModal
+          entries={viewerEntries.length > 0 ? viewerEntries : undefined}
+          entry={
+            viewerEntries.length > 0
+              ? undefined
+              : { url: displayUrl, type: "video" }
+          }
+          initialIndex={effectiveIndex >= 0 ? effectiveIndex : 0}
+          metadata={{
+            label: nodeData.label,
+            prompt: nodeData.prompt,
+            modelName: nodeData.modelName,
+            aspectRatio: nodeData.aspectRatio,
+            resolution: nodeData.resolution,
+            duration: nodeData.duration,
+          }}
+          onClose={() => setViewerOpen(false)}
+        />
+      )}
     </div>
   );
 });

@@ -2,13 +2,14 @@
 
 import { memo, useCallback, useRef, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Images, Plus, X, FolderOpen, Loader2 } from "lucide-react";
+import { Images, Plus, X, FolderOpen, Loader2, ZoomIn } from "lucide-react";
 import { HANDLE_IDS, type StaticImageGroupNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
 import { useCanvasContext } from "../canvas-context";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { uploadFileToS3 } from "../lib/canvas-upload";
 import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { MediaViewerModal, type MediaViewerEntry } from "./media-viewer-modal";
 
 export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode({ id, data, selected, width, height }: NodeProps) {
   const nodeData = data as unknown as StaticImageGroupNodeData;
@@ -17,6 +18,11 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
   const inputRef = useRef<HTMLInputElement>(null);
   const images = nodeData.images || [];
   const [uploading, setUploading] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const viewerEntries: MediaViewerEntry[] = images.map((img) => ({
+    url: img.url,
+    type: "image" as const,
+  }));
 
   const existingUrls = new Set(images.map((img) => img.url));
 
@@ -103,8 +109,15 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
                 <div key={i} className="relative rounded overflow-hidden bg-muted/50 group/img">
                   <img src={img.url} alt="" className="w-full aspect-square object-cover" />
                   <button
+                    onClick={(e) => { e.stopPropagation(); setViewerIndex(i); }}
+                    className="nodrag absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/30 opacity-0 group-hover/img:opacity-100 transition-all"
+                    title="Ver en grande"
+                  >
+                    <ZoomIn className="h-4 w-4 text-white drop-shadow" />
+                  </button>
+                  <button
                     onClick={(e) => { e.stopPropagation(); removeImage(i); }}
-                    className="absolute top-0.5 right-0.5 p-0.5 rounded bg-black/50 text-white opacity-0 group-hover/img:opacity-100 transition-opacity"
+                    className="nodrag absolute top-0.5 right-0.5 p-0.5 rounded bg-black/50 text-white opacity-0 group-hover/img:opacity-100 transition-opacity"
                   >
                     <X className="h-2.5 w-2.5" />
                   </button>
@@ -156,6 +169,15 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
       />
 
       <ResizeHandle minWidth={200} minHeight={140} />
+
+      {viewerIndex != null && viewerEntries[viewerIndex] && (
+        <MediaViewerModal
+          entries={viewerEntries}
+          initialIndex={viewerIndex}
+          metadata={{ label: nodeData.label }}
+          onClose={() => setViewerIndex(null)}
+        />
+      )}
     </div>
   );
 });

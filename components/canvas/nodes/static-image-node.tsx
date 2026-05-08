@@ -2,13 +2,14 @@
 
 import { memo, useCallback, useRef, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { ImagePlus, Upload, FolderOpen, Loader2 } from "lucide-react";
+import { ImagePlus, Upload, FolderOpen, Loader2, ZoomIn } from "lucide-react";
 import { HANDLE_IDS, type StaticImageNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
 import { useCanvasContext } from "../canvas-context";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { uploadFileToS3 } from "../lib/canvas-upload";
 import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { MediaViewerModal } from "./media-viewer-modal";
 
 export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data, selected, width, height }: NodeProps) {
   const nodeData = data as unknown as StaticImageNodeData;
@@ -16,6 +17,8 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
   const { openImagePicker, projectId } = useCanvasContext();
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const isResized = width != null || height != null;
 
   const setImage = useCallback((url: string) => {
     updateNodeData(id, { ...nodeData, imageUrl: url });
@@ -68,16 +71,34 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
       </div>
 
       {/* Body */}
-      <div className="px-3 py-2">
+      <div className={`px-3 py-2 ${isResized ? "flex-1 min-h-0 flex flex-col" : ""}`}>
         {uploading ? (
           <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin mb-1" />
             <span className="text-[10px]">Subiendo...</span>
           </div>
         ) : nodeData.imageUrl ? (
-          <div className="space-y-1.5">
-            <div className="relative rounded-md overflow-hidden bg-muted/50">
-              <img src={nodeData.imageUrl} alt={nodeData.caption || "Static"} className="max-w-full max-h-[28vh] mx-auto object-contain rounded-md" />
+          <div className={`space-y-1.5 ${isResized ? "flex-1 min-h-0 flex flex-col" : ""}`}>
+            <div className={`group/img relative rounded-md overflow-hidden bg-muted/50 ${isResized ? "flex-1 min-h-0" : ""}`}>
+              <img
+                src={nodeData.imageUrl}
+                alt={nodeData.caption || "Static"}
+                className={
+                  isResized
+                    ? "w-full h-full object-contain rounded-md"
+                    : "max-w-full max-h-[28vh] mx-auto object-contain rounded-md"
+                }
+              />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setViewerOpen(true);
+                }}
+                className="nodrag absolute top-1 right-1 p-1.5 rounded-md bg-black/60 hover:bg-black/80 text-white opacity-0 group-hover/img:opacity-100 transition-opacity"
+                title="Ver en grande"
+              >
+                <ZoomIn className="h-3.5 w-3.5" />
+              </button>
             </div>
             <div className="flex gap-1">
               <button
@@ -124,6 +145,17 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
       />
 
       <ResizeHandle minWidth={180} minHeight={140} />
+
+      {viewerOpen && nodeData.imageUrl && (
+        <MediaViewerModal
+          entry={{ url: nodeData.imageUrl, type: "image" }}
+          metadata={{
+            label: nodeData.label,
+            caption: nodeData.caption,
+          }}
+          onClose={() => setViewerOpen(false)}
+        />
+      )}
     </div>
   );
 });
