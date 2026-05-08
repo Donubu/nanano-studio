@@ -12,8 +12,14 @@ interface ResizeHandleProps {
 /**
  * Single bottom-right resize handle, Figma/Excel style. Discreet by default
  * (low opacity) and brightens on hover. Drop inside any canvas node alongside
- * the existing handles. Pair with `useNodeSizeStyle()` to make the node's
+ * the existing handles. Pair with `nodeSizeClass()` to make the node's
  * root element grow with the resized wrapper.
+ *
+ * Resizing preserves the node's current aspect ratio: making it wider also
+ * makes it taller (and vice versa). Without this, dragging only-horizontally
+ * stretches the box but leaves its height unchanged, which causes the
+ * generated image to overflow and push the action buttons (history nav,
+ * download, delete) off-screen / out of reach.
  */
 export function ResizeHandle({ minWidth = 200, minHeight = 80 }: ResizeHandleProps) {
   return (
@@ -21,6 +27,7 @@ export function ResizeHandle({ minWidth = 200, minHeight = 80 }: ResizeHandlePro
       position="bottom-right"
       minWidth={minWidth}
       minHeight={minHeight}
+      keepAspectRatio
       style={{
         background: "transparent",
         border: "none",

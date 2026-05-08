@@ -112,10 +112,10 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected, 
 
         {displayUrl ? (
           <div className="mt-1 space-y-1">
-            <div className={`rounded-md overflow-hidden bg-muted/50 relative ${isVertical ? "mx-auto" : ""}`}>
+            <div className={`rounded-md overflow-hidden bg-muted/50 relative mx-auto max-h-[28vh] ${isVertical ? "max-w-[160px]" : "w-full"}`}>
               <video
                 src={displayUrl}
-                className="w-full h-auto object-contain"
+                className="w-full h-full object-contain"
                 style={{ aspectRatio: isVertical ? "9/16" : "16/9" }}
                 muted playsInline preload="metadata"
               />

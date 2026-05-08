@@ -98,7 +98,7 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
         {displayUrl ? (
           <div className="mt-1 space-y-1">
             <div className="rounded-md overflow-hidden bg-muted/50 relative">
-              <img src={displayUrl} alt="Generated" className="w-full h-auto rounded-md" />
+              <img src={displayUrl} alt="Generated" className="max-w-full max-h-[28vh] mx-auto object-contain rounded-md" />
               {!isViewingLatest && effectiveIndex >= 0 && (
                 <div className="absolute top-1 left-1 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded">
                   {history[effectiveIndex]?.modelName || "Anterior"}

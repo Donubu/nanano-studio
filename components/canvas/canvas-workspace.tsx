@@ -614,9 +614,9 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     if (nodes.length === 0) return;
     const confirmed = window.confirm(
       "¿Reordenar todos los nodos?\n\n" +
-      "Se reorganizarán en formato timeline horizontal: " +
-      "los nodos de origen quedan a la izquierda y sus dependientes se ubican " +
-      "en columnas hacia la derecha según el flujo de las conexiones.\n\n" +
+      "Se reorganizarán en formato timeline vertical (de arriba hacia abajo): " +
+      "los orígenes quedan arriba y sus dependientes bajan en la misma columna. " +
+      "Cuando un nodo tiene varios hijos, las ramas extras se abren a la derecha.\n\n" +
       "Las posiciones actuales se perderán (puedes deshacer con Ctrl+Z)."
     );
     if (!confirmed) return;
