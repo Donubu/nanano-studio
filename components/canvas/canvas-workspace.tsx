@@ -612,6 +612,14 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   // Auto-layout: reposition every node into columns based on topological depth
   const reorderNodes = useCallback(() => {
     if (nodes.length === 0) return;
+    const confirmed = window.confirm(
+      "¿Reordenar todos los nodos?\n\n" +
+      "Se reorganizarán en formato timeline horizontal: " +
+      "los nodos de origen quedan a la izquierda y sus dependientes se ubican " +
+      "en columnas hacia la derecha según el flujo de las conexiones.\n\n" +
+      "Las posiciones actuales se perderán (puedes deshacer con Ctrl+Z)."
+    );
+    if (!confirmed) return;
     const positions = autoLayoutPositions(nodes, edges);
     if (positions.size === 0) return;
     takeSnapshot();
