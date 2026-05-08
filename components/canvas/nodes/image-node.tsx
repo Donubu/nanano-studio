@@ -69,6 +69,7 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
     .map((h) => ({
       url: h.url!,
       type: "image" as const,
+      messageId: h.messageId,
       modelName: h.modelName,
       createdAt: h.createdAt,
     }));
@@ -164,15 +165,21 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
           entry={
             viewerEntries.length > 0
               ? undefined
-              : { url: displayUrl, type: "image" }
+              : {
+                  url: displayUrl,
+                  type: "image",
+                  messageId: nodeData.outputMessageId,
+                  modelName: nodeData.modelName,
+                }
           }
           initialIndex={effectiveIndex >= 0 ? effectiveIndex : 0}
           metadata={{
             label: nodeData.label,
             prompt: nodeData.prompt,
-            modelName: nodeData.modelName,
+            negativePrompt: nodeData.negativePrompt,
             aspectRatio: nodeData.aspectRatio,
             resolution: nodeData.resolution,
+            seed: nodeData.seed,
           }}
           onClose={() => setViewerOpen(false)}
         />

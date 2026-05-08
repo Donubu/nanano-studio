@@ -69,6 +69,7 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected, 
     .map((h) => ({
       url: h.url!,
       type: "video" as const,
+      messageId: h.messageId,
       modelName: h.modelName,
       createdAt: h.createdAt,
     }));
@@ -201,16 +202,25 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected, 
           entry={
             viewerEntries.length > 0
               ? undefined
-              : { url: displayUrl, type: "video" }
+              : {
+                  url: displayUrl,
+                  type: "video",
+                  messageId: nodeData.outputMessageId,
+                  modelName: nodeData.modelName,
+                }
           }
           initialIndex={effectiveIndex >= 0 ? effectiveIndex : 0}
           metadata={{
             label: nodeData.label,
             prompt: nodeData.prompt,
-            modelName: nodeData.modelName,
+            negativePrompt: nodeData.negativePrompt,
             aspectRatio: nodeData.aspectRatio,
             resolution: nodeData.resolution,
             duration: nodeData.duration,
+            audioEnabled: nodeData.audioEnabled,
+            firstFrameUrl: nodeData.firstFrameUrl,
+            lastFrameUrl: nodeData.lastFrameUrl,
+            referenceImageUrls: nodeData.referenceImageUrls,
           }}
           onClose={() => setViewerOpen(false)}
         />
