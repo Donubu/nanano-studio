@@ -65,7 +65,7 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
     <div
       className={`group bg-card rounded-xl border-2 ${statusColors[status]} ${
         selected ? "ring-2 ring-primary/50" : ""
-      } transition-all overflow-hidden flex flex-col ${nodeSizeClass(width, height, "min-w-[260px] max-w-[300px]")}`}
+      } transition-all ${nodeSizeClass(width, height, "min-w-[260px] max-w-[300px]")}`}
     >
       {/* Input handles */}
       <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_PROMPT}

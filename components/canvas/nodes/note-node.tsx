@@ -20,7 +20,7 @@ export const NoteNodeComponent = memo(function NoteNode({ id, data, selected, wi
     <div
       className={`group bg-amber-50 dark:bg-amber-950/30 rounded-xl border-2 border-amber-300/50 dark:border-amber-700/50 ${
         selected ? "ring-2 ring-amber-400/50" : ""
-      } transition-all overflow-hidden flex flex-col ${nodeSizeClass(width, height, "min-w-[180px] max-w-[280px]")}`}
+      } transition-all ${nodeSizeClass(width, height, "min-w-[180px] max-w-[280px]")}`}
     >
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-amber-300/30 dark:border-amber-700/30">

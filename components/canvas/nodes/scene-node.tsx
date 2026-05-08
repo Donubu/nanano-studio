@@ -30,7 +30,7 @@ export const SceneNodeComponent = memo(function SceneNode({ id, data, selected, 
     <div
       className={`group bg-card rounded-xl border-2 border-violet-500/40 ${
         selected ? "ring-2 ring-violet-500/50" : ""
-      } transition-all overflow-hidden flex flex-col ${nodeSizeClass(width, height, "min-w-[240px] max-w-[300px]")}`}
+      } transition-all ${nodeSizeClass(width, height, "min-w-[240px] max-w-[300px]")}`}
     >
       {/* Input handle: chain from script or previous scene */}
       <Handle

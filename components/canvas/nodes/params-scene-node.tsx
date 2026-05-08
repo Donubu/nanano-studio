@@ -112,7 +112,7 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
     <div
       className={`group bg-card rounded-xl border-2 border-dashed border-yellow-400/40 ${
         selected ? "ring-2 ring-yellow-400/40" : ""
-      } transition-all overflow-hidden flex flex-col ${nodeSizeClass(width, height, "min-w-[260px] max-w-[320px]")}`}
+      } transition-all ${nodeSizeClass(width, height, "min-w-[260px] max-w-[320px]")}`}
     >
       {/* Input handle: gallery / static-image as visual reference for "Extract style" */}
       <Handle

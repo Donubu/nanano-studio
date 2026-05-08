@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ImageIcon, Video, MessageSquare, Play, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette } from "lucide-react";
+import { ImageIcon, Video, MessageSquare, Play, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CanvasNodeType, ExecutionProgress } from "./lib/canvas-types";
 
@@ -10,6 +10,7 @@ interface CanvasToolbarProps {
   onRunAll: () => void;
   onClone: () => void;
   onLockAll: () => void;
+  onReorder: () => void;
   isExecuting: boolean;
   isAllLocked: boolean;
   executionProgress: ExecutionProgress | null;
@@ -41,6 +42,7 @@ export function CanvasToolbar({
   onRunAll,
   onClone,
   onLockAll,
+  onReorder,
   isExecuting,
   isAllLocked,
   executionProgress,
@@ -157,8 +159,22 @@ export function CanvasToolbar({
         </div>
       </div>
 
-      {/* Secondary toolbar: Clone, Lock All */}
+      {/* Secondary toolbar: Reorder, Clone, Lock All */}
       <div className="flex items-center gap-1 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-1.5 shadow-lg">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onReorder}
+          disabled={isExecuting || nodeCount === 0}
+          className="gap-1.5 text-xs"
+          title="Reordenar todos los nodos en columnas según sus dependencias"
+        >
+          <LayoutGrid className="h-3.5 w-3.5" />
+          Reordenar
+        </Button>
+
+        <div className="w-px h-5 bg-border" />
+
         <Button
           variant="ghost"
           size="sm"

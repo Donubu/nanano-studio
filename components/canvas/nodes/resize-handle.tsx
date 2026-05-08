@@ -51,9 +51,13 @@ export function ResizeHandle({ minWidth = 200, minHeight = 80 }: ResizeHandlePro
 
 /**
  * Helper: returns the className suffix for a canvas node's root element.
- * If the user has resized the node (width/height are set on the wrapper),
- * the root must fill 100% of that wrapper. Otherwise, it falls back to its
- * tailwind min-w/max-w defaults.
+ *
+ * - If the user has resized the node (width/height are set on the wrapper),
+ *   the root fills 100% of that wrapper AND switches to a flex-column with
+ *   overflow-hidden so the resized box clips/contains its children.
+ * - Otherwise, it falls back to its natural tailwind min-w/max-w defaults
+ *   with no flex/overflow wrapping — preserving the rendering of canvases
+ *   created before resize support existed.
  *
  * Usage:
  *   const sizeClass = nodeSizeClass(width, height, "min-w-[260px] max-w-[300px]");
@@ -65,5 +69,7 @@ export function nodeSizeClass(
   defaults: string
 ): string {
   const customSize = width != null || height != null;
-  return customSize ? "w-full h-full" : defaults;
+  return customSize
+    ? "w-full h-full overflow-hidden flex flex-col"
+    : defaults;
 }

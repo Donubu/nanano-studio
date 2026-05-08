@@ -608,7 +608,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
       onKeyDown={handleNodeKeyDown}
       className={`group bg-card rounded-xl border-2 ${statusColors[status]} ${
         selected ? "ring-2 ring-fuchsia-500/40" : ""
-      } transition-all overflow-hidden flex flex-col ${nodeSizeClass(width, height, "min-w-[340px] max-w-[380px]")}`}
+      } transition-all ${nodeSizeClass(width, height, "min-w-[340px] max-w-[380px]")}`}
     >
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">

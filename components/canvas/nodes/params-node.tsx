@@ -48,7 +48,7 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
     <div
       className={`group bg-card rounded-xl border-2 border-dashed ${config.borderColor} ${
         selected ? "ring-2 ring-primary/50" : ""
-      } transition-all overflow-hidden flex flex-col ${nodeSizeClass(width, height, "min-w-[240px] max-w-[300px]")}`}
+      } transition-all ${nodeSizeClass(width, height, "min-w-[240px] max-w-[300px]")}`}
     >
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">

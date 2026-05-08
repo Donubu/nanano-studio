@@ -20,7 +20,7 @@ export const StaticTextNodeComponent = memo(function StaticTextNode({ id, data, 
     <div
       className={`group bg-card rounded-xl border-2 border-blue-400/30 ${
         selected ? "ring-2 ring-blue-400/50" : ""
-      } transition-all overflow-hidden flex flex-col ${nodeSizeClass(width, height, "min-w-[200px] max-w-[300px]")}`}
+      } transition-all ${nodeSizeClass(width, height, "min-w-[200px] max-w-[300px]")}`}
     >
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">

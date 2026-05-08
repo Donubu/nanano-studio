@@ -43,6 +43,7 @@ import { useAutoSave } from "./hooks/use-auto-save";
 import { useCanvasExecution } from "./hooks/use-canvas-execution";
 import { useUndoRedo } from "./hooks/use-undo-redo";
 import { isValidConnection, wouldCreateCycle, getCompatibleTargetTypes, getCompatibleSourceTypes } from "./lib/connection-rules";
+import { autoLayoutPositions } from "./lib/auto-layout";
 import { getDefaultNodeData, type CanvasNodeType, type CanvasNodeData, HANDLE_IDS } from "./lib/canvas-types";
 import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Type, Settings, Bot, Sparkles, Film } from "lucide-react";
 import { CanvasProvider } from "./canvas-context";
@@ -608,6 +609,25 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     }
   }, [realConversationId, nodes, edges, projectId, generationConfig]);
 
+  // Auto-layout: reposition every node into columns based on topological depth
+  const reorderNodes = useCallback(() => {
+    if (nodes.length === 0) return;
+    const positions = autoLayoutPositions(nodes, edges);
+    if (positions.size === 0) return;
+    takeSnapshot();
+    setNodes((nds) =>
+      nds.map((n) => {
+        const pos = positions.get(n.id);
+        if (!pos) return n;
+        return { ...n, position: pos };
+      })
+    );
+    // Broadcast new positions so collaborators see the reorder live
+    for (const [nodeId, pos] of positions.entries()) {
+      collab.emitNodeMove(nodeId, pos.x, pos.y);
+    }
+  }, [nodes, edges, setNodes, takeSnapshot, collab.emitNodeMove]);
+
   // Lock/unlock all nodes
   const isAllLocked = nodes.length > 0 && nodes.every((n) => (n.data as Record<string, unknown>).locked === true);
 
@@ -729,6 +749,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
               onRunAll={executeAll}
               onClone={cloneCanvas}
               onLockAll={lockAllNodes}
+              onReorder={reorderNodes}
               isExecuting={isExecuting}
               isAllLocked={isAllLocked}
               executionProgress={executionProgress}

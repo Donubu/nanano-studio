@@ -57,7 +57,7 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
     <div
       className={`group bg-card rounded-xl border-2 border-border ${
         selected ? "ring-2 ring-primary/50" : ""
-      } transition-all overflow-hidden flex flex-col ${nodeSizeClass(width, height, "min-w-[200px] max-w-[300px]")}`}
+      } transition-all ${nodeSizeClass(width, height, "min-w-[200px] max-w-[300px]")}`}
       onPaste={handlePaste}
     >
       {/* Header */}
