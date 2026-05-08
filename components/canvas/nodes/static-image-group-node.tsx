@@ -172,6 +172,7 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
 
       {viewerIndex != null && viewerEntries[viewerIndex] && (
         <MediaViewerModal
+          projectId={projectId}
           entries={viewerEntries}
           initialIndex={viewerIndex}
           metadata={{ label: nodeData.label }}

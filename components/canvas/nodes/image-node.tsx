@@ -8,6 +8,7 @@ import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useUpstreamPromptLabel } from "../hooks/use-upstream-prompt-label";
+import { useCanvasContext } from "../canvas-context";
 import { ResizeHandle, nodeSizeClass } from "./resize-handle";
 import { MediaViewerModal, type MediaViewerEntry } from "./media-viewer-modal";
 
@@ -23,6 +24,7 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
   const status = nodeData.status || "idle";
   const { updateNodeData } = useNodeUpdate();
   const upstreamLabel = useUpstreamPromptLabel();
+  const { projectId } = useCanvasContext();
 
   const history = nodeData.outputHistory || [];
   const totalOutputs = history.length;
@@ -161,6 +163,7 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
 
       {viewerOpen && displayUrl && (
         <MediaViewerModal
+          projectId={projectId}
           entries={viewerEntries.length > 0 ? viewerEntries : undefined}
           entry={
             viewerEntries.length > 0

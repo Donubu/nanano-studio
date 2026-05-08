@@ -1,6 +1,6 @@
 {
   "name": "nanano",
-  "version": "7.4.22",
+  "version": "7.4.24",
   "private": true,
   "scripts": {
     "dev": "node scripts/bump-version.js && npx tsx server.custom.ts",

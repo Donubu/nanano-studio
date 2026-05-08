@@ -8,7 +8,13 @@ interface MessageRow extends RowDataPacket {
   conversation_id: number;
   project_id: number | null;
   user_id: number;
+  role: "user" | "model";
+  content: string | null;
   deleted_at: string | null;
+}
+
+interface UserMessageContentRow extends RowDataPacket {
+  content: string | null;
 }
 
 // GET - Get a single message
@@ -38,7 +44,30 @@ export async function GET(
 
     const message = messages[0];
 
-    return NextResponse.json(message);
+    // For a model message whose own `content` is empty (image / video
+    // generations store the prompt only on the preceding user message),
+    // resolve the most recent user message in the same conversation that
+    // came before this one and expose it as `prompt_content`. The
+    // /api/conversations/[id]/generations endpoint applies the same rule —
+    // we mirror it here so single-message consumers (canvas viewer, etc.)
+    // can recover the prompt without a second round-trip.
+    let promptContent: string | null = message.content;
+    if (
+      message.role === "model" &&
+      (!message.content || !String(message.content).trim())
+    ) {
+      const [userMsgs] = await pool.execute<UserMessageContentRow[]>(
+        `SELECT content FROM messages
+         WHERE conversation_id = ? AND role = 'user' AND id < ?
+         ORDER BY id DESC LIMIT 1`,
+        [message.conversation_id, message.id]
+      );
+      if (userMsgs.length > 0 && userMsgs[0].content) {
+        promptContent = userMsgs[0].content;
+      }
+    }
+
+    return NextResponse.json({ ...message, prompt_content: promptContent });
   } catch (error) {
     console.error("Error fetching message:", error);
     return NextResponse.json(

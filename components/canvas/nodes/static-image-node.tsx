@@ -148,6 +148,7 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
 
       {viewerOpen && nodeData.imageUrl && (
         <MediaViewerModal
+          projectId={projectId}
           entry={{ url: nodeData.imageUrl, type: "image" }}
           metadata={{
             label: nodeData.label,

@@ -49,6 +49,8 @@ interface MediaViewerModalProps {
   entry?: MediaViewerEntry;
   entries?: MediaViewerEntry[];
   initialIndex?: number;
+  /** Project id — unlocks the tag picker (creating / attaching tags). */
+  projectId?: number;
   metadata?: {
     label?: string;
     caption?: string;
@@ -66,6 +68,12 @@ interface MediaViewerModalProps {
   onClose: () => void;
 }
 
+interface ProjectTag {
+  id: number;
+  name: string;
+  color: string;
+}
+
 /**
  * Rich fullscreen viewer for canvas-generated and static images / videos.
  * Mirrors the full-mode DetailModal layout: card with header / centered
@@ -77,6 +85,7 @@ export function MediaViewerModal({
   entry,
   entries,
   initialIndex = 0,
+  projectId,
   metadata,
   onClose,
 }: MediaViewerModalProps) {
@@ -97,6 +106,12 @@ export function MediaViewerModal({
   const [topazResults, setTopazResults] = useState<TopazResult[]>([]);
   const [topazOpen, setTopazOpen] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [fetchedPrompt, setFetchedPrompt] = useState<string | null>(null);
+  const [fetchedSeed, setFetchedSeed] = useState<number | null>(null);
+  const [projectTags, setProjectTags] = useState<ProjectTag[]>([]);
+  const [tagPickerOpen, setTagPickerOpen] = useState(false);
+  const [newTagName, setNewTagName] = useState("");
+  const [newTagColor, setNewTagColor] = useState("#6366f1");
 
   // Reset per-entry state whenever the displayed entry changes (history nav).
   useEffect(() => {
@@ -106,6 +121,8 @@ export function MediaViewerModal({
     setTags([]);
     setTopazResults([]);
     setDownloadError(null);
+    setFetchedPrompt(null);
+    setFetchedSeed(null);
   }, [current?.url, messageId]);
 
   // Detect file size via HEAD (best-effort, S3 returns Content-Length).
@@ -139,6 +156,21 @@ export function MediaViewerModal({
         if (!cancelled && msgRes.ok) {
           const m = await msgRes.json();
           setIsFavorite(!!m.is_favorite);
+          // For image / video model messages the prompt lives on the
+          // preceding user message, so the API exposes it as
+          // `prompt_content`. Fall back to `content` for text outputs that
+          // do store their content locally.
+          const resolvedPrompt =
+            (typeof m.prompt_content === "string" && m.prompt_content.trim()
+              ? m.prompt_content
+              : null) ||
+            (typeof m.content === "string" && m.content.trim()
+              ? m.content
+              : null);
+          if (resolvedPrompt) setFetchedPrompt(resolvedPrompt);
+          if (typeof m.generation_seed === "number" && m.generation_seed > 0) {
+            setFetchedSeed(m.generation_seed);
+          }
         }
         if (!cancelled && tagsRes.ok) {
           const t = await tagsRes.json();
@@ -291,6 +323,88 @@ export function MediaViewerModal({
     }
   }, [messageId]);
 
+  // Project tags (catalog) — load when picker opens for the first time.
+  useEffect(() => {
+    if (!tagPickerOpen || !projectId || projectTags.length > 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/tags`);
+        if (!cancelled && res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) setProjectTags(data);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tagPickerOpen, projectId, projectTags.length]);
+
+  const handleAddExistingTag = useCallback(
+    async (tag: ProjectTag) => {
+      if (!messageId) return;
+      if (tags.some((t) => t.tag_id === tag.id)) return;
+      try {
+        const res = await fetch(`/api/messages/${messageId}/tags`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tag_id: tag.id }),
+        });
+        if (res.ok) {
+          setTags((ts) => [
+            ...ts,
+            {
+              id: Date.now(),
+              tag_id: tag.id,
+              tag_name: tag.name,
+              tag_color: tag.color,
+            },
+          ]);
+          setTagPickerOpen(false);
+        }
+      } catch {
+        /* ignore */
+      }
+    },
+    [messageId, tags]
+  );
+
+  const handleCreateTag = useCallback(async () => {
+    if (!projectId || !messageId || !newTagName.trim()) return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/tags`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newTagName.trim(), color: newTagColor }),
+      });
+      if (!res.ok) return;
+      const newTag = await res.json();
+      setProjectTags((ts) => [...ts, newTag]);
+      // Attach immediately
+      await fetch(`/api/messages/${messageId}/tags`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tag_id: newTag.id }),
+      });
+      setTags((ts) => [
+        ...ts,
+        {
+          id: Date.now(),
+          tag_id: newTag.id,
+          tag_name: newTag.name,
+          tag_color: newTag.color,
+        },
+      ]);
+      setNewTagName("");
+      setTagPickerOpen(false);
+    } catch {
+      /* ignore */
+    }
+  }, [projectId, messageId, newTagName, newTagColor]);
+
   if (!current) return null;
   if (typeof document === "undefined") return null;
 
@@ -298,8 +412,8 @@ export function MediaViewerModal({
     ? new Date(current.createdAt).toLocaleString()
     : null;
 
-  const promptText = current.prompt || metadata?.prompt;
-  const seed = current.seed ?? metadata?.seed;
+  const promptText = current.prompt || metadata?.prompt || fetchedPrompt || undefined;
+  const seed = current.seed ?? metadata?.seed ?? fetchedSeed ?? undefined;
   const TypeIcon = current.type === "video" ? VideoIcon : ImageIcon;
 
   // ------ Topaz overlay (sits above the modal) ------
@@ -517,7 +631,7 @@ export function MediaViewerModal({
           )}
 
           {/* Tags */}
-          {tags.length > 0 && (
+          {messageId != null && (
             <div className="flex items-center gap-1.5 flex-wrap">
               <TagIcon className="h-3 w-3 text-muted-foreground shrink-0" />
               {tags.map((t) => (
@@ -532,6 +646,81 @@ export function MediaViewerModal({
                   <X className="h-2.5 w-2.5" />
                 </button>
               ))}
+              {projectId != null && (
+                <div className="relative">
+                  <button
+                    onClick={() => setTagPickerOpen((v) => !v)}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-dashed border-border hover:border-primary text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <TagIcon className="h-3 w-3" />
+                    {tags.length === 0 ? "Agregar tag" : "+"}
+                  </button>
+                  {tagPickerOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-40"
+                        onClick={() => setTagPickerOpen(false)}
+                      />
+                      <div className="absolute bottom-full left-0 mb-1 z-50 bg-card border border-border/50 rounded-lg shadow-xl p-1.5 min-w-[200px]">
+                        {projectTags
+                          .filter((t) => !tags.some((it) => it.tag_id === t.id))
+                          .map((tag) => (
+                            <button
+                              key={tag.id}
+                              onClick={() => handleAddExistingTag(tag)}
+                              className="flex items-center gap-1.5 w-full px-2 py-1 rounded text-xs hover:bg-accent transition-colors"
+                            >
+                              <span
+                                className="w-2.5 h-2.5 rounded-full shrink-0"
+                                style={{ backgroundColor: tag.color }}
+                              />
+                              {tag.name}
+                            </button>
+                          ))}
+                        {projectTags.filter(
+                          (t) => !tags.some((it) => it.tag_id === t.id)
+                        ).length > 0 && (
+                          <div className="border-t border-border/50 my-1" />
+                        )}
+                        <div className="px-2 py-1 space-y-1.5">
+                          <p className="text-[10px] text-muted-foreground font-medium">
+                            Crear tag
+                          </p>
+                          <div className="flex gap-1">
+                            <input
+                              value={newTagName}
+                              onChange={(e) =>
+                                setNewTagName(e.target.value.toUpperCase())
+                              }
+                              placeholder="NOMBRE"
+                              className="flex-1 text-[11px] bg-muted rounded px-1.5 py-1 outline-none placeholder:text-muted-foreground/40"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  handleCreateTag();
+                                }
+                              }}
+                            />
+                            <input
+                              type="color"
+                              value={newTagColor}
+                              onChange={(e) => setNewTagColor(e.target.value)}
+                              className="w-6 h-6 rounded cursor-pointer border-0 p-0"
+                            />
+                            <button
+                              onClick={handleCreateTag}
+                              disabled={!newTagName.trim()}
+                              className="px-1.5 py-1 rounded bg-primary text-primary-foreground text-[10px] font-medium disabled:opacity-30"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

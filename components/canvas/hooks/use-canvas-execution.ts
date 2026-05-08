@@ -1137,7 +1137,8 @@ async function executeTextNode(
           if (data.type === "chunk") {
             fullText += data.text || "";
           } else if (data.type === "complete") {
-            messageId = data.messageId;
+            // Text stream SSE delivers the model message id as `id`.
+            messageId = data.id || data.messageId;
             if (data.fullText) fullText = data.fullText;
           } else if (data.type === "error") {
             throw new Error(data.message || "Error en generación");
@@ -1241,9 +1242,10 @@ async function executeNanoBananaNode(
           const data = JSON.parse(line.slice(6));
           if (data.type === "image") {
             outputUrl = data.imageUrl || data.url;
-            messageId = data.messageId;
+            messageId = messageId || data.messageId || data.id;
           } else if (data.type === "complete") {
-            messageId = messageId || data.messageId;
+            messageId = messageId || data.id || data.messageId;
+            outputUrl = outputUrl || data.imageUrl || data.url;
           } else if (data.type === "error") {
             throw new Error(data.message || "Error en generación nano banana");
           }
@@ -1330,9 +1332,12 @@ async function executeImageNode(
           const data = JSON.parse(line.slice(6));
           if (data.type === "image") {
             outputUrl = data.imageUrl || data.url;
-            messageId = data.messageId;
+            // The imagen SSE doesn't emit messageId on per-image events; the
+            // model message id is delivered on the `complete` event as `id`.
+            messageId = messageId || data.messageId || data.id;
           } else if (data.type === "complete") {
-            messageId = messageId || data.messageId;
+            messageId = messageId || data.id || data.messageId;
+            outputUrl = outputUrl || data.imageUrl || data.url;
           } else if (data.type === "error") {
             throw new Error(data.message || "Error en generación de imagen");
           }
@@ -1417,10 +1422,11 @@ async function executeVideoNode(
           const data = JSON.parse(line.slice(6));
           if (data.type === "video") {
             outputUrl = data.videoUrl || data.url;
-            messageId = data.messageId;
+            messageId = messageId || data.messageId || data.id;
           } else if (data.type === "complete") {
             outputUrl = outputUrl || data.videoUrl || data.url;
-            messageId = messageId || data.messageId;
+            // Video SSE delivers the model message id as `id` on `complete`.
+            messageId = messageId || data.id || data.messageId;
           } else if (data.type === "error") {
             throw new Error(data.message || "Error en generación de video");
           }
