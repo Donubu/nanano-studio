@@ -76,7 +76,7 @@ interface SummaryResponse {
 
 const COLORS = ["#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ec4899", "#3b82f6", "#ef4444", "#84cc16"];
 
-type PeriodType = "1" | "7" | "30" | "90" | "custom";
+type PeriodType = "1" | "7" | "30" | "90" | "all" | "custom";
 
 export default function BillingPage() {
   const [data, setData] = useState<SummaryResponse | null>(null);
@@ -114,7 +114,9 @@ export default function BillingPage() {
     setSyncing(true);
     setSyncError(null);
     try {
-      const res = await fetch(`/api/admin/gcp-costs/sync?days=${period}`, {
+      // Para "all" o "custom" el sync no puede traer infinito: la API capa en 30.
+      const syncDays = period === "all" || period === "custom" ? "30" : period;
+      const res = await fetch(`/api/admin/gcp-costs/sync?days=${syncDays}`, {
         method: "POST",
       });
       const result = await res.json();
@@ -260,6 +262,7 @@ export default function BillingPage() {
               <SelectItem value="7">7 días</SelectItem>
               <SelectItem value="30">30 días</SelectItem>
               <SelectItem value="90">90 días</SelectItem>
+              <SelectItem value="all">Todo el tiempo</SelectItem>
               <SelectItem value="custom">Rango</SelectItem>
             </SelectContent>
           </Select>

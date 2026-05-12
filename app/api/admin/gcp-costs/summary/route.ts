@@ -49,6 +49,9 @@ export async function GET(request: Request) {
     } else if (period === "1") {
       fromDate = new Date();
       fromDate.setHours(0, 0, 0, 0);
+    } else if (period === "all") {
+      // Todo el tiempo: usar una fecha base muy antigua para no acotar el rango.
+      fromDate = new Date("2000-01-01T00:00:00Z");
     } else {
       const days = parseInt(period) || 30;
       fromDate = new Date();
