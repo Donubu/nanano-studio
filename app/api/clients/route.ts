@@ -10,6 +10,8 @@ interface ClientRow extends RowDataPacket {
   name: string;
   logo: string | null;
   hidden: boolean;
+  monthly_image_limit: number | null;
+  monthly_video_limit: number | null;
   created_at: Date;
 }
 
@@ -27,7 +29,8 @@ export async function GET() {
     if (isAdmin) {
       // Admin ve todos los clientes incluyendo hidden
       const [rows] = await pool.execute<ClientRow[]>(
-        `SELECT c.id, c.name, c.logo, c.hidden, c.is_internal, c.default_project_id, c.created_at,
+        `SELECT c.id, c.name, c.logo, c.hidden, c.is_internal, c.default_project_id,
+          c.monthly_image_limit, c.monthly_video_limit, c.created_at,
           (SELECT COUNT(*) FROM projects WHERE client_id = c.id) as project_count
          FROM clients c
          ORDER BY c.name ASC`
@@ -38,7 +41,8 @@ export async function GET() {
     // Usuario normal: ve clientes no-hidden + cliente interno si tiene espacio personal
     const userId = session.user.id;
     const [rows] = await pool.execute<ClientRow[]>(
-      `SELECT c.id, c.name, c.logo, c.hidden, c.is_internal, c.default_project_id, c.created_at,
+      `SELECT c.id, c.name, c.logo, c.hidden, c.is_internal, c.default_project_id,
+        c.monthly_image_limit, c.monthly_video_limit, c.created_at,
         (SELECT COUNT(*) FROM projects WHERE client_id = c.id AND (hidden = 0 OR (is_personal = 1 AND owner_user_id = ?))) as project_count
        FROM clients c
        WHERE c.hidden = 0

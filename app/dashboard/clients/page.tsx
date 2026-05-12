@@ -20,7 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, Loader2, Upload, Building2, Eye, EyeOff, Star, Home } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Upload, Building2, Eye, EyeOff, Star, Home, Image as ImageLucide, Video, Infinity as InfinityIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import Image from "next/image";
 import { formatDateLocal } from "@/lib/utils";
@@ -32,6 +32,8 @@ interface Client {
   hidden: boolean;
   is_internal: boolean;
   default_project_id: number | null;
+  monthly_image_limit: number | null;
+  monthly_video_limit: number | null;
   created_at: string;
   project_count: number;
 }
@@ -226,6 +228,7 @@ export default function ClientsPage() {
               <TableHead className="text-muted-foreground w-[80px]">Logo</TableHead>
               <TableHead className="text-muted-foreground">Nombre</TableHead>
               <TableHead className="text-muted-foreground text-center">Proyectos</TableHead>
+              <TableHead className="text-muted-foreground">Cuota mensual</TableHead>
               <TableHead className="text-muted-foreground">Fecha de registro</TableHead>
               <TableHead className="w-[100px] text-muted-foreground">Acciones</TableHead>
             </TableRow>
@@ -233,7 +236,7 @@ export default function ClientsPage() {
           <TableBody>
             {clients.length === 0 ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                   No hay clientes registrados
                 </TableCell>
               </TableRow>
@@ -273,6 +276,48 @@ export default function ClientsPage() {
                     </span>
                   </TableCell>
                   <TableCell className="text-center">{client.project_count}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-3 text-xs">
+                      <span
+                        className="inline-flex items-center gap-1 text-muted-foreground"
+                        title={`Imágenes: ${
+                          client.monthly_image_limit === null
+                            ? "ilimitado"
+                            : client.monthly_image_limit === 0
+                              ? "bloqueado"
+                              : `${client.monthly_image_limit} al mes`
+                        }`}
+                      >
+                        <ImageLucide className="h-3.5 w-3.5 text-purple-400" />
+                        {client.monthly_image_limit === null ? (
+                          <InfinityIcon className="h-3 w-3" />
+                        ) : (
+                          <span className={client.monthly_image_limit === 0 ? "text-red-400" : "text-foreground"}>
+                            {client.monthly_image_limit}
+                          </span>
+                        )}
+                      </span>
+                      <span
+                        className="inline-flex items-center gap-1 text-muted-foreground"
+                        title={`Videos: ${
+                          client.monthly_video_limit === null
+                            ? "ilimitado"
+                            : client.monthly_video_limit === 0
+                              ? "bloqueado"
+                              : `${client.monthly_video_limit} al mes`
+                        }`}
+                      >
+                        <Video className="h-3.5 w-3.5 text-orange-400" />
+                        {client.monthly_video_limit === null ? (
+                          <InfinityIcon className="h-3 w-3" />
+                        ) : (
+                          <span className={client.monthly_video_limit === 0 ? "text-red-400" : "text-foreground"}>
+                            {client.monthly_video_limit}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  </TableCell>
                   <TableCell className="text-muted-foreground">
                     {formatDateLocal(client.created_at)}
                   </TableCell>
