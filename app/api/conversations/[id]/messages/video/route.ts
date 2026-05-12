@@ -10,6 +10,7 @@ import { generateConversationTitle, Labels } from "@/lib/google-ai";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
 import { acquireSlot, releaseSlot, waitForSlot } from "@/lib/veo-semaphore";
 import { isRedisConfigured } from "@/lib/redis";
+import { checkClientCreditQuota, CREDIT_ERROR_CODE } from "@/lib/client-credits";
 
 type QualityTier = "normal" | "hq";
 
@@ -30,6 +31,7 @@ interface ConversationRow extends RowDataPacket {
   supports_video_generation: boolean;
   project_name: string | null;
   client_name: string | null;
+  client_id: number | null;
   // Cost fields from model
   cost_video_per_second: number;
   model_api_backend: string | null;
@@ -136,7 +138,7 @@ export async function POST(
 
     // Obtener conversación con configuración de video y costos del modelo
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, m.model_id as model_model_id, m.supports_video_generation, m.api_backend as model_api_backend, p.title as project_name, cl.name as client_name,
+      `SELECT c.*, m.model_id as model_model_id, m.supports_video_generation, m.api_backend as model_api_backend, p.title as project_name, p.client_id as client_id, cl.name as client_name,
               m.cost_video_per_second
        FROM conversations c
        JOIN models m ON c.model_id = m.id
@@ -161,6 +163,32 @@ export async function POST(
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
+    }
+
+    // Cuota mensual del cliente. Admins y usuarios exentos pasan directo.
+    if (conversation.client_id) {
+      const quota = await checkClientCreditQuota({
+        clientId: conversation.client_id,
+        userId: Number(session.user.id),
+        isAdmin: session.user.role === "admin",
+        type: "video",
+      });
+      if (!quota.ok) {
+        return new Response(
+          JSON.stringify({
+            error: quota.message,
+            code: CREDIT_ERROR_CODE,
+            limit: quota.limit,
+            used: quota.used,
+            period: quota.period,
+            generation_type: "video",
+          }),
+          {
+            status: 429,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
     }
 
     // Crear el stream de respuesta SSE inmediatamente para enviar headers rápido

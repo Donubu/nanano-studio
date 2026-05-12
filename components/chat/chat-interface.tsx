@@ -86,6 +86,7 @@ import {ModelSelector, ProjectModel as ConfigModel, QualityBadge, QualityTier} f
 import {ReasoningSelector, ThinkingLevel} from "./reasoning-selector";
 import {DeploymentBanner} from "./deployment-banner";
 import {CreateProjectDialog} from "./create-project-dialog";
+import {CreditBadge} from "./credit-badge";
 import {ImageModelSelector} from "./image-model-selector";
 import {AudioSettings} from "./audio-settings";
 import {MusicSettings} from "./music-settings";
@@ -2167,9 +2168,11 @@ export function ChatInterface() {
 
             if (!response.ok) {
                 let errorMessage = "";
+                let errorCode = "";
                 try {
                     const errorData = await response.json();
                     errorMessage = errorData.error || "";
+                    errorCode = errorData.code || "";
                 } catch { /* non-JSON response */ }
                 if (!errorMessage) {
                     if (response.status === 413) {
@@ -2180,11 +2183,12 @@ export function ChatInterface() {
                         errorMessage = `Error del servidor (${response.status})`;
                     }
                 }
+                const isQuota = errorCode === "CLIENT_QUOTA_EXCEEDED";
                 setTabMessages((prev) => ({
                     ...prev,
                     [tabId]: prev[tabId].map((m) =>
                         m.id === streamingMessageId
-                            ? { ...m, content: `Error: ${errorMessage}`, content_type: "error" as const, isStreaming: false }
+                            ? { ...m, content: isQuota ? errorMessage : `Error: ${errorMessage}`, content_type: "error" as const, isStreaming: false }
                             : m
                     ),
                 }));
@@ -2847,9 +2851,11 @@ export function ChatInterface() {
 
                 if (!response.ok) {
                     let errorMessage = "";
+                    let errorCode = "";
                     try {
                         const errorData = await response.json();
                         errorMessage = errorData.error || "";
+                        errorCode = errorData.code || "";
                     } catch { /* Respuesta no-JSON */ }
                     if (!errorMessage) {
                         if (response.status === 413) {
@@ -2860,11 +2866,12 @@ export function ChatInterface() {
                             errorMessage = `Error del servidor (${response.status})`;
                         }
                     }
+                    const isQuota = errorCode === "CLIENT_QUOTA_EXCEEDED";
                     setTabMessages((prev) => ({
                         ...prev,
                         [tabId]: prev[tabId].map((m) =>
                             m.id === placeholderId
-                                ? { ...m, content: `Error: ${errorMessage}`, isVideoGenerating: false, videoProgress: undefined }
+                                ? { ...m, content: isQuota ? errorMessage : `Error: ${errorMessage}`, isVideoGenerating: false, videoProgress: undefined }
                                 : m
                         ),
                     }));
@@ -3425,6 +3432,10 @@ export function ChatInterface() {
                                 </button>
                             ) : null;
                         })()}
+
+                        <div className="mb-2 px-1">
+                            <CreditBadge clientId={selectedClientId} />
+                        </div>
 
                         <div className="flex items-center justify-between mb-1">
                             <label className="text-xs text-muted-foreground">Proyecto</label>

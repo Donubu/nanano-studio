@@ -10,6 +10,7 @@ import { generateConversationTitle } from "@/lib/google-ai";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
 import { isRedisConfigured, createRedisConnection } from "@/lib/redis";
 import { getImagenQueue, jobChannel, ImagenJobEvent, IMAGEN_QUEUE_NAME, hasActiveWorkers } from "@/lib/queue";
+import { checkClientCreditQuota, CREDIT_ERROR_CODE } from "@/lib/client-credits";
 
 // Allow up to 5 minutes for image generation (retries can be slow)
 export const maxDuration = 300;
@@ -30,6 +31,7 @@ interface ConversationRow extends RowDataPacket {
   supports_image_generation: boolean;
   project_name: string | null;
   client_name: string | null;
+  client_id: number | null;
   cost_image_1k: number;
   cost_image_2k: number;
   cost_image_4k: number;
@@ -91,7 +93,7 @@ export async function POST(
 
     // Obtener conversacion con configuracion de imagen y costos del modelo
     const [conversations] = await pool.execute<ConversationRow[]>(
-      `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, m.api_backend as model_api_backend, p.title as project_name, cl.name as client_name,
+      `SELECT c.*, m.model_id as model_model_id, m.supports_image_generation, m.api_backend as model_api_backend, p.title as project_name, p.client_id as client_id, cl.name as client_name,
               m.cost_image_1k, m.cost_image_2k, m.cost_image_4k
        FROM conversations c
        JOIN models m ON c.model_id = m.id
@@ -106,6 +108,29 @@ export async function POST(
     }
 
     const conversation = conversations[0];
+
+    // Cuota mensual del cliente. Admins y usuarios exentos pasan directo.
+    if (conversation.client_id) {
+      const quota = await checkClientCreditQuota({
+        clientId: conversation.client_id,
+        userId: Number(session.user.id),
+        isAdmin: session.user.role === "admin",
+        type: "image",
+      });
+      if (!quota.ok) {
+        return NextResponse.json(
+          {
+            error: quota.message,
+            code: CREDIT_ERROR_CODE,
+            limit: quota.limit,
+            used: quota.used,
+            period: quota.period,
+            generation_type: "image",
+          },
+          { status: 429 }
+        );
+      }
+    }
 
     // Resolve effective model
     let effectiveModelId = conversation.model_model_id;

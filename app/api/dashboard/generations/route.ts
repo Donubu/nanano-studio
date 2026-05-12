@@ -98,12 +98,35 @@ interface TopazVideoEditRow extends RowDataPacket {
 interface ProjectRow extends RowDataPacket {
   id: number;
   title: string;
+  client_id: number | null;
+  client_name: string | null;
 }
 
 interface ClientRow extends RowDataPacket {
   id: number;
   name: string;
 }
+
+interface UserFilterRow extends RowDataPacket {
+  id: number;
+  name: string | null;
+  email: string;
+}
+
+const PROJECTS_FILTER_SQL = `
+  SELECT p.id, p.title, p.client_id, cl.name AS client_name
+    FROM projects p
+    LEFT JOIN clients cl ON p.client_id = cl.id
+   WHERE p.status = 'active'
+   ORDER BY cl.name IS NULL, cl.name, p.title
+`;
+
+const USERS_FILTER_SQL = `
+  SELECT id, name, email
+    FROM users
+   WHERE deleted_at IS NULL
+   ORDER BY name IS NULL, name, email
+`;
 
 // GET - Get all generations across all projects (admin only)
 export async function GET(request: NextRequest) {
@@ -215,6 +238,7 @@ export async function GET(request: NextRequest) {
       [topazVideoTotals],
       [projects],
       [clients],
+      [users],
     ] = await Promise.all([
       pool.execute<RowDataPacket[]>(`
         SELECT COUNT(*) as total
@@ -294,28 +318,27 @@ export async function GET(request: NextRequest) {
       pool.execute<RowDataPacket[]>(
         "SELECT COUNT(*) as count, COALESCE(SUM(credits_consumed), 0) as credits FROM topaz_video_edits WHERE status = 'completed'"
       ),
-      pool.execute<ProjectRow[]>(
-        "SELECT id, title FROM projects WHERE status = 'active' ORDER BY title"
-      ),
+      pool.execute<ProjectRow[]>(PROJECTS_FILTER_SQL),
       pool.execute<ClientRow[]>(
         "SELECT id, name FROM clients ORDER BY name"
       ),
+      pool.execute<UserFilterRow[]>(USERS_FILTER_SQL),
     ]);
 
     const total = countResult[0]?.total || 0;
 
-    // Determine type for each generation
+    // Determine type for each generation. La fuente (canvas/full/chat) se mantiene
+    // aparte en conversation_generation_type para que la UI pueda mostrar el origen
+    // sin sobrescribir el tipo del asset real.
     const result = generations.map(gen => {
       let generationType: string = "text";
       const convType = gen.conversation_generation_type;
-      if (convType === "canvas" || convType === "full" || convType === "audio_hd") {
-        generationType = convType;
-      } else if (gen.video_url) {
+      if (gen.video_url) {
         generationType = "video";
       } else if (gen.music_url) {
         generationType = "music";
       } else if (gen.audio_url) {
-        generationType = "audio";
+        generationType = convType === "audio_hd" ? "audio_hd" : "audio";
       } else if (gen.image_url) {
         generationType = "image";
       }
@@ -353,8 +376,14 @@ export async function GET(request: NextRequest) {
         topaz_video_credits: Number(topazVideoTotals[0]?.credits) || 0,
       },
       filters: {
-        projects: projects.map(p => ({ id: p.id, name: p.title })),
+        projects: projects.map(p => ({
+          id: p.id,
+          name: p.title,
+          client_id: p.client_id,
+          client_name: p.client_name,
+        })),
         clients,
+        users: users.map(u => ({ id: u.id, name: u.name, email: u.email })),
       },
     });
   } catch (error) {
@@ -467,12 +496,11 @@ async function handleTopazGenerations(
     `, queryParams);
 
     // Get filters
-    const [projects] = await pool.execute<ProjectRow[]>(
-      "SELECT id, title FROM projects WHERE status = 'active' ORDER BY title"
-    );
+    const [projects] = await pool.execute<ProjectRow[]>(PROJECTS_FILTER_SQL);
     const [clients] = await pool.execute<ClientRow[]>(
       "SELECT id, name FROM clients ORDER BY name"
     );
+    const [users] = await pool.execute<UserFilterRow[]>(USERS_FILTER_SQL);
 
     return NextResponse.json({
       data: rows.map(row => ({
@@ -510,8 +538,14 @@ async function handleTopazGenerations(
         topaz_image_credits: Number(totalsResult[0]?.credits) || 0,
       },
       filters: {
-        projects: projects.map(p => ({ id: p.id, name: p.title })),
+        projects: projects.map(p => ({
+          id: p.id,
+          name: p.title,
+          client_id: p.client_id,
+          client_name: p.client_name,
+        })),
         clients,
+        users: users.map(u => ({ id: u.id, name: u.name, email: u.email })),
       },
     });
   } else {
@@ -606,12 +640,11 @@ async function handleTopazGenerations(
     `, queryParams);
 
     // Get filters
-    const [projects] = await pool.execute<ProjectRow[]>(
-      "SELECT id, title FROM projects WHERE status = 'active' ORDER BY title"
-    );
+    const [projects] = await pool.execute<ProjectRow[]>(PROJECTS_FILTER_SQL);
     const [clients] = await pool.execute<ClientRow[]>(
       "SELECT id, name FROM clients ORDER BY name"
     );
+    const [users] = await pool.execute<UserFilterRow[]>(USERS_FILTER_SQL);
 
     return NextResponse.json({
       data: rows.map(row => ({
@@ -649,8 +682,14 @@ async function handleTopazGenerations(
         topaz_video_credits: Number(totalsResult[0]?.credits) || 0,
       },
       filters: {
-        projects: projects.map(p => ({ id: p.id, name: p.title })),
+        projects: projects.map(p => ({
+          id: p.id,
+          name: p.title,
+          client_id: p.client_id,
+          client_name: p.client_name,
+        })),
         clients,
+        users: users.map(u => ({ id: u.id, name: u.name, email: u.email })),
       },
     });
   }
@@ -893,6 +932,7 @@ async function handleAllGenerations(
     type: string;
     conversation_id: number;
     conversation_title: string;
+    conversation_generation_type?: string | null;
     project_id: number | null;
     project_name: string | null;
     client_id: number | null;
@@ -938,11 +978,9 @@ async function handleAllGenerations(
   for (const msg of messages) {
     const convType = msg.conversation_generation_type;
     let generationType: string = "text";
-    if (convType === "canvas" || convType === "full" || convType === "audio_hd") {
-      generationType = convType;
-    } else if (msg.video_url) generationType = "video";
+    if (msg.video_url) generationType = "video";
     else if (msg.music_url) generationType = "music";
-    else if (msg.audio_url) generationType = "audio";
+    else if (msg.audio_url) generationType = convType === "audio_hd" ? "audio_hd" : "audio";
     else if (msg.image_url) generationType = "image";
 
     combined.push({
@@ -950,6 +988,7 @@ async function handleAllGenerations(
       type: generationType,
       conversation_id: msg.conversation_id,
       conversation_title: msg.conversation_title,
+      conversation_generation_type: convType,
       project_id: msg.project_id,
       project_name: msg.project_name,
       client_id: msg.client_id,
@@ -1080,6 +1119,7 @@ async function handleAllGenerations(
     [topazVideoTotals],
     [projects],
     [clients],
+    [users],
   ] = await Promise.all([
     pool.execute<RowDataPacket[]>(`
       SELECT
@@ -1103,12 +1143,11 @@ async function handleAllGenerations(
     pool.execute<RowDataPacket[]>(
       "SELECT COUNT(*) as count, COALESCE(SUM(credits_consumed), 0) as credits FROM topaz_video_edits WHERE status = 'completed'"
     ),
-    pool.execute<ProjectRow[]>(
-      "SELECT id, title FROM projects WHERE status = 'active' ORDER BY title"
-    ),
+    pool.execute<ProjectRow[]>(PROJECTS_FILTER_SQL),
     pool.execute<ClientRow[]>(
       "SELECT id, name FROM clients ORDER BY name"
     ),
+    pool.execute<UserFilterRow[]>(USERS_FILTER_SQL),
   ]);
 
   const totals = totalsResult[0] || {};
@@ -1135,8 +1174,14 @@ async function handleAllGenerations(
       topaz_video_credits: Number(topazVideoTotals[0]?.credits) || 0,
     },
     filters: {
-      projects: projects.map(p => ({ id: p.id, name: p.title })),
+      projects: projects.map(p => ({
+        id: p.id,
+        name: p.title,
+        client_id: p.client_id,
+        client_name: p.client_name,
+      })),
       clients,
+      users: users.map(u => ({ id: u.id, name: u.name, email: u.email })),
     },
   });
 }

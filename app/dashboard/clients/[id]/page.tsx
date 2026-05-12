@@ -13,6 +13,7 @@ import {
 import { ArrowLeft, Loader2, Building2, X, UserPlus } from "lucide-react";
 import Image from "next/image";
 import { formatDateLocal } from "@/lib/utils";
+import ClientCreditsSection from "@/components/dashboard/client-credits-section";
 
 interface ClientDetail {
   id: number;
@@ -280,6 +281,8 @@ export default function ClientDetailPage() {
           </div>
         )}
       </div>
+
+      <ClientCreditsSection clientId={Number(clientId)} />
     </div>
   );
 }

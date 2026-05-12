@@ -51,11 +51,13 @@ export async function GET(
     // /api/conversations/[id]/generations endpoint applies the same rule —
     // we mirror it here so single-message consumers (canvas viewer, etc.)
     // can recover the prompt without a second round-trip.
+    //
+    // `user_prompt` se expone SIEMPRE (cuando existe el user message previo)
+    // como un campo separado, útil para mostrar prompt + respuesta lado a lado
+    // sin tener que adivinar si `prompt_content` es la respuesta o el prompt.
     let promptContent: string | null = message.content;
-    if (
-      message.role === "model" &&
-      (!message.content || !String(message.content).trim())
-    ) {
+    let userPrompt: string | null = null;
+    if (message.role === "model") {
       const [userMsgs] = await pool.execute<UserMessageContentRow[]>(
         `SELECT content FROM messages
          WHERE conversation_id = ? AND role = 'user' AND id < ?
@@ -63,11 +65,18 @@ export async function GET(
         [message.conversation_id, message.id]
       );
       if (userMsgs.length > 0 && userMsgs[0].content) {
-        promptContent = userMsgs[0].content;
+        userPrompt = userMsgs[0].content;
+        if (!message.content || !String(message.content).trim()) {
+          promptContent = userMsgs[0].content;
+        }
       }
     }
 
-    return NextResponse.json({ ...message, prompt_content: promptContent });
+    return NextResponse.json({
+      ...message,
+      prompt_content: promptContent,
+      user_prompt: userPrompt,
+    });
   } catch (error) {
     console.error("Error fetching message:", error);
     return NextResponse.json(

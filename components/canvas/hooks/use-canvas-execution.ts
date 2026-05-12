@@ -1307,7 +1307,16 @@ async function executeImageNode(
 
   if (!res.ok) {
     let detail = res.statusText;
-    try { const err = await res.json(); detail = err.error || JSON.stringify(err); } catch {}
+    let code = "";
+    try {
+      const err = await res.json();
+      detail = err.error || JSON.stringify(err);
+      code = err.code || "";
+    } catch {}
+    // Cuota mensual: mensaje sin prefijos técnicos para no confundir con error de API
+    if (code === "CLIENT_QUOTA_EXCEEDED") {
+      throw new Error(detail);
+    }
     throw new Error(`Imagen ${res.status}: ${detail}`);
   }
 
@@ -1397,7 +1406,15 @@ async function executeVideoNode(
 
   if (!res.ok) {
     let detail = res.statusText;
-    try { const err = await res.json(); detail = err.error || JSON.stringify(err); } catch {}
+    let code = "";
+    try {
+      const err = await res.json();
+      detail = err.error || JSON.stringify(err);
+      code = err.code || "";
+    } catch {}
+    if (code === "CLIENT_QUOTA_EXCEEDED") {
+      throw new Error(detail);
+    }
     throw new Error(`${res.status}: ${detail}`);
   }
 
