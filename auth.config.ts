@@ -17,13 +17,22 @@ export const authConfig: NextAuthConfig = {
     strategy: "jwt",
   },
   callbacks: {
-    // Shared session callback so middleware can also see user.id/role
+    // Shared session callback so middleware can also see user.id/role/blocked
     async session({ session, token }) {
       if (session.user) {
-        (session.user as { id: number; role: string; canCreateProjects: boolean; hasPersonalSpace: boolean }).id = token.id as number;
-        (session.user as { id: number; role: string; canCreateProjects: boolean; hasPersonalSpace: boolean }).role = token.role as string;
-        (session.user as { id: number; role: string; canCreateProjects: boolean; hasPersonalSpace: boolean }).canCreateProjects = (token.canCreateProjects as boolean) || false;
-        (session.user as { id: number; role: string; canCreateProjects: boolean; hasPersonalSpace: boolean }).hasPersonalSpace = (token.hasPersonalSpace as boolean) || false;
+        type AppSessionUser = {
+          id: number;
+          role: string;
+          canCreateProjects: boolean;
+          hasPersonalSpace: boolean;
+          blocked: boolean;
+        };
+        const u = session.user as unknown as AppSessionUser;
+        u.id = token.id as number;
+        u.role = token.role as string;
+        u.canCreateProjects = (token.canCreateProjects as boolean) || false;
+        u.hasPersonalSpace = (token.hasPersonalSpace as boolean) || false;
+        u.blocked = (token.blocked as boolean) || false;
       }
       return session;
     },

@@ -7,6 +7,7 @@ import { Suspense } from "react";
 function LoginContent() {
   const searchParams = useSearchParams();
   const error = searchParams.get("error");
+  const blocked = searchParams.get("blocked");
 
   const getErrorMessage = (error: string | null) => {
     switch (error) {
@@ -19,7 +20,9 @@ function LoginContent() {
     }
   };
 
-  const errorMessage = getErrorMessage(error);
+  const errorMessage = blocked === "1"
+    ? "Tu cuenta fue bloqueada o eliminada. Contacta a un administrador."
+    : getErrorMessage(error);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">

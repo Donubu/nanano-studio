@@ -22,8 +22,20 @@ export default auth((req) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const hasIncompleteSession = isLoggedIn && (!token.user || !(token.user as any).id);
 
+  // Usuario marcado como bloqueado/eliminado en la BD por el jwt callback
+  // (se setea hasta 5 min después del bloqueo administrativo). Forzamos
+  // logout limpiando los cookies de sesión.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const isBlocked = isLoggedIn && (token.user as any)?.blocked === true;
+  if (isBlocked && !isLoginPage) {
+    const response = NextResponse.redirect(new URL("/login?blocked=1", req.url));
+    response.cookies.delete("authjs.session-token");
+    response.cookies.delete("__Secure-authjs.session-token");
+    return response;
+  }
+
   // Redirigir a home si ya está logueado e intenta acceder a login
-  if (isLoginPage && isLoggedIn && !hasIncompleteSession) {
+  if (isLoginPage && isLoggedIn && !hasIncompleteSession && !isBlocked) {
     return NextResponse.redirect(new URL("/", req.url));
   }
 
