@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ImageIcon, Video, MessageSquare, Play, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid } from "lucide-react";
+import { ImageIcon, Video, MessageSquare, Play, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CanvasNodeType, ExecutionProgress } from "./lib/canvas-types";
 
@@ -16,6 +16,8 @@ interface CanvasToolbarProps {
   executionProgress: ExecutionProgress | null;
   saveStatus: "idle" | "saving" | "saved" | "error";
   nodeCount: number;
+  canvasMode: "pan" | "select";
+  onCanvasModeChange: (mode: "pan" | "select") => void;
 }
 
 const nodeOptions: { type: CanvasNodeType; icon: typeof MessageSquare; label: string; isAI: boolean }[] = [
@@ -48,11 +50,35 @@ export function CanvasToolbar({
   executionProgress,
   saveStatus,
   nodeCount,
+  canvasMode,
+  onCanvasModeChange,
 }: CanvasToolbarProps) {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
 
   return (
     <div className="flex items-center gap-1.5">
+      {/* Mode toggle: Pan vs Select */}
+      <div className="flex items-center gap-0.5 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-1 shadow-lg">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onCanvasModeChange("pan")}
+          className={`h-7 w-7 p-0 ${canvasMode === "pan" ? "bg-accent text-foreground" : "text-muted-foreground"}`}
+          title="Mover canvas (H)"
+        >
+          <Hand className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onCanvasModeChange("select")}
+          className={`h-7 w-7 p-0 ${canvasMode === "select" ? "bg-accent text-foreground" : "text-muted-foreground"}`}
+          title="Seleccionar con rectángulo (V)"
+        >
+          <MousePointer2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
       {/* Primary toolbar: Node, Run, Save */}
       <div className="flex items-center gap-2 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-1.5 shadow-lg">
         {/* Add Node */}

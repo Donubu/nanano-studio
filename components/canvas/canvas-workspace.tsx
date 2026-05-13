@@ -13,6 +13,7 @@ import {
   useReactFlow,
   addEdge,
   BackgroundVariant,
+  SelectionMode,
   type Connection,
   type NodeTypes,
   type OnConnect,
@@ -108,6 +109,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   const [edges, setEdges, onEdgesChangeBase] = useEdgesState<Edge>([] as Edge[]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [canvasMode, setCanvasMode] = useState<"pan" | "select">("pan");
 
   // Undo/redo
   const { takeSnapshot, undo, redo } = useUndoRedo(nodes, edges, setNodes, setEdges);
@@ -697,11 +699,27 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       }
     };
 
+    // Figma-style V/H to toggle select/pan mode. Skip when typing.
+    const handleModeShortcut = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (e.key === "v" || e.key === "V") {
+        e.preventDefault();
+        setCanvasMode("select");
+      } else if (e.key === "h" || e.key === "H") {
+        e.preventDefault();
+        setCanvasMode("pan");
+      }
+    };
+
     el.addEventListener("keydown", handleEscape, true);
     el.addEventListener("keydown", handleUndoRedo, false);
+    el.addEventListener("keydown", handleModeShortcut, false);
     return () => {
       el.removeEventListener("keydown", handleEscape, true);
       el.removeEventListener("keydown", handleUndoRedo, false);
+      el.removeEventListener("keydown", handleModeShortcut, false);
     };
   }, [dropMenu, selectedNodeId, closeDropMenu, undo, redo]);
 
@@ -748,6 +766,10 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
           edgeTypes={edgeTypes}
           defaultEdgeOptions={defaultEdgeOptions}
           proOptions={{ hideAttribution: true }}
+          panOnDrag={canvasMode === "pan" ? true : [1, 2]}
+          selectionOnDrag={canvasMode === "select"}
+          selectionMode={SelectionMode.Partial}
+          selectionKeyCode={canvasMode === "select" ? null : "Shift"}
         >
           <Background variant={BackgroundVariant.Lines} gap={24} size={1} color="var(--color-border)" className="opacity-30" />
           <Controls position="bottom-left" showInteractive={false} />
@@ -763,6 +785,8 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
               executionProgress={executionProgress}
               saveStatus={saveStatus}
               nodeCount={nodes.length}
+              canvasMode={canvasMode}
+              onCanvasModeChange={setCanvasMode}
             />
           </Panel>
           <Panel position="top-right">
