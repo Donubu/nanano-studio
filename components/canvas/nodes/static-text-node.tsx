@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Type } from "lucide-react";
 import { HANDLE_IDS, type StaticTextNodeData } from "../lib/canvas-types";
@@ -12,9 +12,36 @@ export const StaticTextNodeComponent = memo(function StaticTextNode({ id, data, 
   const nodeData = data as unknown as StaticTextNodeData;
   const { updateNodeData } = useNodeUpdate();
 
-  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    updateNodeData(id, { ...nodeData, content: e.target.value });
-  }, [id, nodeData, updateNodeData]);
+  // Local state mirrors the inputs so typing stays in sync with the DOM.
+  // Without this, the controlled value can lag a keystroke while the update
+  // round-trips through React Flow / collab, and React resets the caret to the
+  // end — making it impossible to insert text in the middle.
+  const [localLabel, setLocalLabel] = useState(nodeData.label || "");
+  const [localContent, setLocalContent] = useState(nodeData.content || "");
+
+  // Sync from external updates (remote collab, undo/redo). The equality guard
+  // prevents clobbering local edits before our own update has round-tripped.
+  useEffect(() => {
+    const incoming = nodeData.label || "";
+    setLocalLabel((prev) => (prev === incoming ? prev : incoming));
+  }, [nodeData.label]);
+
+  useEffect(() => {
+    const incoming = nodeData.content || "";
+    setLocalContent((prev) => (prev === incoming ? prev : incoming));
+  }, [nodeData.content]);
+
+  const handleLabelChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setLocalLabel(value);
+    updateNodeData(id, { label: value });
+  }, [id, updateNodeData]);
+
+  const handleContentChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setLocalContent(value);
+    updateNodeData(id, { content: value });
+  }, [id, updateNodeData]);
 
   return (
     <div
@@ -25,15 +52,15 @@ export const StaticTextNodeComponent = memo(function StaticTextNode({ id, data, 
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
         <Type className="h-3.5 w-3.5 text-blue-400 shrink-0" />
-        <input value={nodeData.label || ""} onChange={(e) => updateNodeData(id, { ...nodeData, label: e.target.value })} placeholder="Texto" className="text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate placeholder:text-muted-foreground/50" />
+        <input value={localLabel} onChange={handleLabelChange} placeholder="Texto" className="text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate placeholder:text-muted-foreground/50" />
         <NodeDeleteButton nodeId={id} />
       </div>
 
       {/* Body - editable textarea */}
       <div className="px-3 py-2">
         <textarea
-          value={nodeData.content || ""}
-          onChange={handleChange}
+          value={localContent}
+          onChange={handleContentChange}
           placeholder="Escribe texto que se usará como input..."
           className="w-full text-xs bg-transparent border-none outline-none resize-y min-h-[50px] max-h-[200px] placeholder:text-muted-foreground/50"
           rows={3}
