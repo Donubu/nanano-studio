@@ -1,6 +1,6 @@
 "use client";
 
-import { Type, Image as ImageIcon, Square, Loader2, Check, AlertCircle, Monitor } from "lucide-react";
+import { Type, Image as ImageIcon, Square, Loader2, Check, AlertCircle, Monitor, Palette } from "lucide-react";
 import { SaveStatus } from "@/lib/production/use-template-editor";
 import { formatDateTimeLocal } from "@/lib/utils";
 
@@ -19,6 +19,7 @@ interface Props {
   previewPresets: PreviewPreset[];
   activePreviewId: string;
   onSelectPreview: (id: string) => void;
+  onOpenProjectBrandKit?: () => void;
 }
 
 export function EditorToolbar({
@@ -30,6 +31,7 @@ export function EditorToolbar({
   previewPresets,
   activePreviewId,
   onSelectPreview,
+  onOpenProjectBrandKit,
 }: Props) {
   return (
     <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50 bg-card/40">
@@ -83,6 +85,18 @@ export function EditorToolbar({
       </div>
 
       <div className="flex-1" />
+
+      {onOpenProjectBrandKit && (
+        <button
+          type="button"
+          onClick={onOpenProjectBrandKit}
+          className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border/50 hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+          title="Tokens custom solo para este proyecto"
+        >
+          <Palette className="h-3.5 w-3.5" />
+          Brand kit del proyecto
+        </button>
+      )}
 
       <SaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} />
     </div>

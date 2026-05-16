@@ -8,6 +8,7 @@ import { TemplateCanvas } from "./template-canvas";
 import { LayersPanel } from "./layers-panel";
 import { PropertiesPanel } from "./properties-panel";
 import { EditorToolbar, PreviewPreset } from "./editor-toolbar";
+import { ProjectBrandKitModal } from "./project-brand-kit-modal";
 
 interface Props {
   initial: TemplateDefinition;
@@ -49,6 +50,9 @@ export function TemplateEditor({
     []
   );
   const [activePreviewId, setActivePreviewId] = useState("master");
+  const [showProjectKit, setShowProjectKit] = useState(false);
+
+  const canOpenProjectKit = !!(clientId && projectId);
 
   // If editor.selectedId changes, clear preview? No — keep preview persistent
   // until user toggles. They may want to inspect different selections.
@@ -90,7 +94,20 @@ export function TemplateEditor({
         previewPresets={previewPresets}
         activePreviewId={activePreviewId}
         onSelectPreview={setActivePreviewId}
+        onOpenProjectBrandKit={
+          canOpenProjectKit ? () => setShowProjectKit(true) : undefined
+        }
       />
+
+      {showProjectKit && clientId && projectId && (
+        <ProjectBrandKitModal
+          clientId={clientId}
+          projectId={projectId}
+          existingKits={allBrandKits}
+          onClose={() => setShowProjectKit(false)}
+          onChanged={() => onBrandKitsChange?.()}
+        />
+      )}
 
       {previewSize && (
         <div className="flex items-center justify-center gap-2 px-3 py-1.5 text-xs bg-blue-500/10 text-blue-300 border-b border-blue-500/20">
