@@ -9,6 +9,7 @@ export async function GET() {
 
   const baseUrl = process.env.PRACTICANTE_URL;
   const apiKey = process.env.PRACTICANTE_API_KEY;
+  const userEmail = process.env.PRACTICANTE_USER_EMAIL || "puertostudio@puer.to";
 
   if (!baseUrl || !apiKey) {
     return NextResponse.json(
@@ -20,7 +21,10 @@ export async function GET() {
   try {
     const res = await fetch(`${baseUrl}/api/external/agents`, {
       method: "GET",
-      headers: { "X-API-Key": apiKey },
+      headers: {
+        "X-API-Key": apiKey,
+        "X-User-Email": userEmail,
+      },
       cache: "no-store",
     });
 
