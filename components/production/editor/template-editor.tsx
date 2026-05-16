@@ -66,18 +66,44 @@ export function TemplateEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewSize?.w, previewSize?.h]);
 
-  // Delete selected layer with Backspace/Delete (ignore when typing or previewing).
+  // Keyboard shortcuts. Skip when typing in an input/textarea or in preview mode.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Delete" && e.key !== "Backspace") return;
       const target = e.target as HTMLElement | null;
-      if (!target) return;
-      const tag = target.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
-      if (previewSize) return;
-      if (!editor.selectedId || editor.selectedId === "tpl_root") return;
-      e.preventDefault();
-      editor.deleteLayer(editor.selectedId);
+      const isTextField =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+      const mod = e.metaKey || e.ctrlKey;
+
+      // Undo / redo work even in text fields when no native handler claims them,
+      // but to avoid breaking native input undo we skip if a text field is focused.
+      if (mod && !isTextField) {
+        const key = e.key.toLowerCase();
+        if (key === "z" && !e.shiftKey) {
+          e.preventDefault();
+          editor.undo();
+          return;
+        }
+        if ((key === "z" && e.shiftKey) || key === "y") {
+          e.preventDefault();
+          editor.redo();
+          return;
+        }
+        if (key === "d" && editor.selectedId && editor.selectedId !== "tpl_root" && !previewSize) {
+          e.preventDefault();
+          editor.duplicateLayer(editor.selectedId);
+          return;
+        }
+      }
+
+      if ((e.key === "Delete" || e.key === "Backspace") && !isTextField) {
+        if (previewSize) return;
+        if (!editor.selectedId || editor.selectedId === "tpl_root") return;
+        e.preventDefault();
+        editor.deleteLayer(editor.selectedId);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -97,6 +123,10 @@ export function TemplateEditor({
         onOpenProjectBrandKit={
           canOpenProjectKit ? () => setShowProjectKit(true) : undefined
         }
+        onUndo={editor.undo}
+        onRedo={editor.redo}
+        canUndo={editor.canUndo}
+        canRedo={editor.canRedo}
       />
 
       {showProjectKit && clientId && projectId && (

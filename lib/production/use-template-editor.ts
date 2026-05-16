@@ -12,6 +12,8 @@ import {
   addLayerToFrame,
   deleteLayer as deleteLayerInTree,
   findLayer,
+  findParent,
+  cloneWithNewIds,
 } from "./types";
 
 export type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
@@ -42,6 +44,12 @@ interface UseTemplateEditorResult {
   updateBounds: (id: string, bounds: { x: number; y: number; w: number; h: number }) => void;
   reorderRootChildren: (sourceId: string, targetId: string, position: "before" | "after") => void;
   deleteLayer: (id: string) => void;
+  duplicateLayer: (id: string) => void;
+
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 
   saveNow: () => Promise<void>;
 }
@@ -67,6 +75,11 @@ function ensureValid(
   return newRootFrame(baseWidth, baseHeight);
 }
 
+const HISTORY_LIMIT = 50;
+// Rapid edits within this window are folded into the same undo entry: dragging
+// a slider should be one undo, not one per keystroke.
+const SNAPSHOT_MERGE_MS = 500;
+
 export function useTemplateEditor({
   initial,
   baseWidth,
@@ -81,8 +94,13 @@ export function useTemplateEditor({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
 
-  // Track whether definition has been touched after mount; otherwise the
-  // initial load itself would trigger an autosave.
+  // History stacks. `past[top]` is the state right before the latest user edit,
+  // i.e. what undo will restore. `future` is filled by undo and consumed by redo.
+  const [past, setPast] = useState<TemplateDefinition[]>([]);
+  const [future, setFuture] = useState<TemplateDefinition[]>([]);
+  const lastSnapshotAtRef = useRef<number>(0);
+
+  // Save plumbing
   const dirtyRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
@@ -115,7 +133,6 @@ export function useTemplateEditor({
     [onSave]
   );
 
-  // Debounced autosave on definition changes.
   useEffect(() => {
     if (!dirtyRef.current) return;
     setSaveStatus("dirty");
@@ -128,10 +145,26 @@ export function useTemplateEditor({
     };
   }, [definition, autosaveDelayMs, flushSave]);
 
+  // User-initiated mutation: push prev into past, clear future, then apply.
+  // Rapid sequential edits (slider drag, repeated key) collapse into one undo
+  // entry by skipping the snapshot when the previous one was just taken.
   const mutate = useCallback(
     (mutator: (d: TemplateDefinition) => TemplateDefinition) => {
       dirtyRef.current = true;
-      setDefinition((prev) => mutator(prev));
+      setDefinition((prev) => {
+        const now = Date.now();
+        const shouldSnapshot = now - lastSnapshotAtRef.current >= SNAPSHOT_MERGE_MS;
+        lastSnapshotAtRef.current = now;
+        if (shouldSnapshot) {
+          setPast((p) => {
+            const np = [...p, prev];
+            if (np.length > HISTORY_LIMIT) np.shift();
+            return np;
+          });
+          setFuture([]);
+        }
+        return mutator(prev);
+      });
     },
     []
   );
@@ -149,24 +182,6 @@ export function useTemplateEditor({
     },
     [mutate]
   );
-
-  const addText = useCallback(() => {
-    const layer = newTextLayer(baseWidth / 2, baseHeight / 2);
-    mutate((d) => addLayerToFrame(d, "tpl_root", layer));
-    setSelectedId(layer.id);
-  }, [baseWidth, baseHeight, mutate]);
-
-  const addImage = useCallback(() => {
-    const layer = newImageLayer(baseWidth / 2, baseHeight / 2);
-    mutate((d) => addLayerToFrame(d, "tpl_root", layer));
-    setSelectedId(layer.id);
-  }, [baseWidth, baseHeight, mutate]);
-
-  const addShape = useCallback(() => {
-    const layer = newShapeLayer(baseWidth / 2, baseHeight / 2);
-    mutate((d) => addLayerToFrame(d, "tpl_root", layer));
-    setSelectedId(layer.id);
-  }, [baseWidth, baseHeight, mutate]);
 
   const updateBounds = useCallback(
     (id: string, bounds: { x: number; y: number; w: number; h: number }) => {
@@ -191,7 +206,6 @@ export function useTemplateEditor({
         if (srcIdx === -1 || tgtIdx === -1) return d;
         const next = [...d.children];
         const [moved] = next.splice(srcIdx, 1);
-        // Recompute target index after removal
         const newIdx = next.findIndex((c) => c.id === targetId);
         if (newIdx === -1) return d;
         const insertAt = position === "before" ? newIdx : newIdx + 1;
@@ -202,6 +216,24 @@ export function useTemplateEditor({
     [mutate]
   );
 
+  const addText = useCallback(() => {
+    const layer = newTextLayer(baseWidth / 2, baseHeight / 2);
+    mutate((d) => addLayerToFrame(d, "tpl_root", layer));
+    setSelectedId(layer.id);
+  }, [baseWidth, baseHeight, mutate]);
+
+  const addImage = useCallback(() => {
+    const layer = newImageLayer(baseWidth / 2, baseHeight / 2);
+    mutate((d) => addLayerToFrame(d, "tpl_root", layer));
+    setSelectedId(layer.id);
+  }, [baseWidth, baseHeight, mutate]);
+
+  const addShape = useCallback(() => {
+    const layer = newShapeLayer(baseWidth / 2, baseHeight / 2);
+    mutate((d) => addLayerToFrame(d, "tpl_root", layer));
+    setSelectedId(layer.id);
+  }, [baseWidth, baseHeight, mutate]);
+
   const deleteLayer = useCallback(
     (id: string) => {
       if (id === "tpl_root") return;
@@ -210,6 +242,66 @@ export function useTemplateEditor({
     },
     [mutate]
   );
+
+  const duplicateLayer = useCallback(
+    (id: string) => {
+      if (id === "tpl_root") return;
+      // Need to resolve in the current state synchronously, so we read from
+      // the closure-captured `definition`. If the user fires duplicate twice
+      // in the same tick, the second runs against the same source — acceptable.
+      const source = findLayer(definition, id);
+      if (!source) return;
+      const parent = findParent(definition, id);
+      const parentId = parent?.id ?? "tpl_root";
+      const cloned = cloneWithNewIds(source);
+      // Offset the clone slightly so it's visible next to the original.
+      cloned.position = {
+        x: source.position.x + 20,
+        y: source.position.y + 20,
+      };
+      mutate((d) => addLayerToFrame(d, parentId, cloned));
+      setSelectedId(cloned.id);
+    },
+    [definition, mutate]
+  );
+
+  const undo = useCallback(() => {
+    setPast((p) => {
+      if (p.length === 0) return p;
+      const prev = p[p.length - 1];
+      const newPast = p.slice(0, -1);
+      setDefinition((cur) => {
+        setFuture((f) => {
+          const nf = [...f, cur];
+          if (nf.length > HISTORY_LIMIT) nf.shift();
+          return nf;
+        });
+        return prev;
+      });
+      dirtyRef.current = true;
+      lastSnapshotAtRef.current = 0; // next mutation will snapshot fresh
+      return newPast;
+    });
+  }, []);
+
+  const redo = useCallback(() => {
+    setFuture((f) => {
+      if (f.length === 0) return f;
+      const next = f[f.length - 1];
+      const newFuture = f.slice(0, -1);
+      setDefinition((cur) => {
+        setPast((p) => {
+          const np = [...p, cur];
+          if (np.length > HISTORY_LIMIT) np.shift();
+          return np;
+        });
+        return next;
+      });
+      dirtyRef.current = true;
+      lastSnapshotAtRef.current = 0;
+      return newFuture;
+    });
+  }, []);
 
   const saveNow = useCallback(async () => {
     if (timerRef.current) {
@@ -236,6 +328,11 @@ export function useTemplateEditor({
     updateBounds,
     reorderRootChildren,
     deleteLayer,
+    duplicateLayer,
+    undo,
+    redo,
+    canUndo: past.length > 0,
+    canRedo: future.length > 0,
     saveNow,
   };
 }

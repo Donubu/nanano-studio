@@ -1,6 +1,6 @@
 "use client";
 
-import { Type, Image as ImageIcon, Square, Loader2, Check, AlertCircle, Monitor, Palette } from "lucide-react";
+import { Type, Image as ImageIcon, Square, Loader2, Check, AlertCircle, Monitor, Palette, Undo2, Redo2 } from "lucide-react";
 import { SaveStatus } from "@/lib/production/use-template-editor";
 import { formatDateTimeLocal } from "@/lib/utils";
 
@@ -20,6 +20,10 @@ interface Props {
   activePreviewId: string;
   onSelectPreview: (id: string) => void;
   onOpenProjectBrandKit?: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 export function EditorToolbar({
@@ -32,9 +36,34 @@ export function EditorToolbar({
   activePreviewId,
   onSelectPreview,
   onOpenProjectBrandKit,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
 }: Props) {
   return (
     <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50 bg-card/40">
+      <button
+        type="button"
+        onClick={onUndo}
+        disabled={!canUndo}
+        className="flex items-center justify-center w-7 h-7 rounded-md border border-border/50 hover:bg-muted transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        title="Deshacer (⌘Z)"
+      >
+        <Undo2 className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={onRedo}
+        disabled={!canRedo}
+        className="flex items-center justify-center w-7 h-7 rounded-md border border-border/50 hover:bg-muted transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        title="Rehacer (⌘⇧Z)"
+      >
+        <Redo2 className="h-3.5 w-3.5" />
+      </button>
+
+      <div className="h-5 w-px bg-border/50 mx-1" />
+
       <button
         type="button"
         onClick={onAddText}

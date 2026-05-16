@@ -302,6 +302,25 @@ function deleteInChildren(children: TemplateLayer[], id: string): TemplateLayer[
     .map((c) => (c.type === "frame" ? { ...c, children: deleteInChildren(c.children, id) } : c));
 }
 
+// Clone a layer (and its subtree, for frames) with freshly generated IDs.
+// Used by duplicate / paste so the new layers don't collide with the originals.
+export function cloneWithNewIds(layer: TemplateLayer): TemplateLayer {
+  const newId = (() => {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      return crypto.randomUUID();
+    }
+    return `id_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+  })();
+  if (layer.type === "frame") {
+    return {
+      ...layer,
+      id: newId,
+      children: layer.children.map(cloneWithNewIds),
+    };
+  }
+  return { ...layer, id: newId };
+}
+
 // Flatten the tree to a list (depth-first), excluding root. Used for the layers panel.
 export interface FlatLayer {
   layer: TemplateLayer;
