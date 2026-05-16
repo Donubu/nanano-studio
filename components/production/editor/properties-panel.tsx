@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import { ImageIcon } from "lucide-react";
 import {
   TemplateDefinition,
   TemplateLayer,
@@ -25,6 +27,7 @@ import {
   ColorToken,
 } from "@/lib/production/brand-kit";
 import { cn } from "@/lib/utils";
+import { ClientImagePicker } from "@/components/production/editor/client-image-picker";
 
 interface Props {
   definition: TemplateDefinition;
@@ -350,6 +353,7 @@ export function PropertiesPanel({
   onUpdateLayer,
   onUpdateRoot,
   brandKit = EMPTY_KIT_CONTENT,
+  clientId = null,
 }: Props) {
   const noSelection = !selectedLayer;
   const isRoot = selectedLayer?.id === "tpl_root";
@@ -373,7 +377,12 @@ export function PropertiesPanel({
         )}
 
         {selectedLayer && !isRoot && (
-          <LayerProps layer={selectedLayer} onUpdate={onUpdateLayer} brandKit={brandKit} />
+          <LayerProps
+            layer={selectedLayer}
+            onUpdate={onUpdateLayer}
+            brandKit={brandKit}
+            clientId={clientId}
+          />
         )}
       </div>
     </aside>
@@ -435,10 +444,12 @@ function LayerProps({
   layer,
   onUpdate,
   brandKit,
+  clientId,
 }: {
   layer: TemplateLayer;
   onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
   brandKit: BrandKitContent;
+  clientId: number | null;
 }) {
   return (
     <>
@@ -494,7 +505,12 @@ function LayerProps({
         <TextProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} />
       )}
       {layer.type === "image" && (
-        <ImageProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} />
+        <ImageProps
+          layer={layer}
+          onUpdate={onUpdate}
+          brandKit={brandKit}
+          clientId={clientId}
+        />
       )}
       {layer.type === "shape" && (
         <ShapeProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} />
@@ -590,11 +606,14 @@ function ImageProps({
   layer,
   onUpdate,
   brandKit,
+  clientId,
 }: {
   layer: ImageLayer;
   onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
   brandKit: BrandKitContent;
+  clientId: number | null;
 }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
   return (
     <Section title="Imagen">
       <TokenTextRow
@@ -609,6 +628,29 @@ function ImageProps({
           )
         }
       />
+      {clientId !== null && (
+        <>
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            className="w-full flex items-center justify-center gap-1.5 text-[11px] py-1.5 rounded border border-dashed border-border/60 text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted transition-colors"
+          >
+            <ImageIcon className="h-3 w-3" />
+            Galería del cliente
+          </button>
+          {pickerOpen && (
+            <ClientImagePicker
+              clientId={clientId}
+              onClose={() => setPickerOpen(false)}
+              onPick={(img) =>
+                onUpdate(layer.id, (l) =>
+                  l.type === "image" ? { ...l, src: img.url } : l
+                )
+              }
+            />
+          )}
+        </>
+      )}
       <div className="flex items-center gap-1">
         {(["cover", "contain", "fill"] as const).map((f) => (
           <button
