@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { TemplateDefinition } from "@/lib/production/types";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { TemplateDefinition, findLayer, findParent } from "@/lib/production/types";
 import { BrandKit, BrandKitContent, EMPTY_KIT_CONTENT } from "@/lib/production/brand-kit";
 import { useTemplateEditor } from "@/lib/production/use-template-editor";
 import { TemplateCanvas } from "./template-canvas";
@@ -9,6 +9,7 @@ import { LayersPanel } from "./layers-panel";
 import { PropertiesPanel } from "./properties-panel";
 import { EditorToolbar, PreviewPreset } from "./editor-toolbar";
 import { ProjectBrandKitModal } from "./project-brand-kit-modal";
+import { LayerContextMenu, LayerContextMenuPosition } from "./layer-context-menu";
 
 interface Props {
   initial: TemplateDefinition;
@@ -51,8 +52,23 @@ export function TemplateEditor({
   );
   const [activePreviewId, setActivePreviewId] = useState("master");
   const [showProjectKit, setShowProjectKit] = useState(false);
+  const [contextMenu, setContextMenu] = useState<LayerContextMenuPosition | null>(null);
 
   const canOpenProjectKit = !!(clientId && projectId);
+
+  const openContextMenu = useCallback(
+    (clientX: number, clientY: number, layerId: string) => {
+      setContextMenu({ x: clientX, y: clientY, layerId });
+    },
+    []
+  );
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  // Resolve current state for the context menu in render so reorder/lock from
+  // the menu reflect the latest definition.
+  const ctxLayer = contextMenu ? findLayer(editor.definition, contextMenu.layerId) : null;
+  const ctxParent = contextMenu ? findParent(editor.definition, contextMenu.layerId) : null;
+  const ctxParentIsStack = ctxParent?.layout.mode === "stack";
 
   // If editor.selectedId changes, clear preview? No — keep preview persistent
   // until user toggles. They may want to inspect different selections.
@@ -139,6 +155,20 @@ export function TemplateEditor({
         />
       )}
 
+      {contextMenu && ctxLayer && (
+        <LayerContextMenu
+          position={contextMenu}
+          layer={ctxLayer}
+          parentIsStack={!!ctxParentIsStack}
+          onClose={closeContextMenu}
+          onCenter={(axis) => editor.centerInParent(contextMenu.layerId, axis)}
+          onReorder={(op) => editor.reorderInParent(contextMenu.layerId, op)}
+          onDuplicate={() => editor.duplicateLayer(contextMenu.layerId)}
+          onToggleLock={() => editor.toggleLock(contextMenu.layerId)}
+          onDelete={() => editor.deleteLayer(contextMenu.layerId)}
+        />
+      )}
+
       {previewSize && (
         <div className="flex items-center justify-center gap-2 px-3 py-1.5 text-xs bg-blue-500/10 text-blue-300 border-b border-blue-500/20">
           <span>
@@ -162,6 +192,8 @@ export function TemplateEditor({
           onSelect={editor.select}
           onDelete={editor.deleteLayer}
           onReorder={editor.reorderRootChildren}
+          onToggleLock={editor.toggleLock}
+          onLayerContextMenu={previewSize ? undefined : openContextMenu}
         />
         <TemplateCanvas
           definition={editor.definition}
@@ -170,6 +202,7 @@ export function TemplateEditor({
           onUpdateBounds={editor.updateBounds}
           previewSize={previewSize}
           brandKit={brandKit}
+          onLayerContextMenu={openContextMenu}
         />
         <PropertiesPanel
           definition={editor.definition}

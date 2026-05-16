@@ -1,8 +1,8 @@
 "use client";
 
-import { DragEvent as ReactDragEvent, useState } from "react";
+import { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, useState } from "react";
 import { cn } from "@/lib/utils";
-import { Trash2, Type, Image as ImageIcon, Square, Layers as LayersIcon, GripVertical } from "lucide-react";
+import { Trash2, Type, Image as ImageIcon, Square, Layers as LayersIcon, GripVertical, Lock, Unlock } from "lucide-react";
 import {
   TemplateDefinition,
   TemplateLayer,
@@ -15,6 +15,8 @@ interface Props {
   onSelect: (id: string | null) => void;
   onDelete: (id: string) => void;
   onReorder: (sourceId: string, targetId: string, position: "before" | "after") => void;
+  onToggleLock: (id: string) => void;
+  onLayerContextMenu?: (clientX: number, clientY: number, layerId: string) => void;
 }
 
 function defaultName(layer: TemplateLayer): string {
@@ -51,6 +53,8 @@ export function LayersPanel({
   onSelect,
   onDelete,
   onReorder,
+  onToggleLock,
+  onLayerContextMenu,
 }: Props) {
   const flat = flattenLayers(definition);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -61,14 +65,22 @@ export function LayersPanel({
   const isRootChild = (id: string) =>
     definition.children.some((c) => c.id === id);
 
-  const handleDragStart = (e: ReactDragEvent<HTMLDivElement>, id: string) => {
-    if (!isRootChild(id)) {
+  const handleDragStart = (e: ReactDragEvent<HTMLDivElement>, id: string, locked: boolean) => {
+    if (!isRootChild(id) || locked) {
       e.preventDefault();
       return;
     }
     setDragId(id);
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", id);
+  };
+
+  const handleContextMenu = (e: ReactMouseEvent<HTMLDivElement>, id: string) => {
+    if (!onLayerContextMenu) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onSelect(id);
+    onLayerContextMenu(e.clientX, e.clientY, id);
   };
 
   const handleDragOver = (e: ReactDragEvent<HTMLDivElement>, id: string) => {
@@ -134,18 +146,20 @@ export function LayersPanel({
           </p>
         ) : (
           flat.map(({ layer, depth }) => {
-            const canDrag = isRootChild(layer.id);
+            const isLocked = !!layer.locked;
+            const canDrag = isRootChild(layer.id) && !isLocked;
             const showBefore = dropHint?.id === layer.id && dropHint.position === "before";
             const showAfter = dropHint?.id === layer.id && dropHint.position === "after";
             return (
               <div
                 key={layer.id}
                 draggable={canDrag}
-                onDragStart={(e) => handleDragStart(e, layer.id)}
+                onDragStart={(e) => handleDragStart(e, layer.id, isLocked)}
                 onDragOver={(e) => handleDragOver(e, layer.id)}
                 onDragLeave={(e) => handleDragLeave(e, layer.id)}
                 onDrop={(e) => handleDrop(e, layer.id)}
                 onDragEnd={handleDragEnd}
+                onContextMenu={(e) => handleContextMenu(e, layer.id)}
                 className={cn(
                   "group relative flex items-center gap-1 rounded-md transition-colors",
                   selectedId === layer.id ? "bg-blue-500/15" : "hover:bg-accent",
@@ -161,25 +175,44 @@ export function LayersPanel({
                   <span className="absolute left-0 right-0 -bottom-0.5 h-0.5 bg-blue-500 rounded pointer-events-none" />
                 )}
 
-                {canDrag && (
+                {canDrag ? (
                   <span
                     className="px-1 text-muted-foreground/60 cursor-grab active:cursor-grabbing"
                     title="Arrastrar para reordenar"
                   >
                     <GripVertical className="h-3 w-3" />
                   </span>
+                ) : (
+                  <span className="px-1 w-5" />
                 )}
                 <button
                   type="button"
                   onClick={() => onSelect(layer.id)}
                   className={cn(
                     "flex-1 flex items-center gap-2 px-2 py-1.5 text-left text-sm",
-                    !canDrag && "pl-2",
                     selectedId === layer.id ? "text-foreground" : "text-muted-foreground"
                   )}
                 >
                   {iconFor(layer)}
-                  <span className="truncate flex-1">{defaultName(layer)}</span>
+                  <span className={cn("truncate flex-1", isLocked && "italic")}>
+                    {defaultName(layer)}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleLock(layer.id);
+                  }}
+                  className={cn(
+                    "px-1.5 py-1 transition-all",
+                    isLocked
+                      ? "opacity-100 text-foreground"
+                      : "opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground"
+                  )}
+                  title={isLocked ? "Desbloquear" : "Bloquear"}
+                >
+                  {isLocked ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
                 </button>
                 <button
                   type="button"

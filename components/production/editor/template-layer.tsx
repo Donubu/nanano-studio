@@ -18,6 +18,7 @@ interface Props {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onLayerPointerDown: (e: ReactPointerEvent<HTMLDivElement>, layerId: string) => void;
+  onLayerContextMenu?: (e: React.MouseEvent<HTMLDivElement>, layerId: string) => void;
   parentMode?: "free" | "stack";
 }
 
@@ -55,6 +56,7 @@ export function TemplateLayerView({
   selectedId,
   onSelect,
   onLayerPointerDown,
+  onLayerContextMenu,
   parentMode = "free",
 }: Props) {
   const isSelected = selectedId === layer.id;
@@ -64,15 +66,32 @@ export function TemplateLayerView({
       onSelect(layer.id);
       onLayerPointerDown(e, layer.id);
     },
+    onContextMenu: (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!onLayerContextMenu) return;
+      e.preventDefault();
+      e.stopPropagation();
+      onSelect(layer.id);
+      onLayerContextMenu(e, layer.id);
+    },
     className: cn(
       "outline-2 outline-offset-0",
-      parentMode === "stack" ? "cursor-pointer" : "cursor-move",
+      layer.locked
+        ? "cursor-default"
+        : parentMode === "stack"
+        ? "cursor-pointer"
+        : "cursor-move",
       isSelected ? "outline outline-blue-500" : "outline-transparent hover:outline hover:outline-blue-300/60"
     ),
   };
 
   if (layer.type === "frame")
-    return renderFrame(layer, parentMode, { commonProps, selectedId, onSelect, onLayerPointerDown });
+    return renderFrame(layer, parentMode, {
+      commonProps,
+      selectedId,
+      onSelect,
+      onLayerPointerDown,
+      onLayerContextMenu,
+    });
   if (layer.type === "text") return renderText(layer, parentMode, commonProps);
   if (layer.type === "image") return renderImage(layer, parentMode, commonProps);
   if (layer.type === "shape") return renderShape(layer, parentMode, commonProps);
@@ -81,6 +100,7 @@ export function TemplateLayerView({
 
 type CommonProps = {
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
+  onContextMenu: (e: React.MouseEvent<HTMLDivElement>) => void;
   className: string;
 };
 
@@ -127,6 +147,7 @@ function renderFrame(
     selectedId: string | null;
     onSelect: (id: string) => void;
     onLayerPointerDown: (e: ReactPointerEvent<HTMLDivElement>, layerId: string) => void;
+    onLayerContextMenu?: (e: React.MouseEvent<HTMLDivElement>, layerId: string) => void;
   }
 ) {
   const bg = layer.background;
@@ -153,6 +174,7 @@ function renderFrame(
           selectedId={ctx.selectedId}
           onSelect={ctx.onSelect}
           onLayerPointerDown={ctx.onLayerPointerDown}
+          onLayerContextMenu={ctx.onLayerContextMenu}
           parentMode={childParentMode}
         />
       ))}

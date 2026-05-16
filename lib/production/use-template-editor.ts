@@ -43,6 +43,9 @@ interface UseTemplateEditorResult {
   updateRoot: (mutator: (root: TemplateDefinition) => TemplateDefinition) => void;
   updateBounds: (id: string, bounds: { x: number; y: number; w: number; h: number }) => void;
   reorderRootChildren: (sourceId: string, targetId: string, position: "before" | "after") => void;
+  reorderInParent: (id: string, op: "front" | "back" | "up" | "down") => void;
+  centerInParent: (id: string, axis: "h" | "v" | "both") => void;
+  toggleLock: (id: string) => void;
   deleteLayer: (id: string) => void;
   duplicateLayer: (id: string) => void;
 
@@ -234,6 +237,68 @@ export function useTemplateEditor({
     setSelectedId(layer.id);
   }, [baseWidth, baseHeight, mutate]);
 
+  const reorderInParent = useCallback(
+    (id: string, op: "front" | "back" | "up" | "down") => {
+      if (id === "tpl_root") return;
+      mutate((d) => {
+        const parent = findParent(d, id);
+        if (!parent) return d;
+        const children = [...parent.children];
+        const idx = children.findIndex((c) => c.id === id);
+        if (idx === -1) return d;
+        let newIdx: number;
+        switch (op) {
+          case "front": newIdx = children.length - 1; break;
+          case "back":  newIdx = 0; break;
+          case "up":    newIdx = Math.min(children.length - 1, idx + 1); break;
+          case "down":  newIdx = Math.max(0, idx - 1); break;
+        }
+        if (newIdx === idx) return d;
+        const [moved] = children.splice(idx, 1);
+        children.splice(newIdx, 0, moved);
+        return updateLayerInTree(d, parent.id, (l) =>
+          l.type === "frame" ? { ...l, children } : l
+        );
+      });
+    },
+    [mutate]
+  );
+
+  const centerInParent = useCallback(
+    (id: string, axis: "h" | "v" | "both") => {
+      if (id === "tpl_root") return;
+      mutate((d) => {
+        const layer = findLayer(d, id);
+        const parent = findParent(d, id);
+        if (!layer || !parent) return d;
+        // Centering doesn't apply in a stack-laid parent (the layout computes
+        // position). Caller should hide the option, but guard anyway.
+        if (parent.layout.mode === "stack") return d;
+        const newX =
+          axis === "h" || axis === "both"
+            ? Math.round((parent.size.w - layer.size.w) / 2)
+            : layer.position.x;
+        const newY =
+          axis === "v" || axis === "both"
+            ? Math.round((parent.size.h - layer.size.h) / 2)
+            : layer.position.y;
+        return updateLayerInTree(d, id, (l) => ({
+          ...l,
+          position: { x: newX, y: newY },
+        }));
+      });
+    },
+    [mutate]
+  );
+
+  const toggleLock = useCallback(
+    (id: string) => {
+      if (id === "tpl_root") return;
+      mutate((d) => updateLayerInTree(d, id, (l) => ({ ...l, locked: !l.locked })));
+    },
+    [mutate]
+  );
+
   const deleteLayer = useCallback(
     (id: string) => {
       if (id === "tpl_root") return;
@@ -327,6 +392,9 @@ export function useTemplateEditor({
     updateRoot,
     updateBounds,
     reorderRootChildren,
+    reorderInParent,
+    centerInParent,
+    toggleLock,
     deleteLayer,
     duplicateLayer,
     undo,

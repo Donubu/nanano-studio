@@ -26,6 +26,7 @@ interface Props {
   // Used by the editor's preview-format selector to inspect adaptations.
   previewSize?: { w: number; h: number } | null;
   brandKit?: BrandKitContent;
+  onLayerContextMenu?: (clientX: number, clientY: number, layerId: string) => void;
 }
 
 type Bounds = { x: number; y: number; w: number; h: number };
@@ -65,6 +66,7 @@ export function TemplateCanvas({
   onUpdateBounds,
   previewSize,
   brandKit = EMPTY_KIT_CONTENT,
+  onLayerContextMenu,
 }: Props) {
   const isPreview = !!previewSize;
   // In preview mode, render against a reflowed clone derived from constraints.
@@ -263,6 +265,11 @@ export function TemplateCanvas({
                 selectedId={selectedId}
                 onSelect={onSelect}
                 onLayerPointerDown={startMove}
+                onLayerContextMenu={
+                  isPreview || !onLayerContextMenu
+                    ? undefined
+                    : (e, id) => onLayerContextMenu(e.clientX, e.clientY, id)
+                }
               />
             ))}
 
