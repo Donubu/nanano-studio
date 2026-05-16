@@ -155,6 +155,48 @@ export function getImagenQueue(): Queue<ImagenJobData> {
 }
 
 // ============================================
+// RENDER QUEUE (Production area: batch render adaptations to JPG)
+// ============================================
+
+export const RENDER_QUEUE_NAME = "production-render";
+
+export interface RenderJobData {
+  renderId: number;
+  templateId: number;
+  adaptationIds: number[];
+  datasetId?: number | null;
+  rowIds?: Array<number | string> | null;
+  outputFormat: "jpg";
+  jpgQuality: number;
+  brandKitId?: number | null;
+  userId: number;
+}
+
+export type RenderJobEvent =
+  | { type: "started"; totalAssets: number }
+  | { type: "asset"; adaptationId: number; rowId?: number | string | null; url: string; index: number; total: number }
+  | { type: "asset_error"; adaptationId: number; rowId?: number | string | null; message: string }
+  | { type: "progress"; completed: number; total: number; pct: number }
+  | { type: "complete"; archiveUrl: string; completed: number; total: number }
+  | { type: "error"; message: string };
+
+let renderQueue: Queue | null = null;
+
+export function getRenderQueue(): Queue<RenderJobData> {
+  if (!renderQueue) {
+    renderQueue = new Queue(RENDER_QUEUE_NAME, {
+      connection: getRedisConnection() as never,
+      defaultJobOptions: {
+        removeOnComplete: 50,
+        removeOnFail: 50,
+        attempts: 1,
+      },
+    });
+  }
+  return renderQueue;
+}
+
+// ============================================
 
 let streamQueue: Queue | null = null;
 
