@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { TemplateDefinition } from "@/lib/production/types";
+import { BrandKit, BrandKitContent, EMPTY_KIT_CONTENT } from "@/lib/production/brand-kit";
 import { useTemplateEditor } from "@/lib/production/use-template-editor";
 import { TemplateCanvas } from "./template-canvas";
 import { LayersPanel } from "./layers-panel";
@@ -13,9 +14,24 @@ interface Props {
   baseWidth: number;
   baseHeight: number;
   onSave: (definition: TemplateDefinition) => Promise<void>;
+  brandKit?: BrandKitContent;
+  clientId?: number | null;
+  projectId?: number;
+  allBrandKits?: BrandKit[];
+  onBrandKitsChange?: () => void;
 }
 
-export function TemplateEditor({ initial, baseWidth, baseHeight, onSave }: Props) {
+export function TemplateEditor({
+  initial,
+  baseWidth,
+  baseHeight,
+  onSave,
+  brandKit = EMPTY_KIT_CONTENT,
+  clientId,
+  projectId,
+  allBrandKits = [],
+  onBrandKitsChange,
+}: Props) {
   const editor = useTemplateEditor({
     initial,
     baseWidth,
@@ -106,12 +122,18 @@ export function TemplateEditor({ initial, baseWidth, baseHeight, onSave }: Props
           onSelect={editor.select}
           onUpdateBounds={editor.updateBounds}
           previewSize={previewSize}
+          brandKit={brandKit}
         />
         <PropertiesPanel
           definition={editor.definition}
           selectedLayer={editor.selectedLayer}
           onUpdateLayer={editor.updateLayer}
           onUpdateRoot={editor.updateRoot}
+          brandKit={brandKit}
+          clientId={clientId ?? null}
+          projectId={projectId}
+          allBrandKits={allBrandKits}
+          onBrandKitsChange={onBrandKitsChange}
         />
       </div>
     </div>

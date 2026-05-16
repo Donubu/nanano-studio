@@ -16,12 +16,29 @@ import {
   ConstraintV,
   DEFAULT_CONSTRAINTS,
 } from "@/lib/production/types";
+import {
+  BrandKit,
+  BrandKitContent,
+  EMPTY_KIT_CONTENT,
+  parseRef,
+  makeRef,
+  ColorToken,
+  FontToken,
+  ScaleToken,
+  SpacingToken,
+  LogoToken,
+} from "@/lib/production/brand-kit";
 
 interface Props {
   definition: TemplateDefinition;
   selectedLayer: TemplateLayer | null;
   onUpdateLayer: (id: string, mutator: (layer: TemplateLayer) => TemplateLayer) => void;
   onUpdateRoot: (mutator: (root: TemplateDefinition) => TemplateDefinition) => void;
+  brandKit?: BrandKitContent;
+  clientId?: number | null;
+  projectId?: number;
+  allBrandKits?: BrandKit[];
+  onBrandKitsChange?: () => void;
 }
 
 function NumberRow({
@@ -59,27 +76,76 @@ function ColorRow({
   label,
   value,
   onChange,
+  tokens,
 }: {
   label: string;
   value: string;
   onChange: (s: string) => void;
+  tokens?: ColorToken[];
 }) {
+  const ref = parseRef(value);
+  const refToken = ref && ref.kind === "color" ? tokens?.find((t) => t.name === ref.name) : null;
+  const isRef = ref !== null;
+  const inputColor = isRef && refToken ? refToken.value : (isRef ? "#888888" : value);
+
   return (
-    <label className="flex items-center gap-2 text-xs">
-      <span className="w-12 text-muted-foreground">{label}</span>
-      <input
-        type="color"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-8 h-7 rounded border border-border/50 bg-muted cursor-pointer"
-      />
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-xs font-mono"
-      />
-    </label>
+    <div className="space-y-1">
+      <div className="flex items-center gap-2 text-xs">
+        <span className="w-12 text-muted-foreground">{label}</span>
+        {isRef ? (
+          <div className="flex-1 flex items-center gap-1 bg-muted border border-border/50 rounded px-2 py-1">
+            <div
+              className="w-4 h-4 rounded border border-border/50"
+              style={{ background: inputColor }}
+            />
+            <span className="text-xs flex-1 truncate">
+              {refToken?.label ?? ref.name}
+            </span>
+            <button
+              type="button"
+              onClick={() => onChange(inputColor)}
+              className="text-[10px] text-muted-foreground hover:text-foreground"
+              title="Convertir a valor personalizado"
+            >
+              ×
+            </button>
+          </div>
+        ) : (
+          <>
+            <input
+              type="color"
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              className="w-8 h-7 rounded border border-border/50 bg-muted cursor-pointer"
+            />
+            <input
+              type="text"
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-xs font-mono"
+            />
+          </>
+        )}
+      </div>
+      {tokens && tokens.length > 0 && (
+        <div className="flex flex-wrap gap-1 pl-14">
+          {tokens.map((t) => (
+            <button
+              key={t.name}
+              type="button"
+              onClick={() => onChange(makeRef("color", t.name))}
+              className={`w-5 h-5 rounded border ${
+                isRef && refToken?.name === t.name
+                  ? "border-primary ring-1 ring-primary"
+                  : "border-border/50 hover:border-foreground/40"
+              }`}
+              style={{ background: t.value }}
+              title={`${t.label} · ${t.value}`}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -121,6 +187,7 @@ export function PropertiesPanel({
   selectedLayer,
   onUpdateLayer,
   onUpdateRoot,
+  brandKit = EMPTY_KIT_CONTENT,
 }: Props) {
   const noSelection = !selectedLayer;
   const isRoot = selectedLayer?.id === "tpl_root";
@@ -140,11 +207,11 @@ export function PropertiesPanel({
         )}
 
         {isRoot && (
-          <RootProps definition={definition} onUpdateRoot={onUpdateRoot} />
+          <RootProps definition={definition} onUpdateRoot={onUpdateRoot} brandKit={brandKit} />
         )}
 
         {selectedLayer && !isRoot && (
-          <LayerProps layer={selectedLayer} onUpdate={onUpdateLayer} />
+          <LayerProps layer={selectedLayer} onUpdate={onUpdateLayer} brandKit={brandKit} />
         )}
       </div>
     </aside>
@@ -167,9 +234,11 @@ function labelForType(type: TemplateLayer["type"]) {
 function RootProps({
   definition,
   onUpdateRoot,
+  brandKit,
 }: {
   definition: TemplateDefinition;
   onUpdateRoot: (m: (root: TemplateDefinition) => TemplateDefinition) => void;
+  brandKit: BrandKitContent;
 }) {
   const bgColor =
     definition.background && definition.background.type === "color"
@@ -182,6 +251,7 @@ function RootProps({
         <ColorRow
           label="Color"
           value={bgColor}
+          tokens={brandKit.colors}
           onChange={(v) =>
             onUpdateRoot((root) => ({
               ...root,
@@ -194,7 +264,7 @@ function RootProps({
         </p>
       </Section>
 
-      <LayoutControls frame={definition} onUpdateFrame={onUpdateRoot} />
+      <LayoutControls frame={definition} onUpdateFrame={onUpdateRoot} brandKit={brandKit} />
     </>
   );
 }
@@ -202,9 +272,11 @@ function RootProps({
 function LayerProps({
   layer,
   onUpdate,
+  brandKit,
 }: {
   layer: TemplateLayer;
   onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
+  brandKit: BrandKitContent;
 }) {
   return (
     <>
@@ -257,16 +329,16 @@ function LayerProps({
       />
 
       {layer.type === "text" && (
-        <TextProps layer={layer} onUpdate={onUpdate} />
+        <TextProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} />
       )}
       {layer.type === "image" && (
-        <ImageProps layer={layer} onUpdate={onUpdate} />
+        <ImageProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} />
       )}
       {layer.type === "shape" && (
-        <ShapeProps layer={layer} onUpdate={onUpdate} />
+        <ShapeProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} />
       )}
       {layer.type === "frame" && (
-        <FrameProps layer={layer} onUpdate={onUpdate} />
+        <FrameProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} />
       )}
     </>
   );
@@ -275,9 +347,11 @@ function LayerProps({
 function TextProps({
   layer,
   onUpdate,
+  brandKit,
 }: {
   layer: TextLayer;
   onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
+  brandKit: BrandKitContent;
 }) {
   const updateStyle = (s: Partial<TextLayer["style"]>) =>
     onUpdate(layer.id, (l) =>
@@ -315,6 +389,7 @@ function TextProps({
         <ColorRow
           label="Color"
           value={layer.style.color}
+          tokens={brandKit.colors}
           onChange={(v) => updateStyle({ color: v })}
         />
         <div className="flex items-center gap-1">
@@ -341,9 +416,11 @@ function TextProps({
 function ImageProps({
   layer,
   onUpdate,
+  brandKit,
 }: {
   layer: ImageLayer;
   onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
+  brandKit: BrandKitContent;
 }) {
   return (
     <Section title="Imagen">
@@ -391,9 +468,11 @@ function ImageProps({
 function ShapeProps({
   layer,
   onUpdate,
+  brandKit,
 }: {
   layer: ShapeLayer;
   onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
+  brandKit: BrandKitContent;
 }) {
   return (
     <Section title="Forma">
@@ -418,6 +497,7 @@ function ShapeProps({
       <ColorRow
         label="Relleno"
         value={layer.fill}
+        tokens={brandKit.colors}
         onChange={(v) =>
           onUpdate(layer.id, (l) => (l.type === "shape" ? { ...l, fill: v } : l))
         }
@@ -441,9 +521,11 @@ function ShapeProps({
 function FrameProps({
   layer,
   onUpdate,
+  brandKit,
 }: {
   layer: FrameLayer;
   onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
+  brandKit: BrandKitContent;
 }) {
   const bgColor =
     layer.background && layer.background.type === "color"
@@ -455,6 +537,7 @@ function FrameProps({
         <ColorRow
           label="Fondo"
           value={bgColor}
+          tokens={brandKit.colors}
           onChange={(v) =>
             onUpdate(layer.id, (l) =>
               l.type === "frame"
@@ -480,6 +563,7 @@ function FrameProps({
         onUpdateFrame={(m) =>
           onUpdate(layer.id, (l) => (l.type === "frame" ? m(l) : l))
         }
+        brandKit={brandKit}
       />
     </>
   );
@@ -568,9 +652,11 @@ function ConstraintsControls({
 function LayoutControls({
   frame,
   onUpdateFrame,
+  brandKit,
 }: {
   frame: FrameLayer;
   onUpdateFrame: (m: (f: FrameLayer) => FrameLayer) => void;
+  brandKit: BrandKitContent;
 }) {
   const isStack = frame.layout.mode === "stack";
   return (
@@ -609,6 +695,7 @@ function LayoutControls({
         <StackControls
           layout={frame.layout as StackLayout}
           onChange={(s) => onUpdateFrame((f) => ({ ...f, layout: s }))}
+          brandKit={brandKit}
         />
       )}
     </Section>
@@ -618,9 +705,11 @@ function LayoutControls({
 function StackControls({
   layout,
   onChange,
+  brandKit: _brandKit,
 }: {
   layout: StackLayout;
   onChange: (next: StackLayout) => void;
+  brandKit: BrandKitContent;
 }) {
   const update = (patch: Partial<StackLayout>) => onChange({ ...layout, ...patch });
   return (

@@ -7,6 +7,13 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, Loader2, Layers, Pencil, Check, X } from "lucide-react";
 import { TemplateEditor } from "@/components/production/editor/template-editor";
 import { TemplateDefinition, newRootFrame } from "@/lib/production/types";
+import {
+  BrandKit,
+  BrandKitContent,
+  EMPTY_KIT_CONTENT,
+  brandKitFromApi,
+  mergeKits,
+} from "@/lib/production/brand-kit";
 
 interface Template {
   id: number;
@@ -31,27 +38,63 @@ export default function TemplateDetailPage() {
   const templateId = params.id as string;
 
   const [template, setTemplate] = useState<Template | null>(null);
+  const [clientId, setClientId] = useState<number | null>(null);
+  const [brandKits, setBrandKits] = useState<BrandKit[]>([]);
+  const [brandKitContent, setBrandKitContent] = useState<BrandKitContent>(EMPTY_KIT_CONTENT);
   const [loading, setLoading] = useState(true);
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const [savingName, setSavingName] = useState(false);
 
+  const fetchBrandKits = useCallback(
+    async (cid: number, projectId: number) => {
+      try {
+        const res = await fetch(
+          `/api/production/brand-kits?client_id=${cid}&production_project_id=${projectId}`
+        );
+        if (!res.ok) return;
+        const rows: unknown[] = await res.json();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const parsed = rows.map((r: any) => brandKitFromApi(r));
+        setBrandKits(parsed);
+        // Cascade: client-wide first (project_id NULL), then project-specific.
+        const clientWide = parsed.filter((k) => k.production_project_id === null);
+        const projectScoped = parsed.filter((k) => k.production_project_id != null);
+        const baseClient = clientWide.find((k) => k.is_default) ?? clientWide[0];
+        const baseProject = projectScoped.find((k) => k.is_default) ?? projectScoped[0];
+        const merged = mergeKits(...[baseClient, baseProject].filter((x): x is BrandKit => !!x));
+        setBrandKitContent(merged);
+      } catch (err) {
+        console.error("Error obteniendo brand kits:", err);
+      }
+    },
+    []
+  );
+
   const fetchTemplate = useCallback(async () => {
     try {
       const res = await fetch(`/api/production/templates/${templateId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setTemplate(data);
-        setNameInput(data.name);
-      } else if (res.status === 404 || res.status === 401) {
-        router.push("/");
+      if (!res.ok) {
+        if (res.status === 404 || res.status === 401) router.push("/");
+        return;
+      }
+      const data: Template = await res.json();
+      setTemplate(data);
+      setNameInput(data.name);
+
+      // Then fetch the production project to know its client_id, then kits.
+      const projRes = await fetch(`/api/production/projects/${data.production_project_id}`);
+      if (projRes.ok) {
+        const proj = await projRes.json();
+        setClientId(proj.client_id);
+        await fetchBrandKits(proj.client_id, data.production_project_id);
       }
     } catch (err) {
       console.error("Error obteniendo template:", err);
     } finally {
       setLoading(false);
     }
-  }, [templateId, router]);
+  }, [templateId, router, fetchBrandKits]);
 
   useEffect(() => {
     if (sessionStatus === "loading") return;
@@ -217,6 +260,13 @@ export default function TemplateDetailPage() {
           baseWidth={template.base_width}
           baseHeight={template.base_height}
           onSave={handleSaveDefinition}
+          brandKit={brandKitContent}
+          clientId={clientId}
+          projectId={template.production_project_id}
+          allBrandKits={brandKits}
+          onBrandKitsChange={() =>
+            clientId && fetchBrandKits(clientId, template.production_project_id)
+          }
         />
       </div>
     </div>

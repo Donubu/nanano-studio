@@ -14,6 +14,7 @@ import {
   findParent,
 } from "@/lib/production/types";
 import { reflowForPreview } from "@/lib/production/reflow";
+import { BrandKitContent, EMPTY_KIT_CONTENT, resolveTreeTokens } from "@/lib/production/brand-kit";
 import { TemplateLayerView } from "./template-layer";
 
 interface Props {
@@ -24,6 +25,7 @@ interface Props {
   // When set, the canvas renders the template reflowed to this size (read-only).
   // Used by the editor's preview-format selector to inspect adaptations.
   previewSize?: { w: number; h: number } | null;
+  brandKit?: BrandKitContent;
 }
 
 type Bounds = { x: number; y: number; w: number; h: number };
@@ -62,13 +64,19 @@ export function TemplateCanvas({
   onSelect,
   onUpdateBounds,
   previewSize,
+  brandKit = EMPTY_KIT_CONTENT,
 }: Props) {
   const isPreview = !!previewSize;
   // In preview mode, render against a reflowed clone derived from constraints.
   // The master `definition` is never mutated.
-  const baseTree: TemplateDefinition = isPreview
+  const reflowed: TemplateDefinition = isPreview
     ? reflowForPreview(definition, previewSize!)
     : definition;
+  // Token references ({color.x}, {font.x}, {scale.x}, {spacing.x}, {logo.x})
+  // are resolved to literal values before the renderer consumes them. The
+  // selection logic still operates on the unresolved tree via the original
+  // `definition` (handles, bounds, drag) so editing keeps the references.
+  const baseTree: TemplateDefinition = resolveTreeTokens(reflowed, brandKit);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
 
