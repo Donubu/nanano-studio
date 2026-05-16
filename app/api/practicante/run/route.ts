@@ -20,11 +20,8 @@ export async function POST(req: NextRequest) {
 
   const baseUrl = process.env.PRACTICANTE_URL;
   const apiKey = process.env.PRACTICANTE_API_KEY;
-  // Practicante identifica al user por email. Mandamos el del usuario que
-  // está interactuando; el env var actúa como override (debug / cuentas de
-  // servicio). Practicante responderá 404 user_not_found si el email no
-  // existe del lado de Practicante con permisos configurados.
-  const userEmail = process.env.PRACTICANTE_USER_EMAIL || session.user.email;
+  const primaryEmail = session.user.email;
+  const fallbackEmail = process.env.PRACTICANTE_USER_EMAIL;
 
   if (!baseUrl || !apiKey) {
     return NextResponse.json(
@@ -74,19 +71,38 @@ export async function POST(req: NextRequest) {
     payload.returnOnlyFinalText = body.returnOnlyFinalText;
   }
 
-  try {
-    const res = await fetch(`${baseUrl}/api/external/run`, {
+  const callPracticante = (email: string) =>
+    fetch(`${baseUrl}/api/external/run`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-API-Key": apiKey,
-        "X-User-Email": userEmail,
+        "X-User-Email": email,
       },
       body: JSON.stringify(payload),
       cache: "no-store",
     });
 
-    const responseBody = await res.json().catch(() => ({}));
+  try {
+    // Por defecto se identifica al usuario interactuando. Si Practicante no
+    // conoce ese email (404 user_not_found) y hay PRACTICANTE_USER_EMAIL
+    // configurado, reintenta con ese identity compartido como fallback.
+    let res = await callPracticante(primaryEmail);
+    let responseBody = await res.json().catch(() => ({} as Record<string, unknown>));
+
+    if (
+      res.status === 404 &&
+      responseBody?.code === "user_not_found" &&
+      fallbackEmail &&
+      fallbackEmail !== primaryEmail
+    ) {
+      console.warn(
+        `[practicante] ${primaryEmail} no existe en Practicante; reintentando con fallback ${fallbackEmail}`
+      );
+      res = await callPracticante(fallbackEmail);
+      responseBody = await res.json().catch(() => ({} as Record<string, unknown>));
+    }
+
     return NextResponse.json(responseBody, { status: res.status });
   } catch (error) {
     console.error("Error proxying to practicante /run:", error);

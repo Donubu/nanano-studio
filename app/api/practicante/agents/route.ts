@@ -9,9 +9,8 @@ export async function GET() {
 
   const baseUrl = process.env.PRACTICANTE_URL;
   const apiKey = process.env.PRACTICANTE_API_KEY;
-  // Per-request: el catálogo de agentes que ve cada usuario depende de sus
-  // permisos en Practicante. El env var queda como override para debug.
-  const userEmail = process.env.PRACTICANTE_USER_EMAIL || session.user.email;
+  const primaryEmail = session.user.email;
+  const fallbackEmail = process.env.PRACTICANTE_USER_EMAIL;
 
   if (!baseUrl || !apiKey) {
     return NextResponse.json(
@@ -20,21 +19,37 @@ export async function GET() {
     );
   }
 
-  try {
-    const res = await fetch(`${baseUrl}/api/external/agents`, {
+  const callPracticante = (email: string) =>
+    fetch(`${baseUrl}/api/external/agents`, {
       method: "GET",
       headers: {
         "X-API-Key": apiKey,
-        "X-User-Email": userEmail,
+        "X-User-Email": email,
       },
       cache: "no-store",
     });
 
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      return NextResponse.json(body, { status: res.status });
+  try {
+    // Por defecto se identifica al usuario interactuando. Si Practicante no
+    // conoce ese email (404 user_not_found) y hay PRACTICANTE_USER_EMAIL
+    // configurado, reintenta con ese identity compartido como fallback.
+    let res = await callPracticante(primaryEmail);
+    let body = await res.json().catch(() => ({} as Record<string, unknown>));
+
+    if (
+      res.status === 404 &&
+      body?.code === "user_not_found" &&
+      fallbackEmail &&
+      fallbackEmail !== primaryEmail
+    ) {
+      console.warn(
+        `[practicante] ${primaryEmail} no existe en Practicante; reintentando con fallback ${fallbackEmail}`
+      );
+      res = await callPracticante(fallbackEmail);
+      body = await res.json().catch(() => ({} as Record<string, unknown>));
     }
-    return NextResponse.json(body);
+
+    return NextResponse.json(body, { status: res.status });
   } catch (error) {
     console.error("Error proxying to practicante /agents:", error);
     return NextResponse.json(
