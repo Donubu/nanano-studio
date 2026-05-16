@@ -88,6 +88,7 @@ import {DeploymentBanner} from "./deployment-banner";
 import {CreateProjectDialog} from "./create-project-dialog";
 import {CreditBadge} from "./credit-badge";
 import ClientProductionProjects from "./client-production-projects";
+import ClientProductionSection from "@/components/dashboard/client-production-section";
 import {ImageModelSelector} from "./image-model-selector";
 import {AudioSettings} from "./audio-settings";
 import {MusicSettings} from "./music-settings";
@@ -4882,6 +4883,13 @@ export function ChatInterface() {
                                                 </table>
                                             );
                                         })()}
+                                    </div>
+                                )}
+
+                                {/* Producción projects (admin-only in MVP) */}
+                                {session?.user?.role === "admin" && (
+                                    <div className="mt-8">
+                                        <ClientProductionSection clientId={selectedClientId} />
                                     </div>
                                 )}
                             </>

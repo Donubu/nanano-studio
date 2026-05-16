@@ -3,8 +3,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Loader2, Plus, Layers, Trash2 } from "lucide-react";
-import { formatDateLocal } from "@/lib/utils";
+import { Loader2, Plus, Layers, Trash2, Settings2 } from "lucide-react";
+import { cn, formatDateLocal } from "@/lib/utils";
+
+type Aspect = "square" | "horizontal" | "vertical" | "custom";
+
+const ASPECT_PRESETS: Record<Exclude<Aspect, "custom">, { w: number; h: number; label: string; ratio: string }> = {
+  square:     { w: 1080, h: 1080, label: "Cuadrado",   ratio: "1:1" },
+  horizontal: { w: 1920, h: 1080, label: "Horizontal", ratio: "16:9" },
+  vertical:   { w: 1080, h: 1920, label: "Vertical",   ratio: "9:16" },
+};
 
 interface Template {
   id: number;
@@ -32,9 +40,30 @@ export default function ProductionTemplatesList({ productionProjectId }: Props) 
   const [showForm, setShowForm] = useState(false);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
+  const [aspect, setAspect] = useState<Aspect>("square");
   const [width, setWidth] = useState("1080");
   const [height, setHeight] = useState("1080");
+  const [showDims, setShowDims] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const resetForm = () => {
+    setName("");
+    setAspect("square");
+    setWidth("1080");
+    setHeight("1080");
+    setShowDims(false);
+  };
+
+  const handleAspectChange = (next: Aspect) => {
+    setAspect(next);
+    if (next === "custom") {
+      setShowDims(true);
+    } else {
+      setWidth(String(ASPECT_PRESETS[next].w));
+      setHeight(String(ASPECT_PRESETS[next].h));
+      setShowDims(false);
+    }
+  };
 
   const fetchTemplates = useCallback(async () => {
     setLoading(true);
@@ -75,9 +104,7 @@ export default function ProductionTemplatesList({ productionProjectId }: Props) 
         }),
       });
       if (res.ok) {
-        setName("");
-        setWidth("1080");
-        setHeight("1080");
+        resetForm();
         setShowForm(false);
         fetchTemplates();
       }
@@ -127,39 +154,96 @@ export default function ProductionTemplatesList({ productionProjectId }: Props) 
             className="w-full bg-muted border border-border/50 rounded-md px-3 py-2 text-sm"
             autoFocus
           />
-          <div className="flex items-center gap-2">
-            <div className="flex-1">
-              <label className="text-xs text-muted-foreground block mb-1">Ancho base (px)</label>
-              <input
-                type="number"
-                min={1}
-                max={10000}
-                value={width}
-                onChange={(e) => setWidth(e.target.value)}
-                className="w-full bg-muted border border-border/50 rounded-md px-3 py-2 text-sm"
-              />
-            </div>
-            <div className="flex-1">
-              <label className="text-xs text-muted-foreground block mb-1">Alto base (px)</label>
-              <input
-                type="number"
-                min={1}
-                max={10000}
-                value={height}
-                onChange={(e) => setHeight(e.target.value)}
-                className="w-full bg-muted border border-border/50 rounded-md px-3 py-2 text-sm"
-              />
+
+          {/* Aspect ratio selector */}
+          <div>
+            <label className="text-xs text-muted-foreground block mb-2">Formato base</label>
+            <div className="grid grid-cols-4 gap-2">
+              {(["square", "horizontal", "vertical", "custom"] as Aspect[]).map((opt) => {
+                const isActive = aspect === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => handleAspectChange(opt)}
+                    className={cn(
+                      "border rounded-md p-3 flex flex-col items-center justify-center gap-1.5 text-xs transition-colors",
+                      isActive
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    )}
+                  >
+                    <div className="h-8 flex items-center justify-center">
+                      {opt === "square" && (
+                        <div className="w-6 h-6 border border-current rounded-sm" />
+                      )}
+                      {opt === "horizontal" && (
+                        <div className="w-9 h-[20px] border border-current rounded-sm" />
+                      )}
+                      {opt === "vertical" && (
+                        <div className="w-[20px] h-9 border border-current rounded-sm" />
+                      )}
+                      {opt === "custom" && <Settings2 className="w-5 h-5" />}
+                    </div>
+                    <div className="text-center leading-tight">
+                      <div className="font-medium">
+                        {opt === "custom" ? "Personalizado" : ASPECT_PRESETS[opt].label}
+                      </div>
+                      {opt !== "custom" && (
+                        <div className="text-[10px] text-muted-foreground">
+                          {ASPECT_PRESETS[opt].ratio}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
+
+          {/* Dimensions: collapsed by default for presets; always visible for custom */}
+          {aspect === "custom" || showDims ? (
+            <div className="flex items-center gap-2">
+              <div className="flex-1">
+                <label className="text-xs text-muted-foreground block mb-1">Ancho (px)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={10000}
+                  value={width}
+                  onChange={(e) => setWidth(e.target.value)}
+                  className="w-full bg-muted border border-border/50 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="text-xs text-muted-foreground block mb-1">Alto (px)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={10000}
+                  value={height}
+                  onChange={(e) => setHeight(e.target.value)}
+                  className="w-full bg-muted border border-border/50 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowDims(true)}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Ajustar dimensiones ({width} × {height} px)
+            </button>
+          )}
+
           <div className="flex items-center gap-2 justify-end">
             <Button
               size="sm"
               variant="ghost"
               onClick={() => {
                 setShowForm(false);
-                setName("");
-                setWidth("1080");
-                setHeight("1080");
+                resetForm();
               }}
               disabled={creating}
             >
