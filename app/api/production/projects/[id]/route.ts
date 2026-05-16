@@ -8,6 +8,8 @@ import { parseBody } from "@/lib/api-utils";
 interface ProductionProjectRow extends RowDataPacket {
   id: number;
   client_id: number;
+  client_name?: string;
+  client_logo?: string | null;
   title: string;
   description: string | null;
   status: "active" | "paused" | "completed" | "archived";
@@ -31,10 +33,12 @@ export async function GET(
 
     const { id } = await params;
     const [rows] = await pool.execute<ProductionProjectRow[]>(
-      `SELECT id, client_id, title, description, status, hidden,
-              created_by, created_at, updated_at
-         FROM production_projects
-        WHERE id = ? AND deleted_at IS NULL`,
+      `SELECT pp.id, pp.client_id, pp.title, pp.description, pp.status, pp.hidden,
+              pp.created_by, pp.created_at, pp.updated_at,
+              c.name AS client_name, c.logo AS client_logo
+         FROM production_projects pp
+         JOIN clients c ON c.id = pp.client_id
+        WHERE pp.id = ? AND pp.deleted_at IS NULL`,
       [id]
     );
 

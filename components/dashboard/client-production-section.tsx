@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Loader2, Plus, FileImage, Trash2 } from "lucide-react";
 import { formatDateLocal } from "@/lib/utils";
@@ -22,6 +23,7 @@ interface Props {
 }
 
 export default function ClientProductionSection({ clientId }: Props) {
+  const router = useRouter();
   const [projects, setProjects] = useState<ProductionProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -164,7 +166,16 @@ export default function ClientProductionSection({ clientId }: Props) {
           {projects.map((p) => (
             <div
               key={p.id}
-              className="flex items-center justify-between bg-muted/50 rounded-lg px-3 py-2"
+              role="button"
+              tabIndex={0}
+              onClick={() => router.push(`/produccion/proyecto/${p.id}`)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  router.push(`/produccion/proyecto/${p.id}`);
+                }
+              }}
+              className="flex items-center justify-between bg-muted/50 hover:bg-muted rounded-lg px-3 py-2 cursor-pointer transition-colors"
             >
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-8 h-8 rounded-md bg-accent flex items-center justify-center shrink-0">
@@ -182,7 +193,10 @@ export default function ClientProductionSection({ clientId }: Props) {
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7 hover:bg-red-500/10"
-                onClick={() => handleDelete(p.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDelete(p.id);
+                }}
                 disabled={deletingId === p.id}
               >
                 {deletingId === p.id ? (

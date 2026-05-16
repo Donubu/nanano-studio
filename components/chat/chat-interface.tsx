@@ -87,6 +87,7 @@ import {ReasoningSelector, ThinkingLevel} from "./reasoning-selector";
 import {DeploymentBanner} from "./deployment-banner";
 import {CreateProjectDialog} from "./create-project-dialog";
 import {CreditBadge} from "./credit-badge";
+import ClientProductionProjects from "./client-production-projects";
 import {ImageModelSelector} from "./image-model-selector";
 import {AudioSettings} from "./audio-settings";
 import {MusicSettings} from "./music-settings";
@@ -3469,6 +3470,11 @@ export function ChatInterface() {
                             </Button>
                         )}
                     </div>
+                    )}
+
+                    {/* Producción projects (admin-only in MVP) */}
+                    {selectedClientId && session?.user?.role === "admin" && (
+                        <ClientProductionProjects clientId={selectedClientId} />
                     )}
 
                     {/* Conversations List - Only when project is selected */}
