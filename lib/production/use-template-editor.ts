@@ -39,6 +39,8 @@ interface UseTemplateEditorResult {
 
   updateLayer: (id: string, mutator: (layer: TemplateLayer) => TemplateLayer) => void;
   updateRoot: (mutator: (root: TemplateDefinition) => TemplateDefinition) => void;
+  updateBounds: (id: string, bounds: { x: number; y: number; w: number; h: number }) => void;
+  reorderRootChildren: (sourceId: string, targetId: string, position: "before" | "after") => void;
   deleteLayer: (id: string) => void;
 
   saveNow: () => Promise<void>;
@@ -166,6 +168,40 @@ export function useTemplateEditor({
     setSelectedId(layer.id);
   }, [baseWidth, baseHeight, mutate]);
 
+  const updateBounds = useCallback(
+    (id: string, bounds: { x: number; y: number; w: number; h: number }) => {
+      mutate((d) =>
+        updateLayerInTree(d, id, (l) => ({
+          ...l,
+          position: { x: bounds.x, y: bounds.y },
+          size: { w: bounds.w, h: bounds.h },
+        }))
+      );
+    },
+    [mutate]
+  );
+
+  const reorderRootChildren = useCallback(
+    (sourceId: string, targetId: string, position: "before" | "after") => {
+      if (sourceId === targetId) return;
+      mutate((d) => {
+        const ids = d.children.map((c) => c.id);
+        const srcIdx = ids.indexOf(sourceId);
+        const tgtIdx = ids.indexOf(targetId);
+        if (srcIdx === -1 || tgtIdx === -1) return d;
+        const next = [...d.children];
+        const [moved] = next.splice(srcIdx, 1);
+        // Recompute target index after removal
+        const newIdx = next.findIndex((c) => c.id === targetId);
+        if (newIdx === -1) return d;
+        const insertAt = position === "before" ? newIdx : newIdx + 1;
+        next.splice(insertAt, 0, moved);
+        return { ...d, children: next };
+      });
+    },
+    [mutate]
+  );
+
   const deleteLayer = useCallback(
     (id: string) => {
       if (id === "tpl_root") return;
@@ -197,6 +233,8 @@ export function useTemplateEditor({
     addShape,
     updateLayer,
     updateRoot,
+    updateBounds,
+    reorderRootChildren,
     deleteLayer,
     saveNow,
   };

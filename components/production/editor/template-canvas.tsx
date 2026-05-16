@@ -1,23 +1,65 @@
 "use client";
 
-import { useEffect, useRef, useState, PointerEvent as ReactPointerEvent, CSSProperties } from "react";
-import { TemplateDefinition, TemplateLayer, findLayer } from "@/lib/production/types";
+import {
+  useEffect,
+  useRef,
+  useState,
+  PointerEvent as ReactPointerEvent,
+  CSSProperties,
+} from "react";
+import {
+  TemplateDefinition,
+  TemplateLayer,
+  findLayer,
+} from "@/lib/production/types";
 import { TemplateLayerView } from "./template-layer";
 
 interface Props {
   definition: TemplateDefinition;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
-  onMoveLayer: (id: string, position: { x: number; y: number }) => void;
+  onUpdateBounds: (id: string, bounds: Bounds) => void;
+}
+
+type Bounds = { x: number; y: number; w: number; h: number };
+type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+
+type DragOp =
+  | {
+      kind: "move";
+      layerId: string;
+      startMouseX: number;
+      startMouseY: number;
+      startBounds: Bounds;
+    }
+  | {
+      kind: "resize";
+      layerId: string;
+      handle: Handle;
+      startMouseX: number;
+      startMouseY: number;
+      startBounds: Bounds;
+      aspectRatio: number;
+    };
+
+interface Guide {
+  axis: "v" | "h"; // vertical line = fixed x, horizontal line = fixed y
+  position: number; // world coord
 }
 
 const CANVAS_PADDING = 32;
+const SNAP_THRESHOLD_PX = 6; // in screen pixels
+const MIN_SIZE = 8;
 
-export function TemplateCanvas({ definition, selectedId, onSelect, onMoveLayer }: Props) {
+export function TemplateCanvas({
+  definition,
+  selectedId,
+  onSelect,
+  onUpdateBounds,
+}: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
 
-  // Fit-to-screen scale.
   useEffect(() => {
     if (!hostRef.current) return;
     const el = hostRef.current;
@@ -34,49 +76,92 @@ export function TemplateCanvas({ definition, selectedId, onSelect, onMoveLayer }
   const availableW = Math.max(1, containerSize.w - CANVAS_PADDING * 2);
   const availableH = Math.max(1, containerSize.h - CANVAS_PADDING * 2);
   const scale = Math.min(availableW / baseW, availableH / baseH, 1);
+  const snapThresholdWorld = SNAP_THRESHOLD_PX / scale;
 
-  // Drag state. Stored in a ref so we don't re-render on every mouse move.
-  const dragRef = useRef<{
-    layerId: string;
-    startMouseX: number;
-    startMouseY: number;
-    startLayerX: number;
-    startLayerY: number;
-  } | null>(null);
+  const dragRef = useRef<DragOp | null>(null);
+  const [ghost, setGhost] = useState<{ id: string; bounds: Bounds } | null>(null);
+  const [guides, setGuides] = useState<Guide[]>([]);
 
-  // Local "ghost" position to render the dragged layer smoothly without
-  // committing to parent state on every frame.
-  const [ghost, setGhost] = useState<{ id: string; x: number; y: number } | null>(null);
-
-  const handleLayerPointerDown = (
-    e: ReactPointerEvent<HTMLDivElement>,
-    layerId: string
-  ) => {
+  const startMove = (e: ReactPointerEvent<HTMLDivElement>, layerId: string) => {
     const layer = findLayer(definition, layerId);
     if (!layer || layer.locked) return;
     dragRef.current = {
+      kind: "move",
       layerId,
       startMouseX: e.clientX,
       startMouseY: e.clientY,
-      startLayerX: layer.position.x,
-      startLayerY: layer.position.y,
+      startBounds: layerToBounds(layer),
     };
-    // capture so we keep receiving moves even outside the layer
     (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
   };
 
-  // Pointer move / up are bound to the canvas host so the capture works
-  // regardless of which child the pointer is over.
+  const startResize = (
+    e: ReactPointerEvent<HTMLDivElement>,
+    layerId: string,
+    handle: Handle
+  ) => {
+    e.stopPropagation();
+    const layer = findLayer(definition, layerId);
+    if (!layer || layer.locked) return;
+    const startBounds = layerToBounds(layer);
+    dragRef.current = {
+      kind: "resize",
+      layerId,
+      handle,
+      startMouseX: e.clientX,
+      startMouseY: e.clientY,
+      startBounds,
+      aspectRatio: startBounds.w / Math.max(1, startBounds.h),
+    };
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+  };
+
   const handlePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag) return;
+
     const dx = (e.clientX - drag.startMouseX) / scale;
     const dy = (e.clientY - drag.startMouseY) / scale;
-    setGhost({
-      id: drag.layerId,
-      x: Math.round(drag.startLayerX + dx),
-      y: Math.round(drag.startLayerY + dy),
-    });
+    let nextBounds: Bounds;
+    let activeEdges: { x: ("left" | "centerX" | "right")[]; y: ("top" | "centerY" | "bottom")[] };
+
+    if (drag.kind === "move") {
+      nextBounds = {
+        x: drag.startBounds.x + dx,
+        y: drag.startBounds.y + dy,
+        w: drag.startBounds.w,
+        h: drag.startBounds.h,
+      };
+      activeEdges = {
+        x: ["left", "centerX", "right"],
+        y: ["top", "centerY", "bottom"],
+      };
+    } else {
+      const aspectLock = e.shiftKey;
+      nextBounds = applyResize(drag.startBounds, drag.handle, dx, dy, aspectLock, drag.aspectRatio);
+      activeEdges = edgesForHandle(drag.handle);
+    }
+
+    // Snap targets: canvas + every other layer at root level (siblings of the
+    // dragged one). Frame-nested children are ignored in this MVP slice.
+    const snapTargets = collectSnapTargets(definition, drag.layerId);
+    const { snapped, guides: g } = applySnap(
+      nextBounds,
+      activeEdges,
+      snapTargets,
+      snapThresholdWorld
+    );
+
+    // Round to keep stored values clean.
+    const finalBounds: Bounds = {
+      x: Math.round(snapped.x),
+      y: Math.round(snapped.y),
+      w: Math.max(MIN_SIZE, Math.round(snapped.w)),
+      h: Math.max(MIN_SIZE, Math.round(snapped.h)),
+    };
+
+    setGhost({ id: drag.layerId, bounds: finalBounds });
+    setGuides(g);
   };
 
   const handlePointerUp = () => {
@@ -84,26 +169,26 @@ export function TemplateCanvas({ definition, selectedId, onSelect, onMoveLayer }
     const g = ghost;
     dragRef.current = null;
     if (drag && g && g.id === drag.layerId) {
-      onMoveLayer(drag.layerId, { x: g.x, y: g.y });
+      onUpdateBounds(drag.layerId, g.bounds);
     }
     setGhost(null);
+    setGuides([]);
   };
 
-  // Background click deselects.
   const handleHostPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
       onSelect(null);
     }
   };
 
-  // Apply ghost position to the selected layer for live preview during drag.
+  // Apply ghost to selected layer for live preview.
   const renderTree = ghost
-    ? applyGhost(definition, ghost.id, { x: ghost.x, y: ghost.y })
+    ? applyGhostBounds(definition, ghost.id, ghost.bounds)
     : definition;
+  const selectedLayer = selectedId ? findLayer(renderTree, selectedId) : null;
 
   const scaledW = baseW * scale;
   const scaledH = baseH * scale;
-
   const rootBackground =
     renderTree.background && renderTree.background.type === "color"
       ? renderTree.background.value
@@ -129,13 +214,7 @@ export function TemplateCanvas({ definition, selectedId, onSelect, onMoveLayer }
       className="flex-1 min-w-0 min-h-0 bg-muted/30 overflow-hidden flex items-center justify-center select-none"
     >
       {containerSize.w > 0 && (
-        <div
-          style={{
-            width: scaledW,
-            height: scaledH,
-            position: "relative",
-          }}
-        >
+        <div style={{ width: scaledW, height: scaledH, position: "relative" }}>
           <div style={stageStyle}>
             {renderTree.children.map((child: TemplateLayer) => (
               <TemplateLayerView
@@ -143,7 +222,33 @@ export function TemplateCanvas({ definition, selectedId, onSelect, onMoveLayer }
                 layer={child}
                 selectedId={selectedId}
                 onSelect={onSelect}
-                onLayerPointerDown={handleLayerPointerDown}
+                onLayerPointerDown={startMove}
+              />
+            ))}
+
+            {/* Resize handles overlay for the selected layer */}
+            {selectedLayer && selectedLayer.id !== "tpl_root" && !selectedLayer.locked && (
+              <SelectionHandles
+                bounds={layerToBounds(selectedLayer)}
+                scale={scale}
+                onHandlePointerDown={(e, handle) =>
+                  startResize(e, selectedLayer.id, handle)
+                }
+              />
+            )}
+
+            {/* Snap guides */}
+            {guides.map((g, i) => (
+              <div
+                key={i}
+                style={{
+                  position: "absolute",
+                  background: "rgb(244, 63, 94)",
+                  pointerEvents: "none",
+                  ...(g.axis === "v"
+                    ? { left: g.position, top: 0, width: 1 / scale, height: baseH }
+                    : { left: 0, top: g.position, height: 1 / scale, width: baseW }),
+                }}
               />
             ))}
           </div>
@@ -153,18 +258,242 @@ export function TemplateCanvas({ definition, selectedId, onSelect, onMoveLayer }
   );
 }
 
-// Returns a fresh tree with the given layer's position replaced by `pos`.
-// Used for live drag preview without committing to parent state.
-function applyGhost(
+// ------------------------- Selection handles -------------------------
+
+function SelectionHandles({
+  bounds,
+  scale,
+  onHandlePointerDown,
+}: {
+  bounds: Bounds;
+  scale: number;
+  onHandlePointerDown: (e: ReactPointerEvent<HTMLDivElement>, h: Handle) => void;
+}) {
+  const handleSize = 10 / scale; // world units; renders as ~10 css px
+  const offset = handleSize / 2;
+  const handles: { id: Handle; x: number; y: number; cursor: string }[] = [
+    { id: "nw", x: bounds.x - offset,                y: bounds.y - offset,                cursor: "nwse-resize" },
+    { id: "n",  x: bounds.x + bounds.w / 2 - offset, y: bounds.y - offset,                cursor: "ns-resize"   },
+    { id: "ne", x: bounds.x + bounds.w - offset,     y: bounds.y - offset,                cursor: "nesw-resize" },
+    { id: "e",  x: bounds.x + bounds.w - offset,     y: bounds.y + bounds.h / 2 - offset, cursor: "ew-resize"   },
+    { id: "se", x: bounds.x + bounds.w - offset,     y: bounds.y + bounds.h - offset,     cursor: "nwse-resize" },
+    { id: "s",  x: bounds.x + bounds.w / 2 - offset, y: bounds.y + bounds.h - offset,     cursor: "ns-resize"   },
+    { id: "sw", x: bounds.x - offset,                y: bounds.y + bounds.h - offset,     cursor: "nesw-resize" },
+    { id: "w",  x: bounds.x - offset,                y: bounds.y + bounds.h / 2 - offset, cursor: "ew-resize"   },
+  ];
+  return (
+    <>
+      {handles.map((h) => (
+        <div
+          key={h.id}
+          onPointerDown={(e) => onHandlePointerDown(e, h.id)}
+          style={{
+            position: "absolute",
+            left: h.x,
+            top: h.y,
+            width: handleSize,
+            height: handleSize,
+            background: "#ffffff",
+            border: `${1 / scale}px solid rgb(59, 130, 246)`,
+            borderRadius: 2 / scale,
+            cursor: h.cursor,
+            zIndex: 10000,
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
+// ------------------------- Geometry helpers -------------------------
+
+function layerToBounds(l: TemplateLayer): Bounds {
+  return { x: l.position.x, y: l.position.y, w: l.size.w, h: l.size.h };
+}
+
+function applyGhostBounds(
   root: TemplateDefinition,
   id: string,
-  pos: { x: number; y: number }
+  bounds: Bounds
 ): TemplateDefinition {
-  const cloneChildren = (nodes: TemplateLayer[]): TemplateLayer[] =>
+  const clone = (nodes: TemplateLayer[]): TemplateLayer[] =>
     nodes.map((n) => {
-      if (n.id === id) return { ...n, position: pos };
-      if (n.type === "frame") return { ...n, children: cloneChildren(n.children) };
+      if (n.id === id) {
+        return {
+          ...n,
+          position: { x: bounds.x, y: bounds.y },
+          size: { w: bounds.w, h: bounds.h },
+        };
+      }
+      if (n.type === "frame") return { ...n, children: clone(n.children) };
       return n;
     });
-  return { ...root, children: cloneChildren(root.children) };
+  return { ...root, children: clone(root.children) };
+}
+
+function applyResize(
+  start: Bounds,
+  handle: Handle,
+  dx: number,
+  dy: number,
+  lockAspect: boolean,
+  aspectRatio: number
+): Bounds {
+  let { x, y, w, h } = start;
+  switch (handle) {
+    case "e":  w = start.w + dx; break;
+    case "w":  x = start.x + dx; w = start.w - dx; break;
+    case "s":  h = start.h + dy; break;
+    case "n":  y = start.y + dy; h = start.h - dy; break;
+    case "se": w = start.w + dx; h = start.h + dy; break;
+    case "ne": w = start.w + dx; y = start.y + dy; h = start.h - dy; break;
+    case "sw": x = start.x + dx; w = start.w - dx; h = start.h + dy; break;
+    case "nw": x = start.x + dx; w = start.w - dx; y = start.y + dy; h = start.h - dy; break;
+  }
+  if (lockAspect) {
+    // Use width as driver; recompute height.
+    const newH = w / aspectRatio;
+    const dh = newH - h;
+    if (handle === "n" || handle === "nw" || handle === "ne") y -= dh;
+    h = newH;
+  }
+  // Flip prevention: clamp to min size, keeping the anchor side stable.
+  if (w < MIN_SIZE) {
+    if (handle === "w" || handle === "nw" || handle === "sw") {
+      x = start.x + start.w - MIN_SIZE;
+    }
+    w = MIN_SIZE;
+  }
+  if (h < MIN_SIZE) {
+    if (handle === "n" || handle === "nw" || handle === "ne") {
+      y = start.y + start.h - MIN_SIZE;
+    }
+    h = MIN_SIZE;
+  }
+  return { x, y, w, h };
+}
+
+function edgesForHandle(handle: Handle): {
+  x: ("left" | "centerX" | "right")[];
+  y: ("top" | "centerY" | "bottom")[];
+} {
+  const x: ("left" | "centerX" | "right")[] = [];
+  const y: ("top" | "centerY" | "bottom")[] = [];
+  if (handle === "w" || handle === "nw" || handle === "sw") x.push("left");
+  if (handle === "e" || handle === "ne" || handle === "se") x.push("right");
+  if (handle === "n" || handle === "nw" || handle === "ne") y.push("top");
+  if (handle === "s" || handle === "sw" || handle === "se") y.push("bottom");
+  return { x, y };
+}
+
+// ------------------------- Snap -------------------------
+
+interface SnapTarget {
+  // Reference lines this target contributes; the canvas adds center lines too.
+  xs: number[];
+  ys: number[];
+}
+
+function collectSnapTargets(
+  definition: TemplateDefinition,
+  excludeId: string
+): SnapTarget {
+  const xs: number[] = [0, definition.size.w, definition.size.w / 2];
+  const ys: number[] = [0, definition.size.h, definition.size.h / 2];
+  for (const child of definition.children) {
+    if (child.id === excludeId) continue;
+    const b = layerToBounds(child);
+    xs.push(b.x, b.x + b.w / 2, b.x + b.w);
+    ys.push(b.y, b.y + b.h / 2, b.y + b.h);
+  }
+  return { xs, ys };
+}
+
+function applySnap(
+  bounds: Bounds,
+  activeEdges: {
+    x: ("left" | "centerX" | "right")[];
+    y: ("top" | "centerY" | "bottom")[];
+  },
+  targets: SnapTarget,
+  threshold: number
+): { snapped: Bounds; guides: Guide[] } {
+  const guides: Guide[] = [];
+  let { x, y, w, h } = bounds;
+
+  // X axis: find best snap among active edges.
+  let bestDx: { delta: number; line: number } | null = null;
+  for (const edge of activeEdges.x) {
+    const edgeX =
+      edge === "left" ? x : edge === "right" ? x + w : x + w / 2;
+    for (const t of targets.xs) {
+      const delta = t - edgeX;
+      if (Math.abs(delta) < threshold) {
+        if (!bestDx || Math.abs(delta) < Math.abs(bestDx.delta)) {
+          bestDx = { delta, line: t };
+        }
+      }
+    }
+  }
+  if (bestDx) {
+    // Apply delta. For "right" or "centerX" we move only x (and size doesn't
+    // change for move). For resize, the change must be applied to whichever
+    // edge is active. Simplest correct behavior: shift the entire bounds by
+    // the delta when the active edge is the only x-edge; for resize with
+    // both edges (shouldn't happen) we'd skip — but here we keep the simple
+    // path because at most one of left/right is active per resize handle,
+    // and "centerX" only appears for move (with both move-edges symmetric).
+    if (activeEdges.x.length === 1) {
+      const edge = activeEdges.x[0];
+      if (edge === "left") {
+        x += bestDx.delta;
+        w -= bestDx.delta;
+      } else if (edge === "right") {
+        w += bestDx.delta;
+      } else {
+        x += bestDx.delta;
+      }
+    } else {
+      // Move case: shift everything.
+      x += bestDx.delta;
+    }
+    guides.push({ axis: "v", position: bestDx.line });
+  }
+
+  // Y axis: same logic.
+  let bestDy: { delta: number; line: number } | null = null;
+  for (const edge of activeEdges.y) {
+    const edgeY =
+      edge === "top" ? y : edge === "bottom" ? y + h : y + h / 2;
+    for (const t of targets.ys) {
+      const delta = t - edgeY;
+      if (Math.abs(delta) < threshold) {
+        if (!bestDy || Math.abs(delta) < Math.abs(bestDy.delta)) {
+          bestDy = { delta, line: t };
+        }
+      }
+    }
+  }
+  if (bestDy) {
+    if (activeEdges.y.length === 1) {
+      const edge = activeEdges.y[0];
+      if (edge === "top") {
+        y += bestDy.delta;
+        h -= bestDy.delta;
+      } else if (edge === "bottom") {
+        h += bestDy.delta;
+      } else {
+        y += bestDy.delta;
+      }
+    } else {
+      y += bestDy.delta;
+    }
+    guides.push({ axis: "h", position: bestDy.line });
+  }
+
+  // Re-enforce min size after snap.
+  w = Math.max(MIN_SIZE, w);
+  h = Math.max(MIN_SIZE, h);
+
+  return { snapped: { x, y, w, h }, guides };
 }

@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
-import { TemplateDefinition, TemplateLayer } from "@/lib/production/types";
+import { useEffect } from "react";
+import { TemplateDefinition } from "@/lib/production/types";
 import { useTemplateEditor } from "@/lib/production/use-template-editor";
 import { TemplateCanvas } from "./template-canvas";
 import { LayersPanel } from "./layers-panel";
@@ -39,13 +39,6 @@ export function TemplateEditor({ initial, baseWidth, baseHeight, onSave }: Props
     return () => window.removeEventListener("keydown", onKey);
   }, [editor]);
 
-  const handleMoveLayer = useCallback(
-    (id: string, position: { x: number; y: number }) => {
-      editor.updateLayer(id, (l: TemplateLayer) => ({ ...l, position }));
-    },
-    [editor]
-  );
-
   return (
     <div className="flex flex-col h-full bg-background">
       <EditorToolbar
@@ -61,12 +54,13 @@ export function TemplateEditor({ initial, baseWidth, baseHeight, onSave }: Props
           selectedId={editor.selectedId}
           onSelect={editor.select}
           onDelete={editor.deleteLayer}
+          onReorder={editor.reorderRootChildren}
         />
         <TemplateCanvas
           definition={editor.definition}
           selectedId={editor.selectedId}
           onSelect={editor.select}
-          onMoveLayer={handleMoveLayer}
+          onUpdateBounds={editor.updateBounds}
         />
         <PropertiesPanel
           definition={editor.definition}
