@@ -14,6 +14,7 @@ import {
   LogoToken,
   brandKitToApi,
 } from "@/lib/production/brand-kit";
+import { FontPicker } from "@/components/dashboard/font-picker";
 
 interface Props {
   kit: BrandKit;
@@ -247,13 +248,12 @@ function FontsSection({
             className="col-span-2 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs"
             placeholder="Etiqueta"
           />
-          <input
-            type="text"
-            value={it.fontFamily}
-            onChange={(e) => update(idx, { fontFamily: e.target.value })}
-            className="col-span-5 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs font-mono"
-            placeholder="Inter, system-ui, sans-serif"
-          />
+          <div className="col-span-5">
+            <FontPicker
+              value={it.fontFamily}
+              onChange={(v) => update(idx, { fontFamily: v })}
+            />
+          </div>
           <input
             type="number"
             value={it.fontWeight ?? 400}

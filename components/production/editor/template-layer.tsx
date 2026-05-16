@@ -12,6 +12,7 @@ import {
   StackAlign,
   StackJustify,
 } from "@/lib/production/types";
+import { ensureGoogleFontLoaded } from "@/lib/production/google-fonts";
 
 interface Props {
   layer: TemplateLayer;
@@ -184,6 +185,7 @@ function renderFrame(
 
 function renderText(layer: TextLayer, parentMode: "free" | "stack", common: CommonProps) {
   const { style } = layer;
+  if (style.fontFamily) ensureGoogleFontLoaded(style.fontFamily);
   const css: CSSProperties = {
     ...baseLayerStyle(layer, parentMode),
     fontFamily: style.fontFamily,
