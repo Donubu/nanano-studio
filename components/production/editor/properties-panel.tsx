@@ -1,0 +1,458 @@
+"use client";
+
+import {
+  TemplateDefinition,
+  TemplateLayer,
+  TextLayer,
+  ImageLayer,
+  ShapeLayer,
+  FrameLayer,
+} from "@/lib/production/types";
+
+interface Props {
+  definition: TemplateDefinition;
+  selectedLayer: TemplateLayer | null;
+  onUpdateLayer: (id: string, mutator: (layer: TemplateLayer) => TemplateLayer) => void;
+  onUpdateRoot: (mutator: (root: TemplateDefinition) => TemplateDefinition) => void;
+}
+
+function NumberRow({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+}: {
+  label: string;
+  value: number;
+  onChange: (n: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-xs">
+      <span className="w-12 text-muted-foreground">{label}</span>
+      <input
+        type="number"
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-xs"
+      />
+    </label>
+  );
+}
+
+function ColorRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (s: string) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-xs">
+      <span className="w-12 text-muted-foreground">{label}</span>
+      <input
+        type="color"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-8 h-7 rounded border border-border/50 bg-muted cursor-pointer"
+      />
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-xs font-mono"
+      />
+    </label>
+  );
+}
+
+function TextRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (s: string) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-xs">
+      <span className="w-12 text-muted-foreground">{label}</span>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-xs"
+      />
+    </label>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {title}
+      </h4>
+      <div className="space-y-1.5">{children}</div>
+    </div>
+  );
+}
+
+export function PropertiesPanel({
+  definition,
+  selectedLayer,
+  onUpdateLayer,
+  onUpdateRoot,
+}: Props) {
+  const noSelection = !selectedLayer;
+  const isRoot = selectedLayer?.id === "tpl_root";
+
+  return (
+    <aside className="w-64 shrink-0 border-l border-border/50 bg-card/40 overflow-y-auto">
+      <div className="p-3 border-b border-border/50">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          {noSelection ? "Propiedades" : isRoot ? "Canvas" : labelForType(selectedLayer!.type)}
+        </h3>
+      </div>
+      <div className="p-3 space-y-4">
+        {noSelection && (
+          <p className="text-xs text-muted-foreground">
+            Selecciona una capa para editar sus propiedades.
+          </p>
+        )}
+
+        {isRoot && (
+          <RootProps definition={definition} onUpdateRoot={onUpdateRoot} />
+        )}
+
+        {selectedLayer && !isRoot && (
+          <LayerProps layer={selectedLayer} onUpdate={onUpdateLayer} />
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function labelForType(type: TemplateLayer["type"]) {
+  switch (type) {
+    case "frame":
+      return "Frame";
+    case "text":
+      return "Texto";
+    case "image":
+      return "Imagen";
+    case "shape":
+      return "Forma";
+  }
+}
+
+function RootProps({
+  definition,
+  onUpdateRoot,
+}: {
+  definition: TemplateDefinition;
+  onUpdateRoot: (m: (root: TemplateDefinition) => TemplateDefinition) => void;
+}) {
+  const bgColor =
+    definition.background && definition.background.type === "color"
+      ? definition.background.value
+      : "#ffffff";
+
+  return (
+    <Section title="Fondo">
+      <ColorRow
+        label="Color"
+        value={bgColor}
+        onChange={(v) =>
+          onUpdateRoot((root) => ({
+            ...root,
+            background: { type: "color", value: v },
+          }))
+        }
+      />
+      <p className="text-[10px] text-muted-foreground pt-1">
+        {definition.size.w} × {definition.size.h} px
+      </p>
+    </Section>
+  );
+}
+
+function LayerProps({
+  layer,
+  onUpdate,
+}: {
+  layer: TemplateLayer;
+  onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
+}) {
+  return (
+    <>
+      <Section title="Nombre">
+        <TextRow
+          label="Capa"
+          value={layer.name ?? ""}
+          onChange={(v) => onUpdate(layer.id, (l) => ({ ...l, name: v }))}
+        />
+      </Section>
+
+      <Section title="Posición y tamaño">
+        <NumberRow
+          label="X"
+          value={Math.round(layer.position.x)}
+          onChange={(v) =>
+            onUpdate(layer.id, (l) => ({ ...l, position: { ...l.position, x: v } }))
+          }
+        />
+        <NumberRow
+          label="Y"
+          value={Math.round(layer.position.y)}
+          onChange={(v) =>
+            onUpdate(layer.id, (l) => ({ ...l, position: { ...l.position, y: v } }))
+          }
+        />
+        <NumberRow
+          label="Ancho"
+          value={Math.round(layer.size.w)}
+          min={1}
+          onChange={(v) =>
+            onUpdate(layer.id, (l) => ({ ...l, size: { ...l.size, w: Math.max(1, v) } }))
+          }
+        />
+        <NumberRow
+          label="Alto"
+          value={Math.round(layer.size.h)}
+          min={1}
+          onChange={(v) =>
+            onUpdate(layer.id, (l) => ({ ...l, size: { ...l.size, h: Math.max(1, v) } }))
+          }
+        />
+      </Section>
+
+      {layer.type === "text" && (
+        <TextProps layer={layer} onUpdate={onUpdate} />
+      )}
+      {layer.type === "image" && (
+        <ImageProps layer={layer} onUpdate={onUpdate} />
+      )}
+      {layer.type === "shape" && (
+        <ShapeProps layer={layer} onUpdate={onUpdate} />
+      )}
+      {layer.type === "frame" && (
+        <FrameProps layer={layer} onUpdate={onUpdate} />
+      )}
+    </>
+  );
+}
+
+function TextProps({
+  layer,
+  onUpdate,
+}: {
+  layer: TextLayer;
+  onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
+}) {
+  const updateStyle = (s: Partial<TextLayer["style"]>) =>
+    onUpdate(layer.id, (l) =>
+      l.type === "text" ? { ...l, style: { ...l.style, ...s } } : l
+    );
+  return (
+    <>
+      <Section title="Contenido">
+        <textarea
+          value={layer.content}
+          onChange={(e) =>
+            onUpdate(layer.id, (l) =>
+              l.type === "text" ? { ...l, content: e.target.value } : l
+            )
+          }
+          rows={3}
+          className="w-full bg-muted border border-border/50 rounded px-2 py-1 text-xs"
+        />
+      </Section>
+      <Section title="Tipografía">
+        <NumberRow
+          label="Tamaño"
+          value={layer.style.fontSize}
+          min={1}
+          onChange={(v) => updateStyle({ fontSize: v })}
+        />
+        <NumberRow
+          label="Peso"
+          value={Number(layer.style.fontWeight ?? 400)}
+          min={100}
+          max={900}
+          step={100}
+          onChange={(v) => updateStyle({ fontWeight: v })}
+        />
+        <ColorRow
+          label="Color"
+          value={layer.style.color}
+          onChange={(v) => updateStyle({ color: v })}
+        />
+        <div className="flex items-center gap-1">
+          {(["left", "center", "right"] as const).map((a) => (
+            <button
+              key={a}
+              type="button"
+              onClick={() => updateStyle({ align: a })}
+              className={`flex-1 text-xs py-1 rounded border ${
+                (layer.style.align ?? "left") === a
+                  ? "border-primary bg-primary/10"
+                  : "border-border/50 hover:bg-muted"
+              }`}
+            >
+              {a === "left" ? "←" : a === "center" ? "↔" : "→"}
+            </button>
+          ))}
+        </div>
+      </Section>
+    </>
+  );
+}
+
+function ImageProps({
+  layer,
+  onUpdate,
+}: {
+  layer: ImageLayer;
+  onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
+}) {
+  return (
+    <Section title="Imagen">
+      <TextRow
+        label="URL"
+        value={layer.src ?? ""}
+        onChange={(v) =>
+          onUpdate(layer.id, (l) =>
+            l.type === "image" ? { ...l, src: v.trim() || null } : l
+          )
+        }
+      />
+      <div className="flex items-center gap-1">
+        {(["cover", "contain", "fill"] as const).map((f) => (
+          <button
+            key={f}
+            type="button"
+            onClick={() =>
+              onUpdate(layer.id, (l) => (l.type === "image" ? { ...l, fit: f } : l))
+            }
+            className={`flex-1 text-[10px] py-1 rounded border ${
+              (layer.fit ?? "cover") === f
+                ? "border-primary bg-primary/10"
+                : "border-border/50 hover:bg-muted"
+            }`}
+          >
+            {f}
+          </button>
+        ))}
+      </div>
+      <NumberRow
+        label="Radio"
+        value={layer.cornerRadius ?? 0}
+        min={0}
+        onChange={(v) =>
+          onUpdate(layer.id, (l) =>
+            l.type === "image" ? { ...l, cornerRadius: v } : l
+          )
+        }
+      />
+    </Section>
+  );
+}
+
+function ShapeProps({
+  layer,
+  onUpdate,
+}: {
+  layer: ShapeLayer;
+  onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
+}) {
+  return (
+    <Section title="Forma">
+      <div className="flex items-center gap-1">
+        {(["rect", "ellipse"] as const).map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() =>
+              onUpdate(layer.id, (l) => (l.type === "shape" ? { ...l, shape: s } : l))
+            }
+            className={`flex-1 text-xs py-1 rounded border ${
+              layer.shape === s
+                ? "border-primary bg-primary/10"
+                : "border-border/50 hover:bg-muted"
+            }`}
+          >
+            {s === "rect" ? "Rectángulo" : "Elipse"}
+          </button>
+        ))}
+      </div>
+      <ColorRow
+        label="Relleno"
+        value={layer.fill}
+        onChange={(v) =>
+          onUpdate(layer.id, (l) => (l.type === "shape" ? { ...l, fill: v } : l))
+        }
+      />
+      {layer.shape !== "ellipse" && (
+        <NumberRow
+          label="Radio"
+          value={layer.cornerRadius ?? 0}
+          min={0}
+          onChange={(v) =>
+            onUpdate(layer.id, (l) =>
+              l.type === "shape" ? { ...l, cornerRadius: v } : l
+            )
+          }
+        />
+      )}
+    </Section>
+  );
+}
+
+function FrameProps({
+  layer,
+  onUpdate,
+}: {
+  layer: FrameLayer;
+  onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
+}) {
+  const bgColor =
+    layer.background && layer.background.type === "color"
+      ? layer.background.value
+      : "#ffffff";
+  return (
+    <Section title="Frame">
+      <ColorRow
+        label="Fondo"
+        value={bgColor}
+        onChange={(v) =>
+          onUpdate(layer.id, (l) =>
+            l.type === "frame"
+              ? { ...l, background: { type: "color", value: v } }
+              : l
+          )
+        }
+      />
+      <NumberRow
+        label="Radio"
+        value={layer.cornerRadius ?? 0}
+        min={0}
+        onChange={(v) =>
+          onUpdate(layer.id, (l) =>
+            l.type === "frame" ? { ...l, cornerRadius: v } : l
+          )
+        }
+      />
+    </Section>
+  );
+}
