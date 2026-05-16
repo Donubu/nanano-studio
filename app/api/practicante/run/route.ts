@@ -14,13 +14,17 @@ interface RunRequestBody {
 
 export async function POST(req: NextRequest) {
   const session = await auth();
-  if (!session?.user) {
+  if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const baseUrl = process.env.PRACTICANTE_URL;
   const apiKey = process.env.PRACTICANTE_API_KEY;
-  const userEmail = process.env.PRACTICANTE_USER_EMAIL || "puertostudio@puer.to";
+  // Practicante identifica al user por email. Mandamos el del usuario que
+  // está interactuando; el env var actúa como override (debug / cuentas de
+  // servicio). Practicante responderá 404 user_not_found si el email no
+  // existe del lado de Practicante con permisos configurados.
+  const userEmail = process.env.PRACTICANTE_USER_EMAIL || session.user.email;
 
   if (!baseUrl || !apiKey) {
     return NextResponse.json(

@@ -3,13 +3,15 @@ import { auth } from "@/auth";
 
 export async function GET() {
   const session = await auth();
-  if (!session?.user) {
+  if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const baseUrl = process.env.PRACTICANTE_URL;
   const apiKey = process.env.PRACTICANTE_API_KEY;
-  const userEmail = process.env.PRACTICANTE_USER_EMAIL || "puertostudio@puer.to";
+  // Per-request: el catálogo de agentes que ve cada usuario depende de sus
+  // permisos en Practicante. El env var queda como override para debug.
+  const userEmail = process.env.PRACTICANTE_USER_EMAIL || session.user.email;
 
   if (!baseUrl || !apiKey) {
     return NextResponse.json(
