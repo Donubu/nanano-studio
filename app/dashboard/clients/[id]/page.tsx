@@ -15,6 +15,7 @@ import Image from "next/image";
 import { formatDateLocal } from "@/lib/utils";
 import ClientCreditsSection from "@/components/dashboard/client-credits-section";
 import ClientProductionSection from "@/components/dashboard/client-production-section";
+import ClientBrandKitsSection from "@/components/dashboard/client-brand-kits-section";
 
 interface ClientDetail {
   id: number;
@@ -51,7 +52,7 @@ export default function ClientDetailPage() {
   const [addingUser, setAddingUser] = useState(false);
   const [removingUserId, setRemovingUserId] = useState<number | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"info" | "production">("info");
+  const [activeTab, setActiveTab] = useState<"info" | "production" | "brand-kits">("info");
 
   const fetchClient = useCallback(async () => {
     try {
@@ -214,10 +215,23 @@ export default function ClientDetailPage() {
         >
           Producción
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("brand-kits")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            activeTab === "brand-kits"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Brand Kits
+        </button>
       </div>
 
       {activeTab === "production" ? (
         <ClientProductionSection clientId={Number(clientId)} />
+      ) : activeTab === "brand-kits" ? (
+        <ClientBrandKitsSection clientId={Number(clientId)} />
       ) : (
         <>
 
