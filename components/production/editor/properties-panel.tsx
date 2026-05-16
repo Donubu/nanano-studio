@@ -23,11 +23,8 @@ import {
   parseRef,
   makeRef,
   ColorToken,
-  FontToken,
-  ScaleToken,
-  SpacingToken,
-  LogoToken,
 } from "@/lib/production/brand-kit";
+import { cn } from "@/lib/utils";
 
 interface Props {
   definition: TemplateDefinition;
@@ -69,6 +66,171 @@ function NumberRow({
         className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-xs"
       />
     </label>
+  );
+}
+
+// Number field that can be either a literal number or a token reference. Used
+// for fontSize (scale tokens), padding/gap (spacing tokens).
+function TokenNumberRow<T extends { name: string; label: string; value?: number; fontSize?: number }>({
+  label,
+  value,
+  onChangeLiteral,
+  onPickToken,
+  tokens,
+  refKind,
+  min = 0,
+  max,
+}: {
+  label: string;
+  value: number | string | undefined;
+  onChangeLiteral: (n: number) => void;
+  onPickToken: (ref: string) => void;
+  tokens: T[];
+  refKind: "scale" | "spacing";
+  min?: number;
+  max?: number;
+}) {
+  const ref = parseRef(value);
+  const isRef = ref && ref.kind === refKind;
+  const refToken = isRef ? tokens.find((t) => t.name === ref.name) : null;
+  // For literal display when value is a number; if ref, show resolved value placeholder.
+  const literalValue =
+    typeof value === "number"
+      ? value
+      : refToken
+      ? refToken.value ?? refToken.fontSize ?? 0
+      : Number(value) || 0;
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2 text-xs">
+        <span className="w-12 text-muted-foreground">{label}</span>
+        {isRef ? (
+          <div className="flex-1 flex items-center gap-1 bg-blue-500/10 border border-blue-500/30 rounded px-2 py-1">
+            <span className="text-xs flex-1 truncate text-blue-300">
+              {refToken?.label ?? ref.name}{" "}
+              <span className="text-[10px] text-blue-300/60">({literalValue}px)</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => onChangeLiteral(literalValue)}
+              className="text-[10px] text-blue-300 hover:text-foreground"
+              title="Convertir a valor literal"
+            >
+              ×
+            </button>
+          </div>
+        ) : (
+          <input
+            type="number"
+            value={literalValue}
+            min={min}
+            max={max}
+            onChange={(e) => onChangeLiteral(Math.max(min, Number(e.target.value)))}
+            className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-xs"
+          />
+        )}
+      </div>
+      {tokens.length > 0 && (
+        <div className="flex flex-wrap gap-1 pl-14">
+          {tokens.map((t) => {
+            const active = isRef && ref.name === t.name;
+            return (
+              <button
+                key={t.name}
+                type="button"
+                onClick={() => onPickToken(makeRef(refKind, t.name))}
+                className={cn(
+                  "text-[10px] px-1.5 py-0.5 rounded border",
+                  active
+                    ? "border-primary bg-primary/10 text-foreground"
+                    : "border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+                title={`${t.name} = ${t.value ?? t.fontSize}px`}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// String field that can be either a literal or a token reference. Used for
+// fontFamily (font tokens) and image src (logo tokens).
+function TokenTextRow<T extends { name: string; label: string }>({
+  label,
+  value,
+  onChange,
+  tokens,
+  refKind,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  tokens: T[];
+  refKind: "font" | "logo";
+  placeholder?: string;
+}) {
+  const ref = parseRef(value);
+  const isRef = ref && ref.kind === refKind;
+  const refToken = isRef ? tokens.find((t) => t.name === ref.name) : null;
+
+  return (
+    <div className="space-y-1">
+      <label className="flex items-center gap-2 text-xs">
+        <span className="w-12 text-muted-foreground">{label}</span>
+        {isRef ? (
+          <div className="flex-1 flex items-center gap-1 bg-blue-500/10 border border-blue-500/30 rounded px-2 py-1">
+            <span className="text-xs flex-1 truncate text-blue-300">
+              {refToken?.label ?? ref.name}
+            </span>
+            <button
+              type="button"
+              onClick={() => onChange("")}
+              className="text-[10px] text-blue-300 hover:text-foreground"
+              title="Convertir a valor literal"
+            >
+              ×
+            </button>
+          </div>
+        ) : (
+          <input
+            type="text"
+            value={value}
+            placeholder={placeholder}
+            onChange={(e) => onChange(e.target.value)}
+            className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-xs"
+          />
+        )}
+      </label>
+      {tokens.length > 0 && (
+        <div className="flex flex-wrap gap-1 pl-14">
+          {tokens.map((t) => {
+            const active = isRef && ref.name === t.name;
+            return (
+              <button
+                key={t.name}
+                type="button"
+                onClick={() => onChange(makeRef(refKind, t.name))}
+                className={cn(
+                  "text-[10px] px-1.5 py-0.5 rounded border",
+                  active
+                    ? "border-primary bg-primary/10 text-foreground"
+                    : "border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+                title={t.name}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -372,11 +534,22 @@ function TextProps({
         />
       </Section>
       <Section title="Tipografía">
-        <NumberRow
+        <TokenTextRow
+          label="Fuente"
+          value={layer.style.fontFamily ?? ""}
+          tokens={brandKit.fonts}
+          refKind="font"
+          placeholder="Inter, system-ui, sans-serif"
+          onChange={(v) => updateStyle({ fontFamily: v || undefined })}
+        />
+        <TokenNumberRow
           label="Tamaño"
           value={layer.style.fontSize}
+          tokens={brandKit.scales}
+          refKind="scale"
           min={1}
-          onChange={(v) => updateStyle({ fontSize: v })}
+          onChangeLiteral={(v) => updateStyle({ fontSize: v })}
+          onPickToken={(r) => updateStyle({ fontSize: r })}
         />
         <NumberRow
           label="Peso"
@@ -424,9 +597,12 @@ function ImageProps({
 }) {
   return (
     <Section title="Imagen">
-      <TextRow
-        label="URL"
+      <TokenTextRow
+        label="Logo"
         value={layer.src ?? ""}
+        tokens={brandKit.logos}
+        refKind="logo"
+        placeholder="URL de la imagen"
         onChange={(v) =>
           onUpdate(layer.id, (l) =>
             l.type === "image" ? { ...l, src: v.trim() || null } : l
@@ -705,7 +881,7 @@ function LayoutControls({
 function StackControls({
   layout,
   onChange,
-  brandKit: _brandKit,
+  brandKit,
 }: {
   layout: StackLayout;
   onChange: (next: StackLayout) => void;
@@ -738,31 +914,78 @@ function StackControls({
           Padding (t · r · b · l)
         </label>
         <div className="grid grid-cols-4 gap-1">
-          {(["T", "R", "B", "L"] as const).map((side, i) => (
-            <input
-              key={side}
-              type="number"
-              min={0}
-              value={layout.padding[i]}
-              onChange={(e) => {
-                const v = Math.max(0, Number(e.target.value) || 0);
-                const next: [number, number, number, number] = [...layout.padding];
-                next[i] = v;
-                update({ padding: next });
-              }}
-              className="bg-muted border border-border/50 rounded px-1.5 py-1 text-xs text-center"
-              title={side}
-            />
-          ))}
+          {(["T", "R", "B", "L"] as const).map((side, i) => {
+            const cell = layout.padding[i];
+            const cellRef = parseRef(cell);
+            const isRef = cellRef && cellRef.kind === "spacing";
+            const refToken = isRef
+              ? brandKit.spacing.find((t) => t.name === cellRef.name)
+              : null;
+            return (
+              <input
+                key={side}
+                type="number"
+                min={0}
+                value={isRef ? "" : (cell as number)}
+                placeholder={isRef ? refToken?.label ?? "T" : undefined}
+                onChange={(e) => {
+                  const v = Math.max(0, Number(e.target.value) || 0);
+                  const next = [...layout.padding] as [
+                    number | string,
+                    number | string,
+                    number | string,
+                    number | string,
+                  ];
+                  next[i] = v;
+                  update({ padding: next });
+                }}
+                className={cn(
+                  "bg-muted border rounded px-1.5 py-1 text-xs text-center",
+                  isRef
+                    ? "border-blue-500/40 bg-blue-500/10 placeholder:text-blue-300"
+                    : "border-border/50"
+                )}
+                title={isRef ? `${cellRef.name} (token)` : side}
+              />
+            );
+          })}
         </div>
+        {brandKit.spacing.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1 mt-1">
+            <span className="text-[10px] text-muted-foreground mr-1">Token a todos:</span>
+            {brandKit.spacing.map((t) => {
+              const ref = makeRef("spacing", t.name);
+              const allActive = layout.padding.every((p) => p === ref);
+              return (
+                <button
+                  key={t.name}
+                  type="button"
+                  onClick={() => update({ padding: [ref, ref, ref, ref] })}
+                  className={cn(
+                    "text-[10px] px-1.5 py-0.5 rounded border",
+                    allActive
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                  title={`${t.name} = ${t.value}px`}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Gap */}
-      <NumberRow
+      <TokenNumberRow
         label="Gap"
         value={layout.gap}
+        tokens={brandKit.spacing}
+        refKind="spacing"
         min={0}
-        onChange={(v) => update({ gap: Math.max(0, v) })}
+        onChangeLiteral={(v) => update({ gap: Math.max(0, v) })}
+        onPickToken={(r) => update({ gap: r })}
       />
 
       {/* Align (cross-axis) */}

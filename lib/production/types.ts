@@ -44,9 +44,10 @@ export interface FreeLayout {
 export interface StackLayout {
   mode: "stack";
   direction: "vertical" | "horizontal";
-  // [top, right, bottom, left]
-  padding: [number, number, number, number];
-  gap: number;
+  // [top, right, bottom, left]. Each side may be a token ref (e.g. "{spacing.md}")
+  // resolved by brand-kit before render.
+  padding: [number | string, number | string, number | string, number | string];
+  gap: number | string;
   align: StackAlign;
   justify: StackJustify;
 }
@@ -75,7 +76,8 @@ export interface TextLayer extends BaseLayer {
   content: string;
   style: {
     fontFamily?: string;
-    fontSize: number;
+    // number literal, or token ref (e.g. "{scale.lg}") / font-family ref via fontFamily.
+    fontSize: number | string;
     fontWeight?: number | string;
     color: string;
     lineHeight?: number;
