@@ -13,6 +13,7 @@ import {
   findLayer,
   findParent,
 } from "@/lib/production/types";
+import { reflowForPreview } from "@/lib/production/reflow";
 import { TemplateLayerView } from "./template-layer";
 
 interface Props {
@@ -20,6 +21,9 @@ interface Props {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onUpdateBounds: (id: string, bounds: Bounds) => void;
+  // When set, the canvas renders the template reflowed to this size (read-only).
+  // Used by the editor's preview-format selector to inspect adaptations.
+  previewSize?: { w: number; h: number } | null;
 }
 
 type Bounds = { x: number; y: number; w: number; h: number };
@@ -57,7 +61,14 @@ export function TemplateCanvas({
   selectedId,
   onSelect,
   onUpdateBounds,
+  previewSize,
 }: Props) {
+  const isPreview = !!previewSize;
+  // In preview mode, render against a reflowed clone derived from constraints.
+  // The master `definition` is never mutated.
+  const baseTree: TemplateDefinition = isPreview
+    ? reflowForPreview(definition, previewSize!)
+    : definition;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
 
@@ -72,8 +83,8 @@ export function TemplateCanvas({
     return () => ro.disconnect();
   }, []);
 
-  const baseW = definition.size.w;
-  const baseH = definition.size.h;
+  const baseW = baseTree.size.w;
+  const baseH = baseTree.size.h;
   const availableW = Math.max(1, containerSize.w - CANVAS_PADDING * 2);
   const availableH = Math.max(1, containerSize.h - CANVAS_PADDING * 2);
   const scale = Math.min(availableW / baseW, availableH / baseH, 1);
@@ -84,6 +95,7 @@ export function TemplateCanvas({
   const [guides, setGuides] = useState<Guide[]>([]);
 
   const startMove = (e: ReactPointerEvent<HTMLDivElement>, layerId: string) => {
+    if (isPreview) return; // read-only
     const layer = findLayer(definition, layerId);
     if (!layer || layer.locked) return;
     // In stack-laid parents the child's position is computed by flex; dragging
@@ -106,6 +118,7 @@ export function TemplateCanvas({
     layerId: string,
     handle: Handle
   ) => {
+    if (isPreview) return; // read-only
     e.stopPropagation();
     const layer = findLayer(definition, layerId);
     if (!layer || layer.locked) return;
@@ -200,10 +213,10 @@ export function TemplateCanvas({
     }
   };
 
-  // Apply ghost to selected layer for live preview.
+  // Apply ghost to selected layer for live drag preview (only outside preview mode).
   const renderTree = ghost
-    ? applyGhostBounds(definition, ghost.id, ghost.bounds)
-    : definition;
+    ? applyGhostBounds(baseTree, ghost.id, ghost.bounds)
+    : baseTree;
   const selectedLayer = selectedId ? findLayer(renderTree, selectedId) : null;
 
   const scaledW = baseW * scale;
@@ -245,8 +258,8 @@ export function TemplateCanvas({
               />
             ))}
 
-            {/* Resize handles overlay for the selected layer */}
-            {selectedLayer && selectedLayer.id !== "tpl_root" && !selectedLayer.locked && (
+            {/* Resize handles overlay for the selected layer (hidden in preview) */}
+            {!isPreview && selectedLayer && selectedLayer.id !== "tpl_root" && !selectedLayer.locked && (
               <SelectionHandles
                 bounds={layerToBounds(selectedLayer)}
                 scale={scale}

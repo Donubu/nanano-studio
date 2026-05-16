@@ -5,6 +5,16 @@
 
 export type LayerType = "frame" | "text" | "image" | "shape";
 
+export type ConstraintH = "left" | "right" | "center" | "stretch" | "scale";
+export type ConstraintV = "top" | "bottom" | "center" | "stretch" | "scale";
+
+export interface Constraints {
+  h: ConstraintH;
+  v: ConstraintV;
+}
+
+export const DEFAULT_CONSTRAINTS: Constraints = { h: "left", v: "top" };
+
 export interface BaseLayer {
   id: string;
   type: LayerType;
@@ -15,6 +25,7 @@ export interface BaseLayer {
   opacity?: number;
   visible?: boolean;
   locked?: boolean;
+  constraints?: Constraints;
 }
 
 export type StackAlign = "start" | "center" | "end" | "stretch";

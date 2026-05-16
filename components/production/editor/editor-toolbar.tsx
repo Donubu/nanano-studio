@@ -1,8 +1,14 @@
 "use client";
 
-import { Type, Image as ImageIcon, Square, Loader2, Check, AlertCircle } from "lucide-react";
+import { Type, Image as ImageIcon, Square, Loader2, Check, AlertCircle, Monitor } from "lucide-react";
 import { SaveStatus } from "@/lib/production/use-template-editor";
 import { formatDateTimeLocal } from "@/lib/utils";
+
+export interface PreviewPreset {
+  id: string;
+  label: string;
+  size: { w: number; h: number } | null; // null = master
+}
 
 interface Props {
   onAddText: () => void;
@@ -10,6 +16,9 @@ interface Props {
   onAddShape: () => void;
   saveStatus: SaveStatus;
   lastSavedAt: Date | null;
+  previewPresets: PreviewPreset[];
+  activePreviewId: string;
+  onSelectPreview: (id: string) => void;
 }
 
 export function EditorToolbar({
@@ -18,6 +27,9 @@ export function EditorToolbar({
   onAddShape,
   saveStatus,
   lastSavedAt,
+  previewPresets,
+  activePreviewId,
+  onSelectPreview,
 }: Props) {
   return (
     <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50 bg-card/40">
@@ -45,6 +57,30 @@ export function EditorToolbar({
         <Square className="h-3.5 w-3.5" />
         Forma
       </button>
+
+      <div className="h-5 w-px bg-border/50 mx-1" />
+
+      <div className="flex items-center gap-1">
+        <Monitor className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground mr-1">
+          Vista
+        </span>
+        {previewPresets.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => onSelectPreview(p.id)}
+            className={`text-[11px] px-2 py-1 rounded-md border transition-colors ${
+              activePreviewId === p.id
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+            title={p.size ? `${p.size.w}×${p.size.h}` : "Master"}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
 
       <div className="flex-1" />
 

@@ -11,6 +11,10 @@ import {
   StackAlign,
   StackJustify,
   DEFAULT_STACK_LAYOUT,
+  Constraints,
+  ConstraintH,
+  ConstraintV,
+  DEFAULT_CONSTRAINTS,
 } from "@/lib/production/types";
 
 interface Props {
@@ -245,6 +249,13 @@ function LayerProps({
         />
       </Section>
 
+      <ConstraintsControls
+        layer={layer}
+        onUpdate={(next) =>
+          onUpdate(layer.id, (l) => ({ ...l, constraints: next }))
+        }
+      />
+
       {layer.type === "text" && (
         <TextProps layer={layer} onUpdate={onUpdate} />
       )}
@@ -471,6 +482,84 @@ function FrameProps({
         }
       />
     </>
+  );
+}
+
+// ----- Constraints controls -----
+
+function ConstraintsControls({
+  layer,
+  onUpdate,
+}: {
+  layer: TemplateLayer;
+  onUpdate: (next: Constraints) => void;
+}) {
+  const current = layer.constraints ?? DEFAULT_CONSTRAINTS;
+  const setH = (h: ConstraintH) => onUpdate({ ...current, h });
+  const setV = (v: ConstraintV) => onUpdate({ ...current, v });
+
+  const H_OPTIONS: Array<[ConstraintH, string, string]> = [
+    ["left", "Izq", "Pegado a la izquierda"],
+    ["center", "Centro", "Centrado horizontal"],
+    ["right", "Der", "Pegado a la derecha"],
+    ["stretch", "↔", "Estirar a izquierda y derecha"],
+    ["scale", "%", "Escala proporcional al ancho"],
+  ];
+  const V_OPTIONS: Array<[ConstraintV, string, string]> = [
+    ["top", "Sup", "Pegado arriba"],
+    ["center", "Centro", "Centrado vertical"],
+    ["bottom", "Inf", "Pegado abajo"],
+    ["stretch", "↕", "Estirar arriba y abajo"],
+    ["scale", "%", "Escala proporcional al alto"],
+  ];
+
+  return (
+    <Section title="Constraints">
+      <div>
+        <label className="text-[10px] text-muted-foreground block mb-1">Horizontal</label>
+        <div className="grid grid-cols-5 gap-1">
+          {H_OPTIONS.map(([val, label, title]) => (
+            <button
+              key={val}
+              type="button"
+              onClick={() => setH(val)}
+              title={title}
+              className={`text-[10px] py-1 rounded border ${
+                current.h === val
+                  ? "border-primary bg-primary/10"
+                  : "border-border/50 hover:bg-muted"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <label className="text-[10px] text-muted-foreground block mb-1">Vertical</label>
+        <div className="grid grid-cols-5 gap-1">
+          {V_OPTIONS.map(([val, label, title]) => (
+            <button
+              key={val}
+              type="button"
+              onClick={() => setV(val)}
+              title={title}
+              className={`text-[10px] py-1 rounded border ${
+                current.v === val
+                  ? "border-primary bg-primary/10"
+                  : "border-border/50 hover:bg-muted"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="text-[10px] text-muted-foreground pt-1">
+        Cómo se ancla esta capa cuando el canvas cambia de tamaño (vista previa
+        o adaptaciones).
+      </p>
+    </Section>
   );
 }
 
