@@ -8,6 +8,7 @@ import { parseBody } from "@/lib/api-utils";
 interface BrandKitRow extends RowDataPacket {
   id: number;
   client_id: number;
+  production_project_id: number | null;
   name: string;
   colors_json: unknown;
   typography_json: unknown;
@@ -20,6 +21,12 @@ interface BrandKitRow extends RowDataPacket {
   updated_at: Date;
 }
 
+// GET - List brand kits.
+// Query params:
+//   - client_id (required): the owning client
+//   - production_project_id (optional): when provided, the response also
+//     includes kits scoped to that project. Without it, only client-wide
+//     kits (production_project_id IS NULL) are returned.
 export async function GET(request: NextRequest) {
   try {
     const session = await auth();
@@ -28,19 +35,26 @@ export async function GET(request: NextRequest) {
     }
     const { searchParams } = new URL(request.url);
     const clientId = searchParams.get("client_id");
+    const projectId = searchParams.get("production_project_id");
     if (!clientId) {
       return NextResponse.json({ error: "client_id es requerido" }, { status: 400 });
     }
 
-    const [rows] = await pool.execute<BrandKitRow[]>(
-      `SELECT id, client_id, name, colors_json, typography_json, logos_json,
-              spacing_json, rules_text, is_default, created_by, created_at, updated_at
-         FROM production_brand_kits
-        WHERE client_id = ?
-        ORDER BY is_default DESC, name ASC`,
-      [clientId]
-    );
+    let sql = `SELECT id, client_id, production_project_id, name, colors_json,
+                      typography_json, logos_json, spacing_json, rules_text,
+                      is_default, created_by, created_at, updated_at
+                 FROM production_brand_kits
+                WHERE client_id = ?`;
+    const values: (string | number)[] = [clientId];
+    if (projectId) {
+      sql += ` AND (production_project_id IS NULL OR production_project_id = ?)`;
+      values.push(Number(projectId));
+    } else {
+      sql += ` AND production_project_id IS NULL`;
+    }
+    sql += ` ORDER BY production_project_id IS NULL DESC, is_default DESC, name ASC`;
 
+    const [rows] = await pool.execute<BrandKitRow[]>(sql, values);
     return NextResponse.json(rows);
   } catch (error) {
     console.error("Error listando brand_kits:", error);
@@ -57,6 +71,7 @@ export async function POST(request: NextRequest) {
 
     const schema = z.object({
       client_id: z.number().int().positive(),
+      production_project_id: z.number().int().positive().nullable().optional(),
       name: z.string().min(1).max(150),
       colors_json: z.unknown().optional(),
       typography_json: z.unknown().optional(),
@@ -70,19 +85,31 @@ export async function POST(request: NextRequest) {
     const d = parsed.data;
 
     if (d.is_default) {
-      await pool.execute<ResultSetHeader>(
-        `UPDATE production_brand_kits SET is_default = 0 WHERE client_id = ? AND is_default = 1`,
-        [d.client_id]
-      );
+      // Default applies per scope: only one client-wide default and one
+      // per-project default at a time.
+      if (d.production_project_id) {
+        await pool.execute<ResultSetHeader>(
+          `UPDATE production_brand_kits SET is_default = 0
+             WHERE client_id = ? AND production_project_id = ? AND is_default = 1`,
+          [d.client_id, d.production_project_id]
+        );
+      } else {
+        await pool.execute<ResultSetHeader>(
+          `UPDATE production_brand_kits SET is_default = 0
+             WHERE client_id = ? AND production_project_id IS NULL AND is_default = 1`,
+          [d.client_id]
+        );
+      }
     }
 
     const [result] = await pool.execute<ResultSetHeader>(
       `INSERT INTO production_brand_kits
-         (client_id, name, colors_json, typography_json, logos_json, spacing_json,
-          rules_text, is_default, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (client_id, production_project_id, name, colors_json, typography_json,
+          logos_json, spacing_json, rules_text, is_default, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         d.client_id,
+        d.production_project_id ?? null,
         d.name,
         d.colors_json !== undefined ? JSON.stringify(d.colors_json) : null,
         d.typography_json !== undefined ? JSON.stringify(d.typography_json) : null,
