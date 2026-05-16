@@ -8,6 +8,9 @@ import {
   TextLayer,
   ImageLayer,
   ShapeLayer,
+  StackLayout,
+  StackAlign,
+  StackJustify,
 } from "@/lib/production/types";
 
 interface Props {
@@ -15,9 +18,25 @@ interface Props {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onLayerPointerDown: (e: ReactPointerEvent<HTMLDivElement>, layerId: string) => void;
+  parentMode?: "free" | "stack";
 }
 
-function baseLayerStyle(layer: TemplateLayer): CSSProperties {
+function baseLayerStyle(layer: TemplateLayer, parentMode: "free" | "stack"): CSSProperties {
+  if (parentMode === "stack") {
+    // Position is determined by the parent's flex layout. We keep width/height
+    // as the layer's stored size; align "stretch" on the cross-axis is handled
+    // by the parent via alignItems, which CSS resolves against this size.
+    return {
+      position: "relative",
+      width: layer.size.w,
+      height: layer.size.h,
+      flexShrink: 0,
+      opacity: layer.opacity ?? 1,
+      transform: layer.rotation ? `rotate(${layer.rotation}deg)` : undefined,
+      display: layer.visible === false ? "none" : undefined,
+      boxSizing: "border-box",
+    };
+  }
   return {
     position: "absolute",
     left: layer.position.x,
@@ -36,26 +55,27 @@ export function TemplateLayerView({
   selectedId,
   onSelect,
   onLayerPointerDown,
+  parentMode = "free",
 }: Props) {
   const isSelected = selectedId === layer.id;
   const commonProps = {
     onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => {
-      // Stop so parent frame doesn't also receive the down (we still want
-      // bubbling to the canvas-level capture).
       e.stopPropagation();
       onSelect(layer.id);
       onLayerPointerDown(e, layer.id);
     },
     className: cn(
-      "cursor-move outline-2 outline-offset-0",
+      "outline-2 outline-offset-0",
+      parentMode === "stack" ? "cursor-pointer" : "cursor-move",
       isSelected ? "outline outline-blue-500" : "outline-transparent hover:outline hover:outline-blue-300/60"
     ),
   };
 
-  if (layer.type === "frame") return renderFrame(layer, { commonProps, selectedId, onSelect, onLayerPointerDown });
-  if (layer.type === "text") return renderText(layer, commonProps);
-  if (layer.type === "image") return renderImage(layer, commonProps);
-  if (layer.type === "shape") return renderShape(layer, commonProps);
+  if (layer.type === "frame")
+    return renderFrame(layer, parentMode, { commonProps, selectedId, onSelect, onLayerPointerDown });
+  if (layer.type === "text") return renderText(layer, parentMode, commonProps);
+  if (layer.type === "image") return renderImage(layer, parentMode, commonProps);
+  if (layer.type === "shape") return renderShape(layer, parentMode, commonProps);
   return null;
 }
 
@@ -64,8 +84,44 @@ type CommonProps = {
   className: string;
 };
 
+function stackToFlexStyle(layout: StackLayout): CSSProperties {
+  const [pt, pr, pb, pl] = layout.padding;
+  return {
+    display: "flex",
+    flexDirection: layout.direction === "horizontal" ? "row" : "column",
+    paddingTop: pt,
+    paddingRight: pr,
+    paddingBottom: pb,
+    paddingLeft: pl,
+    gap: layout.gap,
+    alignItems: alignToCss(layout.align),
+    justifyContent: justifyToCss(layout.justify),
+  };
+}
+
+function alignToCss(a: StackAlign): CSSProperties["alignItems"] {
+  switch (a) {
+    case "start":   return "flex-start";
+    case "center":  return "center";
+    case "end":     return "flex-end";
+    case "stretch": return "stretch";
+  }
+}
+
+function justifyToCss(j: StackJustify): CSSProperties["justifyContent"] {
+  switch (j) {
+    case "start":         return "flex-start";
+    case "center":        return "center";
+    case "end":           return "flex-end";
+    case "space-between": return "space-between";
+    case "space-around":  return "space-around";
+    case "space-evenly":  return "space-evenly";
+  }
+}
+
 function renderFrame(
   layer: FrameLayer,
+  parentMode: "free" | "stack",
   ctx: {
     commonProps: CommonProps;
     selectedId: string | null;
@@ -74,8 +130,9 @@ function renderFrame(
   }
 ) {
   const bg = layer.background;
+  const isStack = layer.layout.mode === "stack";
   const style: CSSProperties = {
-    ...baseLayerStyle(layer),
+    ...baseLayerStyle(layer, parentMode),
     background:
       bg && bg.type === "color"
         ? bg.value
@@ -83,7 +140,10 @@ function renderFrame(
         ? "transparent"
         : undefined,
     borderRadius: layer.cornerRadius,
+    ...(isStack ? stackToFlexStyle(layer.layout as StackLayout) : {}),
+    overflow: "hidden",
   };
+  const childParentMode: "free" | "stack" = isStack ? "stack" : "free";
   return (
     <div style={style} {...ctx.commonProps}>
       {layer.children.map((child) => (
@@ -93,16 +153,17 @@ function renderFrame(
           selectedId={ctx.selectedId}
           onSelect={ctx.onSelect}
           onLayerPointerDown={ctx.onLayerPointerDown}
+          parentMode={childParentMode}
         />
       ))}
     </div>
   );
 }
 
-function renderText(layer: TextLayer, common: CommonProps) {
+function renderText(layer: TextLayer, parentMode: "free" | "stack", common: CommonProps) {
   const { style } = layer;
   const css: CSSProperties = {
-    ...baseLayerStyle(layer),
+    ...baseLayerStyle(layer, parentMode),
     fontFamily: style.fontFamily,
     fontSize: style.fontSize,
     fontWeight: style.fontWeight,
@@ -122,9 +183,9 @@ function renderText(layer: TextLayer, common: CommonProps) {
   );
 }
 
-function renderImage(layer: ImageLayer, common: CommonProps) {
+function renderImage(layer: ImageLayer, parentMode: "free" | "stack", common: CommonProps) {
   const style: CSSProperties = {
-    ...baseLayerStyle(layer),
+    ...baseLayerStyle(layer, parentMode),
     overflow: "hidden",
     borderRadius: layer.cornerRadius,
     background: layer.src ? undefined : "rgba(0,0,0,0.05)",
@@ -165,10 +226,10 @@ function renderImage(layer: ImageLayer, common: CommonProps) {
   );
 }
 
-function renderShape(layer: ShapeLayer, common: CommonProps) {
+function renderShape(layer: ShapeLayer, parentMode: "free" | "stack", common: CommonProps) {
   const isEllipse = layer.shape === "ellipse";
   const style: CSSProperties = {
-    ...baseLayerStyle(layer),
+    ...baseLayerStyle(layer, parentMode),
     background: layer.fill,
     borderRadius: isEllipse ? "50%" : layer.cornerRadius,
     border: layer.stroke

@@ -17,10 +17,44 @@ export interface BaseLayer {
   locked?: boolean;
 }
 
+export type StackAlign = "start" | "center" | "end" | "stretch";
+export type StackJustify =
+  | "start"
+  | "center"
+  | "end"
+  | "space-between"
+  | "space-around"
+  | "space-evenly";
+
+export interface FreeLayout {
+  mode: "free";
+}
+
+export interface StackLayout {
+  mode: "stack";
+  direction: "vertical" | "horizontal";
+  // [top, right, bottom, left]
+  padding: [number, number, number, number];
+  gap: number;
+  align: StackAlign;
+  justify: StackJustify;
+}
+
+export type LayoutConfig = FreeLayout | StackLayout;
+
+export const DEFAULT_STACK_LAYOUT: StackLayout = {
+  mode: "stack",
+  direction: "vertical",
+  padding: [24, 24, 24, 24],
+  gap: 12,
+  align: "stretch",
+  justify: "start",
+};
+
 export interface FrameLayer extends BaseLayer {
   type: "frame";
   background?: { type: "color"; value: string } | { type: "transparent" };
-  layout: { mode: "free" };
+  layout: LayoutConfig;
   cornerRadius?: number;
   children: TemplateLayer[];
 }

@@ -11,6 +11,7 @@ import {
   TemplateDefinition,
   TemplateLayer,
   findLayer,
+  findParent,
 } from "@/lib/production/types";
 import { TemplateLayerView } from "./template-layer";
 
@@ -85,6 +86,11 @@ export function TemplateCanvas({
   const startMove = (e: ReactPointerEvent<HTMLDivElement>, layerId: string) => {
     const layer = findLayer(definition, layerId);
     if (!layer || layer.locked) return;
+    // In stack-laid parents the child's position is computed by flex; dragging
+    // to move would have no visual effect. Click still selects (handled by the
+    // layer view) but we don't initiate a move op here.
+    const parent = findParent(definition, layerId);
+    if (parent && parent.layout.mode === "stack") return;
     dragRef.current = {
       kind: "move",
       layerId,
@@ -142,15 +148,28 @@ export function TemplateCanvas({
       activeEdges = edgesForHandle(drag.handle);
     }
 
-    // Snap targets: canvas + every other layer at root level (siblings of the
-    // dragged one). Frame-nested children are ignored in this MVP slice.
-    const snapTargets = collectSnapTargets(definition, drag.layerId);
-    const { snapped, guides: g } = applySnap(
-      nextBounds,
-      activeEdges,
-      snapTargets,
-      snapThresholdWorld
-    );
+    // Snap is disabled when the dragged layer's parent is in stack mode,
+    // since its sibling positions are layout-driven and not meaningful as
+    // reference lines. Resize still works in that case, just without snap.
+    const parent = findParent(definition, drag.layerId);
+    const parentIsStack = parent?.layout.mode === "stack";
+
+    let snapped: Bounds;
+    let nextGuides: Guide[];
+    if (parentIsStack) {
+      snapped = nextBounds;
+      nextGuides = [];
+    } else {
+      const snapTargets = collectSnapTargets(definition, drag.layerId);
+      const result = applySnap(
+        nextBounds,
+        activeEdges,
+        snapTargets,
+        snapThresholdWorld
+      );
+      snapped = result.snapped;
+      nextGuides = result.guides;
+    }
 
     // Round to keep stored values clean.
     const finalBounds: Bounds = {
@@ -161,7 +180,7 @@ export function TemplateCanvas({
     };
 
     setGhost({ id: drag.layerId, bounds: finalBounds });
-    setGuides(g);
+    setGuides(nextGuides);
   };
 
   const handlePointerUp = () => {

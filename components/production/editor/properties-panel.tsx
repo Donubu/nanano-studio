@@ -7,6 +7,10 @@ import {
   ImageLayer,
   ShapeLayer,
   FrameLayer,
+  StackLayout,
+  StackAlign,
+  StackJustify,
+  DEFAULT_STACK_LAYOUT,
 } from "@/lib/production/types";
 
 interface Props {
@@ -169,21 +173,25 @@ function RootProps({
       : "#ffffff";
 
   return (
-    <Section title="Fondo">
-      <ColorRow
-        label="Color"
-        value={bgColor}
-        onChange={(v) =>
-          onUpdateRoot((root) => ({
-            ...root,
-            background: { type: "color", value: v },
-          }))
-        }
-      />
-      <p className="text-[10px] text-muted-foreground pt-1">
-        {definition.size.w} × {definition.size.h} px
-      </p>
-    </Section>
+    <>
+      <Section title="Fondo">
+        <ColorRow
+          label="Color"
+          value={bgColor}
+          onChange={(v) =>
+            onUpdateRoot((root) => ({
+              ...root,
+              background: { type: "color", value: v },
+            }))
+          }
+        />
+        <p className="text-[10px] text-muted-foreground pt-1">
+          {definition.size.w} × {definition.size.h} px
+        </p>
+      </Section>
+
+      <LayoutControls frame={definition} onUpdateFrame={onUpdateRoot} />
+    </>
   );
 }
 
@@ -431,28 +439,212 @@ function FrameProps({
       ? layer.background.value
       : "#ffffff";
   return (
-    <Section title="Frame">
-      <ColorRow
-        label="Fondo"
-        value={bgColor}
-        onChange={(v) =>
-          onUpdate(layer.id, (l) =>
-            l.type === "frame"
-              ? { ...l, background: { type: "color", value: v } }
-              : l
-          )
+    <>
+      <Section title="Frame">
+        <ColorRow
+          label="Fondo"
+          value={bgColor}
+          onChange={(v) =>
+            onUpdate(layer.id, (l) =>
+              l.type === "frame"
+                ? { ...l, background: { type: "color", value: v } }
+                : l
+            )
+          }
+        />
+        <NumberRow
+          label="Radio"
+          value={layer.cornerRadius ?? 0}
+          min={0}
+          onChange={(v) =>
+            onUpdate(layer.id, (l) =>
+              l.type === "frame" ? { ...l, cornerRadius: v } : l
+            )
+          }
+        />
+      </Section>
+
+      <LayoutControls
+        frame={layer}
+        onUpdateFrame={(m) =>
+          onUpdate(layer.id, (l) => (l.type === "frame" ? m(l) : l))
         }
       />
-      <NumberRow
-        label="Radio"
-        value={layer.cornerRadius ?? 0}
-        min={0}
-        onChange={(v) =>
-          onUpdate(layer.id, (l) =>
-            l.type === "frame" ? { ...l, cornerRadius: v } : l
-          )
-        }
-      />
+    </>
+  );
+}
+
+// ----- Layout controls (free vs stack) -----
+
+function LayoutControls({
+  frame,
+  onUpdateFrame,
+}: {
+  frame: FrameLayer;
+  onUpdateFrame: (m: (f: FrameLayer) => FrameLayer) => void;
+}) {
+  const isStack = frame.layout.mode === "stack";
+  return (
+    <Section title="Layout">
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => onUpdateFrame((f) => ({ ...f, layout: { mode: "free" } }))}
+          className={`flex-1 text-xs py-1 rounded border ${
+            !isStack
+              ? "border-primary bg-primary/10"
+              : "border-border/50 hover:bg-muted"
+          }`}
+        >
+          Libre
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            onUpdateFrame((f) => ({
+              ...f,
+              layout: f.layout.mode === "stack" ? f.layout : DEFAULT_STACK_LAYOUT,
+            }))
+          }
+          className={`flex-1 text-xs py-1 rounded border ${
+            isStack
+              ? "border-primary bg-primary/10"
+              : "border-border/50 hover:bg-muted"
+          }`}
+        >
+          Stack
+        </button>
+      </div>
+
+      {isStack && (
+        <StackControls
+          layout={frame.layout as StackLayout}
+          onChange={(s) => onUpdateFrame((f) => ({ ...f, layout: s }))}
+        />
+      )}
     </Section>
+  );
+}
+
+function StackControls({
+  layout,
+  onChange,
+}: {
+  layout: StackLayout;
+  onChange: (next: StackLayout) => void;
+}) {
+  const update = (patch: Partial<StackLayout>) => onChange({ ...layout, ...patch });
+  return (
+    <div className="space-y-2 pt-1">
+      {/* Direction */}
+      <div className="flex items-center gap-1">
+        {(["vertical", "horizontal"] as const).map((d) => (
+          <button
+            key={d}
+            type="button"
+            onClick={() => update({ direction: d })}
+            className={`flex-1 text-[11px] py-1 rounded border ${
+              layout.direction === d
+                ? "border-primary bg-primary/10"
+                : "border-border/50 hover:bg-muted"
+            }`}
+          >
+            {d === "vertical" ? "↓ Vertical" : "→ Horizontal"}
+          </button>
+        ))}
+      </div>
+
+      {/* Padding (4 sides) */}
+      <div>
+        <label className="text-[10px] text-muted-foreground block mb-1">
+          Padding (t · r · b · l)
+        </label>
+        <div className="grid grid-cols-4 gap-1">
+          {(["T", "R", "B", "L"] as const).map((side, i) => (
+            <input
+              key={side}
+              type="number"
+              min={0}
+              value={layout.padding[i]}
+              onChange={(e) => {
+                const v = Math.max(0, Number(e.target.value) || 0);
+                const next: [number, number, number, number] = [...layout.padding];
+                next[i] = v;
+                update({ padding: next });
+              }}
+              className="bg-muted border border-border/50 rounded px-1.5 py-1 text-xs text-center"
+              title={side}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Gap */}
+      <NumberRow
+        label="Gap"
+        value={layout.gap}
+        min={0}
+        onChange={(v) => update({ gap: Math.max(0, v) })}
+      />
+
+      {/* Align (cross-axis) */}
+      <div>
+        <label className="text-[10px] text-muted-foreground block mb-1">Alinear</label>
+        <div className="grid grid-cols-4 gap-1">
+          {(["start", "center", "end", "stretch"] as StackAlign[]).map((a) => (
+            <button
+              key={a}
+              type="button"
+              onClick={() => update({ align: a })}
+              className={`text-[10px] py-1 rounded border ${
+                layout.align === a
+                  ? "border-primary bg-primary/10"
+                  : "border-border/50 hover:bg-muted"
+              }`}
+              title={a}
+            >
+              {a === "start"
+                ? "Inicio"
+                : a === "center"
+                ? "Centro"
+                : a === "end"
+                ? "Fin"
+                : "Stretch"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Justify (main-axis) */}
+      <div>
+        <label className="text-[10px] text-muted-foreground block mb-1">Distribuir</label>
+        <div className="grid grid-cols-3 gap-1">
+          {(
+            [
+              ["start", "Inicio"],
+              ["center", "Centro"],
+              ["end", "Fin"],
+              ["space-between", "Entre"],
+              ["space-around", "Alrededor"],
+              ["space-evenly", "Uniforme"],
+            ] as Array<[StackJustify, string]>
+          ).map(([j, label]) => (
+            <button
+              key={j}
+              type="button"
+              onClick={() => update({ justify: j })}
+              className={`text-[10px] py-1 rounded border ${
+                layout.justify === j
+                  ? "border-primary bg-primary/10"
+                  : "border-border/50 hover:bg-muted"
+              }`}
+              title={j}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
