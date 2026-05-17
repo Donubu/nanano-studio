@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { ImageIcon } from "lucide-react";
+import { useRef, useState } from "react";
+import { ImageIcon, Loader2, Upload } from "lucide-react";
 import {
   TemplateDefinition,
   TemplateLayer,
@@ -614,6 +614,77 @@ function ImageProps({
   clientId: number | null;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const dragCounterRef = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleFile = async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      setUploadError("El archivo debe ser una imagen");
+      return;
+    }
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("No se pudo leer el archivo"));
+        reader.readAsDataURL(file);
+      });
+      const res = await fetch("/api/production/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageData: dataUrl, clientId }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setUploadError(body?.error || "Error al subir");
+        return;
+      }
+      const { url } = (await res.json()) as { url: string };
+      onUpdate(layer.id, (l) =>
+        l.type === "image" ? { ...l, src: url } : l
+      );
+    } catch (err) {
+      console.error("Error subiendo imagen:", err);
+      setUploadError("Error inesperado");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const onDragEnter = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    dragCounterRef.current += 1;
+    if (dragCounterRef.current === 1) setDragOver(true);
+  };
+  const onDragLeave = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setDragOver(false);
+    }
+  };
+  const onDragOver = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  };
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleFile(file);
+  };
+
   return (
     <Section title="Imagen">
       <TokenTextRow
@@ -628,28 +699,73 @@ function ImageProps({
           )
         }
       />
-      {clientId !== null && (
-        <>
+      <div
+        className={cn(
+          "rounded border border-dashed transition-colors p-1 -m-1",
+          dragOver
+            ? "border-primary/60 bg-primary/5"
+            : "border-transparent"
+        )}
+        onDragEnter={onDragEnter}
+        onDragLeave={onDragLeave}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleFile(file);
+          }}
+        />
+        <div className="grid grid-cols-2 gap-1">
+          {clientId !== null && (
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              className="flex items-center justify-center gap-1.5 text-[11px] py-1.5 rounded border border-border/60 text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted transition-colors"
+            >
+              <ImageIcon className="h-3 w-3" />
+              Galería
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => setPickerOpen(true)}
-            className="w-full flex items-center justify-center gap-1.5 text-[11px] py-1.5 rounded border border-dashed border-border/60 text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted transition-colors"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className={cn(
+              "flex items-center justify-center gap-1.5 text-[11px] py-1.5 rounded border transition-colors",
+              "border-border/60 text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted",
+              clientId === null && "col-span-2",
+              uploading && "opacity-60 cursor-wait"
+            )}
+            title="Subir desde tu equipo (se guarda en GCS)"
           >
-            <ImageIcon className="h-3 w-3" />
-            Galería del cliente
+            {uploading ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Upload className="h-3 w-3" />
+            )}
+            {uploading ? "Subiendo…" : "Subir o arrastrar"}
           </button>
-          {pickerOpen && (
-            <ClientImagePicker
-              clientId={clientId}
-              onClose={() => setPickerOpen(false)}
-              onPick={(img) =>
-                onUpdate(layer.id, (l) =>
-                  l.type === "image" ? { ...l, src: img.url } : l
-                )
-              }
-            />
-          )}
-        </>
+        </div>
+        {uploadError && (
+          <p className="text-[10px] text-red-400 mt-1">{uploadError}</p>
+        )}
+      </div>
+      {pickerOpen && clientId !== null && (
+        <ClientImagePicker
+          clientId={clientId}
+          onClose={() => setPickerOpen(false)}
+          onPick={(img) =>
+            onUpdate(layer.id, (l) =>
+              l.type === "image" ? { ...l, src: img.url } : l
+            )
+          }
+        />
       )}
       <div className="flex items-center gap-1">
         {(["cover", "contain", "fill"] as const).map((f) => (
