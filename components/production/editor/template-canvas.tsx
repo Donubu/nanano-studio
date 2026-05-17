@@ -225,6 +225,14 @@ export function TemplateCanvas({
     }
   };
 
+  // Click directly on the stage (not on a layer) selects the canvas root so
+  // its properties show up in the right panel.
+  const handleStagePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget) return;
+    e.stopPropagation();
+    onSelect("tpl_root");
+  };
+
   // Apply ghost to selected layer for live drag preview (only outside preview mode).
   const renderTree = ghost
     ? applyGhostBounds(baseTree, ghost.id, ghost.bounds)
@@ -312,7 +320,11 @@ export function TemplateCanvas({
     >
       {containerSize.w > 0 && (
         <div style={{ width: scaledW, height: scaledH, position: "relative" }}>
-          <div ref={stageRef} style={stageStyle}>
+          <div
+            ref={stageRef}
+            style={stageStyle}
+            onPointerDown={handleStagePointerDown}
+          >
             {renderTree.children.map((child: TemplateLayer) => (
               <TemplateLayerView
                 key={child.id}
