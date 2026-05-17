@@ -239,33 +239,42 @@ export function TemplateCanvas({
   const selectedParent = selectedId ? findParent(definition, selectedId) : null;
   const selectedParentIsStack = selectedParent?.layout.mode === "stack";
   const [stackHandleBounds, setStackHandleBounds] = useState<Bounds | null>(null);
+  // Stable primitives only: depending on selectedLayer or renderTree directly
+  // loops infinitely — those are fresh references each render (token resolver
+  // rebuilds the tree). Track the data that actually changes the rendered
+  // layer size/position: selection id, layer size, scale.
+  const selW = selectedLayer?.size.w;
+  const selH = selectedLayer?.size.h;
   /* eslint-disable react-hooks/set-state-in-effect */
-  // setState in a layout effect is the right pattern for DOM measurement
-  // — the rect can't be known during render and the handles must overlay the
+  // setState in a layout effect is the right pattern for DOM measurement:
+  // the rect can't be known during render and the handles must overlay the
   // committed layout.
   useLayoutEffect(() => {
-    if (!selectedLayer || !selectedParentIsStack) {
-      setStackHandleBounds(null);
+    if (!selectedId || !selectedParentIsStack) {
+      setStackHandleBounds((cur) => (cur === null ? cur : null));
       return;
     }
     const stage = stageRef.current;
     if (!stage) return;
-    const node = stage.querySelector<HTMLElement>(
-      `[data-layer-id="${selectedLayer.id}"]`
-    );
+    const node = stage.querySelector<HTMLElement>(`[data-layer-id="${selectedId}"]`);
     if (!node) {
-      setStackHandleBounds(null);
+      setStackHandleBounds((cur) => (cur === null ? cur : null));
       return;
     }
     const stageRect = stage.getBoundingClientRect();
     const rect = node.getBoundingClientRect();
-    setStackHandleBounds({
+    const next: Bounds = {
       x: (rect.left - stageRect.left) / scale,
       y: (rect.top - stageRect.top) / scale,
       w: rect.width / scale,
       h: rect.height / scale,
-    });
-  }, [selectedLayer, selectedParentIsStack, renderTree, scale]);
+    };
+    setStackHandleBounds((cur) =>
+      cur && cur.x === next.x && cur.y === next.y && cur.w === next.w && cur.h === next.h
+        ? cur
+        : next
+    );
+  }, [selectedId, selectedParentIsStack, selW, selH, scale]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const scaledW = baseW * scale;
