@@ -235,6 +235,21 @@ export default function ProducirPage() {
       }
 
       await fetchAdaptations();
+
+      // Hidratar dataset persistido (si existe).
+      const dsRes = await fetch(`/api/production/templates/${templateId}/datasets`);
+      if (dsRes.ok) {
+        const ds = await dsRes.json();
+        if (ds && Array.isArray(ds.rows) && ds.rows.length > 0) {
+          setDataset({
+            columns: ds.columns ?? [],
+            rows: ds.rows,
+            totalRows: ds.row_count ?? ds.rows.length,
+            filename: ds.source_filename ?? ds.name ?? "dataset",
+          });
+          setSelectedRowIdx(0);
+        }
+      }
     } catch (err) {
       console.error("Error cargando datos:", err);
     } finally {
@@ -340,10 +355,14 @@ export default function ProducirPage() {
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
 
   // --- Dataset / variables ---
+  // El dataset persiste en production_datasets (uno por template). El upload
+  // parsea el CSV en cliente vía papaparse y luego lo POSTea para guardarlo.
+  // Al cargar la página se hace GET para hidratar el estado.
   const [dataset, setDataset] = useState<ParsedDataset | null>(null);
   const [selectedRowIdx, setSelectedRowIdx] = useState<number | null>(null);
   const datasetFileInputRef = useRef<HTMLInputElement | null>(null);
   const [datasetError, setDatasetError] = useState<string | null>(null);
+  const [datasetSaving, setDatasetSaving] = useState(false);
 
   useEffect(() => {
     if (!currentlyRendering) return;
@@ -461,25 +480,61 @@ export default function ProducirPage() {
 
   const handleUploadCsv = async (file: File) => {
     setDatasetError(null);
+    setDatasetSaving(true);
     try {
       const parsed = await parseCsvFile(file);
       if (parsed.rows.length === 0) {
         setDatasetError("El archivo CSV está vacío");
         return;
       }
+      // Persistimos antes de actualizar UI: si la BD falla, no queremos
+      // dejar al usuario con un dataset que se va a perder al refrescar.
+      const res = await fetch(
+        `/api/production/templates/${templateId}/datasets`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: parsed.filename,
+            source_filename: parsed.filename,
+            columns: parsed.columns,
+            rows: parsed.rows,
+          }),
+        }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setDatasetError(body?.error || `No se pudo guardar el dataset (HTTP ${res.status})`);
+        return;
+      }
       setDataset(parsed);
       setSelectedRowIdx(0);
     } catch (err) {
-      console.error("Error parseando CSV:", err);
-      setDatasetError("No se pudo parsear el archivo CSV");
+      console.error("Error parseando/guardando CSV:", err);
+      setDatasetError("No se pudo parsear o guardar el archivo CSV");
     } finally {
+      setDatasetSaving(false);
       if (datasetFileInputRef.current) datasetFileInputRef.current.value = "";
     }
   };
 
-  const handleClearDataset = () => {
-    setDataset(null);
-    setSelectedRowIdx(null);
+  const handleClearDataset = async () => {
+    setDatasetSaving(true);
+    try {
+      const res = await fetch(
+        `/api/production/templates/${templateId}/datasets`,
+        { method: "DELETE" }
+      );
+      if (res.ok) {
+        setDataset(null);
+        setSelectedRowIdx(null);
+      } else {
+        const body = await res.json().catch(() => null);
+        setDatasetError(body?.error || "No se pudo eliminar el dataset");
+      }
+    } finally {
+      setDatasetSaving(false);
+    }
   };
 
   // La fila activa del dataset (si la hay) se propaga a cada AdaptationCard
@@ -713,9 +768,14 @@ export default function ProducirPage() {
                   size="sm"
                   variant={dataset ? "outline" : "default"}
                   onClick={() => datasetFileInputRef.current?.click()}
+                  disabled={datasetSaving}
                   className="gap-1"
                 >
-                  <FileSpreadsheet className="h-4 w-4" />
+                  {datasetSaving ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <FileSpreadsheet className="h-4 w-4" />
+                  )}
                   {dataset ? "Cambiar CSV" : "Subir CSV"}
                 </Button>
                 {dataset && (
@@ -723,6 +783,7 @@ export default function ProducirPage() {
                     size="sm"
                     variant="ghost"
                     onClick={handleClearDataset}
+                    disabled={datasetSaving}
                     className="gap-1"
                   >
                     <X className="h-4 w-4" />
