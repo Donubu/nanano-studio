@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ImageIcon, Loader2, Upload } from "lucide-react";
+import { ImageIcon, Loader2, PanelRightClose, Upload } from "lucide-react";
 import {
   TemplateDefinition,
   TemplateLayer,
@@ -41,6 +41,8 @@ interface Props {
   projectId?: number;
   allBrandKits?: BrandKit[];
   onBrandKitsChange?: () => void;
+  // Cuando viene, el panel muestra un botón para colapsarse.
+  onCollapse?: () => void;
 }
 
 function NumberRow({
@@ -466,16 +468,27 @@ export function PropertiesPanel({
   onUpdateRoot,
   brandKit = EMPTY_KIT_CONTENT,
   clientId = null,
+  onCollapse,
 }: Props) {
   const noSelection = !selectedLayer;
   const isRoot = selectedLayer?.id === "tpl_root";
 
   return (
     <aside className="w-64 shrink-0 border-l border-border/50 bg-card/40 overflow-y-auto">
-      <div className="p-3 border-b border-border/50">
+      <div className="p-3 border-b border-border/50 flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {noSelection ? "Propiedades" : isRoot ? "Canvas" : labelForType(selectedLayer!.type)}
         </h3>
+        {onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            className="text-muted-foreground hover:text-foreground p-0.5 rounded"
+            title="Colapsar"
+          >
+            <PanelRightClose className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
       <div className="p-3 space-y-4">
         {noSelection && (

@@ -2,7 +2,7 @@
 
 import { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, useState } from "react";
 import { cn } from "@/lib/utils";
-import { Trash2, Type, Image as ImageIcon, Square, Layers as LayersIcon, GripVertical, Lock, Unlock } from "lucide-react";
+import { Trash2, Type, Image as ImageIcon, Square, Layers as LayersIcon, GripVertical, Lock, Unlock, PanelLeftClose } from "lucide-react";
 import {
   TemplateDefinition,
   TemplateLayer,
@@ -17,6 +17,9 @@ interface Props {
   onReorder: (sourceId: string, targetId: string, position: "before" | "after") => void;
   onToggleLock: (id: string) => void;
   onLayerContextMenu?: (clientX: number, clientY: number, layerId: string) => void;
+  // Cuando viene, el panel muestra un botón para colapsarse. El padre
+  // controla el estado abierto/cerrado.
+  onCollapse?: () => void;
 }
 
 function defaultName(layer: TemplateLayer): string {
@@ -55,6 +58,7 @@ export function LayersPanel({
   onReorder,
   onToggleLock,
   onLayerContextMenu,
+  onCollapse,
 }: Props) {
   // Panel order = reverse of paint order: the row at the top of the panel is
   // the layer painted on top of the canvas (Figma convention).
@@ -128,10 +132,20 @@ export function LayersPanel({
 
   return (
     <aside className="w-56 shrink-0 border-r border-border/50 bg-card/40 overflow-y-auto">
-      <div className="p-3 border-b border-border/50">
+      <div className="p-3 border-b border-border/50 flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Capas
         </h3>
+        {onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            className="text-muted-foreground hover:text-foreground p-0.5 rounded"
+            title="Colapsar"
+          >
+            <PanelLeftClose className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
       <div className="p-1">
         {/* Root entry */}

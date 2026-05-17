@@ -1,8 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { PanelLeftOpen, PanelRightOpen } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { TemplateDefinition, findLayer, findParent } from "@/lib/production/types";
 import { BrandKit, BrandKitContent, EMPTY_KIT_CONTENT } from "@/lib/production/brand-kit";
+import { DataRow } from "@/lib/production/variables";
 import { useTemplateEditor } from "@/lib/production/use-template-editor";
 import { TemplateCanvas } from "./template-canvas";
 import { LayersPanel } from "./layers-panel";
@@ -25,6 +28,15 @@ interface Props {
   // Custom node rendered above the canvas en lugar del PreviewThumbnails
   // default. Lo usa producir para mostrar variantes reales del master.
   topAccessory?: React.ReactNode;
+  // Custom node renderizado en la columna derecha, abajo del PropertiesPanel.
+  // Lo usa producir para meter la sección de Variables / Dataset cerca del
+  // contexto del editor.
+  rightAccessory?: React.ReactNode;
+  // Fila activa del dataset CSV: cuando viene, las variables {{var}} del
+  // árbol se sustituyen visualmente en el canvas. El estado del editor
+  // permanece raw — al editar un text layer el productor ve "{{var}}", no
+  // el valor.
+  dataRow?: DataRow | null;
 }
 
 export function TemplateEditor({
@@ -38,7 +50,12 @@ export function TemplateEditor({
   allBrandKits = [],
   onBrandKitsChange,
   topAccessory,
+  rightAccessory,
+  dataRow,
 }: Props) {
+  // Estado de colapso de los paneles laterales. Por default abiertos.
+  const [layersCollapsed, setLayersCollapsed] = useState(false);
+  const [propsCollapsed, setPropsCollapsed] = useState(false);
   const editor = useTemplateEditor({
     initial,
     baseWidth,
@@ -186,17 +203,34 @@ export function TemplateEditor({
       )}
 
       <div className="flex flex-1 min-h-0">
-        <div className={readOnlyClass}>
-          <LayersPanel
-            definition={editor.definition}
-            selectedId={editor.selectedId}
-            onSelect={editor.select}
-            onDelete={editor.deleteLayer}
-            onReorder={editor.reorderRootChildren}
-            onToggleLock={editor.toggleLock}
-            onLayerContextMenu={previewSize ? undefined : openContextMenu}
-          />
-        </div>
+        {/* Columna izquierda — Capas. Colapsable: cuando cerrada se ve
+            como una banda fina con botón expand. */}
+        {layersCollapsed ? (
+          <div className="w-8 shrink-0 border-r border-border/50 bg-card/40 flex items-start justify-center py-2">
+            <button
+              type="button"
+              onClick={() => setLayersCollapsed(false)}
+              className="text-muted-foreground hover:text-foreground p-1 rounded"
+              title="Mostrar capas"
+            >
+              <PanelLeftOpen className="h-4 w-4" />
+            </button>
+          </div>
+        ) : (
+          <div className={readOnlyClass}>
+            <LayersPanel
+              definition={editor.definition}
+              selectedId={editor.selectedId}
+              onSelect={editor.select}
+              onDelete={editor.deleteLayer}
+              onReorder={editor.reorderRootChildren}
+              onToggleLock={editor.toggleLock}
+              onLayerContextMenu={previewSize ? undefined : openContextMenu}
+              onCollapse={() => setLayersCollapsed(true)}
+            />
+          </div>
+        )}
+
         <div className="flex flex-col flex-1 min-w-0 min-h-0">
           {/* Cuando el caller pasa un topAccessory (ej. la strip de
               variantes en producir), reemplaza al PreviewThumbnails
@@ -233,22 +267,40 @@ export function TemplateEditor({
             onUpdateBounds={editor.updateBounds}
             previewSize={previewSize}
             brandKit={brandKit}
+            dataRow={dataRow}
             onLayerContextMenu={openContextMenu}
           />
         </div>
-        <div className={readOnlyClass}>
-          <PropertiesPanel
-            definition={editor.definition}
-            selectedLayer={editor.selectedLayer}
-            onUpdateLayer={editor.updateLayer}
-            onUpdateRoot={editor.updateRoot}
-            brandKit={brandKit}
-            clientId={clientId ?? null}
-            projectId={projectId}
-            allBrandKits={allBrandKits}
-            onBrandKitsChange={onBrandKitsChange}
-          />
-        </div>
+
+        {/* Columna derecha — Propiedades + rightAccessory. Colapsable. */}
+        {propsCollapsed ? (
+          <div className="w-8 shrink-0 border-l border-border/50 bg-card/40 flex items-start justify-center py-2">
+            <button
+              type="button"
+              onClick={() => setPropsCollapsed(false)}
+              className="text-muted-foreground hover:text-foreground p-1 rounded"
+              title="Mostrar propiedades"
+            >
+              <PanelRightOpen className="h-4 w-4" />
+            </button>
+          </div>
+        ) : (
+          <div className={cn("flex flex-col shrink-0", readOnlyClass)}>
+            <PropertiesPanel
+              definition={editor.definition}
+              selectedLayer={editor.selectedLayer}
+              onUpdateLayer={editor.updateLayer}
+              onUpdateRoot={editor.updateRoot}
+              brandKit={brandKit}
+              clientId={clientId ?? null}
+              projectId={projectId}
+              allBrandKits={allBrandKits}
+              onBrandKitsChange={onBrandKitsChange}
+              onCollapse={() => setPropsCollapsed(true)}
+            />
+            {rightAccessory}
+          </div>
+        )}
       </div>
     </div>
   );

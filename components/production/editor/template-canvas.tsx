@@ -17,6 +17,7 @@ import {
 } from "@/lib/production/types";
 import { reflowForPreview } from "@/lib/production/reflow";
 import { BrandKitContent, EMPTY_KIT_CONTENT, resolveTreeTokens } from "@/lib/production/brand-kit";
+import { substituteVariables, DataRow } from "@/lib/production/variables";
 import { TemplateLayerView, stackToFlexStyle } from "./template-layer";
 
 interface Props {
@@ -28,6 +29,11 @@ interface Props {
   // Used by the editor's preview-format selector to inspect adaptations.
   previewSize?: { w: number; h: number } | null;
   brandKit?: BrandKitContent;
+  // Fila activa del dataset: cuando viene, las variables {{var}} se
+  // sustituyen visualmente en el canvas pero el state del editor sigue
+  // raw — al editar un text layer la propiedad sigue siendo "{{precio}}",
+  // solo el render del canvas muestra el valor sustituido.
+  dataRow?: DataRow | null;
   onLayerContextMenu?: (clientX: number, clientY: number, layerId: string) => void;
 }
 
@@ -68,6 +74,7 @@ export function TemplateCanvas({
   onUpdateBounds,
   previewSize,
   brandKit = EMPTY_KIT_CONTENT,
+  dataRow,
   onLayerContextMenu,
 }: Props) {
   const isPreview = !!previewSize;
@@ -80,7 +87,14 @@ export function TemplateCanvas({
   // are resolved to literal values before the renderer consumes them. The
   // selection logic still operates on the unresolved tree via the original
   // `definition` (handles, bounds, drag) so editing keeps the references.
-  const baseTree: TemplateDefinition = resolveTreeTokens(reflowed, brandKit);
+  const resolvedTree: TemplateDefinition = resolveTreeTokens(reflowed, brandKit);
+  // Variable substitution se aplica al final, solo para el render. El state
+  // del editor sigue con "{{precio}}" — al editar el text layer se ve el
+  // raw en properties panel. Esto convierte el canvas en un preview vivo
+  // de cómo se ve la pieza con los datos de la fila activa.
+  const baseTree: TemplateDefinition = dataRow
+    ? substituteVariables(resolvedTree, dataRow)
+    : resolvedTree;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
 
