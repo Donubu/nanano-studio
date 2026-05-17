@@ -43,6 +43,8 @@ import {
   StackLayout,
   newRootFrame,
 } from "@/lib/production/types";
+import { TemplateEditor } from "@/components/production/editor/template-editor";
+import { deriveManualLayoutFromMaster } from "@/lib/production/overrides";
 import {
   BrandKit,
   BrandKitContent,
@@ -161,6 +163,10 @@ export default function ProducirPage() {
 
   const [template, setTemplate] = useState<Template | null>(null);
   const [siblings, setSiblings] = useState<SiblingTemplate[]>([]);
+  // clientId y brandKits viven en state (no solo locals de fetchAll) porque
+  // el editor embebido los necesita como props.
+  const [clientId, setClientId] = useState<number | null>(null);
+  const [brandKits, setBrandKits] = useState<BrandKit[]>([]);
   const [brandKitContent, setBrandKitContent] = useState<BrandKitContent>(EMPTY_KIT_CONTENT);
   const [adaptations, setAdaptations] = useState<Adaptation[]>([]);
   const [presets, setPresets] = useState<FormatPreset[]>([]);
@@ -168,10 +174,36 @@ export default function ProducirPage() {
   const [showPicker, setShowPicker] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
+  // --- Editor embebido (workspace unificado) ---
+  // editingId controla qué se muestra en el editor:
+  //   null  → master del template
+  //   N     → adaptación N (override editing)
+  const [editingId, setEditingId] = useState<number | null>(null);
+
   const fetchAdaptations = useCallback(async () => {
     const res = await fetch(`/api/production/templates/${templateId}/adaptations`);
     if (res.ok) setAdaptations(await res.json());
   }, [templateId]);
+
+  // Re-fetcheable desde el TemplateEditor cuando el modal de brand-kit del
+  // proyecto guarda cambios; también lo usa fetchAll para hidratar al cargar.
+  const fetchBrandKits = useCallback(async (cid: number, projectId: number) => {
+    const res = await fetch(
+      `/api/production/brand-kits?client_id=${cid}&production_project_id=${projectId}`
+    );
+    if (!res.ok) return;
+    const rows: unknown[] = await res.json();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parsed: BrandKit[] = rows.map((r: any) => brandKitFromApi(r));
+    setBrandKits(parsed);
+    const clientWide = parsed.filter((k) => k.production_project_id === null);
+    const projectScoped = parsed.filter((k) => k.production_project_id != null);
+    const baseClient = clientWide.find((k) => k.is_default) ?? clientWide[0];
+    const baseProject = projectScoped.find((k) => k.is_default) ?? projectScoped[0];
+    setBrandKitContent(
+      mergeKits(...[baseClient, baseProject].filter((x): x is BrandKit => !!x))
+    );
+  }, []);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -204,34 +236,21 @@ export default function ProducirPage() {
       } else {
         setSiblings([]);
       }
-      let clientId: number | null = null;
+      let resolvedClientId: number | null = null;
       if (projRes.ok) {
         const proj = await projRes.json();
-        clientId = proj.client_id;
+        resolvedClientId = proj.client_id;
       }
+      setClientId(resolvedClientId);
       // Re-fetch presets including client-specific ones if we have a client.
-      const presetsRes = clientId
-        ? await fetch(`/api/production/format-presets?client_id=${clientId}`)
+      const presetsRes = resolvedClientId
+        ? await fetch(`/api/production/format-presets?client_id=${resolvedClientId}`)
         : presetsBaseRes;
       if (presetsRes.ok) setPresets(await presetsRes.json());
 
       // Brand kit cascade (mismo pattern que el editor).
-      if (clientId) {
-        const bkRes = await fetch(
-          `/api/production/brand-kits?client_id=${clientId}&production_project_id=${tpl.production_project_id}`
-        );
-        if (bkRes.ok) {
-          const rows: unknown[] = await bkRes.json();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const parsed: BrandKit[] = rows.map((r: any) => brandKitFromApi(r));
-          const clientWide = parsed.filter((k) => k.production_project_id === null);
-          const projectScoped = parsed.filter((k) => k.production_project_id != null);
-          const baseClient = clientWide.find((k) => k.is_default) ?? clientWide[0];
-          const baseProject = projectScoped.find((k) => k.is_default) ?? projectScoped[0];
-          setBrandKitContent(
-            mergeKits(...[baseClient, baseProject].filter((x): x is BrandKit => !!x))
-          );
-        }
+      if (resolvedClientId) {
+        await fetchBrandKits(resolvedClientId, tpl.production_project_id);
       }
 
       await fetchAdaptations();
@@ -255,7 +274,7 @@ export default function ProducirPage() {
     } finally {
       setLoading(false);
     }
-  }, [templateId, router, fetchAdaptations]);
+  }, [templateId, router, fetchAdaptations, fetchBrandKits]);
 
   useEffect(() => {
     if (sessionStatus === "loading") return;
@@ -276,6 +295,74 @@ export default function ProducirPage() {
       ? template.definition
       : newRootFrame(template.base_width, template.base_height);
   }, [template]);
+
+  // Cuando se edita una adaptación, derivamos su layout inicial: o el
+  // manual_layout guardado o un reflow del master.
+  const editingAdaptation = editingId != null
+    ? adaptations.find((a) => a.id === editingId) ?? null
+    : null;
+  const adaptInitialDefinition: TemplateDefinition | null = useMemo(() => {
+    if (!editingAdaptation) return null;
+    const overrides = parseOverrides(editingAdaptation.overrides_json);
+    return (
+      overrides.manual_layout ??
+      deriveManualLayoutFromMaster(
+        definition,
+        editingAdaptation.width,
+        editingAdaptation.height,
+      )
+    );
+  }, [editingAdaptation, definition]);
+
+  // Save del master: PUT al endpoint del template. Después re-fetcheamos
+  // para que las adaptaciones en preview se reflowen contra el master nuevo.
+  const handleSaveMaster = useCallback(
+    async (def: TemplateDefinition) => {
+      const res = await fetch(`/api/production/templates/${templateId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ definition: def }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(`Save master failed: ${res.status}${body?.error ? ` — ${body.error}` : ""}`);
+      }
+      // Actualizamos el template en memoria sin refetch completo: setTemplate
+      // hace que las adaptaciones se reflowen contra el master nuevo al
+      // siguiente render.
+      setTemplate((t) => (t ? { ...t, definition: def } : t));
+    },
+    [templateId]
+  );
+
+  // Save de una adaptación: PATCH overrides_json con manual_layout.
+  const handleSaveAdapt = useCallback(
+    async (def: TemplateDefinition) => {
+      if (editingId == null) return;
+      const res = await fetch(
+        `/api/production/templates/${templateId}/adaptations/${editingId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ overrides_json: { manual_layout: def } }),
+        }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(`Save adapt failed: ${res.status}${body?.error ? ` — ${body.error}` : ""}`);
+      }
+      // Solo actualizamos la fila de la adaptación editada — sin refetch
+      // completo para evitar parpadeos en el resto de la grilla.
+      setAdaptations((cur) =>
+        cur.map((a) =>
+          a.id === editingId
+            ? { ...a, overrides_json: JSON.stringify({ manual_layout: def }) }
+            : a
+        )
+      );
+    },
+    [templateId, editingId]
+  );
 
   const handleAddBulk = async (presetIds: number[], autoDistribute: boolean) => {
     if (presetIds.length === 0) return;
@@ -648,49 +735,100 @@ export default function ProducirPage() {
           <div className="flex-1" />
 
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             onClick={() => router.push(`/produccion/template/${template.id}`)}
-            className="gap-1.5"
+            className="gap-1.5 text-muted-foreground"
+            title="Editor del master en pantalla completa (sin grid de adaptaciones)"
           >
             <Pencil className="h-3.5 w-3.5" />
-            Editar master
+            Pantalla completa
           </Button>
         </div>
       </header>
 
       <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-6">
-        {/* Master preview */}
-        <section className="bg-card rounded-xl border border-border/50 p-4 flex gap-4">
-          <MasterThumb
-            definition={definition}
-            brandKit={brandKitContent}
-            width={template.base_width}
-            height={template.base_height}
-          />
-          <div className="flex-1 min-w-0">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              Template master
-            </p>
-            <h2 className="text-lg font-semibold">{template.name}</h2>
-            <p className="text-xs text-muted-foreground mt-1">
-              {template.base_width} × {template.base_height} px · v{template.version}
-            </p>
-            <p className="text-xs text-muted-foreground mt-2 max-w-md">
-              Las adaptaciones se generan a partir de este master usando los
-              constraints de cada capa. Puedes editar el master en cualquier
-              momento y todas las adaptaciones se reflowean automáticamente.
-            </p>
+        {/* Editor embebido — workspace unificado.
+            Por defecto edita el master. Click en una adaptación más abajo
+            cambia el editor a esa adaptación; el botón "Volver al master"
+            arriba del editor regresa al master. */}
+        <section className="bg-card rounded-xl border border-border/50 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-border/50 bg-muted/30">
+            <div className="flex items-center gap-2 text-xs">
+              {editingId == null ? (
+                <>
+                  <Rocket className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Editando master
+                  </span>
+                  <span className="text-muted-foreground/50">·</span>
+                  <span className="text-foreground font-medium">{template.name}</span>
+                  <span className="text-muted-foreground/50">·</span>
+                  <span className="text-muted-foreground">
+                    {template.base_width} × {template.base_height}
+                  </span>
+                </>
+              ) : editingAdaptation ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setEditingId(null)}
+                    className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-border/50 hover:bg-muted hover:border-foreground/40 transition-colors"
+                  >
+                    <ArrowLeft className="h-3 w-3" />
+                    Volver al master
+                  </button>
+                  <span className="text-muted-foreground/50">·</span>
+                  <span className="text-[10px] uppercase tracking-wider text-amber-300">
+                    Ajustando adaptación
+                  </span>
+                  <span className="text-foreground font-medium">
+                    {editingAdaptation.custom_name ||
+                      editingAdaptation.preset_name ||
+                      `${editingAdaptation.width}×${editingAdaptation.height}`}
+                  </span>
+                  <span className="text-muted-foreground/50">·</span>
+                  <span className="text-muted-foreground">
+                    {editingAdaptation.width}×{editingAdaptation.height}
+                  </span>
+                </>
+              ) : null}
+            </div>
           </div>
-          <div className="shrink-0 flex items-start">
-            <Button
-              size="sm"
-              onClick={() => router.push(`/produccion/template/${template.id}`)}
-              className="gap-1.5"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-              Editar master
-            </Button>
+          <div className="h-[70vh] min-h-[480px]">
+            {editingId == null ? (
+              <TemplateEditor
+                key="master"
+                initial={definition}
+                baseWidth={template.base_width}
+                baseHeight={template.base_height}
+                onSave={handleSaveMaster}
+                brandKit={brandKitContent}
+                clientId={clientId}
+                projectId={template.production_project_id}
+                allBrandKits={brandKits}
+                onBrandKitsChange={() => {
+                  if (clientId)
+                    fetchBrandKits(clientId, template.production_project_id);
+                }}
+              />
+            ) : editingAdaptation && adaptInitialDefinition ? (
+              <TemplateEditor
+                key={`adapt-${editingId}`}
+                initial={adaptInitialDefinition}
+                baseWidth={editingAdaptation.width}
+                baseHeight={editingAdaptation.height}
+                onSave={handleSaveAdapt}
+                brandKit={brandKitContent}
+                clientId={clientId}
+                projectId={template.production_project_id}
+                allBrandKits={brandKits}
+                onBrandKitsChange={() => {
+                  if (clientId)
+                    fetchBrandKits(clientId, template.production_project_id);
+                }}
+              />
+            ) : null}
           </div>
         </section>
 
@@ -962,8 +1100,9 @@ export default function ProducirPage() {
                   adaptation={a}
                   definition={definition}
                   brandKit={brandKitContent}
-                  templateId={templateId}
                   dataRow={previewRow}
+                  isEditing={editingId === a.id}
+                  onEdit={() => setEditingId(a.id)}
                   onDelete={() => handleDelete(a.id)}
                   onFitModeChange={(m) => handleFitModeChange(a.id, m)}
                   onDownload={() => handleDownloadSingle(a)}
@@ -1025,66 +1164,15 @@ export default function ProducirPage() {
   );
 }
 
-// ----- Master preview thumbnail -----
-
-function MasterThumb({
-  definition,
-  brandKit,
-  width,
-  height,
-}: {
-  definition: TemplateDefinition;
-  brandKit: BrandKitContent;
-  width: number;
-  height: number;
-}) {
-  const TARGET = 120;
-  const scale = Math.min(TARGET / width, TARGET / height);
-  const w = width * scale;
-  const h = height * scale;
-  const resolved = resolveTreeTokens(definition, brandKit);
-  const bg =
-    resolved.background && resolved.background.type === "color"
-      ? resolved.background.value
-      : "#ffffff";
-  const rootIsStack = resolved.layout.mode === "stack";
-  const innerStyle: CSSProperties = {
-    width,
-    height,
-    transform: `scale(${scale})`,
-    transformOrigin: "0 0",
-    position: "relative",
-    ...(rootIsStack ? stackToFlexStyle(resolved.layout as StackLayout) : {}),
-  };
-  return (
-    <div
-      className="rounded border border-border/30 overflow-hidden shrink-0"
-      style={{ width: w, height: h, background: bg }}
-    >
-      <div style={innerStyle}>
-        {resolved.children.map((child: TemplateLayer) => (
-          <TemplateLayerView
-            key={child.id}
-            layer={child}
-            selectedId={null}
-            onSelect={noop}
-            onLayerPointerDown={noop}
-            parentMode={rootIsStack ? "stack" : "free"}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ----- Adaptation card with reflowed mini preview -----
 
 function AdaptationCard({
   adaptation,
   definition,
   brandKit,
-  templateId,
   dataRow,
+  isEditing,
+  onEdit,
   onDelete,
   onFitModeChange,
   onDownload,
@@ -1095,8 +1183,9 @@ function AdaptationCard({
   adaptation: Adaptation;
   definition: TemplateDefinition;
   brandKit: BrandKitContent;
-  templateId: string;
   dataRow?: DataRow | null;
+  isEditing: boolean;
+  onEdit: () => void;
   onDelete: () => void;
   onFitModeChange: (m: FitMode) => void;
   onDownload: () => void;
@@ -1131,10 +1220,20 @@ function AdaptationCard({
   const hasManualOverride = !!parseOverrides(adaptation.overrides_json).manual_layout;
 
   return (
-    <div className="bg-muted/50 border border-border/60 rounded-lg p-3 flex flex-col gap-2 group">
-      <div
-        className="flex items-end justify-center bg-background/40 rounded"
+    <div
+      className={cn(
+        "bg-muted/50 rounded-lg p-3 flex flex-col gap-2 group border transition-colors",
+        isEditing
+          ? "border-primary ring-2 ring-primary/40"
+          : "border-border/60 hover:border-foreground/30"
+      )}
+    >
+      <button
+        type="button"
+        onClick={onEdit}
+        className="flex items-end justify-center bg-background/40 rounded w-full hover:bg-background/60 transition-colors"
         style={{ minHeight: TARGET_H + 16 }}
+        title={isEditing ? "Esta adaptación está siendo editada" : "Click para editar esta adaptación"}
       >
         <AdaptationPreview
           adaptation={adaptation}
@@ -1144,7 +1243,7 @@ function AdaptationCard({
           targetW={TARGET_W}
           dataRow={dataRow}
         />
-      </div>
+      </button>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           {channel && (
@@ -1207,14 +1306,20 @@ function AdaptationCard({
             </option>
           ))}
         </select>
-        <Link
-          href={`/produccion/template/${templateId}/adapt/${adaptation.id}`}
-          className="text-[11px] px-2 py-1 rounded border border-border/50 hover:bg-muted hover:border-foreground/30 transition-colors flex items-center gap-1"
-          title="Editar manualmente esta pieza"
+        <button
+          type="button"
+          onClick={onEdit}
+          className={cn(
+            "text-[11px] px-2 py-1 rounded border transition-colors flex items-center gap-1",
+            isEditing
+              ? "border-primary bg-primary/10 text-foreground"
+              : "border-border/50 hover:bg-muted hover:border-foreground/30"
+          )}
+          title="Editar manualmente esta pieza en el editor principal"
         >
           <Pencil className="h-3 w-3" />
-          Ajustar
-        </Link>
+          {isEditing ? "Editando" : "Ajustar"}
+        </button>
         <button
           type="button"
           onClick={onDownload}
