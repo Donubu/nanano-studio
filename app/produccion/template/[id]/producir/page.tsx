@@ -598,6 +598,7 @@ export default function ProducirPage() {
             onClick={() => router.push(`/produccion/template/${template.id}`)}
             className="gap-1.5"
           >
+            <Pencil className="h-3.5 w-3.5" />
             Editar master
           </Button>
         </div>
@@ -625,6 +626,16 @@ export default function ProducirPage() {
               constraints de cada capa. Puedes editar el master en cualquier
               momento y todas las adaptaciones se reflowean automáticamente.
             </p>
+          </div>
+          <div className="shrink-0 flex items-start">
+            <Button
+              size="sm"
+              onClick={() => router.push(`/produccion/template/${template.id}`)}
+              className="gap-1.5"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Editar master
+            </Button>
           </div>
         </section>
 
