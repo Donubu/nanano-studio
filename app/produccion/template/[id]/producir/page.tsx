@@ -97,15 +97,20 @@ interface Template {
   definition: TemplateDefinition | null;
 }
 
-interface SiblingTemplate {
+// Orientación del master. Cada master tiene 1..N orientaciones — pueden ser
+// vinculadas al base (heredan layout via reflow) o distintas (layout
+// propio). Vienen del endpoint /api/production/templates/[id]/orientations.
+interface Orientation {
   id: number;
+  production_project_id: number;
+  design_id: number | null;
+  linked_to_template_id: number | null;
   name: string;
   base_width: number;
   base_height: number;
   thumbnail_url: string | null;
-  design_id: number | null;
-  design_name: string | null;
-  linked_to_template_id: number | null;
+  version: number;
+  definition: TemplateDefinition | null;
 }
 
 interface FormatPreset {
@@ -163,7 +168,14 @@ export default function ProducirPage() {
   const templateId = params.id as string;
 
   const [template, setTemplate] = useState<Template | null>(null);
-  const [siblings, setSiblings] = useState<SiblingTemplate[]>([]);
+  // Orientaciones del master: cada item incluye id + dimensiones +
+  // definition. Una sola orientación cuando el master no tiene variantes.
+  // El "master" es el conjunto, no un singular.
+  const [orientations, setOrientations] = useState<Orientation[]>([]);
+  // Orientación activa = la que está abierta en el editor. Default: la del
+  // URL. Cambiar de orientación NO refresca la página ni navega — solo
+  // setea este state.
+  const [activeOrientationId, setActiveOrientationId] = useState<number | null>(null);
   // clientId y brandKits viven en state (no solo locals de fetchAll) porque
   // el editor embebido los necesita como props.
   const [clientId, setClientId] = useState<number | null>(null);
@@ -248,26 +260,20 @@ export default function ProducirPage() {
       const tpl: Template = await tplRes.json();
       setTemplate(tpl);
 
-      const [projRes, presetsBaseRes, siblingsRes] = await Promise.all([
+      const [projRes, presetsBaseRes, orientationsRes] = await Promise.all([
         fetch(`/api/production/projects/${tpl.production_project_id}`),
         fetch(`/api/production/format-presets`),
-        // Templates hermanos: comparten production_project. Necesitamos el
-        // listado SIN el filtro de "1 por design" (default del endpoint),
-        // así que pasamos include_variants=true para que el server devuelva
-        // todas las variantes y podamos elegir las del mismo design.
-        fetch(
-          `/api/production/templates?production_project_id=${tpl.production_project_id}&include_variants=true`
-        ),
+        // Orientaciones del master (incluye la actual). Endpoint dedicado:
+        // resuelve design_id, devuelve todos los templates del mismo design
+        // CON sus definitions parseadas para previews y rendering.
+        fetch(`/api/production/templates/${templateId}/orientations`),
       ]);
-      if (siblingsRes.ok && tpl.design_id != null) {
-        const allTemplates: SiblingTemplate[] = await siblingsRes.json();
-        setSiblings(
-          allTemplates.filter(
-            (t) => t.design_id === tpl.design_id && t.id !== tpl.id
-          )
-        );
-      } else {
-        setSiblings([]);
+      if (orientationsRes.ok) {
+        const list: Orientation[] = await orientationsRes.json();
+        setOrientations(list);
+        // Active = el del URL si está en la lista; si no, el primero.
+        const fromUrl = list.find((o) => o.id === Number(templateId));
+        setActiveOrientationId((fromUrl ?? list[0])?.id ?? null);
       }
       let resolvedClientId: number | null = null;
       if (projRes.ok) {
@@ -326,50 +332,83 @@ export default function ProducirPage() {
     fetchAll();
   }, [fetchAll, session, sessionStatus, router]);
 
-  const definition: TemplateDefinition = useMemo(() => {
-    if (!template) return newRootFrame(1080, 1080);
-    return template.definition && template.definition.type === "frame"
-      ? template.definition
-      : newRootFrame(template.base_width, template.base_height);
-  }, [template]);
+  // Orientación activa: la que está abierta en el editor en este momento.
+  // Cambia con setActiveOrientationId (no requiere recarga ni navegación).
+  const activeOrientation = useMemo(
+    () => orientations.find((o) => o.id === activeOrientationId) ?? null,
+    [orientations, activeOrientationId],
+  );
 
-  // Cuando se edita una adaptación, derivamos su layout inicial: o el
-  // manual_layout guardado o un reflow del master.
+  // Definition que se está editando: viene de la orientación ACTIVA. El
+  // useMemo evita reconstruir el objeto en cada render si la orientación no
+  // cambió.
+  const definition: TemplateDefinition = useMemo(() => {
+    if (activeOrientation?.definition && activeOrientation.definition.type === "frame") {
+      return activeOrientation.definition;
+    }
+    if (activeOrientation) {
+      return newRootFrame(activeOrientation.base_width, activeOrientation.base_height);
+    }
+    return newRootFrame(1920, 1080);
+  }, [activeOrientation]);
+
+  // Cuando se edita una adaptación, derivamos su layout inicial desde la
+  // orientación del MASTER cuyo aspect ratio sea más cercano a la
+  // adaptación. Esa es la "source" implícita del adaptación.
   const editingAdaptation = editingId != null
     ? adaptations.find((a) => a.id === editingId) ?? null
     : null;
   const adaptInitialDefinition: TemplateDefinition | null = useMemo(() => {
     if (!editingAdaptation) return null;
     const overrides = parseOverrides(editingAdaptation.overrides_json);
-    return (
-      overrides.manual_layout ??
-      deriveManualLayoutFromMaster(
-        definition,
-        editingAdaptation.width,
-        editingAdaptation.height,
-      )
+    if (overrides.manual_layout) return overrides.manual_layout;
+    // No hay override manual: derivamos del master más cercano por aspect.
+    const source = pickClosestOrientation(
+      orientations,
+      editingAdaptation.width,
+      editingAdaptation.height,
     );
-  }, [editingAdaptation, definition]);
+    const sourceDef = source?.definition ?? definition;
+    return deriveManualLayoutFromMaster(
+      sourceDef,
+      editingAdaptation.width,
+      editingAdaptation.height,
+    );
+  }, [editingAdaptation, orientations, definition]);
 
-  // Save del master: PUT al endpoint del template. Después re-fetcheamos
-  // para que las adaptaciones en preview se reflowen contra el master nuevo.
+  // Save de la orientación activa: PUT al endpoint del template
+  // correspondiente. Si la orientación es la base, el server propaga el
+  // cambio a las orientaciones linked (definition reflowed). Después
+  // refrescamos las orientaciones para que el strip muestre lo nuevo.
   const handleSaveMaster = useCallback(
     async (def: TemplateDefinition) => {
-      const res = await fetch(`/api/production/templates/${templateId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ definition: def }),
-      });
+      if (!activeOrientationId) return;
+      const res = await fetch(
+        `/api/production/templates/${activeOrientationId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ definition: def }),
+        }
+      );
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        throw new Error(`Save master failed: ${res.status}${body?.error ? ` — ${body.error}` : ""}`);
+        throw new Error(
+          `Save master failed: ${res.status}${body?.error ? ` — ${body.error}` : ""}`
+        );
       }
-      // Actualizamos el template en memoria sin refetch completo: setTemplate
-      // hace que las adaptaciones se reflowen contra el master nuevo al
-      // siguiente render.
-      setTemplate((t) => (t ? { ...t, definition: def } : t));
+      // Refrescamos todas las orientaciones — la base puede haber empujado
+      // cambios a las linked. Si solo se editó una orientación linked /
+      // distinta, solo esa cambia.
+      const refresh = await fetch(
+        `/api/production/templates/${templateId}/orientations`
+      );
+      if (refresh.ok) {
+        const list: Orientation[] = await refresh.json();
+        setOrientations(list);
+      }
     },
-    [templateId]
+    [activeOrientationId, templateId]
   );
 
   // Save de una adaptación: PATCH overrides_json con manual_layout.
@@ -669,51 +708,46 @@ export default function ProducirPage() {
     dataset && selectedRowIdx !== null ? dataset.rows[selectedRowIdx] ?? null : null;
 
   const [fitModeError, setFitModeError] = useState<string | null>(null);
-  // --- Master variants ---
-  // El template "base" es el que tiene linked_to_template_id = NULL (o el más
-  // viejo si todos son distintos). Variantes linked se reflowean cuando el
-  // base cambia (lo hace el server en el PUT).
+
+  // siblings: orientations.filter(o => o.id !== activeOrientationId).
+  //   (Mantengo el nombre para minimizar cambios donde se usaba.)
+  const siblings = useMemo(
+    () => orientations.filter((o) => o.id !== activeOrientationId),
+    [orientations, activeOrientationId],
+  );
   const designMembers = useMemo(() => {
-    if (!template) return [];
-    // Master actual + siblings. Lista plana ordenada por orientación luego
-    // por área (similar a las adaptaciones).
-    const all = [
-      {
-        id: template.id,
-        name: template.name,
-        base_width: template.base_width,
-        base_height: template.base_height,
-        thumbnail_url: template.thumbnail_url,
-        linked_to_template_id: template.linked_to_template_id,
-        isCurrent: true,
-      },
-      ...siblings.map((s) => ({
-        id: s.id,
-        name: s.name,
-        base_width: s.base_width,
-        base_height: s.base_height,
-        thumbnail_url: s.thumbnail_url,
-        linked_to_template_id: s.linked_to_template_id,
-        isCurrent: false,
-      })),
-    ];
-    return all.sort((a, b) => {
-      const orient = (w: number, h: number) => {
-        const r = w / h;
-        if (Math.abs(r - 1) < 0.05) return 1;
-        return r > 1 ? 0 : 2;
-      };
-      const ao = orient(a.base_width, a.base_height);
-      const bo = orient(b.base_width, b.base_height);
-      if (ao !== bo) return ao - bo;
-      return a.base_width * a.base_height - b.base_width * b.base_height;
-    });
-  }, [template, siblings]);
+    if (orientations.length === 0) return [];
+    return orientations
+      .map((o) => ({
+        id: o.id,
+        name: o.name,
+        base_width: o.base_width,
+        base_height: o.base_height,
+        thumbnail_url: o.thumbnail_url,
+        linked_to_template_id: o.linked_to_template_id,
+        isCurrent: o.id === activeOrientationId,
+      }))
+      .sort((a, b) => {
+        const orient = (w: number, h: number) => {
+          const r = w / h;
+          if (Math.abs(r - 1) < 0.05) return 1;
+          return r > 1 ? 0 : 2;
+        };
+        const ao = orient(a.base_width, a.base_height);
+        const bo = orient(b.base_width, b.base_height);
+        if (ao !== bo) return ao - bo;
+        return a.base_width * a.base_height - b.base_width * b.base_height;
+      });
+  }, [orientations, activeOrientationId]);
 
   const handleAddVariant = useCallback(
     async (width: number, height: number, customName?: string) => {
+      // Creamos la variante a partir de la orientación ACTUAL (no del URL
+      // template). Así el reflow inicial se hace contra lo que el productor
+      // estaba mirando, no contra una "base" arbitraria.
+      const sourceId = activeOrientationId ?? Number(templateId);
       const res = await fetch(
-        `/api/production/templates/${templateId}/variants`,
+        `/api/production/templates/${sourceId}/variants`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -723,41 +757,47 @@ export default function ProducirPage() {
       if (res.ok) {
         const data = (await res.json()) as { id: number };
         setShowAddVariant(false);
-        // Navegamos a la nueva variante para que el productor empiece a
-        // editarla directamente.
-        router.push(`/produccion/template/${data.id}/producir`);
+        // Refrescamos las orientaciones y dejamos la nueva como activa —
+        // sin navegar. El productor sigue en el mismo URL.
+        const refresh = await fetch(
+          `/api/production/templates/${templateId}/orientations`
+        );
+        if (refresh.ok) {
+          const list: Orientation[] = await refresh.json();
+          setOrientations(list);
+          setActiveOrientationId(data.id);
+        }
       }
     },
-    [templateId, router]
+    [activeOrientationId, templateId]
   );
 
   const handleToggleLinked = useCallback(async () => {
-    if (!template) return;
-    const isCurrentlyLinked = template.linked_to_template_id != null;
+    if (!activeOrientation) return;
+    const isCurrentlyLinked = activeOrientation.linked_to_template_id != null;
     if (isCurrentlyLinked) {
       const ok = confirm(
-        "¿Marcar esta variante como distinta? Dejará de heredar cambios del master base."
+        "¿Diferenciar esta orientación del resto? Dejará de heredar cambios del master base."
       );
       if (!ok) return;
     }
-    const res = await fetch(`/api/production/templates/${templateId}`, {
+    const res = await fetch(`/api/production/templates/${activeOrientation.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        linked_to_template_id: isCurrentlyLinked
-          ? null
-          : // Re-link al base: usamos el primer sibling como base si no había link previo.
-            // En la práctica, en este flujo solo desvincularemos; re-linking explícito
-            // queda para futuro porque requiere elegir a quién vincular.
-            null,
+        linked_to_template_id: isCurrentlyLinked ? null : null,
       }),
     });
     if (res.ok) {
-      setTemplate((t) =>
-        t ? { ...t, linked_to_template_id: isCurrentlyLinked ? null : t.linked_to_template_id } : t
+      setOrientations((cur) =>
+        cur.map((o) =>
+          o.id === activeOrientation.id
+            ? { ...o, linked_to_template_id: isCurrentlyLinked ? null : o.linked_to_template_id }
+            : o
+        )
       );
     }
-  }, [template, templateId]);
+  }, [activeOrientation]);
 
   const handleFitModeChange = async (adaptationId: number, fitMode: FitMode) => {
     setFitModeError(null);
@@ -909,12 +949,15 @@ export default function ProducirPage() {
             </div>
           )}
           <div className="h-[70vh] min-h-[480px] relative">
-            {editingId == null ? (
+            {editingId == null && activeOrientation ? (
               <TemplateEditor
-                key="master"
+                // key incluye la orientación: al cambiar de orientación se
+                // desmonta y remonta el editor con la definition correcta.
+                // No hay navegación, no recarga — solo el remount React.
+                key={`orientation-${activeOrientation.id}`}
                 initial={definition}
-                baseWidth={template.base_width}
-                baseHeight={template.base_height}
+                baseWidth={activeOrientation.base_width}
+                baseHeight={activeOrientation.base_height}
                 onSave={handleSaveMaster}
                 brandKit={brandKitContent}
                 clientId={clientId}
@@ -927,9 +970,7 @@ export default function ProducirPage() {
                 topAccessory={
                   <VariantsStrip
                     designMembers={designMembers}
-                    onSwitch={(id) =>
-                      router.push(`/produccion/template/${id}/producir`)
-                    }
+                    onSwitch={(id) => setActiveOrientationId(id)}
                     onAdd={() => setShowAddVariant(true)}
                   />
                 }
@@ -952,21 +993,23 @@ export default function ProducirPage() {
               />
             ) : null}
 
-            {/* Botón flotante para diferenciar la variante actual del resto.
-                Solo aparece cuando: editando master (no adaptación) Y la
-                variante está vinculada al base. Posicionado abajo-derecha
-                para no tapar el canvas. */}
-            {editingId == null && template.linked_to_template_id != null && (
-              <button
-                type="button"
-                onClick={handleToggleLinked}
-                className="absolute bottom-4 right-4 z-30 flex items-center gap-1.5 text-xs px-3 py-2 rounded-md bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-200 backdrop-blur-sm shadow-lg transition-colors"
-                title="Esta variante hereda del master base. Diferenciarla para que tenga su propio layout."
-              >
-                <Pencil className="h-3.5 w-3.5" />
-                Diferenciar del resto
-              </button>
-            )}
+            {/* Botón flotante para diferenciar la orientación activa del
+                resto. Solo aparece cuando: editando master Y la orientación
+                está vinculada al base. Estilo solid + contraste alto para
+                que sea legible sobre cualquier fondo de canvas. */}
+            {editingId == null &&
+              activeOrientation &&
+              activeOrientation.linked_to_template_id != null && (
+                <button
+                  type="button"
+                  onClick={handleToggleLinked}
+                  className="absolute bottom-4 right-4 z-30 flex items-center gap-1.5 text-xs px-3 py-2 rounded-md bg-amber-500 hover:bg-amber-600 text-white shadow-lg font-medium transition-colors"
+                  title="Esta orientación hereda del master base. Diferenciarla para que tenga su propio layout."
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Diferenciar del resto
+                </button>
+              )}
           </div>
         </section>
 
@@ -1223,23 +1266,35 @@ export default function ProducirPage() {
                     </span>
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                    {group.items.map((a) => (
-                      <AdaptationCard
-                        key={a.id}
-                        adaptation={a}
-                        definition={definition}
-                        brandKit={brandKitContent}
-                        dataRow={previewRow}
-                        isEditing={editingId === a.id}
-                        onEdit={() => setEditingId(a.id)}
-                        onDelete={() => handleDelete(a.id)}
-                        onFitModeChange={(m) => handleFitModeChange(a.id, m)}
-                        onDownload={() => handleDownloadSingle(a)}
-                        downloading={singleDownloadingId === a.id}
-                        batchInProgress={!!batchProgress}
-                        deleting={deletingId === a.id}
-                      />
-                    ))}
+                    {group.items.map((a) => {
+                      // Cada adaptación toma como master a la orientación
+                      // del master cuyo aspect es más cercano. Default
+                      // automático — el override manual sigue siendo el
+                      // manual_layout en overrides_json.
+                      const sourceOrientation = pickClosestOrientation(
+                        orientations,
+                        a.width,
+                        a.height,
+                      );
+                      const sourceDef = sourceOrientation?.definition ?? definition;
+                      return (
+                        <AdaptationCard
+                          key={a.id}
+                          adaptation={a}
+                          definition={sourceDef}
+                          brandKit={brandKitContent}
+                          dataRow={previewRow}
+                          isEditing={editingId === a.id}
+                          onEdit={() => setEditingId(a.id)}
+                          onDelete={() => handleDelete(a.id)}
+                          onFitModeChange={(m) => handleFitModeChange(a.id, m)}
+                          onDownload={() => handleDownloadSingle(a)}
+                          downloading={singleDownloadingId === a.id}
+                          batchInProgress={!!batchProgress}
+                          deleting={deletingId === a.id}
+                        />
+                      );
+                    })}
                   </div>
                 </div>
               ))}
@@ -1293,15 +1348,28 @@ export default function ProducirPage() {
           opacity: 0,
         }}
       >
-        {currentlyRendering && (
-          <AdaptationRenderer
-            ref={renderRef}
-            adaptation={currentlyRendering.adaptation}
-            master={definition}
-            brandKit={brandKitContent}
-            dataRow={currentlyRendering.row}
-          />
-        )}
+        {currentlyRendering && (() => {
+          // El export usa la misma lógica que el preview: para cada
+          // adaptación se elige la orientación del master cuyo aspect ratio
+          // sea más cercano. Así un banner horizontal renderiza desde la
+          // orientación horizontal del master, no del 9:16 que estaba
+          // siendo editado.
+          const src = pickClosestOrientation(
+            orientations,
+            currentlyRendering.adaptation.width,
+            currentlyRendering.adaptation.height,
+          );
+          const srcDef = src?.definition ?? definition;
+          return (
+            <AdaptationRenderer
+              ref={renderRef}
+              adaptation={currentlyRendering.adaptation}
+              master={srcDef}
+              brandKit={brandKitContent}
+              dataRow={currentlyRendering.row}
+            />
+          );
+        })()}
       </div>
     </div>
   );
@@ -1728,7 +1796,10 @@ function PresetPickerModal({
 }: {
   presets: FormatPreset[];
   existingAdaptations: Adaptation[];
-  siblings: SiblingTemplate[];
+  // El modal solo necesita id / nombre / dimensiones de los hermanos para
+  // calcular la auto-distribución. Le pasamos un shape mínimo compatible
+  // con Orientation u otros tipos.
+  siblings: Array<{ id: number; name: string; base_width: number; base_height: number }>;
   currentTemplate: { id: number; name: string; base_width: number; base_height: number } | null;
   onClose: () => void;
   onConfirmPresets: (presetIds: number[], autoDistribute: boolean) => void;
@@ -2170,9 +2241,9 @@ function PresetShape({
 
 function noop() {}
 
-// VariantsStrip: barra horizontal con las OTRAS variantes del master (no la
-// actual), pensada para vivir arriba del canvas del editor. Click navega a
-// la variante elegida para editarla.
+// VariantsStrip: barra horizontal con TODAS las orientaciones del master,
+// incluyendo la que está abierta en el editor (marcada con border primary).
+// Click cambia la orientación activa SIN navegar.
 function VariantsStrip({
   designMembers,
   onSwitch,
@@ -2190,19 +2261,15 @@ function VariantsStrip({
   onSwitch: (id: number) => void;
   onAdd: () => void;
 }) {
-  // Mostramos solo las otras variantes. Al cambiar, la actual queda en la
-  // strip y la nueva pasa al canvas — "se intercambian" visualmente.
-  const others = designMembers.filter((m) => !m.isCurrent);
-  if (others.length === 0) {
-    // Default: no hay variantes generadas todavía. Solo el botón "+ Formato"
-    // discreto, sin chrome adicional. La strip queda casi invisible.
+  // Una sola orientación: la strip queda discreta con solo el botón "+ Formato".
+  if (designMembers.length <= 1) {
     return (
       <div className="flex items-center justify-end px-3 py-1.5 border-b border-border/30 bg-muted/10">
         <button
           type="button"
           onClick={onAdd}
-          className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded border border-dashed border-border/40 hover:border-foreground/40 transition-colors"
-          title="Agregar variante de orientación del master"
+          className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded border border-dashed border-border/40 hover:border-foreground/40 transition-colors"
+          title="Agregar otra orientación al master"
         >
           <Plus className="h-3 w-3" />
           Formato
@@ -2212,18 +2279,28 @@ function VariantsStrip({
   }
   return (
     <div className="flex items-end gap-2 px-3 py-2 border-b border-border/30 bg-muted/10 overflow-x-auto">
-      {others.map((m) => (
+      {designMembers.map((m) => (
         <button
           key={m.id}
           type="button"
           onClick={() => onSwitch(m.id)}
-          className="group flex flex-col items-center gap-1 shrink-0 focus:outline-none"
-          title={`${m.name} · ${m.base_width}×${m.base_height} — click para editar`}
+          disabled={m.isCurrent}
+          className={cn(
+            "group flex flex-col items-center gap-1 shrink-0 focus:outline-none",
+            m.isCurrent && "cursor-default"
+          )}
+          title={
+            m.isCurrent
+              ? "Orientación abierta en el editor"
+              : `${m.name} · ${m.base_width}×${m.base_height} — click para abrir`
+          }
         >
           <div
             className={cn(
-              "border rounded shadow-sm flex items-center justify-center transition-colors overflow-hidden",
-              "border-border/50 group-hover:border-foreground/40 bg-background/40 group-hover:bg-background/60"
+              "rounded shadow-sm flex items-center justify-center transition-colors overflow-hidden bg-background/40",
+              m.isCurrent
+                ? "border-2 border-primary ring-2 ring-primary/30"
+                : "border border-border/50 group-hover:border-foreground/40 group-hover:bg-background/60"
             )}
             style={{
               width: 80 * (m.base_width / Math.max(m.base_width, m.base_height)),
@@ -2243,7 +2320,14 @@ function VariantsStrip({
               variantOrientationIcon(m.base_width, m.base_height)
             )}
           </div>
-          <span className="text-[10px] text-muted-foreground group-hover:text-foreground flex items-center gap-1">
+          <span
+            className={cn(
+              "text-xs flex items-center gap-1 font-medium",
+              m.isCurrent
+                ? "text-foreground"
+                : "text-muted-foreground group-hover:text-foreground"
+            )}
+          >
             {m.name}
             {m.linked_to_template_id != null && (
               <span className="text-emerald-400" title="Vinculada al base">
@@ -2251,13 +2335,16 @@ function VariantsStrip({
               </span>
             )}
           </span>
+          <span className="text-[10px] text-muted-foreground/70">
+            {m.base_width}×{m.base_height}
+          </span>
         </button>
       ))}
       <button
         type="button"
         onClick={onAdd}
-        className="text-[10px] text-muted-foreground hover:text-foreground flex flex-col items-center justify-center gap-1 px-3 py-1 rounded border border-dashed border-border/40 hover:border-foreground/40 transition-colors shrink-0 self-stretch min-h-[80px]"
-        title="Agregar variante de orientación del master"
+        className="text-xs text-muted-foreground hover:text-foreground flex flex-col items-center justify-center gap-1 px-3 py-2 rounded border border-dashed border-border/40 hover:border-foreground/40 transition-colors shrink-0 self-stretch min-h-[100px]"
+        title="Agregar otra orientación al master"
       >
         <Plus className="h-4 w-4" />
         <span>Formato</span>
@@ -2527,6 +2614,30 @@ function rowSubfolderName(row: DataRow, idx: number): string {
     }
   }
   return `fila_${idx + 1}`;
+}
+
+// Para una adaptación dada, elige la orientación del master cuyo aspect
+// ratio sea más cercano. Esto resuelve "la adaptación usa por defecto la
+// orientación que más se le parezca" — el productor ve cada adaptación
+// renderizada desde la orientación correcta sin tener que elegirla.
+function pickClosestOrientation(
+  orientations: Orientation[],
+  adaptW: number,
+  adaptH: number,
+): Orientation | null {
+  if (orientations.length === 0) return null;
+  const r = adaptW / adaptH;
+  let best = orientations[0];
+  let bestDiff = Infinity;
+  for (const o of orientations) {
+    const or = o.base_width / o.base_height;
+    const diff = Math.abs(or - r) / Math.min(or, r);
+    if (diff < bestDiff) {
+      best = o;
+      bestDiff = diff;
+    }
+  }
+  return best;
 }
 
 // Devuelve el id del template cuyo aspect ratio es más cercano al del preset.
