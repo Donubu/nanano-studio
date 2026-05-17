@@ -15,6 +15,7 @@ interface TemplateRow extends RowDataPacket {
   production_project_id: number;
   design_id: number | null;
   design_name: string | null;
+  linked_to_template_id: number | null;
   name: string;
   description: string | null;
   base_width: number;
@@ -42,6 +43,10 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get("production_project_id");
+    // Cuando include_variants=true, devolvemos TODOS los templates del
+    // proyecto (incluidas variantes dentro de un design). Default = false:
+    // listado a nivel de proyecto colapsa cada design a su base.
+    const includeVariants = searchParams.get("include_variants") === "true";
     if (!projectId) {
       return NextResponse.json(
         { error: "production_project_id es requerido" },
@@ -49,15 +54,24 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Listado a nivel de proyecto: el "master" se representa como UNA fila,
-    // no una por cada variante. Para cada design devolvemos el template con
-    // el id más antiguo (la base original). Standalone templates (sin
-    // design) aparecen tal cual. variant_count expone cuántas variantes
-    // adicionales viven dentro del design (las que se ven en el editor).
+    // Filtro de design: cuando include_variants es false (listado del
+    // proyecto), por cada design devolvemos el template con MIN(id) — la
+    // base. Cuando es true (producir / sibling lookup), devolvemos todos.
+    const designFilter = includeVariants
+      ? ""
+      : `AND (
+            pt.design_id IS NULL
+            OR pt.id = (
+              SELECT MIN(pt2.id) FROM production_templates pt2
+               WHERE pt2.design_id = pt.design_id AND pt2.deleted_at IS NULL
+            )
+          )`;
+
     const [rows] = await pool.execute<TemplateRow[]>(
-      `SELECT pt.id, pt.production_project_id, pt.design_id, pt.name, pt.description,
-              pt.base_width, pt.base_height, pt.thumbnail_url, pt.brand_kit_id,
-              pt.status, pt.version, pt.created_by, pt.created_at, pt.updated_at,
+      `SELECT pt.id, pt.production_project_id, pt.design_id, pt.linked_to_template_id,
+              pt.name, pt.description, pt.base_width, pt.base_height,
+              pt.thumbnail_url, pt.brand_kit_id, pt.status, pt.version,
+              pt.created_by, pt.created_at, pt.updated_at,
               d.name AS design_name,
               (SELECT COUNT(*) FROM production_template_adaptations a
                  WHERE a.template_id = pt.id) AS adaptation_count,
@@ -74,13 +88,7 @@ export async function GET(request: NextRequest) {
          LEFT JOIN production_designs d
                 ON d.id = pt.design_id AND d.deleted_at IS NULL
         WHERE pt.production_project_id = ? AND pt.deleted_at IS NULL
-          AND (
-            pt.design_id IS NULL
-            OR pt.id = (
-              SELECT MIN(pt2.id) FROM production_templates pt2
-               WHERE pt2.design_id = pt.design_id AND pt2.deleted_at IS NULL
-            )
-          )
+          ${designFilter}
         ORDER BY pt.updated_at DESC`,
       [projectId]
     );

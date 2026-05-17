@@ -251,11 +251,12 @@ export default function ProducirPage() {
       const [projRes, presetsBaseRes, siblingsRes] = await Promise.all([
         fetch(`/api/production/projects/${tpl.production_project_id}`),
         fetch(`/api/production/format-presets`),
-        // Templates hermanos: comparten production_project; los filtramos por
-        // design_id en el cliente para quedarnos con las variantes del mismo
-        // design (excluido el actual).
+        // Templates hermanos: comparten production_project. Necesitamos el
+        // listado SIN el filtro de "1 por design" (default del endpoint),
+        // así que pasamos include_variants=true para que el server devuelva
+        // todas las variantes y podamos elegir las del mismo design.
         fetch(
-          `/api/production/templates?production_project_id=${tpl.production_project_id}`
+          `/api/production/templates?production_project_id=${tpl.production_project_id}&include_variants=true`
         ),
       ]);
       if (siblingsRes.ok && tpl.design_id != null) {
@@ -1249,6 +1250,10 @@ export default function ProducirPage() {
 
       {showAddVariant && (
         <AddVariantModal
+          existingSizes={designMembers.map((m) => ({
+            w: m.base_width,
+            h: m.base_height,
+          }))}
           onClose={() => setShowAddVariant(false)}
           onAdd={handleAddVariant}
         />
@@ -2265,9 +2270,11 @@ function VariantsStrip({
 // (cuadrado / vertical / horizontal) o tamaño custom. La variante se crea
 // linked al master actual.
 function AddVariantModal({
+  existingSizes,
   onClose,
   onAdd,
 }: {
+  existingSizes: { w: number; h: number }[];
   onClose: () => void;
   onAdd: (w: number, h: number, name?: string) => Promise<void>;
 }) {
@@ -2277,12 +2284,29 @@ function AddVariantModal({
     { label: "Vertical 4:5", w: 1080, h: 1350, ratio: "4:5" },
     { label: "Horizontal", w: 1920, h: 1080, ratio: "16:9" },
   ];
+  // Bloqueamos presets cuya aspect ratio ya existe en el design — no tiene
+  // sentido tener dos variantes "Horizontal" del mismo master. Para custom
+  // permitimos cualquier W/H aunque coincida, porque podrían ser tamaños
+  // distintos del mismo ratio (ej. 1920×1080 y 1280×720).
+  const existingRatios = existingSizes.map((s) => s.w / s.h);
+  const isPresetTaken = (presetW: number, presetH: number) => {
+    const r = presetW / presetH;
+    return existingRatios.some((er) => Math.abs(er - r) < 0.02);
+  };
+
   const [mode, setMode] = useState<"preset" | "custom">("preset");
   const [w, setW] = useState("1080");
   const [h, setH] = useState("1080");
   const [submitting, setSubmitting] = useState(false);
+  const [customError, setCustomError] = useState<string | null>(null);
 
   const submit = async (width: number, height: number) => {
+    // Para custom validamos que no exista exactamente esa dimensión.
+    if (existingSizes.some((s) => s.w === width && s.h === height)) {
+      setCustomError("Ya existe una variante con esas dimensiones exactas.");
+      return;
+    }
+    setCustomError(null);
     setSubmitting(true);
     try {
       await onAdd(width, height);
@@ -2341,20 +2365,37 @@ function AddVariantModal({
 
         {mode === "preset" ? (
           <div className="grid grid-cols-2 gap-2">
-            {PRESETS.map((p) => (
-              <button
-                key={p.label}
-                type="button"
-                disabled={submitting}
-                onClick={() => submit(p.w, p.h)}
-                className="border border-border/50 rounded-md p-3 text-left hover:bg-muted hover:border-foreground/30 transition-colors disabled:opacity-50"
-              >
-                <div className="text-sm font-medium">{p.label}</div>
-                <div className="text-[11px] text-muted-foreground mt-0.5">
-                  {p.ratio} · {p.w}×{p.h}
-                </div>
-              </button>
-            ))}
+            {PRESETS.map((p) => {
+              const taken = isPresetTaken(p.w, p.h);
+              return (
+                <button
+                  key={p.label}
+                  type="button"
+                  disabled={submitting || taken}
+                  onClick={() => submit(p.w, p.h)}
+                  className={cn(
+                    "border rounded-md p-3 text-left transition-colors",
+                    taken
+                      ? "border-border/30 bg-muted/20 cursor-not-allowed opacity-60"
+                      : "border-border/50 hover:bg-muted hover:border-foreground/30",
+                    submitting && "opacity-50"
+                  )}
+                  title={taken ? "Ya existe una variante con este aspect ratio" : ""}
+                >
+                  <div className="text-sm font-medium flex items-center justify-between gap-2">
+                    {p.label}
+                    {taken && (
+                      <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
+                        ya existe
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">
+                    {p.ratio} · {p.w}×{p.h}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         ) : (
           <div className="space-y-2">
@@ -2386,6 +2427,9 @@ function AddVariantModal({
                 />
               </div>
             </div>
+            {customError && (
+              <p className="text-xs text-red-400">{customError}</p>
+            )}
             <div className="flex justify-end">
               <Button
                 size="sm"
