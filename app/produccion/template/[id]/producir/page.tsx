@@ -77,6 +77,7 @@ const CHANNEL_ORDER: string[] = [
 interface Template {
   id: number;
   production_project_id: number;
+  design_id: number | null;
   name: string;
   base_width: number;
   base_height: number;
@@ -84,6 +85,16 @@ interface Template {
   status: "draft" | "published" | "archived";
   version: number;
   definition: TemplateDefinition | null;
+}
+
+interface SiblingTemplate {
+  id: number;
+  name: string;
+  base_width: number;
+  base_height: number;
+  thumbnail_url: string | null;
+  design_id: number | null;
+  design_name: string | null;
 }
 
 interface FormatPreset {
@@ -141,6 +152,7 @@ export default function ProducirPage() {
   const templateId = params.id as string;
 
   const [template, setTemplate] = useState<Template | null>(null);
+  const [siblings, setSiblings] = useState<SiblingTemplate[]>([]);
   const [brandKitContent, setBrandKitContent] = useState<BrandKitContent>(EMPTY_KIT_CONTENT);
   const [adaptations, setAdaptations] = useState<Adaptation[]>([]);
   const [presets, setPresets] = useState<FormatPreset[]>([]);
@@ -164,10 +176,26 @@ export default function ProducirPage() {
       const tpl: Template = await tplRes.json();
       setTemplate(tpl);
 
-      const [projRes, presetsBaseRes] = await Promise.all([
+      const [projRes, presetsBaseRes, siblingsRes] = await Promise.all([
         fetch(`/api/production/projects/${tpl.production_project_id}`),
         fetch(`/api/production/format-presets`),
+        // Templates hermanos: comparten production_project; los filtramos por
+        // design_id en el cliente para quedarnos con las variantes del mismo
+        // design (excluido el actual).
+        fetch(
+          `/api/production/templates?production_project_id=${tpl.production_project_id}`
+        ),
       ]);
+      if (siblingsRes.ok && tpl.design_id != null) {
+        const allTemplates: SiblingTemplate[] = await siblingsRes.json();
+        setSiblings(
+          allTemplates.filter(
+            (t) => t.design_id === tpl.design_id && t.id !== tpl.id
+          )
+        );
+      } else {
+        setSiblings([]);
+      }
       let clientId: number | null = null;
       if (projRes.ok) {
         const proj = await projRes.json();
@@ -226,17 +254,54 @@ export default function ProducirPage() {
       : newRootFrame(template.base_width, template.base_height);
   }, [template]);
 
-  const handleAddBulk = async (presetIds: number[]) => {
+  const handleAddBulk = async (presetIds: number[], autoDistribute: boolean) => {
     if (presetIds.length === 0) return;
-    const res = await fetch(`/api/production/templates/${templateId}/adaptations`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ format_preset_ids: presetIds }),
-    });
-    if (res.ok) {
-      setShowPicker(false);
-      fetchAdaptations();
+    // Si no hay design o el productor optó por no distribuir, todo cae en el
+    // template actual.
+    if (!autoDistribute || siblings.length === 0) {
+      const res = await fetch(`/api/production/templates/${templateId}/adaptations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ format_preset_ids: presetIds }),
+      });
+      if (res.ok) {
+        setShowPicker(false);
+        fetchAdaptations();
+      }
+      return;
     }
+
+    // Modo auto-distribuir: cada preset va al template (master actual o
+    // hermano del design) cuyo aspect ratio sea más cercano. Llamamos POST
+    // por template en paralelo con su lote de presets.
+    const candidates: { id: number; base_width: number; base_height: number }[] = [
+      ...(template
+        ? [{ id: template.id, base_width: template.base_width, base_height: template.base_height }]
+        : []),
+      ...siblings.map((s) => ({ id: s.id, base_width: s.base_width, base_height: s.base_height })),
+    ];
+
+    const groups = new Map<number, number[]>();
+    for (const pid of presetIds) {
+      const preset = presets.find((p) => p.id === pid);
+      if (!preset) continue;
+      const best = pickBestTemplate(preset.width, preset.height, candidates);
+      const arr = groups.get(best) ?? [];
+      arr.push(pid);
+      groups.set(best, arr);
+    }
+
+    await Promise.all(
+      Array.from(groups.entries()).map(([tplId, ids]) =>
+        fetch(`/api/production/templates/${tplId}/adaptations`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ format_preset_ids: ids }),
+        })
+      )
+    );
+    setShowPicker(false);
+    fetchAdaptations();
   };
 
   const handleAddCustom = async (name: string, w: number, h: number) => {
@@ -454,11 +519,55 @@ export default function ProducirPage() {
             </p>
             <p className="text-xs text-muted-foreground mt-2 max-w-md">
               Las adaptaciones se generan a partir de este master usando los
-              constraints de cada capa. Podés editar el master en cualquier
+              constraints de cada capa. Puedes editar el master en cualquier
               momento y todas las adaptaciones se reflowean automáticamente.
             </p>
           </div>
         </section>
+
+        {/* Variantes del design (hermanos) */}
+        {siblings.length > 0 && (
+          <section className="bg-card rounded-xl border border-border/50 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-sm font-medium">Variantes del design</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Otros masters del mismo design. Al agregar adaptaciones, los
+                  formatos se distribuyen entre la variante más adecuada.
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {siblings.map((s) => (
+                <Link
+                  key={s.id}
+                  href={`/produccion/template/${s.id}/producir`}
+                  className="bg-muted/50 rounded-lg p-3 flex items-center gap-3 hover:bg-muted transition-colors"
+                >
+                  <div
+                    className="bg-background rounded border border-border/30 shrink-0 overflow-hidden flex items-center justify-center"
+                    style={{
+                      width: 60,
+                      height: 60 * (s.base_height / s.base_width),
+                      maxHeight: 60,
+                    }}
+                  >
+                    {s.thumbnail_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={s.thumbnail_url} alt={s.name} className="max-w-full max-h-full object-contain" />
+                    ) : null}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium truncate">{s.name}</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      {s.base_width}×{s.base_height}
+                    </p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Adaptations list */}
         <section className="bg-card rounded-xl border border-border/50 p-4">
@@ -528,6 +637,17 @@ export default function ProducirPage() {
         <PresetPickerModal
           presets={presets}
           existingAdaptations={adaptations}
+          siblings={siblings}
+          currentTemplate={
+            template
+              ? {
+                  id: template.id,
+                  name: template.name,
+                  base_width: template.base_width,
+                  base_height: template.base_height,
+                }
+              : null
+          }
           onClose={() => setShowPicker(false)}
           onConfirmPresets={handleAddBulk}
           onAddCustom={handleAddCustom}
@@ -954,16 +1074,22 @@ function AdaptationPreview({
 function PresetPickerModal({
   presets,
   existingAdaptations,
+  siblings,
+  currentTemplate,
   onClose,
   onConfirmPresets,
   onAddCustom,
 }: {
   presets: FormatPreset[];
   existingAdaptations: Adaptation[];
+  siblings: SiblingTemplate[];
+  currentTemplate: { id: number; name: string; base_width: number; base_height: number } | null;
   onClose: () => void;
-  onConfirmPresets: (presetIds: number[]) => void;
+  onConfirmPresets: (presetIds: number[], autoDistribute: boolean) => void;
   onAddCustom: (name: string, w: number, h: number) => void;
 }) {
+  const hasDesign = siblings.length > 0 && !!currentTemplate;
+  const [autoDistribute, setAutoDistribute] = useState(hasDesign);
   const usedPresetIds = useMemo(
     () =>
       new Set(
@@ -1259,36 +1385,110 @@ function PresetPickerModal({
 
         {/* Confirm bar */}
         {activeChannel !== "custom" && (
-          <div className="flex items-center justify-between px-5 py-3 border-t border-border/50 bg-muted/20">
-            <p className="text-xs text-muted-foreground">
-              {selectedCount === 0
-                ? "Ningún formato seleccionado"
-                : `${selectedCount} formato${selectedCount === 1 ? "" : "s"} listo${selectedCount === 1 ? "" : "s"} para agregar`}
-            </p>
-            <div className="flex items-center gap-2">
-              {selectedCount > 0 && (
+          <div className="flex flex-col gap-2 px-5 py-3 border-t border-border/50 bg-muted/20">
+            {hasDesign && (
+              <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoDistribute}
+                  onChange={(e) => setAutoDistribute(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="text-foreground font-medium">
+                    Auto-distribuir entre las variantes del design
+                  </span>
+                  {" — "}
+                  cada formato cae en el master del design cuya orientación
+                  sea más parecida (actual + {siblings.length} hermano
+                  {siblings.length === 1 ? "" : "s"}).
+                </span>
+              </label>
+            )}
+            {hasDesign && autoDistribute && selectedCount > 0 && currentTemplate && (
+              <DistributionPreview
+                presets={presets}
+                selectedIds={Array.from(selected)}
+                candidates={[
+                  { id: currentTemplate.id, name: currentTemplate.name, base_width: currentTemplate.base_width, base_height: currentTemplate.base_height },
+                  ...siblings.map((s) => ({ id: s.id, name: s.name, base_width: s.base_width, base_height: s.base_height })),
+                ]}
+              />
+            )}
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                {selectedCount === 0
+                  ? "Ningún formato seleccionado"
+                  : `${selectedCount} formato${selectedCount === 1 ? "" : "s"} listo${selectedCount === 1 ? "" : "s"} para agregar`}
+              </p>
+              <div className="flex items-center gap-2">
+                {selectedCount > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelected(new Set())}
+                  >
+                    Limpiar
+                  </Button>
+                )}
                 <Button
-                  variant="ghost"
                   size="sm"
-                  onClick={() => setSelected(new Set())}
+                  disabled={selectedCount === 0}
+                  onClick={() => onConfirmPresets(Array.from(selected), autoDistribute)}
+                  className="gap-1"
                 >
-                  Limpiar
+                  <Plus className="h-4 w-4" />
+                  Agregar
+                  {selectedCount > 0 ? ` (${selectedCount})` : ""}
                 </Button>
-              )}
-              <Button
-                size="sm"
-                disabled={selectedCount === 0}
-                onClick={() => onConfirmPresets(Array.from(selected))}
-                className="gap-1"
-              >
-                <Plus className="h-4 w-4" />
-                Agregar
-                {selectedCount > 0 ? ` (${selectedCount})` : ""}
-              </Button>
+              </div>
             </div>
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Muestra cuántos formatos van a cada master cuando el toggle de
+// auto-distribuir está activo. Le da feedback al productor antes de confirmar.
+function DistributionPreview({
+  presets,
+  selectedIds,
+  candidates,
+}: {
+  presets: FormatPreset[];
+  selectedIds: number[];
+  candidates: { id: number; name: string; base_width: number; base_height: number }[];
+}) {
+  const counts = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const id of selectedIds) {
+      const p = presets.find((x) => x.id === id);
+      if (!p) continue;
+      const best = pickBestTemplate(p.width, p.height, candidates);
+      m.set(best, (m.get(best) ?? 0) + 1);
+    }
+    return m;
+  }, [presets, selectedIds, candidates]);
+
+  return (
+    <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground bg-background/40 rounded px-2 py-1.5">
+      {candidates.map((c) => {
+        const n = counts.get(c.id) ?? 0;
+        if (n === 0) return null;
+        return (
+          <span key={c.id} className="inline-flex items-center gap-1">
+            <span className="font-medium text-foreground">{c.name}</span>
+            <span className="text-muted-foreground/70">
+              ({c.base_width}×{c.base_height})
+            </span>
+            <span className="bg-primary/20 text-foreground rounded-full px-1.5">
+              {n}
+            </span>
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -1323,3 +1523,25 @@ function PresetShape({
 }
 
 function noop() {}
+
+// Devuelve el id del template cuyo aspect ratio es más cercano al del preset.
+// Usado por la distribución automática dentro de un design: cada formato va
+// al master de orientación más parecida.
+function pickBestTemplate(
+  presetW: number,
+  presetH: number,
+  candidates: { id: number; base_width: number; base_height: number }[],
+): number {
+  const presetRatio = presetW / presetH;
+  let bestId = candidates[0].id;
+  let bestDiff = Infinity;
+  for (const c of candidates) {
+    const r = c.base_width / c.base_height;
+    const diff = Math.abs(presetRatio - r) / Math.min(presetRatio, r);
+    if (diff < bestDiff) {
+      bestId = c.id;
+      bestDiff = diff;
+    }
+  }
+  return bestId;
+}
