@@ -1001,7 +1001,13 @@ function AdaptationCard({
     adaptation.preset_channel ||
     (adaptation.format_preset_id == null ? "custom" : null);
 
+  // El thumbnail respeta dos límites: alto Y ancho. Antes solo usábamos
+  // alto fijo, lo que hacía que banners chatos (8:1, 10:1) generaran un
+  // cssW gigante (~1300px) y el flex justify-center del card mostrara el
+  // centro del contenido en vez del top-left — el bug de "alto 100% se ve
+  // corrido a la derecha".
   const TARGET_H = 160;
+  const TARGET_W = 280;
   // Warning si el aspect ratio del adaptación es muy distinto al del master:
   // en ese caso ningún fit automático va a producir un buen resultado y se
   // recomienda ajuste manual.
@@ -1021,6 +1027,7 @@ function AdaptationCard({
           definition={definition}
           brandKit={brandKit}
           targetH={TARGET_H}
+          targetW={TARGET_W}
         />
       </div>
       <div className="flex items-start justify-between gap-2">
@@ -1112,23 +1119,28 @@ function AdaptationCard({
   );
 }
 
-// Renders an adaptation at thumbnail height honoring its fit_mode.
+// Renders an adaptation at thumbnail size honoring its fit_mode. The
+// thumbnail fits within a box (targetW × targetH) preserving aspect ratio —
+// usar solo targetH dejaba banners chatos con cssW gigante que el flex
+// parent recortaba mostrando el centro en vez del top-left.
 function AdaptationPreview({
   adaptation,
   definition,
   brandKit,
   targetH,
+  targetW,
 }: {
   adaptation: Adaptation;
   definition: TemplateDefinition;
   brandKit: BrandKitContent;
   targetH: number;
+  targetW: number;
 }) {
   const adaptW = adaptation.width;
   const adaptH = adaptation.height;
-  const thumbScale = targetH / adaptH;
+  const thumbScale = Math.min(targetH / adaptH, targetW / adaptW);
   const cssW = adaptW * thumbScale;
-  const cssH = targetH;
+  const cssH = adaptH * thumbScale;
 
   // Si la adaptación tiene un ajuste manual guardado, se renderiza ese
   // árbol directamente (ignora fit_mode automático).
