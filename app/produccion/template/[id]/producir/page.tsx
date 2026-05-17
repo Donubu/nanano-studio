@@ -12,7 +12,9 @@ import {
   ArrowLeft,
   Check,
   CheckSquare,
+  Database,
   Download,
+  FileSpreadsheet,
   Loader2,
   Package,
   Pencil,
@@ -29,6 +31,12 @@ import {
   sanitizeFilename,
 } from "@/lib/production/export";
 import { AdaptationRenderer } from "@/components/production/render/adaptation-renderer";
+import {
+  extractVariables,
+  substituteVariables,
+  DataRow,
+} from "@/lib/production/variables";
+import { parseCsvFile, ParsedDataset } from "@/lib/production/csv";
 import {
   TemplateDefinition,
   TemplateLayer,
@@ -318,14 +326,24 @@ export default function ProducirPage() {
 
   // --- Export pipeline ---
   // currentlyRendering: la adaptación que está montada en el container oculto
-  // a su tamaño nativo. captureResolverRef sostiene el resolve del Promise que
+  // a su tamaño nativo (con la fila de datos opcional para variable
+  // substitution). captureResolverRef sostiene el resolve del Promise que
   // espera el blob capturado. Trabajamos con un slot único: exportSingle
   // serializa cualquier llamada (single-download o ítem de un batch).
-  const [currentlyRendering, setCurrentlyRendering] = useState<Adaptation | null>(null);
+  const [currentlyRendering, setCurrentlyRendering] = useState<{
+    adaptation: Adaptation;
+    row: DataRow | null;
+  } | null>(null);
   const captureResolverRef = useRef<((blob: Blob | null) => void) | null>(null);
   const renderRef = useRef<HTMLDivElement | null>(null);
   const [singleDownloadingId, setSingleDownloadingId] = useState<number | null>(null);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+
+  // --- Dataset / variables ---
+  const [dataset, setDataset] = useState<ParsedDataset | null>(null);
+  const [selectedRowIdx, setSelectedRowIdx] = useState<number | null>(null);
+  const datasetFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [datasetError, setDatasetError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!currentlyRendering) return;
@@ -363,10 +381,10 @@ export default function ProducirPage() {
   }, [currentlyRendering]);
 
   const exportAdaptation = useCallback(
-    (a: Adaptation): Promise<Blob | null> => {
+    (a: Adaptation, row: DataRow | null = null): Promise<Blob | null> => {
       return new Promise((resolve) => {
         captureResolverRef.current = resolve;
-        setCurrentlyRendering(a);
+        setCurrentlyRendering({ adaptation: a, row });
       });
     },
     []
@@ -384,8 +402,14 @@ export default function ProducirPage() {
   const handleDownloadSingle = async (a: Adaptation) => {
     setSingleDownloadingId(a.id);
     try {
-      const blob = await exportAdaptation(a);
-      if (blob) downloadBlob(blob, filenameFor(a));
+      // Single download usa el row de preview si hay uno seleccionado, así
+      // descargas la versión que ves en pantalla.
+      const blob = await exportAdaptation(a, previewRow);
+      if (blob) {
+        const suffix = previewRow ? `_fila${(selectedRowIdx ?? 0) + 1}` : "";
+        const name = filenameFor(a).replace(/\.jpg$/, `${suffix}.jpg`);
+        downloadBlob(blob, name);
+      }
     } finally {
       setSingleDownloadingId(null);
     }
@@ -393,24 +417,77 @@ export default function ProducirPage() {
 
   const handleDownloadAll = async () => {
     if (adaptations.length === 0) return;
-    setBatchProgress({ current: 0, total: adaptations.length });
+    // Dos modos según haya o no dataset cargado:
+    //  - Sin dataset: 1 archivo por adaptación.
+    //  - Con dataset: N filas × M adaptaciones, agrupadas en subcarpetas
+    //    por fila para mantener orden.
+    const rows: (DataRow | null)[] = dataset ? dataset.rows : [null];
+    const total = rows.length * adaptations.length;
+    setBatchProgress({ current: 0, total });
+    let counter = 0;
     try {
       const zip = new JSZip();
-      for (let i = 0; i < adaptations.length; i++) {
-        const a = adaptations[i];
-        setBatchProgress({ current: i + 1, total: adaptations.length });
-        const blob = await exportAdaptation(a);
-        if (blob) {
-          zip.file(filenameFor(a), blob);
+      for (let r = 0; r < rows.length; r++) {
+        const row = rows[r];
+        const rowPrefix = row
+          ? `${String(r + 1).padStart(3, "0")}_${sanitizeFilename(rowSubfolderName(row, r))}/`
+          : "";
+        for (let i = 0; i < adaptations.length; i++) {
+          const a = adaptations[i];
+          counter++;
+          setBatchProgress({ current: counter, total });
+          const blob = await exportAdaptation(a, row);
+          if (blob) {
+            zip.file(`${rowPrefix}${filenameFor(a)}`, blob);
+          }
         }
       }
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const tplName = template?.name ?? "template";
-      downloadBlob(zipBlob, sanitizeFilename(`${tplName}_adaptaciones.zip`));
+      const zipName = dataset
+        ? `${tplName}_${dataset.rows.length}filas.zip`
+        : `${tplName}_adaptaciones.zip`;
+      downloadBlob(zipBlob, sanitizeFilename(zipName));
     } finally {
       setBatchProgress(null);
     }
   };
+
+  // --- Dataset handlers ---
+  const detectedVariables = useMemo(
+    () => extractVariables(definition),
+    [definition]
+  );
+
+  const handleUploadCsv = async (file: File) => {
+    setDatasetError(null);
+    try {
+      const parsed = await parseCsvFile(file);
+      if (parsed.rows.length === 0) {
+        setDatasetError("El archivo CSV está vacío");
+        return;
+      }
+      setDataset(parsed);
+      setSelectedRowIdx(0);
+    } catch (err) {
+      console.error("Error parseando CSV:", err);
+      setDatasetError("No se pudo parsear el archivo CSV");
+    } finally {
+      if (datasetFileInputRef.current) datasetFileInputRef.current.value = "";
+    }
+  };
+
+  const handleClearDataset = () => {
+    setDataset(null);
+    setSelectedRowIdx(null);
+  };
+
+  // Master efectivo a mostrar/exportar según el row seleccionado para preview.
+  const previewRow: DataRow | null =
+    dataset && selectedRowIdx !== null ? dataset.rows[selectedRowIdx] ?? null : null;
+  const effectiveDefinition: TemplateDefinition = previewRow
+    ? substituteVariables(definition, previewRow)
+    : definition;
 
   const handleFitModeChange = async (adaptationId: number, fitMode: FitMode) => {
     // Optimistic update.
@@ -569,6 +646,155 @@ export default function ProducirPage() {
           </section>
         )}
 
+        {/* Dataset (variables + CSV merge) */}
+        {(detectedVariables.length > 0 || dataset) && (
+          <section className="bg-card rounded-xl border border-border/50 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-sm font-medium flex items-center gap-2">
+                  <Database className="h-4 w-4 text-muted-foreground" />
+                  Variables y datos
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Detectamos {detectedVariables.length} variable
+                  {detectedVariables.length === 1 ? "" : "s"} en el master.
+                  Sube un CSV con esas columnas para generar una pieza por fila.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={datasetFileInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleUploadCsv(f);
+                  }}
+                />
+                <Button
+                  size="sm"
+                  variant={dataset ? "outline" : "default"}
+                  onClick={() => datasetFileInputRef.current?.click()}
+                  className="gap-1"
+                >
+                  <FileSpreadsheet className="h-4 w-4" />
+                  {dataset ? "Cambiar CSV" : "Subir CSV"}
+                </Button>
+                {dataset && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={handleClearDataset}
+                    className="gap-1"
+                  >
+                    <X className="h-4 w-4" />
+                    Quitar
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {detectedVariables.length > 0 && (
+              <div className="mb-3 flex flex-wrap gap-1.5">
+                {detectedVariables.map((v) => {
+                  const inDataset = dataset?.columns.includes(v);
+                  return (
+                    <span
+                      key={v}
+                      className={cn(
+                        "text-[11px] font-mono px-2 py-1 rounded border",
+                        inDataset || !dataset
+                          ? "border-border/50 bg-muted text-foreground"
+                          : "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                      )}
+                      title={
+                        dataset
+                          ? inDataset
+                            ? "Esta variable se va a sustituir con la columna del CSV"
+                            : "El CSV no tiene una columna con este nombre"
+                          : undefined
+                      }
+                    >
+                      {`{{${v}}}`}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
+            {datasetError && (
+              <p className="text-xs text-red-400 mb-3">{datasetError}</p>
+            )}
+
+            {dataset && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">
+                    <span className="text-foreground font-medium">{dataset.filename}</span>
+                    {" · "}
+                    {dataset.totalRows} fila{dataset.totalRows === 1 ? "" : "s"}
+                    {" · "}
+                    {dataset.columns.length} columna{dataset.columns.length === 1 ? "" : "s"}
+                  </span>
+                  <label className="flex items-center gap-2 text-muted-foreground">
+                    Previsualizar fila:
+                    <select
+                      value={selectedRowIdx ?? ""}
+                      onChange={(e) => setSelectedRowIdx(Number(e.target.value))}
+                      className="bg-muted border border-border/50 rounded px-2 py-1 text-xs"
+                    >
+                      {dataset.rows.map((_, i) => (
+                        <option key={i} value={i}>
+                          Fila {i + 1}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="border border-border/50 rounded overflow-x-auto max-h-48 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/40 sticky top-0">
+                      <tr>
+                        <th className="px-2 py-1 text-left text-muted-foreground">#</th>
+                        {dataset.columns.map((c) => (
+                          <th key={c} className="px-2 py-1 text-left text-muted-foreground font-mono">
+                            {c}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dataset.rows.slice(0, 50).map((row, i) => (
+                        <tr
+                          key={i}
+                          className={cn(
+                            "border-t border-border/30 cursor-pointer hover:bg-muted/30",
+                            selectedRowIdx === i && "bg-primary/10"
+                          )}
+                          onClick={() => setSelectedRowIdx(i)}
+                        >
+                          <td className="px-2 py-1 text-muted-foreground">{i + 1}</td>
+                          {dataset.columns.map((c) => (
+                            <td key={c} className="px-2 py-1 truncate max-w-[200px]">
+                              {String(row[c] ?? "")}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {dataset.rows.length > 50 && (
+                    <p className="text-[10px] text-muted-foreground px-2 py-1 bg-muted/20">
+                      Mostrando 50 de {dataset.rows.length}. El export usa todas.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
         {/* Adaptations list */}
         <section className="bg-card rounded-xl border border-border/50 p-4">
           <div className="flex items-center justify-between mb-3">
@@ -586,7 +812,11 @@ export default function ProducirPage() {
                   onClick={handleDownloadAll}
                   disabled={!!batchProgress || !!singleDownloadingId}
                   className="gap-1"
-                  title="Renderiza todas las adaptaciones y descarga un ZIP"
+                  title={
+                    dataset
+                      ? `Renderiza ${dataset.rows.length} filas × ${adaptations.length} adaptaciones y descarga ZIP con subcarpetas por fila`
+                      : "Renderiza todas las adaptaciones y descarga un ZIP"
+                  }
                 >
                   {batchProgress ? (
                     <>
@@ -596,7 +826,9 @@ export default function ProducirPage() {
                   ) : (
                     <>
                       <Package className="h-4 w-4" />
-                      Descargar todas (ZIP)
+                      {dataset
+                        ? `Descargar ZIP (${dataset.rows.length} × ${adaptations.length})`
+                        : "Descargar todas (ZIP)"}
                     </>
                   )}
                 </Button>
@@ -617,7 +849,7 @@ export default function ProducirPage() {
                 <AdaptationCard
                   key={a.id}
                   adaptation={a}
-                  definition={definition}
+                  definition={effectiveDefinition}
                   brandKit={brandKitContent}
                   templateId={templateId}
                   onDelete={() => handleDelete(a.id)}
@@ -670,8 +902,12 @@ export default function ProducirPage() {
         {currentlyRendering && (
           <AdaptationRenderer
             ref={renderRef}
-            adaptation={currentlyRendering}
-            master={definition}
+            adaptation={currentlyRendering.adaptation}
+            master={
+              currentlyRendering.row
+                ? substituteVariables(definition, currentlyRendering.row)
+                : definition
+            }
             brandKit={brandKitContent}
           />
         )}
@@ -1523,6 +1759,22 @@ function PresetShape({
 }
 
 function noop() {}
+
+// Cuando exportamos un batch por filas de un dataset, nombramos la subcarpeta
+// con un identificador derivado de la fila: probamos columnas comunes
+// (nombre, name, id, sku) y caemos a "fila_N" si no hay nada útil.
+function rowSubfolderName(row: DataRow, idx: number): string {
+  const candidates = ["nombre", "name", "title", "titulo", "id", "sku", "codigo"];
+  for (const key of Object.keys(row)) {
+    if (candidates.includes(key.toLowerCase())) {
+      const v = row[key];
+      if (v !== undefined && v !== null && String(v).trim() !== "") {
+        return String(v);
+      }
+    }
+  }
+  return `fila_${idx + 1}`;
+}
 
 // Devuelve el id del template cuyo aspect ratio es más cercano al del preset.
 // Usado por la distribución automática dentro de un design: cada formato va
