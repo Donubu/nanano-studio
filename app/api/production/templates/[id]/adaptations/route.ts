@@ -70,9 +70,12 @@ export async function GET(
   }
 }
 
-// POST - Create a new adaptation (admin only). Either:
-//   { format_preset_id: number }                       — copies size from preset
-//   { custom_name: string, width: number, height: number } — fully custom
+// POST - Create one or more adaptations (admin only). Body shapes:
+//   { format_preset_id: number }                          — single from preset
+//   { custom_name: string, width: number, height: number }— single custom
+//   { format_preset_ids: number[] }                       — bulk from presets
+// Bulk runs in a single transaction so the sort_order numbering stays
+// contiguous and we don't end up half-applied on a failure.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -99,6 +102,61 @@ export async function POST(
     }
 
     const body = await request.json();
+    const bulkIds: number[] | null = Array.isArray(body.format_preset_ids)
+      ? body.format_preset_ids
+          .map((x: unknown) => Number(x))
+          .filter((n: number) => Number.isFinite(n) && n > 0)
+      : null;
+
+    // ----- Bulk path -----
+    if (bulkIds && bulkIds.length > 0) {
+      const placeholders = bulkIds.map(() => "?").join(",");
+      const [presets] = await pool.execute<PresetRow[]>(
+        `SELECT id, width, height FROM production_format_presets WHERE id IN (${placeholders})`,
+        bulkIds
+      );
+      if (presets.length === 0) {
+        return NextResponse.json(
+          { error: "Ningún format preset válido" },
+          { status: 400 }
+        );
+      }
+      const presetMap = new Map(presets.map((p) => [p.id, p]));
+
+      const conn = await pool.getConnection();
+      try {
+        await conn.beginTransaction();
+        const [[{ next_order }]] = await conn.execute<
+          (RowDataPacket & { next_order: number })[]
+        >(
+          "SELECT COALESCE(MAX(sort_order), 0) + 10 AS next_order FROM production_template_adaptations WHERE template_id = ?",
+          [templateId]
+        );
+        let order = Number(next_order);
+        const insertedIds: number[] = [];
+        for (const id of bulkIds) {
+          const preset = presetMap.get(id);
+          if (!preset) continue;
+          const [result] = await conn.execute<ResultSetHeader>(
+            `INSERT INTO production_template_adaptations
+               (template_id, format_preset_id, custom_name, width, height, sort_order)
+             VALUES (?, ?, NULL, ?, ?, ?)`,
+            [templateId, id, preset.width, preset.height, order]
+          );
+          insertedIds.push(result.insertId);
+          order += 10;
+        }
+        await conn.commit();
+        return NextResponse.json({ ids: insertedIds, count: insertedIds.length }, { status: 201 });
+      } catch (err) {
+        await conn.rollback();
+        throw err;
+      } finally {
+        conn.release();
+      }
+    }
+
+    // ----- Single path -----
     const formatPresetId =
       body.format_preset_id != null ? Number(body.format_preset_id) : null;
     const customName: string | null =

@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
+  Check,
+  CheckSquare,
   Loader2,
   Plus,
   Rocket,
@@ -190,11 +192,12 @@ export default function ProducirPage() {
       : newRootFrame(template.base_width, template.base_height);
   }, [template]);
 
-  const handleAddFromPreset = async (presetId: number) => {
+  const handleAddBulk = async (presetIds: number[]) => {
+    if (presetIds.length === 0) return;
     const res = await fetch(`/api/production/templates/${templateId}/adaptations`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ format_preset_id: presetId }),
+      body: JSON.stringify({ format_preset_ids: presetIds }),
     });
     if (res.ok) {
       setShowPicker(false);
@@ -348,7 +351,7 @@ export default function ProducirPage() {
           presets={presets}
           existingAdaptations={adaptations}
           onClose={() => setShowPicker(false)}
-          onPickPreset={handleAddFromPreset}
+          onConfirmPresets={handleAddBulk}
           onAddCustom={handleAddCustom}
         />
       )}
@@ -511,17 +514,22 @@ function PresetPickerModal({
   presets,
   existingAdaptations,
   onClose,
-  onPickPreset,
+  onConfirmPresets,
   onAddCustom,
 }: {
   presets: FormatPreset[];
   existingAdaptations: Adaptation[];
   onClose: () => void;
-  onPickPreset: (presetId: number) => void;
+  onConfirmPresets: (presetIds: number[]) => void;
   onAddCustom: (name: string, w: number, h: number) => void;
 }) {
   const usedPresetIds = useMemo(
-    () => new Set(existingAdaptations.map((a) => a.format_preset_id).filter((x): x is number => x != null)),
+    () =>
+      new Set(
+        existingAdaptations
+          .map((a) => a.format_preset_id)
+          .filter((x): x is number => x != null)
+      ),
     [existingAdaptations]
   );
 
@@ -535,6 +543,18 @@ function PresetPickerModal({
   const [activeChannel, setActiveChannel] = useState<string>(
     channelsInOrder[0] ?? "custom"
   );
+  // Selection persists across channel switches so the user can pick items
+  // from several channels before confirming.
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+
+  const toggle = (id: number) => {
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // Group presets in the active channel by group_name.
   const channelPresets = presets.filter((p) => p.channel === activeChannel);
@@ -549,10 +569,35 @@ function PresetPickerModal({
     return Array.from(map.entries()).map(([name, items]) => ({ name, items }));
   }, [channelPresets]);
 
+  // Presets in the current channel that are eligible to be selected via
+  // "Seleccionar todos" — i.e. not already added and not already selected.
+  const selectableInChannel = useMemo(
+    () => channelPresets.filter((p) => !usedPresetIds.has(p.id)),
+    [channelPresets, usedPresetIds]
+  );
+  const allChannelSelected =
+    selectableInChannel.length > 0 &&
+    selectableInChannel.every((p) => selected.has(p.id));
+
+  const handleSelectAllChannel = () => {
+    setSelected((cur) => {
+      const next = new Set(cur);
+      // Toggle: if all are already selected, clear them; otherwise add all.
+      if (allChannelSelected) {
+        for (const p of selectableInChannel) next.delete(p.id);
+      } else {
+        for (const p of selectableInChannel) next.add(p.id);
+      }
+      return next;
+    });
+  };
+
   // Custom form state
   const [customName, setCustomName] = useState("");
   const [customW, setCustomW] = useState("1080");
   const [customH, setCustomH] = useState("1080");
+
+  const selectedCount = selected.size;
 
   return (
     <div
@@ -564,9 +609,10 @@ function PresetPickerModal({
       <div className="bg-background border border-border/50 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-5 py-3 border-b border-border/50">
           <div>
-            <h2 className="text-sm font-semibold">Agregar adaptación</h2>
+            <h2 className="text-sm font-semibold">Agregar adaptaciones</h2>
             <p className="text-xs text-muted-foreground">
-              Elegí un formato del catálogo o creá uno personalizado.
+              Elegí uno o varios formatos del catálogo (podés seleccionar de
+              distintos canales) o creá uno personalizado.
             </p>
           </div>
           <Button variant="ghost" size="icon" onClick={onClose}>
@@ -577,21 +623,31 @@ function PresetPickerModal({
         <div className="flex flex-1 min-h-0">
           {/* Channel sidebar */}
           <aside className="w-44 shrink-0 border-r border-border/50 p-2 overflow-y-auto">
-            {channelsInOrder.map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setActiveChannel(c)}
-                className={cn(
-                  "w-full text-left text-xs px-2 py-1.5 rounded-md transition-colors",
-                  activeChannel === c
-                    ? "bg-primary/10 text-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                {CHANNEL_LABEL[c] ?? c}
-              </button>
-            ))}
+            {channelsInOrder.map((c) => {
+              const countInChannel = presets.filter(
+                (p) => p.channel === c && selected.has(p.id)
+              ).length;
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setActiveChannel(c)}
+                  className={cn(
+                    "w-full text-left text-xs px-2 py-1.5 rounded-md transition-colors flex items-center justify-between gap-2",
+                    activeChannel === c
+                      ? "bg-primary/10 text-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  <span className="truncate">{CHANNEL_LABEL[c] ?? c}</span>
+                  {countInChannel > 0 && (
+                    <span className="text-[10px] bg-primary/20 text-foreground rounded-full px-1.5 py-0.5 shrink-0">
+                      {countInChannel}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
             <button
               type="button"
               onClick={() => setActiveChannel("custom")}
@@ -611,7 +667,8 @@ function PresetPickerModal({
             {activeChannel === "custom" ? (
               <div className="max-w-md space-y-3">
                 <p className="text-xs text-muted-foreground">
-                  Definí un tamaño que no está en el catálogo.
+                  Definí un tamaño que no está en el catálogo. Se agrega al
+                  instante (no requiere confirmar selección).
                 </p>
                 <input
                   type="text"
@@ -654,7 +711,14 @@ function PresetPickerModal({
                     onClick={() => {
                       const w = Number(customW);
                       const h = Number(customH);
-                      if (!customName.trim() || !Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return;
+                      if (
+                        !customName.trim() ||
+                        !Number.isFinite(w) ||
+                        !Number.isFinite(h) ||
+                        w <= 0 ||
+                        h <= 0
+                      )
+                        return;
                       onAddCustom(customName.trim(), w, h);
                     }}
                     disabled={!customName.trim()}
@@ -670,6 +734,28 @@ function PresetPickerModal({
               </p>
             ) : (
               <div className="space-y-5">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-muted-foreground">
+                    {selectableInChannel.length} formato
+                    {selectableInChannel.length === 1 ? "" : "s"} disponible
+                    {selectableInChannel.length === 1 ? "" : "s"}
+                    {" en "}
+                    {CHANNEL_LABEL[activeChannel] ?? activeChannel}
+                  </p>
+                  {selectableInChannel.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 h-7"
+                      onClick={handleSelectAllChannel}
+                    >
+                      <CheckSquare className="h-3.5 w-3.5" />
+                      {allChannelSelected
+                        ? "Quitar selección"
+                        : "Seleccionar todos"}
+                    </Button>
+                  )}
+                </div>
                 {groups.map((g) => (
                   <div key={g.name}>
                     {g.name && (
@@ -680,16 +766,19 @@ function PresetPickerModal({
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {g.items.map((p) => {
                         const used = usedPresetIds.has(p.id);
+                        const isSelected = selected.has(p.id);
                         return (
                           <button
                             key={p.id}
                             type="button"
-                            onClick={() => onPickPreset(p.id)}
+                            onClick={() => !used && toggle(p.id)}
                             disabled={used}
                             className={cn(
-                              "border rounded-md p-2 text-left transition-colors",
+                              "border rounded-md p-2 text-left transition-colors relative",
                               used
                                 ? "border-border/30 opacity-50 cursor-not-allowed"
+                                : isSelected
+                                ? "border-primary bg-primary/10"
                                 : "border-border/50 hover:bg-muted hover:border-foreground/30"
                             )}
                             title={used ? "Ya agregado" : `${p.width}×${p.height}`}
@@ -708,11 +797,13 @@ function PresetPickerModal({
                                   {p.width}×{p.height}
                                 </p>
                               </div>
-                              {used && (
+                              {used ? (
                                 <span className="text-[9px] text-muted-foreground">
                                   Agregado
                                 </span>
-                              )}
+                              ) : isSelected ? (
+                                <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                              ) : null}
                             </div>
                           </button>
                         );
@@ -724,6 +815,38 @@ function PresetPickerModal({
             )}
           </div>
         </div>
+
+        {/* Confirm bar */}
+        {activeChannel !== "custom" && (
+          <div className="flex items-center justify-between px-5 py-3 border-t border-border/50 bg-muted/20">
+            <p className="text-xs text-muted-foreground">
+              {selectedCount === 0
+                ? "Ningún formato seleccionado"
+                : `${selectedCount} formato${selectedCount === 1 ? "" : "s"} listo${selectedCount === 1 ? "" : "s"} para agregar`}
+            </p>
+            <div className="flex items-center gap-2">
+              {selectedCount > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelected(new Set())}
+                >
+                  Limpiar
+                </Button>
+              )}
+              <Button
+                size="sm"
+                disabled={selectedCount === 0}
+                onClick={() => onConfirmPresets(Array.from(selected))}
+                className="gap-1"
+              >
+                <Plus className="h-4 w-4" />
+                Agregar
+                {selectedCount > 0 ? ` (${selectedCount})` : ""}
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
