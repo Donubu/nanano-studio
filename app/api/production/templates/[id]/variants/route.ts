@@ -116,7 +116,11 @@ export async function POST(
         ? reflowForPreview(parsedDef, { w: width, h: height })
         : null;
 
-      const variantName = customName || `${base.name} · ${variantSuggestedName(width, height)}`;
+      // El nombre de la variante es solo su rol (Cuadrado, Vertical, etc.).
+      // No le ponemos prefijo con el nombre del template ("concept") porque
+      // ese ya lo aporta el design / la página padre. La variante es un
+      // formato dentro del mismo master.
+      const variantName = customName || variantSuggestedName(width, height);
 
       const [result] = await conn.execute<ResultSetHeader>(
         `INSERT INTO production_templates

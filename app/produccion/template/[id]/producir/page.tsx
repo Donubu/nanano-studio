@@ -847,70 +847,9 @@ export default function ProducirPage() {
             cambia el editor a esa adaptación; el botón "Volver al master"
             arriba del editor regresa al master. */}
         <section className="bg-card rounded-xl border border-border/50 overflow-hidden">
-          {/* Tabs de variantes del master. Cada variante es un template
-              separado dentro del mismo design. Hacer click en una distinta
-              navega a su /producir. "Agregar formato" crea una nueva
-              variante linked. "Marcar como distinto" desvincula la actual
-              del base. */}
-          {editingId == null && (
-            <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50 bg-muted/30 overflow-x-auto">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
-                Master
-              </span>
-              {designMembers.map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => {
-                    if (!m.isCurrent) router.push(`/produccion/template/${m.id}/producir`);
-                  }}
-                  className={cn(
-                    "flex items-center gap-1.5 text-[11px] px-2 py-1 rounded border transition-colors shrink-0",
-                    m.isCurrent
-                      ? "border-primary bg-primary/10 text-foreground"
-                      : "border-border/50 text-muted-foreground hover:bg-muted hover:border-foreground/30"
-                  )}
-                  title={
-                    m.linked_to_template_id != null
-                      ? "Variante vinculada (hereda del base)"
-                      : m.isCurrent
-                      ? "Variante actual"
-                      : "Variante distinta (layout independiente)"
-                  }
-                >
-                  {variantOrientationIcon(m.base_width, m.base_height)}
-                  <span>{variantShortLabel(m.base_width, m.base_height)}</span>
-                  <span className="text-muted-foreground/70">
-                    {m.base_width}×{m.base_height}
-                  </span>
-                  {m.linked_to_template_id != null && (
-                    <span className="text-[9px] text-emerald-400">↳</span>
-                  )}
-                </button>
-              ))}
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setShowAddVariant(true)}
-                className="gap-1 h-7 px-2 text-xs shrink-0"
-                title="Agregar otra orientación al master"
-              >
-                <Plus className="h-3 w-3" /> Formato
-              </Button>
-              <div className="flex-1" />
-              {template.linked_to_template_id != null && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleToggleLinked}
-                  className="h-7 text-xs gap-1 shrink-0"
-                  title="Esta variante hereda del master base. Marcarla distinta para que tenga su propio layout."
-                >
-                  Marcar como distinto
-                </Button>
-              )}
-            </div>
-          )}
+          {/* Barra superior del editor: solo aparece cuando hay algo que
+              indicar (estamos editando una adaptación). El master por
+              defecto se ve sin chrome arriba. */}
           {editingId != null && editingAdaptation && (
             <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50 bg-muted/30">
               <button
@@ -1141,6 +1080,54 @@ export default function ProducirPage() {
             </button>
           </div>
         )}
+
+        {/* Master variantes — sección que aparece cuando el productor ha
+            generado variantes de orientación del master (cuadrado, vertical,
+            custom). El default 16:9 solo no aparece como variante porque ya
+            es lo que se está editando en la barra superior. */}
+        <section className="bg-card rounded-xl border border-border/50 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="text-sm font-medium">Master</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Variantes de orientación del master. Cambios en el base se
+                propagan a las vinculadas; las marcadas como distintas
+                mantienen su propio layout.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowAddVariant(true)}
+              className="gap-1"
+            >
+              <Plus className="h-4 w-4" />
+              Agregar formato
+            </Button>
+          </div>
+          {designMembers.length <= 1 ? (
+            <p className="text-xs text-muted-foreground py-2">
+              Solo está el master por defecto. Agrega formatos (cuadrado,
+              vertical, etc.) si necesitas variantes de orientación.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+              {designMembers.map((m) => (
+                <MasterVariantCard
+                  key={m.id}
+                  variant={m}
+                  isCurrent={m.isCurrent}
+                  currentTemplateLinkedToId={template.linked_to_template_id}
+                  onSwitch={() => {
+                    if (!m.isCurrent)
+                      router.push(`/produccion/template/${m.id}/producir`);
+                  }}
+                  onToggleLinked={m.isCurrent ? handleToggleLinked : undefined}
+                />
+              ))}
+            </div>
+          )}
+        </section>
 
         {/* Adaptations list */}
         <section className="bg-card rounded-xl border border-border/50 p-4">
@@ -2145,6 +2132,102 @@ function PresetShape({
 
 function noop() {}
 
+// Card de una variante de master en la sección "Master". Click para ir a
+// editar esa variante. Si es la variante actual y está linked, muestra
+// botón "Marcar como distinto".
+function MasterVariantCard({
+  variant,
+  isCurrent,
+  currentTemplateLinkedToId,
+  onSwitch,
+  onToggleLinked,
+}: {
+  variant: {
+    id: number;
+    name: string;
+    base_width: number;
+    base_height: number;
+    thumbnail_url: string | null;
+    linked_to_template_id: number | null;
+  };
+  isCurrent: boolean;
+  currentTemplateLinkedToId: number | null;
+  onSwitch: () => void;
+  onToggleLinked?: () => void;
+}) {
+  const isLinked = isCurrent
+    ? currentTemplateLinkedToId != null
+    : variant.linked_to_template_id != null;
+  return (
+    <div
+      className={cn(
+        "rounded-lg border bg-muted/50 overflow-hidden flex flex-col transition-colors group",
+        isCurrent
+          ? "border-primary ring-2 ring-primary/40"
+          : "border-border/60 hover:border-foreground/30"
+      )}
+    >
+      <div className="px-3 pt-2 pb-1.5 flex items-baseline justify-between gap-2 min-w-0">
+        <p className="text-sm font-medium truncate flex-1 min-w-0">
+          {variant.name}
+        </p>
+        <span className="text-[10px] text-muted-foreground shrink-0 font-mono">
+          {variant.base_width}×{variant.base_height}
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={onSwitch}
+        disabled={isCurrent}
+        className="flex items-center justify-center bg-background/40 hover:bg-background/60 transition-colors disabled:cursor-default"
+        style={{
+          aspectRatio: `${variant.base_width} / ${variant.base_height}`,
+          maxHeight: 140,
+        }}
+        title={isCurrent ? "Variante actual" : "Click para editarla"}
+      >
+        {variant.thumbnail_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={variant.thumbnail_url}
+            alt={variant.name}
+            className="max-w-full max-h-full object-contain"
+          />
+        ) : (
+          variantOrientationIcon(variant.base_width, variant.base_height)
+        )}
+      </button>
+      <div className="px-3 py-1.5 flex items-center gap-1.5">
+        {isLinked ? (
+          <span
+            className="text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded px-1.5 py-0.5"
+            title="Hereda del master base"
+          >
+            ↳ Vinculada
+          </span>
+        ) : (
+          <span
+            className="text-[10px] text-muted-foreground border border-border/50 rounded px-1.5 py-0.5"
+            title="Layout independiente"
+          >
+            Distinta
+          </span>
+        )}
+        {isCurrent && isLinked && onToggleLinked && (
+          <button
+            type="button"
+            onClick={onToggleLinked}
+            className="ml-auto text-[10px] text-muted-foreground hover:text-foreground underline"
+            title="Hacer que esta variante tenga su propio layout independiente"
+          >
+            Marcar como distinta
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Modal para agregar una variante al master. El productor elige preset
 // (cuadrado / vertical / horizontal) o tamaño custom. La variante se crea
 // linked al master actual.
@@ -2303,17 +2386,6 @@ function variantOrientationIcon(w: number, h: number) {
     return <div className="w-3 h-2 border border-current rounded-sm shrink-0" />;
   }
   return <div className="w-2 h-3 border border-current rounded-sm shrink-0" />;
-}
-
-// Etiqueta corta de orientación: "16:9", "1:1", "9:16", o custom.
-function variantShortLabel(w: number, h: number): string {
-  const r = w / h;
-  if (Math.abs(r - 1) < 0.02) return "1:1";
-  if (Math.abs(r - 16 / 9) < 0.05) return "16:9";
-  if (Math.abs(r - 9 / 16) < 0.05) return "9:16";
-  if (Math.abs(r - 4 / 5) < 0.05) return "4:5";
-  if (Math.abs(r - 21 / 9) < 0.05) return "21:9";
-  return r > 1 ? "Horiz" : r < 1 ? "Vert" : "Custom";
 }
 
 // Agrupa adaptaciones por canal del preset (custom queda al final). Dentro
