@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   PointerEvent as ReactPointerEvent,
@@ -10,12 +11,13 @@ import {
 import {
   TemplateDefinition,
   TemplateLayer,
+  StackLayout,
   findLayer,
   findParent,
 } from "@/lib/production/types";
 import { reflowForPreview } from "@/lib/production/reflow";
 import { BrandKitContent, EMPTY_KIT_CONTENT, resolveTreeTokens } from "@/lib/production/brand-kit";
-import { TemplateLayerView } from "./template-layer";
+import { TemplateLayerView, stackToFlexStyle } from "./template-layer";
 
 interface Props {
   definition: TemplateDefinition;
@@ -229,6 +231,43 @@ export function TemplateCanvas({
     : baseTree;
   const selectedLayer = selectedId ? findLayer(renderTree, selectedId) : null;
 
+  // When the selected layer is laid out by a stack parent its rendered
+  // position differs from layer.position (flex decides). Read the DOM rect
+  // and convert it into canvas-space coords so the resize handles overlay
+  // where the user actually sees the layer.
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const selectedParent = selectedId ? findParent(definition, selectedId) : null;
+  const selectedParentIsStack = selectedParent?.layout.mode === "stack";
+  const [stackHandleBounds, setStackHandleBounds] = useState<Bounds | null>(null);
+  /* eslint-disable react-hooks/set-state-in-effect */
+  // setState in a layout effect is the right pattern for DOM measurement
+  // — the rect can't be known during render and the handles must overlay the
+  // committed layout.
+  useLayoutEffect(() => {
+    if (!selectedLayer || !selectedParentIsStack) {
+      setStackHandleBounds(null);
+      return;
+    }
+    const stage = stageRef.current;
+    if (!stage) return;
+    const node = stage.querySelector<HTMLElement>(
+      `[data-layer-id="${selectedLayer.id}"]`
+    );
+    if (!node) {
+      setStackHandleBounds(null);
+      return;
+    }
+    const stageRect = stage.getBoundingClientRect();
+    const rect = node.getBoundingClientRect();
+    setStackHandleBounds({
+      x: (rect.left - stageRect.left) / scale,
+      y: (rect.top - stageRect.top) / scale,
+      w: rect.width / scale,
+      h: rect.height / scale,
+    });
+  }, [selectedLayer, selectedParentIsStack, renderTree, scale]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
   const scaledW = baseW * scale;
   const scaledH = baseH * scale;
   const rootBackground =
@@ -236,6 +275,11 @@ export function TemplateCanvas({
       ? renderTree.background.value
       : "#ffffff";
 
+  // The canvas root can be in stack mode just like nested frames. Without
+  // applying the flex styles here, root children stayed at their stored x/y
+  // while drag was disabled (because parent.layout.mode === "stack"), so the
+  // user could neither move them nor see the layout react.
+  const rootIsStack = renderTree.layout.mode === "stack";
   const stageStyle: CSSProperties = {
     width: baseW,
     height: baseH,
@@ -244,7 +288,9 @@ export function TemplateCanvas({
     background: rootBackground,
     position: "relative",
     boxShadow: "0 0 0 1px rgba(0,0,0,0.08), 0 10px 30px rgba(0,0,0,0.18)",
+    ...(rootIsStack ? stackToFlexStyle(renderTree.layout as StackLayout) : {}),
   };
+  const rootChildParentMode: "free" | "stack" = rootIsStack ? "stack" : "free";
 
   return (
     <div
@@ -257,7 +303,7 @@ export function TemplateCanvas({
     >
       {containerSize.w > 0 && (
         <div style={{ width: scaledW, height: scaledH, position: "relative" }}>
-          <div style={stageStyle}>
+          <div ref={stageRef} style={stageStyle}>
             {renderTree.children.map((child: TemplateLayer) => (
               <TemplateLayerView
                 key={child.id}
@@ -270,13 +316,18 @@ export function TemplateCanvas({
                     ? undefined
                     : (e, id) => onLayerContextMenu(e.clientX, e.clientY, id)
                 }
+                parentMode={rootChildParentMode}
               />
             ))}
 
             {/* Resize handles overlay for the selected layer (hidden in preview) */}
             {!isPreview && selectedLayer && selectedLayer.id !== "tpl_root" && !selectedLayer.locked && (
               <SelectionHandles
-                bounds={layerToBounds(selectedLayer)}
+                bounds={
+                  selectedParentIsStack && stackHandleBounds
+                    ? stackHandleBounds
+                    : layerToBounds(selectedLayer)
+                }
                 scale={scale}
                 onHandlePointerDown={(e, handle) =>
                   startResize(e, selectedLayer.id, handle)

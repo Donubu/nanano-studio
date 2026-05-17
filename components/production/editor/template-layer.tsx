@@ -62,6 +62,7 @@ export function TemplateLayerView({
 }: Props) {
   const isSelected = selectedId === layer.id;
   const commonProps = {
+    "data-layer-id": layer.id,
     onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => {
       e.stopPropagation();
       onSelect(layer.id);
@@ -105,7 +106,7 @@ type CommonProps = {
   className: string;
 };
 
-function stackToFlexStyle(layout: StackLayout): CSSProperties {
+export function stackToFlexStyle(layout: StackLayout): CSSProperties {
   const [pt, pr, pb, pl] = layout.padding;
   return {
     display: "flex",
