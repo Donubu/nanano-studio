@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
+  AlertTriangle,
   ArrowLeft,
   Check,
   CheckSquare,
@@ -15,6 +16,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { hasExtremeAspectMismatch } from "@/lib/production/fit-mode";
 import {
   TemplateDefinition,
   TemplateLayer,
@@ -476,6 +478,15 @@ function AdaptationCard({
     (adaptation.format_preset_id == null ? "custom" : null);
 
   const TARGET_H = 160;
+  // Warning si el aspect ratio del adaptación es muy distinto al del master:
+  // en ese caso ningún fit automático va a producir un buen resultado y se
+  // recomienda ajuste manual.
+  const extremeMismatch = hasExtremeAspectMismatch(
+    definition.size.w,
+    definition.size.h,
+    adaptation.width,
+    adaptation.height,
+  );
 
   return (
     <div className="bg-muted/50 rounded-lg p-3 flex flex-col gap-2 group">
@@ -514,6 +525,17 @@ function AdaptationCard({
           )}
         </Button>
       </div>
+      {extremeMismatch && (
+        <div
+          className="flex items-start gap-1.5 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1"
+          title="Este formato tiene un aspect ratio muy distinto al del master."
+        >
+          <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+          <span>
+            Aspect muy distinto al master. Probablemente necesita ajuste manual.
+          </span>
+        </div>
+      )}
       <select
         value={adaptation.fit_mode}
         onChange={(e) => onFitModeChange(e.target.value as FitMode)}

@@ -10,8 +10,8 @@ import {
   Constraints,
   ConstraintH,
   ConstraintV,
-  DEFAULT_CONSTRAINTS,
 } from "./types";
+import { effectiveConstraints } from "./smart-constraints";
 
 const MIN_SIZE = 8;
 
@@ -31,7 +31,10 @@ function reflowChild(
   origParent: { w: number; h: number },
   newParent: { w: number; h: number }
 ): TemplateLayer {
-  const constraints: Constraints = layer.constraints ?? DEFAULT_CONSTRAINTS;
+  // Smart inference: cuando la capa no tiene constraints custom, se calcula
+  // un constraint razonable según la posición. Si el usuario eligió algo
+  // explícito, se respeta.
+  const constraints: Constraints = effectiveConstraints(layer, { size: origParent });
   const horiz = applyAxis(layer.position.x, layer.size.w, origParent.w, newParent.w, constraints.h);
   const vert = applyAxisV(layer.position.y, layer.size.h, origParent.h, newParent.h, constraints.v);
   const next: TemplateLayer = {

@@ -126,7 +126,10 @@ export function newRootFrame(width: number, height: number): TemplateDefinition 
     position: { x: 0, y: 0 },
     size: { w: width, h: height },
     background: { type: "color", value: "#ffffff" },
-    layout: { mode: "free" },
+    // Stack vertical por defecto: las nuevas plantillas heredan layout
+    // responsive de fábrica. El usuario puede cambiar a "Libre" cuando
+    // necesite posicionamiento absoluto.
+    layout: { ...DEFAULT_STACK_LAYOUT },
     children: [],
   };
 }

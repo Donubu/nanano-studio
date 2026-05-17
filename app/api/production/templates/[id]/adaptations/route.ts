@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
+import { suggestFitMode } from "@/lib/production/fit-mode";
 
 interface AdaptationRow extends RowDataPacket {
   id: number;
@@ -32,6 +33,8 @@ interface PresetRow extends RowDataPacket {
 
 interface TemplateRow extends RowDataPacket {
   id: number;
+  base_width: number;
+  base_height: number;
 }
 
 // GET - List adaptations for a template (admin only).
@@ -93,14 +96,17 @@ export async function POST(
       return NextResponse.json({ error: "Template inválido" }, { status: 400 });
     }
 
-    // Verify the template exists.
+    // Verify the template exists. Fetch base dimensions so we can pick a
+    // smart fit_mode default per adaptation based on aspect ratio.
     const [tpl] = await pool.execute<TemplateRow[]>(
-      "SELECT id FROM production_templates WHERE id = ? AND deleted_at IS NULL",
+      "SELECT id, base_width, base_height FROM production_templates WHERE id = ? AND deleted_at IS NULL",
       [templateId]
     );
     if (tpl.length === 0) {
       return NextResponse.json({ error: "Template no encontrado" }, { status: 404 });
     }
+    const masterW = tpl[0].base_width;
+    const masterH = tpl[0].base_height;
 
     const body = await request.json();
     const bulkIds: number[] | null = Array.isArray(body.format_preset_ids)
@@ -138,11 +144,12 @@ export async function POST(
         for (const id of bulkIds) {
           const preset = presetMap.get(id);
           if (!preset) continue;
+          const fitMode = suggestFitMode(masterW, masterH, preset.width, preset.height);
           const [result] = await conn.execute<ResultSetHeader>(
             `INSERT INTO production_template_adaptations
-               (template_id, format_preset_id, custom_name, width, height, sort_order)
-             VALUES (?, ?, NULL, ?, ?, ?)`,
-            [templateId, id, preset.width, preset.height, order]
+               (template_id, format_preset_id, custom_name, width, height, fit_mode, sort_order)
+             VALUES (?, ?, NULL, ?, ?, ?, ?)`,
+            [templateId, id, preset.width, preset.height, fitMode, order]
           );
           insertedIds.push(result.insertId);
           order += 10;
@@ -205,16 +212,18 @@ export async function POST(
       [templateId]
     );
 
+    const fitMode = suggestFitMode(masterW, masterH, width!, height!);
     const [result] = await pool.execute<ResultSetHeader>(
       `INSERT INTO production_template_adaptations
-         (template_id, format_preset_id, custom_name, width, height, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+         (template_id, format_preset_id, custom_name, width, height, fit_mode, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         templateId,
         formatPresetId,
         customName,
         width,
         height,
+        fitMode,
         next_order,
       ]
     );
