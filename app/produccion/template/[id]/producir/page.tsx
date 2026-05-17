@@ -85,6 +85,24 @@ interface FormatPreset {
   sort_order: number;
 }
 
+type FitMode = "contain" | "cover" | "width" | "height" | "responsive";
+
+const FIT_MODE_LABEL: Record<FitMode, string> = {
+  contain: "Contain",
+  cover: "Cover",
+  width: "Ancho 100%",
+  height: "Alto 100%",
+  responsive: "Responsive",
+};
+
+const FIT_MODE_DESCRIPTION: Record<FitMode, string> = {
+  contain: "Master entero a escala uniforme; puede dejar bordes vacíos",
+  cover: "Llena toda la adaptación; recorta lo que sobra",
+  width: "Ajusta al ancho de la adaptación; recorta o extiende vertical",
+  height: "Ajusta al alto de la adaptación; recorta o extiende horizontal",
+  responsive: "Usa los constraints por capa del master (layout fluido)",
+};
+
 interface Adaptation {
   id: number;
   template_id: number;
@@ -92,6 +110,7 @@ interface Adaptation {
   custom_name: string | null;
   width: number;
   height: number;
+  fit_mode: FitMode;
   is_active: number;
   thumbnail_url: string | null;
   preset_channel: string | null;
@@ -217,6 +236,25 @@ export default function ProducirPage() {
     }
   };
 
+  const handleFitModeChange = async (adaptationId: number, fitMode: FitMode) => {
+    // Optimistic update.
+    setAdaptations((cur) =>
+      cur.map((a) => (a.id === adaptationId ? { ...a, fit_mode: fitMode } : a))
+    );
+    const res = await fetch(
+      `/api/production/templates/${templateId}/adaptations/${adaptationId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fit_mode: fitMode }),
+      }
+    );
+    if (!res.ok) {
+      // Rollback on error.
+      fetchAdaptations();
+    }
+  };
+
   const handleDelete = async (adaptationId: number) => {
     if (!confirm("¿Eliminar esta adaptación?")) return;
     setDeletingId(adaptationId);
@@ -338,6 +376,7 @@ export default function ProducirPage() {
                   definition={definition}
                   brandKit={brandKitContent}
                   onDelete={() => handleDelete(a.id)}
+                  onFitModeChange={(m) => handleFitModeChange(a.id, m)}
                   deleting={deletingId === a.id}
                 />
               ))}
@@ -418,12 +457,14 @@ function AdaptationCard({
   definition,
   brandKit,
   onDelete,
+  onFitModeChange,
   deleting,
 }: {
   adaptation: Adaptation;
   definition: TemplateDefinition;
   brandKit: BrandKitContent;
   onDelete: () => void;
+  onFitModeChange: (m: FitMode) => void;
   deleting: boolean;
 }) {
   const label =
@@ -434,48 +475,17 @@ function AdaptationCard({
     adaptation.preset_channel ||
     (adaptation.format_preset_id == null ? "custom" : null);
 
-  const reflowed = reflowForPreview(definition, {
-    w: adaptation.width,
-    h: adaptation.height,
-  });
-  const resolved = resolveTreeTokens(reflowed, brandKit);
   const TARGET_H = 160;
-  const scale = TARGET_H / adaptation.height;
-  const cssW = adaptation.width * scale;
-  const bg =
-    resolved.background && resolved.background.type === "color"
-      ? resolved.background.value
-      : "#ffffff";
-  const rootIsStack = resolved.layout.mode === "stack";
-  const innerStyle: CSSProperties = {
-    width: adaptation.width,
-    height: adaptation.height,
-    transform: `scale(${scale})`,
-    transformOrigin: "0 0",
-    position: "relative",
-    ...(rootIsStack ? stackToFlexStyle(resolved.layout as StackLayout) : {}),
-  };
 
   return (
     <div className="bg-muted/50 rounded-lg p-3 flex flex-col gap-2 group">
       <div className="flex items-center justify-center bg-background/40 rounded">
-        <div
-          className="overflow-hidden rounded shadow-sm border border-border/30"
-          style={{ width: cssW, height: TARGET_H, background: bg }}
-        >
-          <div style={innerStyle}>
-            {resolved.children.map((child: TemplateLayer) => (
-              <TemplateLayerView
-                key={child.id}
-                layer={child}
-                selectedId={null}
-                onSelect={noop}
-                onLayerPointerDown={noop}
-                parentMode={rootIsStack ? "stack" : "free"}
-              />
-            ))}
-          </div>
-        </div>
+        <AdaptationPreview
+          adaptation={adaptation}
+          definition={definition}
+          brandKit={brandKit}
+          targetH={TARGET_H}
+        />
       </div>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
@@ -503,6 +513,172 @@ function AdaptationCard({
             <Trash2 className="h-3.5 w-3.5 text-red-400" />
           )}
         </Button>
+      </div>
+      <select
+        value={adaptation.fit_mode}
+        onChange={(e) => onFitModeChange(e.target.value as FitMode)}
+        className="w-full bg-muted border border-border/50 rounded px-2 py-1 text-[11px]"
+        title={FIT_MODE_DESCRIPTION[adaptation.fit_mode]}
+      >
+        {(Object.keys(FIT_MODE_LABEL) as FitMode[]).map((mode) => (
+          <option key={mode} value={mode}>
+            Fit: {FIT_MODE_LABEL[mode]}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+// Renders an adaptation at thumbnail height honoring its fit_mode.
+function AdaptationPreview({
+  adaptation,
+  definition,
+  brandKit,
+  targetH,
+}: {
+  adaptation: Adaptation;
+  definition: TemplateDefinition;
+  brandKit: BrandKitContent;
+  targetH: number;
+}) {
+  const adaptW = adaptation.width;
+  const adaptH = adaptation.height;
+  const thumbScale = targetH / adaptH;
+  const cssW = adaptW * thumbScale;
+  const cssH = targetH;
+
+  if (adaptation.fit_mode === "responsive") {
+    const reflowed = reflowForPreview(definition, { w: adaptW, h: adaptH });
+    const resolved = resolveTreeTokens(reflowed, brandKit);
+    const bg =
+      resolved.background && resolved.background.type === "color"
+        ? resolved.background.value
+        : "#ffffff";
+    const rootIsStack = resolved.layout.mode === "stack";
+    const innerStyle: CSSProperties = {
+      width: adaptW,
+      height: adaptH,
+      transform: `scale(${thumbScale})`,
+      transformOrigin: "0 0",
+      position: "relative",
+      ...(rootIsStack ? stackToFlexStyle(resolved.layout as StackLayout) : {}),
+    };
+    return (
+      <div
+        className="overflow-hidden rounded shadow-sm border border-border/30"
+        style={{ width: cssW, height: cssH, background: bg }}
+      >
+        <div style={innerStyle}>
+          {resolved.children.map((child: TemplateLayer) => (
+            <TemplateLayerView
+              key={child.id}
+              layer={child}
+              selectedId={null}
+              onSelect={noop}
+              onLayerPointerDown={noop}
+              parentMode={rootIsStack ? "stack" : "free"}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Scale-based fit modes: render the master at its native size with a
+  // uniform scale and position it inside the adaptation canvas. The
+  // adaptation canvas does the clipping via overflow:hidden.
+  const masterW = definition.size.w;
+  const masterH = definition.size.h;
+  const ratioW = adaptW / masterW;
+  const ratioH = adaptH / masterH;
+  let fitScale = 1;
+  let centerX = false;
+  let centerY = false;
+  switch (adaptation.fit_mode) {
+    case "contain":
+      fitScale = Math.min(ratioW, ratioH);
+      centerX = true;
+      centerY = true;
+      break;
+    case "cover":
+      fitScale = Math.max(ratioW, ratioH);
+      centerX = true;
+      centerY = true;
+      break;
+    case "width":
+      fitScale = ratioW;
+      // height anchored top, may overflow bottom
+      break;
+    case "height":
+      fitScale = ratioH;
+      // width anchored left, may overflow right
+      break;
+  }
+  const scaledW = masterW * fitScale;
+  const scaledH = masterH * fitScale;
+  const offsetX = centerX ? (adaptW - scaledW) / 2 : 0;
+  const offsetY = centerY ? (adaptH - scaledH) / 2 : 0;
+
+  const resolved = resolveTreeTokens(definition, brandKit);
+  const masterBg =
+    resolved.background && resolved.background.type === "color"
+      ? resolved.background.value
+      : "#ffffff";
+  const rootIsStack = resolved.layout.mode === "stack";
+  const masterInnerStyle: CSSProperties = {
+    width: masterW,
+    height: masterH,
+    position: "relative",
+    background: masterBg,
+    ...(rootIsStack ? stackToFlexStyle(resolved.layout as StackLayout) : {}),
+  };
+
+  // Outer takes the thumbnail size; transform scales the inner adapt-canvas
+  // by thumbScale so the inner pixel math stays in adaptation coordinates.
+  return (
+    <div
+      className="overflow-hidden rounded shadow-sm border border-border/30 relative"
+      style={{
+        width: cssW,
+        height: cssH,
+        background: masterBg,
+      }}
+    >
+      <div
+        style={{
+          width: adaptW,
+          height: adaptH,
+          transform: `scale(${thumbScale})`,
+          transformOrigin: "0 0",
+          position: "relative",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            left: offsetX,
+            top: offsetY,
+            width: masterW,
+            height: masterH,
+            transform: `scale(${fitScale})`,
+            transformOrigin: "0 0",
+          }}
+        >
+          <div style={masterInnerStyle}>
+            {resolved.children.map((child: TemplateLayer) => (
+              <TemplateLayerView
+                key={child.id}
+                layer={child}
+                selectedId={null}
+                onSelect={noop}
+                onLayerPointerDown={noop}
+                parentMode={rootIsStack ? "stack" : "free"}
+              />
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

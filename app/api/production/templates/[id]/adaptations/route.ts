@@ -11,6 +11,7 @@ interface AdaptationRow extends RowDataPacket {
   width: number;
   height: number;
   overrides_json: string | null;
+  fit_mode: "contain" | "cover" | "width" | "height" | "responsive";
   is_active: number;
   thumbnail_url: string | null;
   sort_order: number;
@@ -52,8 +53,8 @@ export async function GET(
 
     const [rows] = await pool.execute<AdaptationRow[]>(
       `SELECT a.id, a.template_id, a.format_preset_id, a.custom_name, a.width,
-              a.height, a.overrides_json, a.is_active, a.thumbnail_url,
-              a.sort_order, a.created_at, a.updated_at,
+              a.height, a.overrides_json, a.fit_mode, a.is_active,
+              a.thumbnail_url, a.sort_order, a.created_at, a.updated_at,
               fp.channel AS preset_channel, fp.group_name AS preset_group_name,
               fp.name AS preset_name, fp.orientation AS preset_orientation
          FROM production_template_adaptations a
