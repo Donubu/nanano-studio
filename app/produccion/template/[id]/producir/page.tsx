@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, CSSProperties } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -11,12 +12,14 @@ import {
   Check,
   CheckSquare,
   Loader2,
+  Pencil,
   Plus,
   Rocket,
   Trash2,
   X,
 } from "lucide-react";
 import { hasExtremeAspectMismatch } from "@/lib/production/fit-mode";
+import { parseOverrides } from "@/lib/production/overrides";
 import {
   TemplateDefinition,
   TemplateLayer,
@@ -115,6 +118,7 @@ interface Adaptation {
   fit_mode: FitMode;
   is_active: number;
   thumbnail_url: string | null;
+  overrides_json: string | null;
   preset_channel: string | null;
   preset_group_name: string | null;
   preset_name: string | null;
@@ -377,6 +381,7 @@ export default function ProducirPage() {
                   adaptation={a}
                   definition={definition}
                   brandKit={brandKitContent}
+                  templateId={templateId}
                   onDelete={() => handleDelete(a.id)}
                   onFitModeChange={(m) => handleFitModeChange(a.id, m)}
                   deleting={deletingId === a.id}
@@ -458,6 +463,7 @@ function AdaptationCard({
   adaptation,
   definition,
   brandKit,
+  templateId,
   onDelete,
   onFitModeChange,
   deleting,
@@ -465,6 +471,7 @@ function AdaptationCard({
   adaptation: Adaptation;
   definition: TemplateDefinition;
   brandKit: BrandKitContent;
+  templateId: string;
   onDelete: () => void;
   onFitModeChange: (m: FitMode) => void;
   deleting: boolean;
@@ -487,6 +494,7 @@ function AdaptationCard({
     adaptation.width,
     adaptation.height,
   );
+  const hasManualOverride = !!parseOverrides(adaptation.overrides_json).manual_layout;
 
   return (
     <div className="bg-muted/50 rounded-lg p-3 flex flex-col gap-2 group">
@@ -525,7 +533,13 @@ function AdaptationCard({
           )}
         </Button>
       </div>
-      {extremeMismatch && (
+      {hasManualOverride && (
+        <div className="flex items-start gap-1.5 text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded px-2 py-1">
+          <Pencil className="h-3 w-3 shrink-0 mt-0.5" />
+          <span>Ajuste manual aplicado</span>
+        </div>
+      )}
+      {extremeMismatch && !hasManualOverride && (
         <div
           className="flex items-start gap-1.5 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1"
           title="Este formato tiene un aspect ratio muy distinto al del master."
@@ -536,18 +550,33 @@ function AdaptationCard({
           </span>
         </div>
       )}
-      <select
-        value={adaptation.fit_mode}
-        onChange={(e) => onFitModeChange(e.target.value as FitMode)}
-        className="w-full bg-muted border border-border/50 rounded px-2 py-1 text-[11px]"
-        title={FIT_MODE_DESCRIPTION[adaptation.fit_mode]}
-      >
-        {(Object.keys(FIT_MODE_LABEL) as FitMode[]).map((mode) => (
-          <option key={mode} value={mode}>
-            Fit: {FIT_MODE_LABEL[mode]}
-          </option>
-        ))}
-      </select>
+      <div className="flex items-center gap-1">
+        <select
+          value={adaptation.fit_mode}
+          onChange={(e) => onFitModeChange(e.target.value as FitMode)}
+          disabled={hasManualOverride}
+          className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-[11px] disabled:opacity-50"
+          title={
+            hasManualOverride
+              ? "El ajuste manual sobreescribe el fit mode"
+              : FIT_MODE_DESCRIPTION[adaptation.fit_mode]
+          }
+        >
+          {(Object.keys(FIT_MODE_LABEL) as FitMode[]).map((mode) => (
+            <option key={mode} value={mode}>
+              Fit: {FIT_MODE_LABEL[mode]}
+            </option>
+          ))}
+        </select>
+        <Link
+          href={`/produccion/template/${templateId}/adapt/${adaptation.id}`}
+          className="text-[11px] px-2 py-1 rounded border border-border/50 hover:bg-muted hover:border-foreground/30 transition-colors flex items-center gap-1"
+          title="Editar manualmente esta pieza"
+        >
+          <Pencil className="h-3 w-3" />
+          Ajustar
+        </Link>
+      </div>
     </div>
   );
 }
@@ -569,6 +598,45 @@ function AdaptationPreview({
   const thumbScale = targetH / adaptH;
   const cssW = adaptW * thumbScale;
   const cssH = targetH;
+
+  // Si la adaptación tiene un ajuste manual guardado, se renderiza ese
+  // árbol directamente (ignora fit_mode automático).
+  const manualLayout = parseOverrides(adaptation.overrides_json).manual_layout;
+  if (manualLayout) {
+    const resolved = resolveTreeTokens(manualLayout, brandKit);
+    const bg =
+      resolved.background && resolved.background.type === "color"
+        ? resolved.background.value
+        : "#ffffff";
+    const rootIsStack = resolved.layout.mode === "stack";
+    const innerStyle: CSSProperties = {
+      width: adaptW,
+      height: adaptH,
+      transform: `scale(${thumbScale})`,
+      transformOrigin: "0 0",
+      position: "relative",
+      ...(rootIsStack ? stackToFlexStyle(resolved.layout as StackLayout) : {}),
+    };
+    return (
+      <div
+        className="overflow-hidden rounded shadow-sm border border-border/30"
+        style={{ width: cssW, height: cssH, background: bg }}
+      >
+        <div style={innerStyle}>
+          {resolved.children.map((child: TemplateLayer) => (
+            <TemplateLayerView
+              key={child.id}
+              layer={child}
+              selectedId={null}
+              onSelect={noop}
+              onLayerPointerDown={noop}
+              parentMode={rootIsStack ? "stack" : "free"}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   if (adaptation.fit_mode === "responsive") {
     const reflowed = reflowForPreview(definition, { w: adaptW, h: adaptH });

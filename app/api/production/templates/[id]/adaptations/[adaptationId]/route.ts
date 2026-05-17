@@ -27,7 +27,7 @@ export async function PATCH(
 
     const body = await request.json();
     const updates: string[] = [];
-    const values: (string | number)[] = [];
+    const values: (string | number | null)[] = [];
 
     if (typeof body.fit_mode === "string") {
       if (!VALID_FIT_MODES.includes(body.fit_mode as FitMode)) {
@@ -38,6 +38,33 @@ export async function PATCH(
       }
       updates.push("fit_mode = ?");
       values.push(body.fit_mode);
+    }
+
+    // overrides_json acepta:
+    //  - object (se serializa a string)
+    //  - null o "reset_overrides: true" → limpia el override y la pieza
+    //    vuelve a renderizarse vía fit_mode automático desde el master
+    if (body.reset_overrides === true) {
+      updates.push("overrides_json = NULL");
+    } else if ("overrides_json" in body) {
+      if (body.overrides_json == null) {
+        updates.push("overrides_json = NULL");
+      } else if (typeof body.overrides_json === "object") {
+        updates.push("overrides_json = ?");
+        values.push(JSON.stringify(body.overrides_json));
+      } else if (typeof body.overrides_json === "string") {
+        // Validar que sea JSON parseable antes de guardar
+        try {
+          JSON.parse(body.overrides_json);
+        } catch {
+          return NextResponse.json(
+            { error: "overrides_json no es un JSON válido" },
+            { status: 400 }
+          );
+        }
+        updates.push("overrides_json = ?");
+        values.push(body.overrides_json);
+      }
     }
 
     if (updates.length === 0) {
