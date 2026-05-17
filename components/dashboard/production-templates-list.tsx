@@ -27,6 +27,8 @@ interface Template {
   created_at: string;
   updated_at: string;
   adaptation_count: number;
+  // Otros templates del mismo design (variantes) que se ven en el editor.
+  variant_count: number;
 }
 
 interface Design {
@@ -401,6 +403,15 @@ function TemplateCard({
           <p className="text-sm font-medium truncate">{t.name}</p>
           <p className="text-xs text-muted-foreground mt-0.5">
             {orientationLabel(t.base_width, t.base_height)} · {t.base_width}×{t.base_height}
+            {t.variant_count > 0 && (
+              <>
+                {" · "}
+                <span className="text-emerald-300">
+                  +{t.variant_count}{" "}
+                  {t.variant_count === 1 ? "variante" : "variantes"}
+                </span>
+              </>
+            )}
             {" · "}
             {t.adaptation_count} {t.adaptation_count === 1 ? "adaptación" : "adaptaciones"}
           </p>

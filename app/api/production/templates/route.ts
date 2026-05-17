@@ -27,6 +27,9 @@ interface TemplateRow extends RowDataPacket {
   created_at: Date;
   updated_at: Date;
   adaptation_count?: number;
+  // Cuántas variantes (otros templates) viven dentro del mismo design.
+  // 0 cuando es standalone, N cuando hay variantes adicionales.
+  variant_count?: number;
 }
 
 // GET - List templates for a production project
@@ -46,18 +49,39 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Listado a nivel de proyecto: el "master" se representa como UNA fila,
+    // no una por cada variante. Para cada design devolvemos el template con
+    // el id más antiguo (la base original). Standalone templates (sin
+    // design) aparecen tal cual. variant_count expone cuántas variantes
+    // adicionales viven dentro del design (las que se ven en el editor).
     const [rows] = await pool.execute<TemplateRow[]>(
       `SELECT pt.id, pt.production_project_id, pt.design_id, pt.name, pt.description,
               pt.base_width, pt.base_height, pt.thumbnail_url, pt.brand_kit_id,
               pt.status, pt.version, pt.created_by, pt.created_at, pt.updated_at,
               d.name AS design_name,
               (SELECT COUNT(*) FROM production_template_adaptations a
-                 WHERE a.template_id = pt.id) AS adaptation_count
+                 WHERE a.template_id = pt.id) AS adaptation_count,
+              CASE
+                WHEN pt.design_id IS NULL THEN 0
+                ELSE (
+                  SELECT COUNT(*) - 1
+                    FROM production_templates pt3
+                   WHERE pt3.design_id = pt.design_id
+                     AND pt3.deleted_at IS NULL
+                )
+              END AS variant_count
          FROM production_templates pt
          LEFT JOIN production_designs d
                 ON d.id = pt.design_id AND d.deleted_at IS NULL
         WHERE pt.production_project_id = ? AND pt.deleted_at IS NULL
-        ORDER BY pt.design_id IS NULL ASC, pt.design_id ASC, pt.updated_at DESC`,
+          AND (
+            pt.design_id IS NULL
+            OR pt.id = (
+              SELECT MIN(pt2.id) FROM production_templates pt2
+               WHERE pt2.design_id = pt.design_id AND pt2.deleted_at IS NULL
+            )
+          )
+        ORDER BY pt.updated_at DESC`,
       [projectId]
     );
 

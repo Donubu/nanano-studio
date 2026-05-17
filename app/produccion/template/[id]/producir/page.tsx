@@ -171,6 +171,13 @@ export default function ProducirPage() {
   const [brandKitContent, setBrandKitContent] = useState<BrandKitContent>(EMPTY_KIT_CONTENT);
   const [adaptations, setAdaptations] = useState<Adaptation[]>([]);
   const [presets, setPresets] = useState<FormatPreset[]>([]);
+  // Adaptations carga lazy: contamos cuántas hay para mostrar el botón
+  // "Ver adaptaciones (N)" sin tener que renderear todas las cards (cada
+  // card hace reflow + token resolve + render del layer tree). Se cargan
+  // al click.
+  const [adaptationsLoaded, setAdaptationsLoaded] = useState(false);
+  const [adaptationCount, setAdaptationCount] = useState(0);
+  const [adaptationsLoading, setAdaptationsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showPicker, setShowPicker] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -185,8 +192,29 @@ export default function ProducirPage() {
   const [showAddVariant, setShowAddVariant] = useState(false);
 
   const fetchAdaptations = useCallback(async () => {
+    setAdaptationsLoading(true);
+    try {
+      const res = await fetch(`/api/production/templates/${templateId}/adaptations`);
+      if (res.ok) {
+        const data: Adaptation[] = await res.json();
+        setAdaptations(data);
+        setAdaptationCount(data.length);
+        setAdaptationsLoaded(true);
+      }
+    } finally {
+      setAdaptationsLoading(false);
+    }
+  }, [templateId]);
+
+  // Carga liviana: solo cuenta cuántas adaptaciones hay. Se llama al inicio
+  // así el botón "Ver adaptaciones (N)" muestra el número sin pagar el
+  // costo de renderizar las cards.
+  const fetchAdaptationCount = useCallback(async () => {
     const res = await fetch(`/api/production/templates/${templateId}/adaptations`);
-    if (res.ok) setAdaptations(await res.json());
+    if (res.ok) {
+      const data: Adaptation[] = await res.json();
+      setAdaptationCount(data.length);
+    }
   }, [templateId]);
 
   // Re-fetcheable desde el TemplateEditor cuando el modal de brand-kit del
@@ -257,7 +285,11 @@ export default function ProducirPage() {
         await fetchBrandKits(resolvedClientId, tpl.production_project_id);
       }
 
-      await fetchAdaptations();
+      // Las adaptaciones no se renderizan en el load inicial — solo
+      // contamos cuántas hay para el botón "Ver adaptaciones (N)". Cada
+      // card hace un reflow + token resolve + render del layer tree, así
+      // que cargar 12+ tarda. El productor pide verlas cuando las necesita.
+      await fetchAdaptationCount();
 
       // Hidratar dataset persistido (si existe).
       const dsRes = await fetch(`/api/production/templates/${templateId}/datasets`);
@@ -278,7 +310,7 @@ export default function ProducirPage() {
     } finally {
       setLoading(false);
     }
-  }, [templateId, router, fetchAdaptations, fetchBrandKits]);
+  }, [templateId, router, fetchAdaptationCount, fetchBrandKits]);
 
   useEffect(() => {
     if (sessionStatus === "loading") return;
@@ -1116,7 +1148,7 @@ export default function ProducirPage() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {adaptations.length > 0 && (
+              {adaptationsLoaded && adaptations.length > 0 && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -1150,10 +1182,34 @@ export default function ProducirPage() {
             </div>
           </div>
 
-          {adaptations.length === 0 ? (
+          {adaptationCount === 0 ? (
             <p className="text-sm text-muted-foreground py-6 text-center">
               Aún no hay adaptaciones. Empieza agregando uno o varios formatos.
             </p>
+          ) : !adaptationsLoaded ? (
+            // Lazy load: el botón muestra el conteo. Click renderea las
+            // cards (cada una hace reflow + token resolve + layer render).
+            <div className="flex flex-col items-center py-8 gap-3">
+              <p className="text-sm text-muted-foreground">
+                Este template tiene{" "}
+                <span className="text-foreground font-medium">{adaptationCount}</span>{" "}
+                {adaptationCount === 1 ? "adaptación" : "adaptaciones"}.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={fetchAdaptations}
+                disabled={adaptationsLoading}
+                className="gap-1"
+              >
+                {adaptationsLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Rocket className="h-4 w-4" />
+                )}
+                Ver adaptaciones
+              </Button>
+            </div>
           ) : (
             <div className="space-y-5">
               {groupAdaptationsByChannel(adaptations).map((group) => (
