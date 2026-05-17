@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
-import { ResultSetHeader } from "mysql2";
+import { ResultSetHeader, RowDataPacket } from "mysql2";
 
 const VALID_FIT_MODES = ["contain", "cover", "width", "height", "responsive"] as const;
 type FitMode = (typeof VALID_FIT_MODES)[number];
+
+interface AdaptationFitRow extends RowDataPacket {
+  id: number;
+  fit_mode: FitMode;
+  overrides_json: string | null;
+}
 
 // PATCH - Update mutable fields of an adaptation (admin only). For now just
 // fit_mode; will expand to overrides_json and sort_order as features land.
@@ -83,7 +89,17 @@ export async function PATCH(
       return NextResponse.json({ error: "Adaptación no encontrada" }, { status: 404 });
     }
 
-    return NextResponse.json({ success: true });
+    // Read-back: devolvemos los valores canónicos persistidos para que el
+    // cliente confirme que la BD quedó como espera (en lugar de quedarse con
+    // la suposición optimista). Si algún día el UPDATE se filtra silenciosa-
+    // mente, el cliente lo detecta acá.
+    const [rows] = await pool.execute<AdaptationFitRow[]>(
+      `SELECT id, fit_mode, overrides_json
+         FROM production_template_adaptations
+        WHERE id = ?`,
+      [adaptationId]
+    );
+    return NextResponse.json({ success: true, adaptation: rows[0] ?? null });
   } catch (error) {
     console.error("Error actualizando adaptación:", error);
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });

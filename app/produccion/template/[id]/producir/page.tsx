@@ -489,21 +489,47 @@ export default function ProducirPage() {
     ? substituteVariables(definition, previewRow)
     : definition;
 
+  const [fitModeError, setFitModeError] = useState<string | null>(null);
   const handleFitModeChange = async (adaptationId: number, fitMode: FitMode) => {
+    setFitModeError(null);
     // Optimistic update.
     setAdaptations((cur) =>
       cur.map((a) => (a.id === adaptationId ? { ...a, fit_mode: fitMode } : a))
     );
-    const res = await fetch(
-      `/api/production/templates/${templateId}/adaptations/${adaptationId}`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fit_mode: fitMode }),
+    try {
+      const res = await fetch(
+        `/api/production/templates/${templateId}/adaptations/${adaptationId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fit_mode: fitMode }),
+        }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        console.error("PATCH fit_mode failed:", res.status, body);
+        setFitModeError(
+          body?.error || `No se pudo guardar el fit (HTTP ${res.status})`
+        );
+        // Rollback usando el valor canónico de la BD.
+        fetchAdaptations();
+        return;
       }
-    );
-    if (!res.ok) {
-      // Rollback on error.
+      // Read-back: el endpoint devuelve la fila actual; sincronizamos el
+      // valor local con el persistido por si la BD canónicamente quedó en
+      // otro estado del que asumimos.
+      const data = await res.json().catch(() => null);
+      if (data?.adaptation?.fit_mode) {
+        const canonical = data.adaptation.fit_mode as FitMode;
+        setAdaptations((cur) =>
+          cur.map((a) =>
+            a.id === adaptationId ? { ...a, fit_mode: canonical } : a
+          )
+        );
+      }
+    } catch (err) {
+      console.error("PATCH fit_mode network error:", err);
+      setFitModeError("Error de red al guardar el fit");
       fetchAdaptations();
     }
   };
@@ -793,6 +819,19 @@ export default function ProducirPage() {
               </div>
             )}
           </section>
+        )}
+
+        {fitModeError && (
+          <div className="bg-red-500/10 border border-red-500/30 text-red-300 text-xs rounded-lg px-3 py-2 flex items-center justify-between">
+            <span>{fitModeError}</span>
+            <button
+              type="button"
+              onClick={() => setFitModeError(null)}
+              className="text-red-300/80 hover:text-red-300"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
         )}
 
         {/* Adaptations list */}
