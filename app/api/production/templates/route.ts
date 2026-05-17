@@ -13,6 +13,8 @@ import {
 interface TemplateRow extends RowDataPacket {
   id: number;
   production_project_id: number;
+  design_id: number | null;
+  design_name: string | null;
   name: string;
   description: string | null;
   base_width: number;
@@ -45,14 +47,17 @@ export async function GET(request: NextRequest) {
     }
 
     const [rows] = await pool.execute<TemplateRow[]>(
-      `SELECT pt.id, pt.production_project_id, pt.name, pt.description,
+      `SELECT pt.id, pt.production_project_id, pt.design_id, pt.name, pt.description,
               pt.base_width, pt.base_height, pt.thumbnail_url, pt.brand_kit_id,
               pt.status, pt.version, pt.created_by, pt.created_at, pt.updated_at,
+              d.name AS design_name,
               (SELECT COUNT(*) FROM production_template_adaptations a
                  WHERE a.template_id = pt.id) AS adaptation_count
          FROM production_templates pt
+         LEFT JOIN production_designs d
+                ON d.id = pt.design_id AND d.deleted_at IS NULL
         WHERE pt.production_project_id = ? AND pt.deleted_at IS NULL
-        ORDER BY pt.updated_at DESC`,
+        ORDER BY pt.design_id IS NULL ASC, pt.design_id ASC, pt.updated_at DESC`,
       [projectId]
     );
 

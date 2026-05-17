@@ -8,6 +8,7 @@ import { parseBody } from "@/lib/api-utils";
 interface TemplateRow extends RowDataPacket {
   id: number;
   production_project_id: number;
+  design_id: number | null;
   name: string;
   description: string | null;
   base_width: number;
@@ -33,7 +34,7 @@ export async function GET(
     }
     const { id } = await params;
     const [rows] = await pool.execute<TemplateRow[]>(
-      `SELECT id, production_project_id, name, description, base_width, base_height,
+      `SELECT id, production_project_id, design_id, name, description, base_width, base_height,
               definition_json, thumbnail_url, brand_kit_id, status, version,
               created_by, created_at, updated_at
          FROM production_templates
@@ -75,6 +76,7 @@ export async function PUT(
       base_width: z.number().int().positive().max(10000).optional(),
       base_height: z.number().int().positive().max(10000).optional(),
       brand_kit_id: z.number().int().positive().nullable().optional(),
+      design_id: z.number().int().positive().nullable().optional(),
       status: z.enum(["draft", "published", "archived"]).optional(),
       thumbnail_url: z.string().url().max(1000).nullable().optional(),
       definition: z.unknown().optional(),
@@ -91,6 +93,7 @@ export async function PUT(
       "base_width",
       "base_height",
       "brand_kit_id",
+      "design_id",
       "status",
       "thumbnail_url",
     ] as const) {
