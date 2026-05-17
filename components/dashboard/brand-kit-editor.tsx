@@ -39,6 +39,20 @@ function uniqueName(base: string, taken: string[]): string {
   return `${slug}-${i}`;
 }
 
+// Build a slug from a label, ensuring uniqueness against the names of every
+// item except the one at `currentIdx` (so renaming an item to its own current
+// slug doesn't trip the dedupe). Used when typing the label updates the slug
+// transparently — the slug is the identifier used in token refs like
+// "{logo.primary}" but the user shouldn't have to think about it.
+function deriveSlug<T extends { name: string }>(
+  label: string,
+  items: T[],
+  currentIdx: number,
+): string {
+  const others = items.map((it, i) => (i === currentIdx ? "" : it.name)).filter(Boolean);
+  return uniqueName(label, others);
+}
+
 export function BrandKitEditor({ kit, onSaved, onCancel }: Props) {
   const [name, setName] = useState(kit.name);
   const [isDefault, setIsDefault] = useState(kit.is_default);
@@ -194,16 +208,12 @@ function ColorsSection({
           <input
             type="text"
             value={it.label}
-            onChange={(e) => update(idx, { label: e.target.value })}
+            onChange={(e) => {
+              const label = e.target.value;
+              update(idx, { label, name: deriveSlug(label, items, idx) });
+            }}
             className="flex-1 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs"
-            placeholder="Etiqueta"
-          />
-          <input
-            type="text"
-            value={it.name}
-            onChange={(e) => update(idx, { name: slugify(e.target.value) })}
-            className="w-32 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs font-mono text-muted-foreground"
-            placeholder="primary"
+            placeholder="Nombre del color"
           />
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => remove(idx)}>
             <Trash2 className="h-3.5 w-3.5 text-red-400" />
@@ -245,11 +255,14 @@ function FontsSection({
           <input
             type="text"
             value={it.label}
-            onChange={(e) => update(idx, { label: e.target.value })}
-            className="col-span-2 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs"
-            placeholder="Etiqueta"
+            onChange={(e) => {
+              const label = e.target.value;
+              update(idx, { label, name: deriveSlug(label, items, idx) });
+            }}
+            className="col-span-3 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs"
+            placeholder="Nombre de la tipografía"
           />
-          <div className="col-span-5">
+          <div className="col-span-6">
             <FontPicker
               value={it.fontFamily}
               onChange={(v) => update(idx, { fontFamily: v })}
@@ -264,13 +277,6 @@ function FontsSection({
             onChange={(e) => update(idx, { fontWeight: Number(e.target.value) })}
             className="col-span-2 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs"
             placeholder="Peso"
-          />
-          <input
-            type="text"
-            value={it.name}
-            onChange={(e) => update(idx, { name: slugify(e.target.value) })}
-            className="col-span-2 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs font-mono text-muted-foreground"
-            placeholder="display"
           />
           <Button variant="ghost" size="icon" className="h-7 w-7 col-span-1" onClick={() => remove(idx)}>
             <Trash2 className="h-3.5 w-3.5 text-red-400" />
@@ -309,9 +315,12 @@ function ScalesSection({
           <input
             type="text"
             value={it.label}
-            onChange={(e) => update(idx, { label: e.target.value })}
+            onChange={(e) => {
+              const label = e.target.value;
+              update(idx, { label, name: deriveSlug(label, items, idx) });
+            }}
             className="flex-1 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs"
-            placeholder="Etiqueta"
+            placeholder="Nombre de la escala"
           />
           <input
             type="number"
@@ -320,13 +329,6 @@ function ScalesSection({
             onChange={(e) => update(idx, { fontSize: Math.max(1, Number(e.target.value)) })}
             className="w-20 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs"
             placeholder="px"
-          />
-          <input
-            type="text"
-            value={it.name}
-            onChange={(e) => update(idx, { name: slugify(e.target.value) })}
-            className="w-32 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs font-mono text-muted-foreground"
-            placeholder="lg"
           />
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => remove(idx)}>
             <Trash2 className="h-3.5 w-3.5 text-red-400" />
@@ -365,9 +367,12 @@ function SpacingSection({
           <input
             type="text"
             value={it.label}
-            onChange={(e) => update(idx, { label: e.target.value })}
+            onChange={(e) => {
+              const label = e.target.value;
+              update(idx, { label, name: deriveSlug(label, items, idx) });
+            }}
             className="flex-1 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs"
-            placeholder="Etiqueta"
+            placeholder="Nombre del spacing"
           />
           <input
             type="number"
@@ -376,13 +381,6 @@ function SpacingSection({
             onChange={(e) => update(idx, { value: Math.max(0, Number(e.target.value)) })}
             className="w-20 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs"
             placeholder="px"
-          />
-          <input
-            type="text"
-            value={it.name}
-            onChange={(e) => update(idx, { name: slugify(e.target.value) })}
-            className="w-32 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs font-mono text-muted-foreground"
-            placeholder="md"
           />
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => remove(idx)}>
             <Trash2 className="h-3.5 w-3.5 text-red-400" />
@@ -422,6 +420,8 @@ function LogosSection({
         <LogoRow
           key={idx}
           item={it}
+          items={items}
+          idx={idx}
           clientId={clientId}
           onUpdate={(patch) => update(idx, patch)}
           onRemove={() => remove(idx)}
@@ -436,11 +436,15 @@ function LogosSection({
 
 function LogoRow({
   item,
+  items,
+  idx,
   clientId,
   onUpdate,
   onRemove,
 }: {
   item: LogoToken;
+  items: LogoToken[];
+  idx: number;
   clientId: number;
   onUpdate: (patch: Partial<LogoToken>) => void;
   onRemove: () => void;
@@ -448,8 +452,14 @@ function LogoRow({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const dragCounterRef = useRef(0);
 
   const handleFile = async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      setUploadError("El archivo debe ser una imagen");
+      return;
+    }
     setUploadError(null);
     setUploading(true);
     try {
@@ -480,8 +490,47 @@ function LogoRow({
     }
   };
 
+  // Use a counter to handle nested drag events from child elements so the
+  // highlight only clears when the pointer actually leaves the row.
+  const onDragEnter = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    dragCounterRef.current += 1;
+    if (dragCounterRef.current === 1) setDragOver(true);
+  };
+  const onDragLeave = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setDragOver(false);
+    }
+  };
+  const onDragOver = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  };
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleFile(file);
+  };
+
   return (
-    <div className="space-y-1">
+    <div
+      className={cn(
+        "space-y-1 rounded p-1 -m-1 border border-transparent transition-colors",
+        dragOver && "border-primary/60 bg-primary/5"
+      )}
+      onDragEnter={onDragEnter}
+      onDragLeave={onDragLeave}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
       <div className="flex items-center gap-2">
         <div className="w-10 h-10 rounded border border-border/50 bg-background flex items-center justify-center overflow-hidden shrink-0">
           {item.src ? (
@@ -494,16 +543,19 @@ function LogoRow({
         <input
           type="text"
           value={item.label}
-          onChange={(e) => onUpdate({ label: e.target.value })}
-          className={cn("bg-muted border border-border/50 rounded px-2 py-1.5 text-xs", "w-32")}
-          placeholder="Etiqueta"
+          onChange={(e) => {
+            const label = e.target.value;
+            onUpdate({ label, name: deriveSlug(label, items, idx) });
+          }}
+          className={cn("bg-muted border border-border/50 rounded px-2 py-1.5 text-xs", "w-40")}
+          placeholder="Nombre del logo"
         />
         <input
           type="text"
           value={item.src}
           onChange={(e) => onUpdate({ src: e.target.value })}
           className="flex-1 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs"
-          placeholder="https://… o subir abajo"
+          placeholder="Subir o arrastrar"
         />
         <input
           ref={fileInputRef}
@@ -530,13 +582,6 @@ function LogoRow({
           )}
           <span className="text-[11px]">Subir</span>
         </Button>
-        <input
-          type="text"
-          value={item.name}
-          onChange={(e) => onUpdate({ name: slugify(e.target.value) })}
-          className="w-32 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs font-mono text-muted-foreground"
-          placeholder="primary"
-        />
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onRemove}>
           <Trash2 className="h-3.5 w-3.5 text-red-400" />
         </Button>
