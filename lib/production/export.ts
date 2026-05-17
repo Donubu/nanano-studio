@@ -42,12 +42,17 @@ export async function waitForFontsAndImages(node: HTMLElement): Promise<void> {
 
 export async function captureNodeToJpeg(node: HTMLElement): Promise<Blob> {
   await waitForFontsAndImages(node);
-  // toJpeg devuelve un data URL; lo convertimos a Blob para ZIP / descarga.
+  // skipFonts: true evita que html-to-image intente leer cssRules de las
+  // stylesheets cross-origin (Google Fonts) — eso lanza SecurityError en
+  // navegadores Chromium. Las fuentes ya están cargadas en el document
+  // vía <link>, así que el foreignObject del SVG las usa al renderear
+  // sin necesidad de embeber @font-face.
   const dataUrl = await toJpeg(node, {
     quality: JPG_QUALITY,
     pixelRatio: 1,
     cacheBust: true,
     backgroundColor: "#ffffff",
+    skipFonts: true,
   });
   const res = await fetch(dataUrl);
   return res.blob();
