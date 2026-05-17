@@ -154,7 +154,12 @@ export default function AdaptationEditorPage() {
         }
       );
       if (!res.ok) {
-        throw new Error(`Save failed: ${res.status}`);
+        // Leemos el cuerpo de error del servidor para que el dev sepa qué
+        // pasó (validación / 404 / 500). Antes solo veíamos el HTTP code.
+        const body = await res.json().catch(() => null);
+        const detail = body?.error ? ` — ${body.error}` : "";
+        console.error("PATCH override failed:", res.status, body);
+        throw new Error(`Save failed: ${res.status}${detail}`);
       }
     },
     [templateId, adaptId]
