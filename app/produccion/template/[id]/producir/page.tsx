@@ -1090,26 +1090,39 @@ export default function ProducirPage() {
 
           {adaptations.length === 0 ? (
             <p className="text-sm text-muted-foreground py-6 text-center">
-              Aún no hay adaptaciones. Empezá agregando uno o varios formatos.
+              Aún no hay adaptaciones. Empieza agregando uno o varios formatos.
             </p>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {adaptations.map((a) => (
-                <AdaptationCard
-                  key={a.id}
-                  adaptation={a}
-                  definition={definition}
-                  brandKit={brandKitContent}
-                  dataRow={previewRow}
-                  isEditing={editingId === a.id}
-                  onEdit={() => setEditingId(a.id)}
-                  onDelete={() => handleDelete(a.id)}
-                  onFitModeChange={(m) => handleFitModeChange(a.id, m)}
-                  onDownload={() => handleDownloadSingle(a)}
-                  downloading={singleDownloadingId === a.id}
-                  batchInProgress={!!batchProgress}
-                  deleting={deletingId === a.id}
-                />
+            <div className="space-y-5">
+              {groupAdaptationsByChannel(adaptations).map((group) => (
+                <div key={group.channel}>
+                  <h4 className="text-xs uppercase tracking-wider text-muted-foreground mb-2">
+                    {CHANNEL_LABEL[group.channel] ?? group.channel}
+                    <span className="text-muted-foreground/60 ml-2 normal-case tracking-normal">
+                      ({group.items.length}{" "}
+                      {group.items.length === 1 ? "pieza" : "piezas"})
+                    </span>
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                    {group.items.map((a) => (
+                      <AdaptationCard
+                        key={a.id}
+                        adaptation={a}
+                        definition={definition}
+                        brandKit={brandKitContent}
+                        dataRow={previewRow}
+                        isEditing={editingId === a.id}
+                        onEdit={() => setEditingId(a.id)}
+                        onDelete={() => handleDelete(a.id)}
+                        onFitModeChange={(m) => handleFitModeChange(a.id, m)}
+                        onDownload={() => handleDownloadSingle(a)}
+                        downloading={singleDownloadingId === a.id}
+                        batchInProgress={!!batchProgress}
+                        deleting={deletingId === a.id}
+                      />
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           )}
@@ -1219,146 +1232,147 @@ function AdaptationCard({
   );
   const hasManualOverride = !!parseOverrides(adaptation.overrides_json).manual_layout;
 
-  // Mostramos el banner como protagonista y ocultamos controles + badges
-  // hasta que el productor pase el mouse encima. Cuando esta card es la que
-  // está siendo editada, los controles quedan siempre visibles porque ya es
-  // un contexto explícito.
-  const showControls = isEditing;
-
   return (
     <div
       className={cn(
-        "bg-muted/50 rounded-lg p-3 flex flex-col gap-2 group border transition-colors relative",
+        "bg-muted/50 rounded-lg flex flex-col group border transition-colors overflow-hidden",
         isEditing
           ? "border-primary ring-2 ring-primary/40"
           : "border-border/60 hover:border-foreground/30"
       )}
     >
-      <button
-        type="button"
-        onClick={onEdit}
-        className="flex items-end justify-center bg-background/40 rounded w-full hover:bg-background/60 transition-colors"
-        style={{ minHeight: TARGET_H + 16 }}
-        title={isEditing ? "Esta adaptación está siendo editada" : "Click para editar esta adaptación"}
-      >
-        <AdaptationPreview
-          adaptation={adaptation}
-          definition={definition}
-          brandKit={brandKit}
-          targetH={TARGET_H}
-          targetW={TARGET_W}
-          dataRow={dataRow}
-        />
-      </button>
-
-      {/* Caption mínimo siempre visible: solo el nombre y dimensiones. */}
-      <div className="min-w-0">
-        <p className="text-sm font-medium truncate">{label}</p>
-        <p className="text-xs text-muted-foreground mt-0.5">
+      {/* Title bar: nombre + dims arriba, siempre visible. */}
+      <div className="px-3 pt-2 pb-1.5 flex items-baseline justify-between gap-2 min-w-0">
+        <p className="text-sm font-medium truncate flex-1 min-w-0">{label}</p>
+        <span className="text-[10px] text-muted-foreground shrink-0 font-mono">
           {adaptation.width}×{adaptation.height}
-        </p>
+        </span>
       </div>
 
-      {/* Controles + badges: ocultos por defecto, visibles al hover (o
-          siempre cuando la card está activa). */}
+      {/* Banner area con overlay hover. */}
       <div
-        className={cn(
-          "flex flex-col gap-2 transition-opacity",
-          showControls
-            ? "opacity-100"
-            : "opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto"
-        )}
+        className="relative bg-background/40"
+        style={{ minHeight: TARGET_H + 16 }}
       >
-        {channel && (
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            {CHANNEL_LABEL[channel] ?? channel}
-          </span>
-        )}
-        {hasManualOverride && (
-          <div className="flex items-start gap-1.5 text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded px-2 py-1">
-            <Pencil className="h-3 w-3 shrink-0 mt-0.5" />
-            <span>Ajuste manual aplicado</span>
+        <button
+          type="button"
+          onClick={onEdit}
+          className="flex items-end justify-center w-full h-full hover:bg-background/60 transition-colors"
+          style={{ minHeight: TARGET_H + 16 }}
+          title={isEditing ? "Esta adaptación está siendo editada" : "Click para editar esta adaptación"}
+        >
+          <AdaptationPreview
+            adaptation={adaptation}
+            definition={definition}
+            brandKit={brandKit}
+            targetH={TARGET_H}
+            targetW={TARGET_W}
+            dataRow={dataRow}
+          />
+        </button>
+
+        {/* Overlay sobre el banner: badges + canal + controles. Por defecto
+            oculto, fade-in al hover. Cuando la card está siendo editada los
+            controles quedan visibles permanentemente. */}
+        <div
+          className={cn(
+            "absolute inset-0 flex flex-col justify-between p-2 gap-2",
+            "bg-background/85 backdrop-blur-sm transition-opacity",
+            isEditing
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto"
+          )}
+        >
+          <div className="flex items-start justify-between gap-2 min-w-0">
+            <div className="flex flex-col gap-1 min-w-0">
+              {channel && (
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {CHANNEL_LABEL[channel] ?? channel}
+                </span>
+              )}
+              {hasManualOverride && (
+                <div className="flex items-start gap-1.5 text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded px-1.5 py-0.5">
+                  <Pencil className="h-3 w-3 shrink-0 mt-0.5" />
+                  <span>Ajuste manual</span>
+                </div>
+              )}
+              {extremeMismatch && !hasManualOverride && (
+                <div
+                  className="flex items-start gap-1.5 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5"
+                  title="Este formato tiene un aspect ratio muy distinto al del master."
+                >
+                  <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+                  <span>Aspect muy distinto</span>
+                </div>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 hover:bg-red-500/20 shrink-0"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              disabled={deleting}
+              title="Eliminar adaptación"
+            >
+              {deleting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5 text-red-400" />
+              )}
+            </Button>
           </div>
-        )}
-        {extremeMismatch && !hasManualOverride && (
-          <div
-            className="flex items-start gap-1.5 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1"
-            title="Este formato tiene un aspect ratio muy distinto al del master."
-          >
-            <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
-            <span>
-              Aspect muy distinto al master. Probablemente necesita ajuste manual.
-            </span>
+          <div className="flex items-center gap-1">
+            <select
+              value={adaptation.fit_mode}
+              onChange={(e) => onFitModeChange(e.target.value as FitMode)}
+              disabled={hasManualOverride}
+              className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-[11px] disabled:opacity-50"
+              title={
+                hasManualOverride
+                  ? "El ajuste manual sobreescribe el fit mode"
+                  : FIT_MODE_DESCRIPTION[adaptation.fit_mode]
+              }
+            >
+              {(Object.keys(FIT_MODE_LABEL) as FitMode[]).map((mode) => (
+                <option key={mode} value={mode}>
+                  Fit: {FIT_MODE_LABEL[mode]}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={onEdit}
+              className={cn(
+                "text-[11px] px-2 py-1 rounded border transition-colors flex items-center gap-1",
+                isEditing
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border/50 hover:bg-muted hover:border-foreground/30"
+              )}
+              title="Editar manualmente esta pieza en el editor principal"
+            >
+              <Pencil className="h-3 w-3" />
+              {isEditing ? "Editando" : "Ajustar"}
+            </button>
+            <button
+              type="button"
+              onClick={onDownload}
+              disabled={downloading || batchInProgress}
+              className="text-[11px] px-2 py-1 rounded border border-border/50 hover:bg-muted hover:border-foreground/30 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Descargar como JPG"
+            >
+              {downloading ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Download className="h-3 w-3" />
+              )}
+              JPG
+            </button>
           </div>
-        )}
-        <div className="flex items-center gap-1">
-          <select
-            value={adaptation.fit_mode}
-            onChange={(e) => onFitModeChange(e.target.value as FitMode)}
-            disabled={hasManualOverride}
-            className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-[11px] disabled:opacity-50"
-            title={
-              hasManualOverride
-                ? "El ajuste manual sobreescribe el fit mode"
-                : FIT_MODE_DESCRIPTION[adaptation.fit_mode]
-            }
-          >
-            {(Object.keys(FIT_MODE_LABEL) as FitMode[]).map((mode) => (
-              <option key={mode} value={mode}>
-                Fit: {FIT_MODE_LABEL[mode]}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={onEdit}
-            className={cn(
-              "text-[11px] px-2 py-1 rounded border transition-colors flex items-center gap-1",
-              isEditing
-                ? "border-primary bg-primary/10 text-foreground"
-                : "border-border/50 hover:bg-muted hover:border-foreground/30"
-            )}
-            title="Editar manualmente esta pieza en el editor principal"
-          >
-            <Pencil className="h-3 w-3" />
-            {isEditing ? "Editando" : "Ajustar"}
-          </button>
-          <button
-            type="button"
-            onClick={onDownload}
-            disabled={downloading || batchInProgress}
-            className="text-[11px] px-2 py-1 rounded border border-border/50 hover:bg-muted hover:border-foreground/30 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Descargar como JPG"
-          >
-            {downloading ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <Download className="h-3 w-3" />
-            )}
-            JPG
-          </button>
         </div>
       </div>
-
-      {/* Eliminar: botón flotante arriba a la derecha, hover-only. Sale del
-          flujo de controles para que el thumb mantenga la altura. */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="absolute top-2 right-2 h-7 w-7 hover:bg-red-500/20 bg-background/80 backdrop-blur opacity-0 group-hover:opacity-100 transition-opacity"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
-        disabled={deleting}
-        title="Eliminar adaptación"
-      >
-        {deleting ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        ) : (
-          <Trash2 className="h-3.5 w-3.5 text-red-400" />
-        )}
-      </Button>
     </div>
   );
 }
@@ -2025,6 +2039,54 @@ function PresetShape({
 }
 
 function noop() {}
+
+// Agrupa adaptaciones por canal del preset (custom queda al final). Dentro
+// de cada canal las ordenamos por orientación (horizontal, square, vertical)
+// y luego por área (de menor a mayor). Esto produce una grilla legible en la
+// que el productor encuentra rápido el formato que busca.
+const ORIENTATION_ORDER: Record<string, number> = {
+  horizontal: 0,
+  square: 1,
+  vertical: 2,
+};
+function adaptationOrientation(a: Adaptation): "horizontal" | "square" | "vertical" {
+  if (a.preset_orientation) return a.preset_orientation;
+  const r = a.width / a.height;
+  if (Math.abs(r - 1) < 0.05) return "square";
+  return r > 1 ? "horizontal" : "vertical";
+}
+function groupAdaptationsByChannel(
+  adaptations: Adaptation[],
+): { channel: string; items: Adaptation[] }[] {
+  const map = new Map<string, Adaptation[]>();
+  for (const a of adaptations) {
+    const channel =
+      a.preset_channel || (a.format_preset_id == null ? "custom" : "other");
+    const arr = map.get(channel) ?? [];
+    arr.push(a);
+    map.set(channel, arr);
+  }
+  const channels = Array.from(map.keys()).sort((a, b) => {
+    const ai = CHANNEL_ORDER.indexOf(a);
+    const bi = CHANNEL_ORDER.indexOf(b);
+    // custom queda al final
+    if (a === "custom") return 1;
+    if (b === "custom") return -1;
+    if (ai === -1 && bi === -1) return a.localeCompare(b);
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
+  return channels.map((channel) => {
+    const items = (map.get(channel) ?? []).slice().sort((x, y) => {
+      const ox = ORIENTATION_ORDER[adaptationOrientation(x)] ?? 99;
+      const oy = ORIENTATION_ORDER[adaptationOrientation(y)] ?? 99;
+      if (ox !== oy) return ox - oy;
+      return x.width * x.height - y.width * y.height;
+    });
+    return { channel, items };
+  });
+}
 
 // Cuando exportamos un batch por filas de un dataset, nombramos la subcarpeta
 // con un identificador derivado de la fila: probamos columnas comunes
