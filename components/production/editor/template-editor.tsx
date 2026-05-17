@@ -22,6 +22,9 @@ interface Props {
   projectId?: number;
   allBrandKits?: BrandKit[];
   onBrandKitsChange?: () => void;
+  // Custom node rendered above the canvas en lugar del PreviewThumbnails
+  // default. Lo usa producir para mostrar variantes reales del master.
+  topAccessory?: React.ReactNode;
 }
 
 export function TemplateEditor({
@@ -34,6 +37,7 @@ export function TemplateEditor({
   projectId,
   allBrandKits = [],
   onBrandKitsChange,
+  topAccessory,
 }: Props) {
   const editor = useTemplateEditor({
     initial,
@@ -194,13 +198,19 @@ export function TemplateEditor({
           />
         </div>
         <div className="flex flex-col flex-1 min-w-0 min-h-0">
-          <PreviewThumbnails
-            definition={editor.definition}
-            brandKit={brandKit}
-            presets={previewPresets}
-            activePreviewId={activePreviewId}
-            onSelectPreview={setActivePreviewId}
-          />
+          {/* Cuando el caller pasa un topAccessory (ej. la strip de
+              variantes en producir), reemplaza al PreviewThumbnails
+              auto-generated. Así la zona arriba del canvas sirve para
+              cambiar de variante real en vez de ver previews read-only. */}
+          {topAccessory ?? (
+            <PreviewThumbnails
+              definition={editor.definition}
+              brandKit={brandKit}
+              presets={previewPresets}
+              activePreviewId={activePreviewId}
+              onSelectPreview={setActivePreviewId}
+            />
+          )}
           {previewSize && (
             <div className="flex items-center justify-center gap-2 px-3 py-1.5 text-xs bg-blue-500/10 text-blue-300 border-b border-blue-500/20">
               <span>
