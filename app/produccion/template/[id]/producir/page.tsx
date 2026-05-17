@@ -482,12 +482,12 @@ export default function ProducirPage() {
     setSelectedRowIdx(null);
   };
 
-  // Master efectivo a mostrar/exportar según el row seleccionado para preview.
+  // La fila activa del dataset (si la hay) se propaga a cada AdaptationCard
+  // como dataRow. La sustitución de variables se hace adentro del renderer
+  // tanto para el master como para el manual_layout — así un override manual
+  // también respeta el dataset sin que el caller tenga que pre-procesar.
   const previewRow: DataRow | null =
     dataset && selectedRowIdx !== null ? dataset.rows[selectedRowIdx] ?? null : null;
-  const effectiveDefinition: TemplateDefinition = previewRow
-    ? substituteVariables(definition, previewRow)
-    : definition;
 
   const [fitModeError, setFitModeError] = useState<string | null>(null);
   const handleFitModeChange = async (adaptationId: number, fitMode: FitMode) => {
@@ -899,9 +899,10 @@ export default function ProducirPage() {
                 <AdaptationCard
                   key={a.id}
                   adaptation={a}
-                  definition={effectiveDefinition}
+                  definition={definition}
                   brandKit={brandKitContent}
                   templateId={templateId}
+                  dataRow={previewRow}
                   onDelete={() => handleDelete(a.id)}
                   onFitModeChange={(m) => handleFitModeChange(a.id, m)}
                   onDownload={() => handleDownloadSingle(a)}
@@ -953,12 +954,9 @@ export default function ProducirPage() {
           <AdaptationRenderer
             ref={renderRef}
             adaptation={currentlyRendering.adaptation}
-            master={
-              currentlyRendering.row
-                ? substituteVariables(definition, currentlyRendering.row)
-                : definition
-            }
+            master={definition}
             brandKit={brandKitContent}
+            dataRow={currentlyRendering.row}
           />
         )}
       </div>
@@ -1025,6 +1023,7 @@ function AdaptationCard({
   definition,
   brandKit,
   templateId,
+  dataRow,
   onDelete,
   onFitModeChange,
   onDownload,
@@ -1036,6 +1035,7 @@ function AdaptationCard({
   definition: TemplateDefinition;
   brandKit: BrandKitContent;
   templateId: string;
+  dataRow?: DataRow | null;
   onDelete: () => void;
   onFitModeChange: (m: FitMode) => void;
   onDownload: () => void;
@@ -1078,6 +1078,7 @@ function AdaptationCard({
           brandKit={brandKit}
           targetH={TARGET_H}
           targetW={TARGET_W}
+          dataRow={dataRow}
         />
       </div>
       <div className="flex items-start justify-between gap-2">
@@ -1179,12 +1180,16 @@ function AdaptationPreview({
   brandKit,
   targetH,
   targetW,
+  dataRow,
 }: {
   adaptation: Adaptation;
   definition: TemplateDefinition;
   brandKit: BrandKitContent;
   targetH: number;
   targetW: number;
+  // Si hay fila activa del dataset, sus valores reemplazan las variables
+  // {{var}} tanto del master como del manual_layout antes de renderizar.
+  dataRow?: DataRow | null;
 }) {
   const adaptW = adaptation.width;
   const adaptH = adaptation.height;
@@ -1192,9 +1197,15 @@ function AdaptationPreview({
   const cssW = adaptW * thumbScale;
   const cssH = adaptH * thumbScale;
 
-  // Si la adaptación tiene un ajuste manual guardado, se renderiza ese
-  // árbol directamente (ignora fit_mode automático).
-  const manualLayout = parseOverrides(adaptation.overrides_json).manual_layout;
+  // Aplicamos la sustitución en un solo lugar — el master que llega como
+  // prop podría no estar sustituido (el caller pasa el master crudo y nos
+  // delega el binding) y el manual_layout siempre se lee del adaptation
+  // crudo, así que se sustituye acá también.
+  const effectiveMaster = dataRow ? substituteVariables(definition, dataRow) : definition;
+  const rawManualLayout = parseOverrides(adaptation.overrides_json).manual_layout;
+  const manualLayout = rawManualLayout && dataRow
+    ? substituteVariables(rawManualLayout, dataRow)
+    : rawManualLayout;
   if (manualLayout) {
     const resolved = resolveTreeTokens(manualLayout, brandKit);
     const bg =
@@ -1232,7 +1243,7 @@ function AdaptationPreview({
   }
 
   if (adaptation.fit_mode === "responsive") {
-    const reflowed = reflowForPreview(definition, { w: adaptW, h: adaptH });
+    const reflowed = reflowForPreview(effectiveMaster, { w: adaptW, h: adaptH });
     const resolved = resolveTreeTokens(reflowed, brandKit);
     const bg =
       resolved.background && resolved.background.type === "color"
@@ -1271,8 +1282,8 @@ function AdaptationPreview({
   // Scale-based fit modes: render the master at its native size with a
   // uniform scale and position it inside the adaptation canvas. The
   // adaptation canvas does the clipping via overflow:hidden.
-  const masterW = definition.size.w;
-  const masterH = definition.size.h;
+  const masterW = effectiveMaster.size.w;
+  const masterH = effectiveMaster.size.h;
   const ratioW = adaptW / masterW;
   const ratioH = adaptH / masterH;
   let fitScale = 1;
@@ -1303,7 +1314,7 @@ function AdaptationPreview({
   const offsetX = centerX ? (adaptW - scaledW) / 2 : 0;
   const offsetY = centerY ? (adaptH - scaledH) / 2 : 0;
 
-  const resolved = resolveTreeTokens(definition, brandKit);
+  const resolved = resolveTreeTokens(effectiveMaster, brandKit);
   const masterBg =
     resolved.background && resolved.background.type === "color"
       ? resolved.background.value
