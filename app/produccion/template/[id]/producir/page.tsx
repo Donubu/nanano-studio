@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, CSSProperties } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import Link from "next/link";
 import JSZip from "jszip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -88,6 +87,7 @@ interface Template {
   id: number;
   production_project_id: number;
   design_id: number | null;
+  linked_to_template_id: number | null;
   name: string;
   base_width: number;
   base_height: number;
@@ -105,6 +105,7 @@ interface SiblingTemplate {
   thumbnail_url: string | null;
   design_id: number | null;
   design_name: string | null;
+  linked_to_template_id: number | null;
 }
 
 interface FormatPreset {
@@ -176,9 +177,12 @@ export default function ProducirPage() {
 
   // --- Editor embebido (workspace unificado) ---
   // editingId controla qué se muestra en el editor:
-  //   null  → master del template
+  //   null  → master del template (variante activa)
   //   N     → adaptación N (override editing)
   const [editingId, setEditingId] = useState<number | null>(null);
+
+  // Modal para agregar variante del master.
+  const [showAddVariant, setShowAddVariant] = useState(false);
 
   const fetchAdaptations = useCallback(async () => {
     const res = await fetch(`/api/production/templates/${templateId}/adaptations`);
@@ -632,6 +636,96 @@ export default function ProducirPage() {
     dataset && selectedRowIdx !== null ? dataset.rows[selectedRowIdx] ?? null : null;
 
   const [fitModeError, setFitModeError] = useState<string | null>(null);
+  // --- Master variants ---
+  // El template "base" es el que tiene linked_to_template_id = NULL (o el más
+  // viejo si todos son distintos). Variantes linked se reflowean cuando el
+  // base cambia (lo hace el server en el PUT).
+  const designMembers = useMemo(() => {
+    if (!template) return [];
+    // Master actual + siblings. Lista plana ordenada por orientación luego
+    // por área (similar a las adaptaciones).
+    const all = [
+      {
+        id: template.id,
+        name: template.name,
+        base_width: template.base_width,
+        base_height: template.base_height,
+        thumbnail_url: template.thumbnail_url,
+        linked_to_template_id: template.linked_to_template_id,
+        isCurrent: true,
+      },
+      ...siblings.map((s) => ({
+        id: s.id,
+        name: s.name,
+        base_width: s.base_width,
+        base_height: s.base_height,
+        thumbnail_url: s.thumbnail_url,
+        linked_to_template_id: s.linked_to_template_id,
+        isCurrent: false,
+      })),
+    ];
+    return all.sort((a, b) => {
+      const orient = (w: number, h: number) => {
+        const r = w / h;
+        if (Math.abs(r - 1) < 0.05) return 1;
+        return r > 1 ? 0 : 2;
+      };
+      const ao = orient(a.base_width, a.base_height);
+      const bo = orient(b.base_width, b.base_height);
+      if (ao !== bo) return ao - bo;
+      return a.base_width * a.base_height - b.base_width * b.base_height;
+    });
+  }, [template, siblings]);
+
+  const handleAddVariant = useCallback(
+    async (width: number, height: number, customName?: string) => {
+      const res = await fetch(
+        `/api/production/templates/${templateId}/variants`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ width, height, name: customName }),
+        }
+      );
+      if (res.ok) {
+        const data = (await res.json()) as { id: number };
+        setShowAddVariant(false);
+        // Navegamos a la nueva variante para que el productor empiece a
+        // editarla directamente.
+        router.push(`/produccion/template/${data.id}/producir`);
+      }
+    },
+    [templateId, router]
+  );
+
+  const handleToggleLinked = useCallback(async () => {
+    if (!template) return;
+    const isCurrentlyLinked = template.linked_to_template_id != null;
+    if (isCurrentlyLinked) {
+      const ok = confirm(
+        "¿Marcar esta variante como distinta? Dejará de heredar cambios del master base."
+      );
+      if (!ok) return;
+    }
+    const res = await fetch(`/api/production/templates/${templateId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        linked_to_template_id: isCurrentlyLinked
+          ? null
+          : // Re-link al base: usamos el primer sibling como base si no había link previo.
+            // En la práctica, en este flujo solo desvincularemos; re-linking explícito
+            // queda para futuro porque requiere elegir a quién vincular.
+            null,
+      }),
+    });
+    if (res.ok) {
+      setTemplate((t) =>
+        t ? { ...t, linked_to_template_id: isCurrentlyLinked ? null : t.linked_to_template_id } : t
+      );
+    }
+  }, [template, templateId]);
+
   const handleFitModeChange = async (adaptationId: number, fitMode: FitMode) => {
     setFitModeError(null);
     // Optimistic update.
@@ -753,48 +847,95 @@ export default function ProducirPage() {
             cambia el editor a esa adaptación; el botón "Volver al master"
             arriba del editor regresa al master. */}
         <section className="bg-card rounded-xl border border-border/50 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2 border-b border-border/50 bg-muted/30">
-            <div className="flex items-center gap-2 text-xs">
-              {editingId == null ? (
-                <>
-                  <Rocket className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    Editando master
+          {/* Tabs de variantes del master. Cada variante es un template
+              separado dentro del mismo design. Hacer click en una distinta
+              navega a su /producir. "Agregar formato" crea una nueva
+              variante linked. "Marcar como distinto" desvincula la actual
+              del base. */}
+          {editingId == null && (
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50 bg-muted/30 overflow-x-auto">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
+                Master
+              </span>
+              {designMembers.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => {
+                    if (!m.isCurrent) router.push(`/produccion/template/${m.id}/producir`);
+                  }}
+                  className={cn(
+                    "flex items-center gap-1.5 text-[11px] px-2 py-1 rounded border transition-colors shrink-0",
+                    m.isCurrent
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "border-border/50 text-muted-foreground hover:bg-muted hover:border-foreground/30"
+                  )}
+                  title={
+                    m.linked_to_template_id != null
+                      ? "Variante vinculada (hereda del base)"
+                      : m.isCurrent
+                      ? "Variante actual"
+                      : "Variante distinta (layout independiente)"
+                  }
+                >
+                  {variantOrientationIcon(m.base_width, m.base_height)}
+                  <span>{variantShortLabel(m.base_width, m.base_height)}</span>
+                  <span className="text-muted-foreground/70">
+                    {m.base_width}×{m.base_height}
                   </span>
-                  <span className="text-muted-foreground/50">·</span>
-                  <span className="text-foreground font-medium">{template.name}</span>
-                  <span className="text-muted-foreground/50">·</span>
-                  <span className="text-muted-foreground">
-                    {template.base_width} × {template.base_height}
-                  </span>
-                </>
-              ) : editingAdaptation ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setEditingId(null)}
-                    className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-border/50 hover:bg-muted hover:border-foreground/40 transition-colors"
-                  >
-                    <ArrowLeft className="h-3 w-3" />
-                    Volver al master
-                  </button>
-                  <span className="text-muted-foreground/50">·</span>
-                  <span className="text-[10px] uppercase tracking-wider text-amber-300">
-                    Ajustando adaptación
-                  </span>
-                  <span className="text-foreground font-medium">
-                    {editingAdaptation.custom_name ||
-                      editingAdaptation.preset_name ||
-                      `${editingAdaptation.width}×${editingAdaptation.height}`}
-                  </span>
-                  <span className="text-muted-foreground/50">·</span>
-                  <span className="text-muted-foreground">
-                    {editingAdaptation.width}×{editingAdaptation.height}
-                  </span>
-                </>
-              ) : null}
+                  {m.linked_to_template_id != null && (
+                    <span className="text-[9px] text-emerald-400">↳</span>
+                  )}
+                </button>
+              ))}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setShowAddVariant(true)}
+                className="gap-1 h-7 px-2 text-xs shrink-0"
+                title="Agregar otra orientación al master"
+              >
+                <Plus className="h-3 w-3" /> Formato
+              </Button>
+              <div className="flex-1" />
+              {template.linked_to_template_id != null && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleToggleLinked}
+                  className="h-7 text-xs gap-1 shrink-0"
+                  title="Esta variante hereda del master base. Marcarla distinta para que tenga su propio layout."
+                >
+                  Marcar como distinto
+                </Button>
+              )}
             </div>
-          </div>
+          )}
+          {editingId != null && editingAdaptation && (
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50 bg-muted/30">
+              <button
+                type="button"
+                onClick={() => setEditingId(null)}
+                className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-border/50 hover:bg-muted hover:border-foreground/40 transition-colors"
+              >
+                <ArrowLeft className="h-3 w-3" />
+                Volver al master
+              </button>
+              <span className="text-muted-foreground/50">·</span>
+              <span className="text-[10px] uppercase tracking-wider text-amber-300">
+                Ajustando adaptación
+              </span>
+              <span className="text-foreground font-medium text-xs">
+                {editingAdaptation.custom_name ||
+                  editingAdaptation.preset_name ||
+                  `${editingAdaptation.width}×${editingAdaptation.height}`}
+              </span>
+              <span className="text-muted-foreground/50">·</span>
+              <span className="text-xs text-muted-foreground">
+                {editingAdaptation.width}×{editingAdaptation.height}
+              </span>
+            </div>
+          )}
           <div className="h-[70vh] min-h-[480px]">
             {editingId == null ? (
               <TemplateEditor
@@ -832,49 +973,6 @@ export default function ProducirPage() {
           </div>
         </section>
 
-        {/* Variantes del design (hermanos) */}
-        {siblings.length > 0 && (
-          <section className="bg-card rounded-xl border border-border/50 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h3 className="text-sm font-medium">Variantes del design</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Otros masters del mismo design. Al agregar adaptaciones, los
-                  formatos se distribuyen entre la variante más adecuada.
-                </p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-              {siblings.map((s) => (
-                <Link
-                  key={s.id}
-                  href={`/produccion/template/${s.id}/producir`}
-                  className="bg-muted/50 rounded-lg p-3 flex items-center gap-3 hover:bg-muted transition-colors"
-                >
-                  <div
-                    className="bg-background rounded border border-border/30 shrink-0 overflow-hidden flex items-center justify-center"
-                    style={{
-                      width: 60,
-                      height: 60 * (s.base_height / s.base_width),
-                      maxHeight: 60,
-                    }}
-                  >
-                    {s.thumbnail_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={s.thumbnail_url} alt={s.name} className="max-w-full max-h-full object-contain" />
-                    ) : null}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium truncate">{s.name}</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
-                      {s.base_width}×{s.base_height}
-                    </p>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </section>
-        )}
 
         {/* Dataset (variables + CSV merge) */}
         {(detectedVariables.length > 0 || dataset) && (
@@ -1128,6 +1226,13 @@ export default function ProducirPage() {
           )}
         </section>
       </main>
+
+      {showAddVariant && (
+        <AddVariantModal
+          onClose={() => setShowAddVariant(false)}
+          onAdd={handleAddVariant}
+        />
+      )}
 
       {showPicker && (
         <PresetPickerModal
@@ -2039,6 +2144,177 @@ function PresetShape({
 }
 
 function noop() {}
+
+// Modal para agregar una variante al master. El productor elige preset
+// (cuadrado / vertical / horizontal) o tamaño custom. La variante se crea
+// linked al master actual.
+function AddVariantModal({
+  onClose,
+  onAdd,
+}: {
+  onClose: () => void;
+  onAdd: (w: number, h: number, name?: string) => Promise<void>;
+}) {
+  const PRESETS = [
+    { label: "Cuadrado", w: 1080, h: 1080, ratio: "1:1" },
+    { label: "Vertical", w: 1080, h: 1920, ratio: "9:16" },
+    { label: "Vertical 4:5", w: 1080, h: 1350, ratio: "4:5" },
+    { label: "Horizontal", w: 1920, h: 1080, ratio: "16:9" },
+  ];
+  const [mode, setMode] = useState<"preset" | "custom">("preset");
+  const [w, setW] = useState("1080");
+  const [h, setH] = useState("1080");
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (width: number, height: number) => {
+    setSubmitting(true);
+    try {
+      await onAdd(width, height);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-6"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="bg-background border border-border/50 rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold">Agregar formato al master</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Hereda del master actual. Después puedes marcarla distinta para
+              tener un layout independiente.
+            </p>
+          </div>
+          <Button variant="ghost" size="icon" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setMode("preset")}
+            className={cn(
+              "flex-1 text-xs py-1.5 rounded border",
+              mode === "preset"
+                ? "border-primary bg-primary/10"
+                : "border-border/50 hover:bg-muted"
+            )}
+          >
+            Preset
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("custom")}
+            className={cn(
+              "flex-1 text-xs py-1.5 rounded border",
+              mode === "custom"
+                ? "border-primary bg-primary/10"
+                : "border-border/50 hover:bg-muted"
+            )}
+          >
+            Personalizado
+          </button>
+        </div>
+
+        {mode === "preset" ? (
+          <div className="grid grid-cols-2 gap-2">
+            {PRESETS.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                disabled={submitting}
+                onClick={() => submit(p.w, p.h)}
+                className="border border-border/50 rounded-md p-3 text-left hover:bg-muted hover:border-foreground/30 transition-colors disabled:opacity-50"
+              >
+                <div className="text-sm font-medium">{p.label}</div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">
+                  {p.ratio} · {p.w}×{p.h}
+                </div>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="flex-1">
+                <label className="text-xs text-muted-foreground block mb-1">
+                  Ancho (px)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={10000}
+                  value={w}
+                  onChange={(e) => setW(e.target.value)}
+                  className="w-full bg-muted border border-border/50 rounded px-2 py-1.5 text-sm"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="text-xs text-muted-foreground block mb-1">
+                  Alto (px)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={10000}
+                  value={h}
+                  onChange={(e) => setH(e.target.value)}
+                  className="w-full bg-muted border border-border/50 rounded px-2 py-1.5 text-sm"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                disabled={submitting}
+                onClick={() => {
+                  const ww = Number(w);
+                  const hh = Number(h);
+                  if (!Number.isFinite(ww) || !Number.isFinite(hh) || ww <= 0 || hh <= 0) return;
+                  submit(ww, hh);
+                }}
+                className="gap-1"
+              >
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                Agregar
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Icono mini para la orientación de una variante de master (en los tabs).
+function variantOrientationIcon(w: number, h: number) {
+  const r = w / h;
+  if (Math.abs(r - 1) < 0.05) {
+    return <div className="w-3 h-3 border border-current rounded-sm shrink-0" />;
+  }
+  if (r > 1) {
+    return <div className="w-3 h-2 border border-current rounded-sm shrink-0" />;
+  }
+  return <div className="w-2 h-3 border border-current rounded-sm shrink-0" />;
+}
+
+// Etiqueta corta de orientación: "16:9", "1:1", "9:16", o custom.
+function variantShortLabel(w: number, h: number): string {
+  const r = w / h;
+  if (Math.abs(r - 1) < 0.02) return "1:1";
+  if (Math.abs(r - 16 / 9) < 0.05) return "16:9";
+  if (Math.abs(r - 9 / 16) < 0.05) return "9:16";
+  if (Math.abs(r - 4 / 5) < 0.05) return "4:5";
+  if (Math.abs(r - 21 / 9) < 0.05) return "21:9";
+  return r > 1 ? "Horiz" : r < 1 ? "Vert" : "Custom";
+}
 
 // Agrupa adaptaciones por canal del preset (custom queda al final). Dentro
 // de cada canal las ordenamos por orientación (horizontal, square, vertical)

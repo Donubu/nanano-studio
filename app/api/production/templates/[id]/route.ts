@@ -4,11 +4,14 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { z } from "zod";
 import { parseBody } from "@/lib/api-utils";
+import { reflowForPreview } from "@/lib/production/reflow";
+import { TemplateDefinition } from "@/lib/production/types";
 
 interface TemplateRow extends RowDataPacket {
   id: number;
   production_project_id: number;
   design_id: number | null;
+  linked_to_template_id: number | null;
   name: string;
   description: string | null;
   base_width: number;
@@ -23,6 +26,12 @@ interface TemplateRow extends RowDataPacket {
   updated_at: Date;
 }
 
+interface LinkedRow extends RowDataPacket {
+  id: number;
+  base_width: number;
+  base_height: number;
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -34,8 +43,9 @@ export async function GET(
     }
     const { id } = await params;
     const [rows] = await pool.execute<TemplateRow[]>(
-      `SELECT id, production_project_id, design_id, name, description, base_width, base_height,
-              definition_json, thumbnail_url, brand_kit_id, status, version,
+      `SELECT id, production_project_id, design_id, linked_to_template_id,
+              name, description, base_width, base_height, definition_json,
+              thumbnail_url, brand_kit_id, status, version,
               created_by, created_at, updated_at
          FROM production_templates
         WHERE id = ? AND deleted_at IS NULL`,
@@ -77,6 +87,7 @@ export async function PUT(
       base_height: z.number().int().positive().max(10000).optional(),
       brand_kit_id: z.number().int().positive().nullable().optional(),
       design_id: z.number().int().positive().nullable().optional(),
+      linked_to_template_id: z.number().int().positive().nullable().optional(),
       status: z.enum(["draft", "published", "archived"]).optional(),
       thumbnail_url: z.string().url().max(1000).nullable().optional(),
       definition: z.unknown().optional(),
@@ -94,6 +105,7 @@ export async function PUT(
       "base_height",
       "brand_kit_id",
       "design_id",
+      "linked_to_template_id",
       "status",
       "thumbnail_url",
     ] as const) {
@@ -102,7 +114,8 @@ export async function PUT(
       updates.push(`${key} = ?`);
       values.push(v as string | number | null);
     }
-    if (parsed.data.definition !== undefined) {
+    const definitionChanged = parsed.data.definition !== undefined;
+    if (definitionChanged) {
       updates.push("definition_json = ?");
       values.push(JSON.stringify(parsed.data.definition));
       updates.push("version = version + 1");
@@ -119,6 +132,33 @@ export async function PUT(
     if (result.affectedRows === 0) {
       return NextResponse.json({ error: "Template no encontrado" }, { status: 404 });
     }
+
+    // Si cambió la definition de este template, propagamos a todas las
+    // variantes linked (linked_to_template_id = this.id). Cada una recibe un
+    // definition_json reflowed a su propio base_width/base_height. Distinct
+    // variants no se tocan.
+    if (definitionChanged) {
+      const newDef = parsed.data.definition as TemplateDefinition;
+      const [linked] = await pool.execute<LinkedRow[]>(
+        `SELECT id, base_width, base_height
+           FROM production_templates
+          WHERE linked_to_template_id = ? AND deleted_at IS NULL`,
+        [id]
+      );
+      for (const v of linked) {
+        const reflowed = reflowForPreview(newDef, {
+          w: v.base_width,
+          h: v.base_height,
+        });
+        await pool.execute<ResultSetHeader>(
+          `UPDATE production_templates
+              SET definition_json = ?, version = version + 1
+            WHERE id = ?`,
+          [JSON.stringify(reflowed), v.id]
+        );
+      }
+    }
+
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error actualizando template:", error);
