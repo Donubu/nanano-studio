@@ -40,6 +40,18 @@ export async function waitForFontsAndImages(node: HTMLElement): Promise<void> {
   );
 }
 
+// Lee el background computado del nodo y devuelve un color CSS válido
+// para JPG. Si está transparente o no se puede leer, defaultea a blanco.
+function resolveNodeBackground(node: HTMLElement): string {
+  if (typeof window === "undefined") return "#ffffff";
+  const bg = window.getComputedStyle(node).backgroundColor;
+  if (!bg) return "#ffffff";
+  // Chromium devuelve "rgba(0, 0, 0, 0)" para elementos sin bg.
+  const transparentForms = new Set(["transparent", "rgba(0, 0, 0, 0)", "rgba(0,0,0,0)"]);
+  if (transparentForms.has(bg)) return "#ffffff";
+  return bg;
+}
+
 export async function captureNodeToJpeg(node: HTMLElement): Promise<Blob> {
   await waitForFontsAndImages(node);
   // skipFonts: true evita que html-to-image intente leer cssRules de las
@@ -47,11 +59,19 @@ export async function captureNodeToJpeg(node: HTMLElement): Promise<Blob> {
   // navegadores Chromium. Las fuentes ya están cargadas en el document
   // vía <link>, así que el foreignObject del SVG las usa al renderear
   // sin necesidad de embeber @font-face.
+  //
+  // backgroundColor: el JPG no soporta alpha, así que cualquier pixel
+  // transparente del nodo capturado se aplana contra este color. Si lo
+  // dejamos en "#ffffff" siempre, masters con fondo negro (o cualquier
+  // color distinto a blanco) muestran áreas blancas donde el rendering
+  // tiene transparencias. Tomamos el computed bg del nodo — si el master
+  // es negro, las gaps quedan negras.
+  const bg = resolveNodeBackground(node);
   const dataUrl = await toJpeg(node, {
     quality: JPG_QUALITY,
     pixelRatio: 1,
     cacheBust: true,
-    backgroundColor: "#ffffff",
+    backgroundColor: bg,
     skipFonts: true,
   });
   const res = await fetch(dataUrl);
