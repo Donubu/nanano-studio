@@ -11,15 +11,18 @@ import {
   ArrowLeft,
   Check,
   CheckSquare,
+  ChevronDown,
   Database,
   Download,
   FileSpreadsheet,
+  Link2,
   Loader2,
   Package,
   Pencil,
   Plus,
   Rocket,
   Trash2,
+  Unlink,
   X,
 } from "lucide-react";
 import { hasExtremeAspectMismatch } from "@/lib/production/fit-mode";
@@ -338,6 +341,43 @@ export default function ProducirPage() {
     () => orientations.find((o) => o.id === activeOrientationId) ?? null,
     [orientations, activeOrientationId],
   );
+
+  // La principal del design = la de MIN id. Es el "master" y nunca se diferencia
+  // (siempre tiene linked_to_template_id = NULL por construcción).
+  const principalOrientation = useMemo(() => {
+    if (orientations.length === 0) return null;
+    return orientations.reduce(
+      (min, o) => (o.id < min.id ? o : min),
+      orientations[0],
+    );
+  }, [orientations]);
+
+  const isActivePrincipal =
+    !!activeOrientation &&
+    !!principalOrientation &&
+    activeOrientation.id === principalOrientation.id;
+
+  // Diferenciada = no es la principal Y no tiene link al master. Aislada del
+  // grupo de sync. Se puede re-conectar vía "Ajustar formato por...".
+  const isActiveDifferentiated =
+    !!activeOrientation &&
+    !isActivePrincipal &&
+    activeOrientation.linked_to_template_id == null;
+
+  // Orientaciones distintas a la activa, ordenadas: master primero, después
+  // por id ascendente. Sirven como opciones del menú "Ajustar formato por...".
+  const relinkSources = useMemo(() => {
+    if (!activeOrientation) return [];
+    return orientations
+      .filter((o) => o.id !== activeOrientation.id)
+      .sort((a, b) => {
+        if (principalOrientation) {
+          if (a.id === principalOrientation.id) return -1;
+          if (b.id === principalOrientation.id) return 1;
+        }
+        return a.id - b.id;
+      });
+  }, [orientations, activeOrientation, principalOrientation]);
 
   // Definition que se está editando: viene de la orientación ACTIVA. El
   // useMemo evita reconstruir el objeto en cada render si la orientación no
@@ -809,32 +849,72 @@ export default function ProducirPage() {
     [orientations, activeOrientationId, templateId]
   );
 
-  const handleToggleLinked = useCallback(async () => {
+  // Diferencia la orientación activa del grupo linked. Solo válido si está
+  // vinculada (linked_to_template_id != null). El re-linkeo no pasa por acá
+  // — para eso está handleRelinkTo.
+  const handleDifferentiate = useCallback(async () => {
     if (!activeOrientation) return;
-    const isCurrentlyLinked = activeOrientation.linked_to_template_id != null;
-    if (isCurrentlyLinked) {
-      const ok = confirm(
-        "¿Diferenciar esta orientación del resto? Dejará de heredar cambios del master base."
-      );
-      if (!ok) return;
-    }
+    if (activeOrientation.linked_to_template_id == null) return;
+    const ok = confirm(
+      "¿Diferenciar esta orientación del resto? Dejará de heredar cambios del master base."
+    );
+    if (!ok) return;
     const res = await fetch(`/api/production/templates/${activeOrientation.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        linked_to_template_id: isCurrentlyLinked ? null : null,
-      }),
+      body: JSON.stringify({ linked_to_template_id: null }),
     });
     if (res.ok) {
       setOrientations((cur) =>
         cur.map((o) =>
-          o.id === activeOrientation.id
-            ? { ...o, linked_to_template_id: isCurrentlyLinked ? null : o.linked_to_template_id }
-            : o
-        )
+          o.id === activeOrientation.id ? { ...o, linked_to_template_id: null } : o,
+        ),
       );
     }
   }, [activeOrientation]);
+
+  // Re-vincula la orientación activa a otra (típicamente el master) y reemplaza
+  // su definition por la fuente reflowed. El backend hace ambas cosas en el
+  // mismo PUT; acá refetcheamos las orientaciones para que el editor se
+  // remonte con el contenido nuevo.
+  const handleRelinkTo = useCallback(
+    async (sourceId: number) => {
+      if (!activeOrientation) return;
+      if (sourceId === activeOrientation.id) return;
+      const sourceOri = orientations.find((o) => o.id === sourceId);
+      const sourceLabel = sourceOri
+        ? principalOrientation && sourceOri.id === principalOrientation.id
+          ? "el master"
+          : `"${sourceOri.name}"`
+        : "esa orientación";
+      const ok = confirm(
+        `¿Reemplazar el contenido de esta orientación por el de ${sourceLabel}? El layout actual se pierde.`,
+      );
+      if (!ok) return;
+      const res = await fetch(
+        `/api/production/templates/${activeOrientation.id}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ linked_to_template_id: sourceId }),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        alert(body?.error || `No se pudo ajustar el formato (HTTP ${res.status})`);
+        return;
+      }
+      // Refetch para tener la nueva definition reflowed que produjo el backend.
+      const refresh = await fetch(
+        `/api/production/templates/${templateId}/orientations`,
+      );
+      if (refresh.ok) {
+        const list: Orientation[] = await refresh.json();
+        setOrientations(list);
+      }
+    },
+    [activeOrientation, orientations, principalOrientation, templateId],
+  );
 
   const handleFitModeChange = async (adaptationId: number, fitMode: FitMode) => {
     setFitModeError(null);
@@ -1048,23 +1128,31 @@ export default function ProducirPage() {
               />
             ) : null}
 
-            {/* Botón flotante para diferenciar la orientación activa del
-                resto. Solo aparece cuando: editando master Y la orientación
-                está vinculada al base. Estilo solid + contraste alto para
-                que sea legible sobre cualquier fondo de canvas. */}
+            {/* Acción flotante según el estado de la orientación activa:
+                - Linked al master: "Diferenciar del resto" (corta el sync).
+                - Diferenciada: "Ajustar formato por..." (re-link + reflow).
+                - Master/principal: nada — es la fuente del grupo. */}
             {editingId == null &&
               activeOrientation &&
+              !isActivePrincipal &&
               activeOrientation.linked_to_template_id != null && (
                 <button
                   type="button"
-                  onClick={handleToggleLinked}
+                  onClick={handleDifferentiate}
                   className="absolute bottom-4 right-4 z-30 flex items-center gap-1.5 text-xs px-3 py-2 rounded-md bg-amber-500 hover:bg-amber-600 text-white shadow-lg font-medium transition-colors"
                   title="Esta orientación hereda del master base. Diferenciarla para que tenga su propio layout."
                 >
-                  <Pencil className="h-3.5 w-3.5" />
+                  <Unlink className="h-3.5 w-3.5" />
                   Diferenciar del resto
                 </button>
               )}
+            {editingId == null && isActiveDifferentiated && relinkSources.length > 0 && (
+              <RelinkMenu
+                sources={relinkSources}
+                principalId={principalOrientation?.id ?? null}
+                onPick={handleRelinkTo}
+              />
+            )}
           </div>
         </section>
 
@@ -2141,6 +2229,89 @@ function PresetShape({
 
 function noop() {}
 
+// Menú flotante para re-conectar una orientación diferenciada a otra fuente.
+// El backend al recibir el PUT con linked_to_template_id copia la definition
+// de la fuente reflowed a las dims de esta. El master aparece primero en la
+// lista; si solo hay una opción (típico: solo master), no mostramos dropdown,
+// hacemos directamente click → confirm → relink.
+function RelinkMenu({
+  sources,
+  principalId,
+  onPick,
+}: {
+  sources: Orientation[];
+  principalId: number | null;
+  onPick: (sourceId: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const onlyMaster =
+    sources.length === 1 &&
+    principalId != null &&
+    sources[0].id === principalId;
+  if (onlyMaster) {
+    return (
+      <button
+        type="button"
+        onClick={() => onPick(sources[0].id)}
+        className="absolute bottom-4 right-4 z-30 flex items-center gap-1.5 text-xs px-3 py-2 rounded-md bg-blue-500 hover:bg-blue-600 text-white shadow-lg font-medium transition-colors"
+        title="Reemplaza el contenido de esta orientación por el del master, reflowed a este tamaño"
+      >
+        <Link2 className="h-3.5 w-3.5" />
+        Ajustar formato por master
+      </button>
+    );
+  }
+  return (
+    <div className="absolute bottom-4 right-4 z-30">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-md bg-blue-500 hover:bg-blue-600 text-white shadow-lg font-medium transition-colors"
+        title="Reemplazar el contenido de esta orientación por el de otra"
+      >
+        <Link2 className="h-3.5 w-3.5" />
+        Ajustar formato por...
+        <ChevronDown className="h-3 w-3" />
+      </button>
+      {open && (
+        <>
+          {/* backdrop transparente para cerrar al click afuera */}
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-30 cursor-default"
+            aria-label="Cerrar menú"
+          />
+          <div className="absolute bottom-full right-0 mb-2 z-40 min-w-[200px] rounded-md bg-popover border border-border shadow-lg overflow-hidden">
+            {sources.map((s) => {
+              const isMaster = principalId != null && s.id === principalId;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    onPick(s.id);
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs hover:bg-accent flex items-center justify-between gap-2"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Link2 className="h-3 w-3 text-blue-400" />
+                    {isMaster ? "master" : s.name}
+                  </span>
+                  <span className="text-muted-foreground/70">
+                    {s.base_width}×{s.base_height}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // VariantsStrip: barra horizontal con TODAS las orientaciones del master,
 // incluyendo la que está abierta en el editor (marcada con border primary).
 // Click cambia la orientación activa SIN navegar. La PRINCIPAL (MIN id)
@@ -2261,9 +2432,16 @@ function VariantsStrip({
                 )}
               >
                 {displayName}
-                {m.linked_to_template_id != null && (
-                  <span className="text-emerald-400" title="Vinculada al master">
-                    ↳
+                {/* Marca "diferenciada": orientación que NO es la principal
+                    y NO está vinculada al master. Sus cambios viven aisladas.
+                    Las linked al master no muestran nada — ese es el estado
+                    por defecto. */}
+                {!isPrincipal && m.linked_to_template_id == null && (
+                  <span
+                    className="text-amber-400"
+                    title="Diferenciada del resto · no recibe cambios del master"
+                  >
+                    <Unlink className="h-3 w-3" />
                   </span>
                 )}
               </span>

@@ -78,7 +78,11 @@ export async function PUT(
     if (!session?.user || session.user.role !== "admin") {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
-    const { id } = await params;
+    const { id: rawId } = await params;
+    const id = Number(rawId);
+    if (!Number.isFinite(id)) {
+      return NextResponse.json({ error: "Template inválido" }, { status: 400 });
+    }
 
     const schema = z.object({
       name: z.string().min(1).max(255).optional(),
@@ -94,6 +98,60 @@ export async function PUT(
     });
     const parsed = await parseBody(request, schema);
     if (parsed.error) return parsed.error;
+
+    // Estado actual del template — necesario para decidir propagación y para
+    // re-link (copiar definition de la fuente cuando cambia linked_to_template_id
+    // de NULL a un valor).
+    const [currentRows] = await pool.execute<TemplateRow[]>(
+      `SELECT id, production_project_id, design_id, linked_to_template_id,
+              name, description, base_width, base_height, definition_json,
+              thumbnail_url, brand_kit_id, status, version,
+              created_by, created_at, updated_at
+         FROM production_templates
+        WHERE id = ? AND deleted_at IS NULL`,
+      [id]
+    );
+    if (currentRows.length === 0) {
+      return NextResponse.json({ error: "Template no encontrado" }, { status: 404 });
+    }
+    const current = currentRows[0];
+
+    // Re-link: si el cliente cambia linked_to_template_id de NULL a un valor,
+    // copiamos la definition de la fuente reflowed a las dims de este template
+    // y forzamos definition_changed (para propagar a siblings que dependen de
+    // esta cadena, aunque por ahora cada link apunta al master MIN(id)).
+    const requestedLink = parsed.data.linked_to_template_id;
+    const isRelinking =
+      requestedLink !== undefined &&
+      requestedLink !== null &&
+      requestedLink !== current.linked_to_template_id;
+    let relinkedDefinition: TemplateDefinition | null = null;
+    if (isRelinking) {
+      const [srcRows] = await pool.execute<TemplateRow[]>(
+        `SELECT id, base_width, base_height, definition_json
+           FROM production_templates
+          WHERE id = ? AND deleted_at IS NULL`,
+        [requestedLink]
+      );
+      if (srcRows.length === 0) {
+        return NextResponse.json(
+          { error: "Template fuente para re-link no encontrado" },
+          { status: 400 }
+        );
+      }
+      let srcDef: TemplateDefinition | null = null;
+      try {
+        srcDef = JSON.parse(srcRows[0].definition_json) as TemplateDefinition;
+      } catch {
+        srcDef = null;
+      }
+      if (srcDef) {
+        relinkedDefinition = reflowForPreview(srcDef, {
+          w: current.base_width,
+          h: current.base_height,
+        });
+      }
+    }
 
     const updates: string[] = [];
     const values: (string | number | null)[] = [];
@@ -114,10 +172,16 @@ export async function PUT(
       updates.push(`${key} = ?`);
       values.push(v as string | number | null);
     }
-    const definitionChanged = parsed.data.definition !== undefined;
+    // Si el cliente mandó una definition explícita, gana. Si no, pero estamos
+    // re-linkeando, usamos la definition reflowed de la fuente.
+    const clientSentDefinition = parsed.data.definition !== undefined;
+    const effectiveDefinition: TemplateDefinition | null = clientSentDefinition
+      ? (parsed.data.definition as TemplateDefinition)
+      : relinkedDefinition;
+    const definitionChanged = effectiveDefinition !== null;
     if (definitionChanged) {
       updates.push("definition_json = ?");
-      values.push(JSON.stringify(parsed.data.definition));
+      values.push(JSON.stringify(effectiveDefinition));
       updates.push("version = version + 1");
     }
     if (updates.length === 0) {
@@ -133,29 +197,69 @@ export async function PUT(
       return NextResponse.json({ error: "Template no encontrado" }, { status: 404 });
     }
 
-    // Si cambió la definition de este template, propagamos a todas las
-    // variantes linked (linked_to_template_id = this.id). Cada una recibe un
-    // definition_json reflowed a su propio base_width/base_height. Distinct
-    // variants no se tocan.
+    // Propagación de definition a las orientaciones linked del mismo grupo.
+    // Un grupo linked es: el master (linked_to_template_id IS NULL dentro de
+    // un design) + todas las orientaciones que apuntan a él. Editar CUALQUIER
+    // miembro del grupo propaga al resto (excluyendo diferenciadas, que están
+    // fuera del grupo por definición).
+    //
+    // Resolvemos el masterId del grupo:
+    //   - si current.linked_to_template_id != null → masterId = ese.
+    //   - si current.linked_to_template_id == null y es el principal del design
+    //     (MIN id sin link) → masterId = current.id.
+    //   - si current.linked_to_template_id == null pero NO es el principal →
+    //     es una orientación diferenciada (standalone). No propaga.
     if (definitionChanged) {
-      const newDef = parsed.data.definition as TemplateDefinition;
-      const [linked] = await pool.execute<LinkedRow[]>(
-        `SELECT id, base_width, base_height
-           FROM production_templates
-          WHERE linked_to_template_id = ? AND deleted_at IS NULL`,
-        [id]
-      );
-      for (const v of linked) {
-        const reflowed = reflowForPreview(newDef, {
-          w: v.base_width,
-          h: v.base_height,
-        });
-        await pool.execute<ResultSetHeader>(
-          `UPDATE production_templates
-              SET definition_json = ?, version = version + 1
-            WHERE id = ?`,
-          [JSON.stringify(reflowed), v.id]
+      const newDef = effectiveDefinition;
+      // Caller editó esta orientación. Solo propagamos si pertenece al grupo
+      // linked. Si es el master, su id es la fuente. Si es una linked variant,
+      // su linked_to_template_id apunta al master.
+      let masterId: number | null = null;
+      if (current.linked_to_template_id != null) {
+        masterId = current.linked_to_template_id;
+      } else if (current.design_id != null) {
+        // Si tiene design pero linked_to_template_id es null, verificamos si
+        // es el principal (MIN id sin link). Si lo es, ES el master del grupo.
+        const [minRows] = await pool.execute<RowDataPacket[]>(
+          `SELECT MIN(id) AS min_id
+             FROM production_templates
+            WHERE design_id = ?
+              AND linked_to_template_id IS NULL
+              AND deleted_at IS NULL`,
+          [current.design_id]
         );
+        const minId = (minRows[0] as { min_id: number | null })?.min_id ?? null;
+        // Si current.id es el menor sin link, asumimos master. Si no, es una
+        // orientación diferenciada y no propaga (queda standalone).
+        if (minId === current.id) {
+          masterId = current.id;
+        }
+      }
+
+      if (masterId !== null) {
+        // Trae master (si no es current) + todas las linked variants. Excluye
+        // current (ya lo actualizamos arriba). Excluye diferenciadas
+        // (linked_to_template_id IS NULL y id != masterId).
+        const [siblings] = await pool.execute<LinkedRow[]>(
+          `SELECT id, base_width, base_height
+             FROM production_templates
+            WHERE (id = ? OR linked_to_template_id = ?)
+              AND id != ?
+              AND deleted_at IS NULL`,
+          [masterId, masterId, id]
+        );
+        for (const sibling of siblings) {
+          const reflowed = reflowForPreview(newDef, {
+            w: sibling.base_width,
+            h: sibling.base_height,
+          });
+          await pool.execute<ResultSetHeader>(
+            `UPDATE production_templates
+                SET definition_json = ?, version = version + 1
+              WHERE id = ?`,
+            [JSON.stringify(reflowed), sibling.id]
+          );
+        }
       }
     }
 

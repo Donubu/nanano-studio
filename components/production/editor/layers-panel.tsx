@@ -2,7 +2,7 @@
 
 import { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, useState } from "react";
 import { cn } from "@/lib/utils";
-import { Trash2, Type, Image as ImageIcon, Square, Layers as LayersIcon, GripVertical, Lock, Unlock, PanelLeftClose } from "lucide-react";
+import { Trash2, Type, Image as ImageIcon, Square, Layers as LayersIcon, GripVertical, Lock, Unlock, PanelLeftClose, Braces } from "lucide-react";
 import {
   TemplateDefinition,
   TemplateLayer,
@@ -48,6 +48,25 @@ function iconFor(layer: TemplateLayer) {
     case "shape":
       return <Square className={cls} />;
   }
+}
+
+// Cuenta variables {{var}} únicas en una capa de texto. 0 si no es texto o
+// si no tiene variables. Lo usamos para decidir si mostramos el ícono Braces
+// y para armar el tooltip con el nombre de cada variable.
+const LAYER_VAR_RE = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
+function textLayerVariables(layer: TemplateLayer): string[] {
+  if (layer.type !== "text") return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  LAYER_VAR_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = LAYER_VAR_RE.exec(layer.content)) !== null) {
+    if (!seen.has(m[1])) {
+      seen.add(m[1]);
+      out.push(m[1]);
+    }
+  }
+  return out;
 }
 
 export function LayersPanel({
@@ -173,6 +192,7 @@ export function LayersPanel({
             const canDrag = isRootChild(layer.id) && !isLocked;
             const showBefore = dropHint?.id === layer.id && dropHint.position === "before";
             const showAfter = dropHint?.id === layer.id && dropHint.position === "after";
+            const vars = textLayerVariables(layer);
             return (
               <div
                 key={layer.id}
@@ -220,6 +240,14 @@ export function LayersPanel({
                   <span className={cn("truncate flex-1", isLocked && "italic")}>
                     {defaultName(layer)}
                   </span>
+                  {vars.length > 0 && (
+                    <span
+                      className="shrink-0 text-emerald-300/90"
+                      title={`Variables: ${vars.map((v) => `{{${v}}}`).join(", ")}`}
+                    >
+                      <Braces className="h-3 w-3" />
+                    </span>
+                  )}
                 </button>
                 <button
                   type="button"
