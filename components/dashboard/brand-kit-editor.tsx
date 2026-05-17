@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Loader2, Plus, Trash2, ChevronDown, ChevronRight, Save } from "lucide-react";
+import { Loader2, Plus, Trash2, ChevronDown, ChevronRight, Save, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   BrandKit,
@@ -116,6 +116,7 @@ export function BrandKitEditor({ kit, onSaved, onCancel }: Props) {
       <LogosSection
         items={content.logos}
         onChange={(logos) => patch({ logos })}
+        clientId={kit.client_id}
       />
       <RulesSection
         value={content.rulesText ?? ""}
@@ -400,9 +401,11 @@ function SpacingSection({
 function LogosSection({
   items,
   onChange,
+  clientId,
 }: {
   items: LogoToken[];
   onChange: (next: LogoToken[]) => void;
+  clientId: number;
 }) {
   const add = () => {
     const name = uniqueName("logo", items.map((i) => i.name));
@@ -416,45 +419,132 @@ function LogosSection({
   return (
     <Section title="Logos" count={items.length}>
       {items.map((it, idx) => (
-        <div key={idx} className="flex items-center gap-2">
-          <div className="w-10 h-10 rounded border border-border/50 bg-background flex items-center justify-center overflow-hidden shrink-0">
-            {it.src ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={it.src} alt="" className="max-w-full max-h-full object-contain" />
-            ) : (
-              <span className="text-[10px] text-muted-foreground">sin</span>
-            )}
-          </div>
-          <input
-            type="text"
-            value={it.label}
-            onChange={(e) => update(idx, { label: e.target.value })}
-            className={cn("bg-muted border border-border/50 rounded px-2 py-1.5 text-xs", "w-32")}
-            placeholder="Etiqueta"
-          />
-          <input
-            type="text"
-            value={it.src}
-            onChange={(e) => update(idx, { src: e.target.value })}
-            className="flex-1 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs"
-            placeholder="https://…"
-          />
-          <input
-            type="text"
-            value={it.name}
-            onChange={(e) => update(idx, { name: slugify(e.target.value) })}
-            className="w-32 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs font-mono text-muted-foreground"
-            placeholder="primary"
-          />
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => remove(idx)}>
-            <Trash2 className="h-3.5 w-3.5 text-red-400" />
-          </Button>
-        </div>
+        <LogoRow
+          key={idx}
+          item={it}
+          clientId={clientId}
+          onUpdate={(patch) => update(idx, patch)}
+          onRemove={() => remove(idx)}
+        />
       ))}
       <Button variant="ghost" size="sm" onClick={add} className="gap-1">
         <Plus className="h-3.5 w-3.5" /> Agregar logo
       </Button>
     </Section>
+  );
+}
+
+function LogoRow({
+  item,
+  clientId,
+  onUpdate,
+  onRemove,
+}: {
+  item: LogoToken;
+  clientId: number;
+  onUpdate: (patch: Partial<LogoToken>) => void;
+  onRemove: () => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const handleFile = async (file: File) => {
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("No se pudo leer el archivo"));
+        reader.readAsDataURL(file);
+      });
+      const res = await fetch("/api/production/brand-kits/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageData: dataUrl, clientId }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setUploadError(body?.error || "Error al subir");
+        return;
+      }
+      const { url } = (await res.json()) as { url: string };
+      onUpdate({ src: url });
+    } catch (err) {
+      console.error("Error subiendo logo:", err);
+      setUploadError("Error inesperado");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2">
+        <div className="w-10 h-10 rounded border border-border/50 bg-background flex items-center justify-center overflow-hidden shrink-0">
+          {item.src ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={item.src} alt="" className="max-w-full max-h-full object-contain" />
+          ) : (
+            <span className="text-[10px] text-muted-foreground">sin</span>
+          )}
+        </div>
+        <input
+          type="text"
+          value={item.label}
+          onChange={(e) => onUpdate({ label: e.target.value })}
+          className={cn("bg-muted border border-border/50 rounded px-2 py-1.5 text-xs", "w-32")}
+          placeholder="Etiqueta"
+        />
+        <input
+          type="text"
+          value={item.src}
+          onChange={(e) => onUpdate({ src: e.target.value })}
+          className="flex-1 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs"
+          placeholder="https://… o subir abajo"
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleFile(file);
+          }}
+        />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1 h-8 px-2"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          title="Subir desde tu equipo (se guarda en GCS)"
+        >
+          {uploading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Upload className="h-3.5 w-3.5" />
+          )}
+          <span className="text-[11px]">Subir</span>
+        </Button>
+        <input
+          type="text"
+          value={item.name}
+          onChange={(e) => onUpdate({ name: slugify(e.target.value) })}
+          className="w-32 bg-muted border border-border/50 rounded px-2 py-1.5 text-xs font-mono text-muted-foreground"
+          placeholder="primary"
+        />
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onRemove}>
+          <Trash2 className="h-3.5 w-3.5 text-red-400" />
+        </Button>
+      </div>
+      {uploadError && (
+        <p className="text-[10px] text-red-400 pl-12">{uploadError}</p>
+      )}
+    </div>
   );
 }
 

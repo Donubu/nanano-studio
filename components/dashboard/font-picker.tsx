@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, Pencil, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -27,20 +28,54 @@ export function FontPicker({ value, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const [dropdownPos, setDropdownPos] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
 
   // Preload the current font so the trigger shows the right typeface.
   useEffect(() => {
     if (matchedGoogle) ensureGoogleFontLoaded(matchedGoogle.family);
   }, [matchedGoogle]);
 
-  // Close dropdown on outside click / Escape.
+  // Recompute dropdown position from the trigger rect. Runs on open and on
+  // scroll/resize while open so the dropdown follows the trigger if the modal
+  // body scrolls underneath it.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const updatePos = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      setDropdownPos({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+      });
+    };
+    updatePos();
+    window.addEventListener("scroll", updatePos, true);
+    window.addEventListener("resize", updatePos);
+    return () => {
+      window.removeEventListener("scroll", updatePos, true);
+      window.removeEventListener("resize", updatePos);
+    };
+  }, [open]);
+
+  // Close dropdown on outside click / Escape. With the dropdown in a portal,
+  // we need to check both the trigger wrapper and the dropdown itself before
+  // dismissing.
   useEffect(() => {
     if (!open) return;
     const onDocClick = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const target = e.target as Node;
+      if (wrapperRef.current?.contains(target)) return;
+      if (dropdownRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
@@ -95,9 +130,69 @@ export function FontPicker({ value, onChange }: Props) {
     );
   }
 
+  const dropdown =
+    open && dropdownPos && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            ref={dropdownRef}
+            className="fixed z-[200] bg-background border border-border/60 rounded-md shadow-xl overflow-hidden"
+            style={{
+              top: dropdownPos.top,
+              left: dropdownPos.left,
+              width: dropdownPos.width,
+            }}
+          >
+            <div className="p-2 border-b border-border/40 flex items-center gap-2">
+              <Search className="h-3 w-3 text-muted-foreground shrink-0" />
+              <input
+                ref={inputRef}
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Buscar Google Font…"
+                className="flex-1 bg-transparent text-xs outline-none"
+              />
+            </div>
+            <div className="max-h-64 overflow-y-auto">
+              {filtered.length === 0 ? (
+                <p className="px-3 py-4 text-xs text-muted-foreground text-center">
+                  Sin coincidencias.
+                </p>
+              ) : (
+                filtered.map((font) => (
+                  <FontRow
+                    key={font.family}
+                    font={font}
+                    active={matchedGoogle?.family === font.family}
+                    onPick={() => {
+                      onChange(fontFamilyCss(font.family));
+                      ensureGoogleFontLoaded(font.family);
+                      setOpen(false);
+                    }}
+                  />
+                ))
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setMode("custom");
+                setOpen(false);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 border-t border-border/40 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <Pencil className="h-3 w-3" />
+              Escribir manualmente (stack CSS personalizado)
+            </button>
+          </div>,
+          document.body
+        )
+      : null;
+
   return (
     <div ref={wrapperRef} className="relative w-full">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={cn(
@@ -109,53 +204,7 @@ export function FontPicker({ value, onChange }: Props) {
         <span className="truncate">{triggerLabel}</span>
         <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
       </button>
-
-      {open && (
-        <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-background border border-border/60 rounded-md shadow-xl overflow-hidden">
-          <div className="p-2 border-b border-border/40 flex items-center gap-2">
-            <Search className="h-3 w-3 text-muted-foreground shrink-0" />
-            <input
-              ref={inputRef}
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar Google Font…"
-              className="flex-1 bg-transparent text-xs outline-none"
-            />
-          </div>
-          <div className="max-h-64 overflow-y-auto">
-            {filtered.length === 0 ? (
-              <p className="px-3 py-4 text-xs text-muted-foreground text-center">
-                Sin coincidencias.
-              </p>
-            ) : (
-              filtered.map((font) => (
-                <FontRow
-                  key={font.family}
-                  font={font}
-                  active={matchedGoogle?.family === font.family}
-                  onPick={() => {
-                    onChange(fontFamilyCss(font.family));
-                    ensureGoogleFontLoaded(font.family);
-                    setOpen(false);
-                  }}
-                />
-              ))
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setMode("custom");
-              setOpen(false);
-            }}
-            className="w-full flex items-center gap-2 px-3 py-2 border-t border-border/40 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <Pencil className="h-3 w-3" />
-            Escribir manualmente (stack CSS personalizado)
-          </button>
-        </div>
-      )}
+      {dropdown}
     </div>
   );
 }
