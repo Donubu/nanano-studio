@@ -1006,7 +1006,9 @@ export default function ProducirPage() {
                 }}
                 topAccessory={
                   <VariantsStrip
-                    designMembers={designMembers}
+                    orientations={orientations}
+                    activeOrientationId={activeOrientationId}
+                    brandKit={brandKitContent}
                     onSwitch={(id) => setActiveOrientationId(id)}
                     onAdd={() => setShowAddVariant(true)}
                     onDelete={handleDeleteOrientation}
@@ -2283,32 +2285,43 @@ function noop() {}
 // incluyendo la que está abierta en el editor (marcada con border primary).
 // Click cambia la orientación activa SIN navegar. La PRINCIPAL (MIN id)
 // se etiqueta "master" independientemente de su DB name y no se puede
-// borrar — todas las demás tienen botón delete on hover.
+// borrar — todas las demás tienen botón delete on hover. Cada mini-card
+// renderiza el CONTENIDO real de la orientación (no un icono placeholder).
 function VariantsStrip({
-  designMembers,
+  orientations,
+  activeOrientationId,
+  brandKit,
   onSwitch,
   onAdd,
   onDelete,
 }: {
-  designMembers: Array<{
-    id: number;
-    name: string;
-    base_width: number;
-    base_height: number;
-    thumbnail_url: string | null;
-    linked_to_template_id: number | null;
-    isCurrent: boolean;
-  }>;
+  orientations: Orientation[];
+  activeOrientationId: number | null;
+  brandKit: BrandKitContent;
   onSwitch: (id: number) => void;
   onAdd: () => void;
   onDelete: (id: number) => void;
 }) {
-  // Identificamos la principal por MIN id. El "master" es el template
-  // original; las demás son orientaciones agregadas después.
+  // Identificamos la principal por MIN id.
   const principalId =
-    designMembers.length > 0
-      ? designMembers.reduce((min, m) => (m.id < min ? m.id : min), designMembers[0].id)
+    orientations.length > 0
+      ? orientations.reduce((min, o) => (o.id < min ? o.id : min), orientations[0].id)
       : null;
+  // Orden visual: horizontal → cuadrado → vertical → custom; dentro de cada
+  // orientación, por área de menor a mayor.
+  const designMembers = useMemo(() => {
+    return [...orientations].sort((a, b) => {
+      const orient = (w: number, h: number) => {
+        const r = w / h;
+        if (Math.abs(r - 1) < 0.05) return 1;
+        return r > 1 ? 0 : 2;
+      };
+      const ao = orient(a.base_width, a.base_height);
+      const bo = orient(b.base_width, b.base_height);
+      if (ao !== bo) return ao - bo;
+      return a.base_width * a.base_height - b.base_width * b.base_height;
+    });
+  }, [orientations]);
   // Una sola orientación: la strip queda discreta con solo el botón "+ Formato".
   if (designMembers.length <= 1) {
     return (
@@ -2329,57 +2342,62 @@ function VariantsStrip({
     <div className="flex items-end gap-2 px-3 py-2 border-b border-border/30 bg-muted/10 overflow-x-auto">
       {designMembers.map((m) => {
         const isPrincipal = m.id === principalId;
+        const isCurrent = m.id === activeOrientationId;
         // El nombre del principal se fuerza a "master" — el nombre que tipea
         // el productor al crear el template no se muestra acá; ese vive en
         // el header de la página como concepto.
         const displayName = isPrincipal ? "master" : m.name;
+        const thumbMaxW = 100;
+        const thumbMaxH = 80;
+        const thumbScale = Math.min(
+          thumbMaxW / m.base_width,
+          thumbMaxH / m.base_height,
+        );
+        const cssW = m.base_width * thumbScale;
+        const cssH = m.base_height * thumbScale;
         return (
           <div key={m.id} className="relative shrink-0 group">
             <button
               type="button"
               onClick={() => onSwitch(m.id)}
-              disabled={m.isCurrent}
+              disabled={isCurrent}
               className={cn(
                 "flex flex-col items-center gap-1 focus:outline-none",
-                m.isCurrent && "cursor-default"
+                isCurrent && "cursor-default"
               )}
               title={
-                m.isCurrent
+                isCurrent
                   ? `${displayName} · orientación abierta`
                   : `${displayName} · ${m.base_width}×${m.base_height} — click para abrir`
               }
             >
               <div
                 className={cn(
-                  "rounded shadow-sm flex items-center justify-center transition-colors overflow-hidden bg-background/40",
-                  m.isCurrent
+                  "rounded shadow-sm transition-colors overflow-hidden",
+                  isCurrent
                     ? "border-2 border-primary ring-2 ring-primary/30"
-                    : "border border-border/50 hover:border-foreground/40 hover:bg-background/60"
+                    : "border border-border/50 hover:border-foreground/40"
                 )}
-                style={{
-                  width: 80 * (m.base_width / Math.max(m.base_width, m.base_height)),
-                  height: 80 * (m.base_height / Math.max(m.base_width, m.base_height)),
-                  maxWidth: 100,
-                  maxHeight: 80,
-                }}
+                style={{ width: cssW, height: cssH }}
               >
-                {m.thumbnail_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={m.thumbnail_url}
-                    alt={displayName}
-                    className="max-w-full max-h-full object-contain"
+                {/* Mini-preview real: renderizamos la definition de la
+                    orientación a escala. El productor ve el contenido
+                    actual (logo / textos / shapes) en miniatura, no un
+                    placeholder. */}
+                {m.definition ? (
+                  <OrientationMiniPreview
+                    definition={m.definition}
+                    brandKit={brandKit}
+                    nativeW={m.base_width}
+                    nativeH={m.base_height}
+                    scale={thumbScale}
                   />
-                ) : (
-                  variantOrientationIcon(m.base_width, m.base_height)
-                )}
+                ) : null}
               </div>
               <span
                 className={cn(
                   "text-xs flex items-center gap-1 font-medium",
-                  m.isCurrent
-                    ? "text-foreground"
-                    : "text-muted-foreground"
+                  isCurrent ? "text-foreground" : "text-muted-foreground"
                 )}
               >
                 {displayName}
@@ -2612,16 +2630,52 @@ function AddVariantModal({
   );
 }
 
-// Icono mini para la orientación de una variante de master (en los tabs).
-function variantOrientationIcon(w: number, h: number) {
-  const r = w / h;
-  if (Math.abs(r - 1) < 0.05) {
-    return <div className="w-3 h-3 border border-current rounded-sm shrink-0" />;
-  }
-  if (r > 1) {
-    return <div className="w-3 h-2 border border-current rounded-sm shrink-0" />;
-  }
-  return <div className="w-2 h-3 border border-current rounded-sm shrink-0" />;
+// Mini-preview real de una orientación del master: renderiza su definition
+// resuelta con el brandKit, escalada al tamaño del thumb. Usa el mismo
+// pipeline que AdaptationPreview pero sin reflow (la orientación ya está
+// dimensionada nativamente).
+function OrientationMiniPreview({
+  definition,
+  brandKit,
+  nativeW,
+  nativeH,
+  scale,
+}: {
+  definition: TemplateDefinition;
+  brandKit: BrandKitContent;
+  nativeW: number;
+  nativeH: number;
+  scale: number;
+}) {
+  const resolved = resolveTreeTokens(definition, brandKit);
+  const bg =
+    resolved.background && resolved.background.type === "color"
+      ? resolved.background.value
+      : "#ffffff";
+  const rootIsStack = resolved.layout.mode === "stack";
+  const innerStyle: CSSProperties = {
+    width: nativeW,
+    height: nativeH,
+    transform: `scale(${scale})`,
+    transformOrigin: "0 0",
+    position: "relative",
+    background: bg,
+    ...(rootIsStack ? stackToFlexStyle(resolved.layout as StackLayout) : {}),
+  };
+  return (
+    <div style={innerStyle}>
+      {resolved.children.map((child: TemplateLayer) => (
+        <TemplateLayerView
+          key={child.id}
+          layer={child}
+          selectedId={null}
+          onSelect={noop}
+          onLayerPointerDown={noop}
+          parentMode={rootIsStack ? "stack" : "free"}
+        />
+      ))}
+    </div>
+  );
 }
 
 // Agrupa adaptaciones por canal del preset (custom queda al final). Dentro
