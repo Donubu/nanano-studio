@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Loader2, Plus, Layers, Trash2, Settings2 } from "lucide-react";
+import { Loader2, Plus, Layers, Trash2, Settings2, Pencil, Rocket } from "lucide-react";
 import { cn, formatDateLocal } from "@/lib/utils";
 
 type Aspect = "square" | "horizontal" | "vertical" | "custom";
@@ -279,19 +279,10 @@ export default function ProductionTemplatesList({ productionProjectId }: Props) 
           {templates.map((t) => (
             <div
               key={t.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => router.push(`/produccion/template/${t.id}`)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  router.push(`/produccion/template/${t.id}`);
-                }
-              }}
-              className="relative bg-muted/50 hover:bg-muted rounded-lg p-3 cursor-pointer transition-colors group"
+              className="relative bg-muted/50 rounded-lg p-3 transition-colors group flex flex-col gap-2"
             >
               <div
-                className="w-full bg-background rounded-md border border-border/30 flex items-center justify-center mb-2 overflow-hidden"
+                className="w-full bg-background rounded-md border border-border/30 flex items-center justify-center overflow-hidden"
                 style={{
                   aspectRatio: `${t.base_width} / ${t.base_height}`,
                   maxHeight: 200,
@@ -330,12 +321,34 @@ export default function ProductionTemplatesList({ productionProjectId }: Props) 
                     handleDelete(t.id);
                   }}
                   disabled={deletingId === t.id}
+                  title="Eliminar template"
                 >
                   {deletingId === t.id ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   ) : (
                     <Trash2 className="h-3.5 w-3.5 text-red-400" />
                   )}
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 gap-1.5"
+                  onClick={() => router.push(`/produccion/template/${t.id}`)}
+                  title="Componer el template master"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Editar
+                </Button>
+                <Button
+                  size="sm"
+                  className="flex-1 gap-1.5"
+                  onClick={() => router.push(`/produccion/template/${t.id}/producir`)}
+                  title="Administrar adaptaciones y exportar"
+                >
+                  <Rocket className="h-3.5 w-3.5" />
+                  Producir
                 </Button>
               </div>
             </div>
