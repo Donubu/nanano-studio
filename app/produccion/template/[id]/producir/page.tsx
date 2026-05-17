@@ -747,7 +747,7 @@ export default function ProducirPage() {
         </div>
       </header>
 
-      <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-6">
+      <main className="flex-1 p-6 w-full space-y-6">
         {/* Editor embebido — workspace unificado.
             Por defecto edita el master. Click en una adaptación más abajo
             cambia el editor a esa adaptación; el botón "Volver al master"
@@ -1219,10 +1219,16 @@ function AdaptationCard({
   );
   const hasManualOverride = !!parseOverrides(adaptation.overrides_json).manual_layout;
 
+  // Mostramos el banner como protagonista y ocultamos controles + badges
+  // hasta que el productor pase el mouse encima. Cuando esta card es la que
+  // está siendo editada, los controles quedan siempre visibles porque ya es
+  // un contexto explícito.
+  const showControls = isEditing;
+
   return (
     <div
       className={cn(
-        "bg-muted/50 rounded-lg p-3 flex flex-col gap-2 group border transition-colors",
+        "bg-muted/50 rounded-lg p-3 flex flex-col gap-2 group border transition-colors relative",
         isEditing
           ? "border-primary ring-2 ring-primary/40"
           : "border-border/60 hover:border-foreground/30"
@@ -1244,97 +1250,115 @@ function AdaptationCard({
           dataRow={dataRow}
         />
       </button>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          {channel && (
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              {CHANNEL_LABEL[channel] ?? channel}
-            </span>
-          )}
-          <p className="text-sm font-medium truncate">{label}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {adaptation.width}×{adaptation.height}
-          </p>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
-          onClick={onDelete}
-          disabled={deleting}
-          title="Eliminar adaptación"
-        >
-          {deleting ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Trash2 className="h-3.5 w-3.5 text-red-400" />
-          )}
-        </Button>
+
+      {/* Caption mínimo siempre visible: solo el nombre y dimensiones. */}
+      <div className="min-w-0">
+        <p className="text-sm font-medium truncate">{label}</p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {adaptation.width}×{adaptation.height}
+        </p>
       </div>
-      {hasManualOverride && (
-        <div className="flex items-start gap-1.5 text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded px-2 py-1">
-          <Pencil className="h-3 w-3 shrink-0 mt-0.5" />
-          <span>Ajuste manual aplicado</span>
-        </div>
-      )}
-      {extremeMismatch && !hasManualOverride && (
-        <div
-          className="flex items-start gap-1.5 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1"
-          title="Este formato tiene un aspect ratio muy distinto al del master."
-        >
-          <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
-          <span>
-            Aspect muy distinto al master. Probablemente necesita ajuste manual.
+
+      {/* Controles + badges: ocultos por defecto, visibles al hover (o
+          siempre cuando la card está activa). */}
+      <div
+        className={cn(
+          "flex flex-col gap-2 transition-opacity",
+          showControls
+            ? "opacity-100"
+            : "opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto"
+        )}
+      >
+        {channel && (
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            {CHANNEL_LABEL[channel] ?? channel}
           </span>
+        )}
+        {hasManualOverride && (
+          <div className="flex items-start gap-1.5 text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded px-2 py-1">
+            <Pencil className="h-3 w-3 shrink-0 mt-0.5" />
+            <span>Ajuste manual aplicado</span>
+          </div>
+        )}
+        {extremeMismatch && !hasManualOverride && (
+          <div
+            className="flex items-start gap-1.5 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1"
+            title="Este formato tiene un aspect ratio muy distinto al del master."
+          >
+            <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+            <span>
+              Aspect muy distinto al master. Probablemente necesita ajuste manual.
+            </span>
+          </div>
+        )}
+        <div className="flex items-center gap-1">
+          <select
+            value={adaptation.fit_mode}
+            onChange={(e) => onFitModeChange(e.target.value as FitMode)}
+            disabled={hasManualOverride}
+            className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-[11px] disabled:opacity-50"
+            title={
+              hasManualOverride
+                ? "El ajuste manual sobreescribe el fit mode"
+                : FIT_MODE_DESCRIPTION[adaptation.fit_mode]
+            }
+          >
+            {(Object.keys(FIT_MODE_LABEL) as FitMode[]).map((mode) => (
+              <option key={mode} value={mode}>
+                Fit: {FIT_MODE_LABEL[mode]}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={onEdit}
+            className={cn(
+              "text-[11px] px-2 py-1 rounded border transition-colors flex items-center gap-1",
+              isEditing
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border/50 hover:bg-muted hover:border-foreground/30"
+            )}
+            title="Editar manualmente esta pieza en el editor principal"
+          >
+            <Pencil className="h-3 w-3" />
+            {isEditing ? "Editando" : "Ajustar"}
+          </button>
+          <button
+            type="button"
+            onClick={onDownload}
+            disabled={downloading || batchInProgress}
+            className="text-[11px] px-2 py-1 rounded border border-border/50 hover:bg-muted hover:border-foreground/30 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Descargar como JPG"
+          >
+            {downloading ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Download className="h-3 w-3" />
+            )}
+            JPG
+          </button>
         </div>
-      )}
-      <div className="flex items-center gap-1">
-        <select
-          value={adaptation.fit_mode}
-          onChange={(e) => onFitModeChange(e.target.value as FitMode)}
-          disabled={hasManualOverride}
-          className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-[11px] disabled:opacity-50"
-          title={
-            hasManualOverride
-              ? "El ajuste manual sobreescribe el fit mode"
-              : FIT_MODE_DESCRIPTION[adaptation.fit_mode]
-          }
-        >
-          {(Object.keys(FIT_MODE_LABEL) as FitMode[]).map((mode) => (
-            <option key={mode} value={mode}>
-              Fit: {FIT_MODE_LABEL[mode]}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={onEdit}
-          className={cn(
-            "text-[11px] px-2 py-1 rounded border transition-colors flex items-center gap-1",
-            isEditing
-              ? "border-primary bg-primary/10 text-foreground"
-              : "border-border/50 hover:bg-muted hover:border-foreground/30"
-          )}
-          title="Editar manualmente esta pieza en el editor principal"
-        >
-          <Pencil className="h-3 w-3" />
-          {isEditing ? "Editando" : "Ajustar"}
-        </button>
-        <button
-          type="button"
-          onClick={onDownload}
-          disabled={downloading || batchInProgress}
-          className="text-[11px] px-2 py-1 rounded border border-border/50 hover:bg-muted hover:border-foreground/30 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Descargar como JPG"
-        >
-          {downloading ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
-          ) : (
-            <Download className="h-3 w-3" />
-          )}
-          JPG
-        </button>
       </div>
+
+      {/* Eliminar: botón flotante arriba a la derecha, hover-only. Sale del
+          flujo de controles para que el thumb mantenga la altura. */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="absolute top-2 right-2 h-7 w-7 hover:bg-red-500/20 bg-background/80 backdrop-blur opacity-0 group-hover:opacity-100 transition-opacity"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+        disabled={deleting}
+        title="Eliminar adaptación"
+      >
+        {deleting ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Trash2 className="h-3.5 w-3.5 text-red-400" />
+        )}
+      </Button>
     </div>
   );
 }
