@@ -772,6 +772,43 @@ export default function ProducirPage() {
     [activeOrientationId, templateId]
   );
 
+  // Borrar una orientación (variante). La PRINCIPAL (MIN id) no se puede
+  // borrar — es el master mismo. Después de borrar, refrescamos orientations
+  // y si era la activa, switcheamos a la principal.
+  const handleDeleteOrientation = useCallback(
+    async (orientationId: number) => {
+      const sorted = [...orientations].sort((a, b) => a.id - b.id);
+      const principal = sorted[0];
+      if (principal && orientationId === principal.id) return;
+      if (
+        !confirm(
+          "¿Eliminar esta orientación? Las adaptaciones del master no se borran, pero las que la estaban usando pasarán a la orientación más cercana."
+        )
+      ) {
+        return;
+      }
+      const res = await fetch(
+        `/api/production/templates/${orientationId}`,
+        { method: "DELETE" }
+      );
+      if (res.ok) {
+        const refresh = await fetch(
+          `/api/production/templates/${templateId}/orientations`
+        );
+        if (refresh.ok) {
+          const list: Orientation[] = await refresh.json();
+          setOrientations(list);
+          // Si la activa era la borrada, cae sobre la principal nueva.
+          if (activeOrientationId === orientationId) {
+            const newSorted = [...list].sort((a, b) => a.id - b.id);
+            setActiveOrientationId(newSorted[0]?.id ?? null);
+          }
+        }
+      }
+    },
+    [orientations, activeOrientationId, templateId]
+  );
+
   const handleToggleLinked = useCallback(async () => {
     if (!activeOrientation) return;
     const isCurrentlyLinked = activeOrientation.linked_to_template_id != null;
@@ -972,6 +1009,7 @@ export default function ProducirPage() {
                     designMembers={designMembers}
                     onSwitch={(id) => setActiveOrientationId(id)}
                     onAdd={() => setShowAddVariant(true)}
+                    onDelete={handleDeleteOrientation}
                   />
                 }
               />
@@ -2243,11 +2281,14 @@ function noop() {}
 
 // VariantsStrip: barra horizontal con TODAS las orientaciones del master,
 // incluyendo la que está abierta en el editor (marcada con border primary).
-// Click cambia la orientación activa SIN navegar.
+// Click cambia la orientación activa SIN navegar. La PRINCIPAL (MIN id)
+// se etiqueta "master" independientemente de su DB name y no se puede
+// borrar — todas las demás tienen botón delete on hover.
 function VariantsStrip({
   designMembers,
   onSwitch,
   onAdd,
+  onDelete,
 }: {
   designMembers: Array<{
     id: number;
@@ -2260,7 +2301,14 @@ function VariantsStrip({
   }>;
   onSwitch: (id: number) => void;
   onAdd: () => void;
+  onDelete: (id: number) => void;
 }) {
+  // Identificamos la principal por MIN id. El "master" es el template
+  // original; las demás son orientaciones agregadas después.
+  const principalId =
+    designMembers.length > 0
+      ? designMembers.reduce((min, m) => (m.id < min ? m.id : min), designMembers[0].id)
+      : null;
   // Una sola orientación: la strip queda discreta con solo el botón "+ Formato".
   if (designMembers.length <= 1) {
     return (
@@ -2279,67 +2327,91 @@ function VariantsStrip({
   }
   return (
     <div className="flex items-end gap-2 px-3 py-2 border-b border-border/30 bg-muted/10 overflow-x-auto">
-      {designMembers.map((m) => (
-        <button
-          key={m.id}
-          type="button"
-          onClick={() => onSwitch(m.id)}
-          disabled={m.isCurrent}
-          className={cn(
-            "group flex flex-col items-center gap-1 shrink-0 focus:outline-none",
-            m.isCurrent && "cursor-default"
-          )}
-          title={
-            m.isCurrent
-              ? "Orientación abierta en el editor"
-              : `${m.name} · ${m.base_width}×${m.base_height} — click para abrir`
-          }
-        >
-          <div
-            className={cn(
-              "rounded shadow-sm flex items-center justify-center transition-colors overflow-hidden bg-background/40",
-              m.isCurrent
-                ? "border-2 border-primary ring-2 ring-primary/30"
-                : "border border-border/50 group-hover:border-foreground/40 group-hover:bg-background/60"
-            )}
-            style={{
-              width: 80 * (m.base_width / Math.max(m.base_width, m.base_height)),
-              height: 80 * (m.base_height / Math.max(m.base_width, m.base_height)),
-              maxWidth: 100,
-              maxHeight: 80,
-            }}
-          >
-            {m.thumbnail_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={m.thumbnail_url}
-                alt={m.name}
-                className="max-w-full max-h-full object-contain"
-              />
-            ) : (
-              variantOrientationIcon(m.base_width, m.base_height)
+      {designMembers.map((m) => {
+        const isPrincipal = m.id === principalId;
+        // El nombre del principal se fuerza a "master" — el nombre que tipea
+        // el productor al crear el template no se muestra acá; ese vive en
+        // el header de la página como concepto.
+        const displayName = isPrincipal ? "master" : m.name;
+        return (
+          <div key={m.id} className="relative shrink-0 group">
+            <button
+              type="button"
+              onClick={() => onSwitch(m.id)}
+              disabled={m.isCurrent}
+              className={cn(
+                "flex flex-col items-center gap-1 focus:outline-none",
+                m.isCurrent && "cursor-default"
+              )}
+              title={
+                m.isCurrent
+                  ? `${displayName} · orientación abierta`
+                  : `${displayName} · ${m.base_width}×${m.base_height} — click para abrir`
+              }
+            >
+              <div
+                className={cn(
+                  "rounded shadow-sm flex items-center justify-center transition-colors overflow-hidden bg-background/40",
+                  m.isCurrent
+                    ? "border-2 border-primary ring-2 ring-primary/30"
+                    : "border border-border/50 hover:border-foreground/40 hover:bg-background/60"
+                )}
+                style={{
+                  width: 80 * (m.base_width / Math.max(m.base_width, m.base_height)),
+                  height: 80 * (m.base_height / Math.max(m.base_width, m.base_height)),
+                  maxWidth: 100,
+                  maxHeight: 80,
+                }}
+              >
+                {m.thumbnail_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={m.thumbnail_url}
+                    alt={displayName}
+                    className="max-w-full max-h-full object-contain"
+                  />
+                ) : (
+                  variantOrientationIcon(m.base_width, m.base_height)
+                )}
+              </div>
+              <span
+                className={cn(
+                  "text-xs flex items-center gap-1 font-medium",
+                  m.isCurrent
+                    ? "text-foreground"
+                    : "text-muted-foreground"
+                )}
+              >
+                {displayName}
+                {m.linked_to_template_id != null && (
+                  <span className="text-emerald-400" title="Vinculada al master">
+                    ↳
+                  </span>
+                )}
+              </span>
+              <span className="text-[10px] text-muted-foreground/70">
+                {m.base_width}×{m.base_height}
+              </span>
+            </button>
+            {/* Borrar variante: solo visible al hover y solo cuando NO es la
+                principal. La principal es el master y no se elimina desde
+                acá (se elimina el template entero desde el listado). */}
+            {!isPrincipal && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(m.id);
+                }}
+                className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-red-500 hover:bg-red-600 text-white shadow-md opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                title="Eliminar esta orientación"
+              >
+                <X className="h-3 w-3" />
+              </button>
             )}
           </div>
-          <span
-            className={cn(
-              "text-xs flex items-center gap-1 font-medium",
-              m.isCurrent
-                ? "text-foreground"
-                : "text-muted-foreground group-hover:text-foreground"
-            )}
-          >
-            {m.name}
-            {m.linked_to_template_id != null && (
-              <span className="text-emerald-400" title="Vinculada al base">
-                ↳
-              </span>
-            )}
-          </span>
-          <span className="text-[10px] text-muted-foreground/70">
-            {m.base_width}×{m.base_height}
-          </span>
-        </button>
-      ))}
+        );
+      })}
       <button
         type="button"
         onClick={onAdd}
