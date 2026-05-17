@@ -71,13 +71,24 @@ export interface FrameLayer extends BaseLayer {
   children: TemplateLayer[];
 }
 
+// Auto-fit text size: el renderer mide la caja del texto y elige el font-size
+// más grande dentro de [min, max] que entre sin overflow. Útil para que un
+// mismo headline funcione en piezas grandes y chicas sin truncar.
+export interface FontSizeRange {
+  min: number;
+  max: number;
+}
+
 export interface TextLayer extends BaseLayer {
   type: "text";
   content: string;
   style: {
     fontFamily?: string;
-    // number literal, or token ref (e.g. "{scale.lg}") / font-family ref via fontFamily.
-    fontSize: number | string;
+    // Tres formas válidas:
+    //   number          → tamaño fijo
+    //   string          → token ref (e.g. "{scale.lg}")
+    //   { min, max }    → auto-fit en el rango (smart text)
+    fontSize: number | string | FontSizeRange;
     fontWeight?: number | string;
     color: string;
     lineHeight?: number;
@@ -85,6 +96,17 @@ export interface TextLayer extends BaseLayer {
     align?: "left" | "center" | "right";
     italic?: boolean;
   };
+}
+
+export function isFontSizeRange(v: unknown): v is FontSizeRange {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    "min" in v &&
+    "max" in v &&
+    typeof (v as FontSizeRange).min === "number" &&
+    typeof (v as FontSizeRange).max === "number"
+  );
 }
 
 export interface ImageLayer extends BaseLayer {

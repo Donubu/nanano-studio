@@ -11,8 +11,10 @@ import {
   StackLayout,
   StackAlign,
   StackJustify,
+  isFontSizeRange,
 } from "@/lib/production/types";
 import { ensureGoogleFontLoaded } from "@/lib/production/google-fonts";
+import { SmartText } from "./smart-text";
 
 interface Props {
   layer: TemplateLayer;
@@ -187,10 +189,9 @@ function renderFrame(
 function renderText(layer: TextLayer, parentMode: "free" | "stack", common: CommonProps) {
   const { style } = layer;
   if (style.fontFamily) ensureGoogleFontLoaded(style.fontFamily);
-  const css: CSSProperties = {
+  const baseCss: CSSProperties = {
     ...baseLayerStyle(layer, parentMode),
     fontFamily: style.fontFamily,
-    fontSize: style.fontSize,
     fontWeight: style.fontWeight,
     color: style.color,
     lineHeight: style.lineHeight,
@@ -199,6 +200,21 @@ function renderText(layer: TextLayer, parentMode: "free" | "stack", common: Comm
     fontStyle: style.italic ? "italic" : undefined,
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
+  };
+  // Smart text: el render busca el font-size más grande que entre en la caja.
+  if (isFontSizeRange(style.fontSize)) {
+    return (
+      <SmartText
+        content={layer.content}
+        range={style.fontSize}
+        style={baseCss}
+        {...common}
+      />
+    );
+  }
+  const css: CSSProperties = {
+    ...baseCss,
+    fontSize: style.fontSize,
     overflow: "hidden",
   };
   return (

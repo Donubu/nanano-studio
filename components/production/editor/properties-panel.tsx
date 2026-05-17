@@ -17,6 +17,8 @@ import {
   ConstraintH,
   ConstraintV,
   DEFAULT_CONSTRAINTS,
+  FontSizeRange,
+  isFontSizeRange,
 } from "@/lib/production/types";
 import {
   BrandKit,
@@ -156,6 +158,116 @@ function TokenNumberRow<T extends { name: string; label: string; value?: number;
             );
           })}
         </div>
+      )}
+    </div>
+  );
+}
+
+// Font-size field con tres modos:
+//   - número o token ref ("{scale.lg}"): tamaño fijo (TokenNumberRow normal).
+//   - { min, max }: smart text — el render busca el font-size más grande que
+//     entre en la caja. Toggle para alternar entre fijo y rango.
+function FontSizeRow({
+  value,
+  scales,
+  onChange,
+}: {
+  value: number | string | FontSizeRange | undefined;
+  scales: { name: string; label: string; fontSize?: number }[];
+  onChange: (next: number | string | FontSizeRange) => void;
+}) {
+  const isRange = isFontSizeRange(value);
+
+  const toFixed = () => {
+    // Pasamos de rango a fijo usando el max como tamaño objetivo.
+    if (isRange) onChange(value.max);
+  };
+  const toRange = () => {
+    if (isRange) return;
+    // Pasamos de fijo a rango. Default sensato: min = max / 2, max = current.
+    const current =
+      typeof value === "number" ? value : Number(value) || 48;
+    const max = Math.max(8, Math.round(current));
+    const min = Math.max(6, Math.round(max / 2));
+    onChange({ min, max });
+  };
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2 text-xs">
+        <span className="w-12 text-muted-foreground">Tamaño</span>
+        <div className="flex-1 flex items-center gap-1">
+          <button
+            type="button"
+            onClick={toFixed}
+            className={cn(
+              "flex-1 text-[10px] py-1 rounded border",
+              !isRange
+                ? "border-primary bg-primary/10"
+                : "border-border/50 text-muted-foreground hover:bg-muted"
+            )}
+            title="Tamaño fijo en px"
+          >
+            Fijo
+          </button>
+          <button
+            type="button"
+            onClick={toRange}
+            className={cn(
+              "flex-1 text-[10px] py-1 rounded border",
+              isRange
+                ? "border-primary bg-primary/10"
+                : "border-border/50 text-muted-foreground hover:bg-muted"
+            )}
+            title="Auto-ajusta entre min y max según el espacio disponible"
+          >
+            Auto-fit
+          </button>
+        </div>
+      </div>
+      {isRange ? (
+        <div className="flex items-center gap-2 pl-14">
+          <label className="flex-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+            min
+            <input
+              type="number"
+              min={1}
+              value={value.min}
+              onChange={(e) =>
+                onChange({
+                  ...value,
+                  min: Math.max(1, Number(e.target.value) || 1),
+                })
+              }
+              className="flex-1 bg-muted border border-border/50 rounded px-1.5 py-1 text-xs"
+            />
+          </label>
+          <label className="flex-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+            max
+            <input
+              type="number"
+              min={value.min}
+              value={value.max}
+              onChange={(e) =>
+                onChange({
+                  ...value,
+                  max: Math.max(value.min, Number(e.target.value) || value.min),
+                })
+              }
+              className="flex-1 bg-muted border border-border/50 rounded px-1.5 py-1 text-xs"
+            />
+          </label>
+        </div>
+      ) : (
+        <TokenNumberRow
+          label=""
+          value={value as number | string | undefined}
+          tokens={scales}
+          refKind="scale"
+          min={1}
+          onChangeLiteral={(v) => onChange(v)}
+          onPickToken={(r) => onChange(r)}
+        />
       )}
     </div>
   );
@@ -558,14 +670,10 @@ function TextProps({
           placeholder="Inter, system-ui, sans-serif"
           onChange={(v) => updateStyle({ fontFamily: v || undefined })}
         />
-        <TokenNumberRow
-          label="Tamaño"
+        <FontSizeRow
           value={layer.style.fontSize}
-          tokens={brandKit.scales}
-          refKind="scale"
-          min={1}
-          onChangeLiteral={(v) => updateStyle({ fontSize: v })}
-          onPickToken={(r) => updateStyle({ fontSize: r })}
+          scales={brandKit.scales}
+          onChange={(v) => updateStyle({ fontSize: v })}
         />
         <NumberRow
           label="Peso"
