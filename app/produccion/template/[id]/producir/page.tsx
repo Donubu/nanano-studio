@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, CSSProperties } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import JSZip from "jszip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -11,7 +12,9 @@ import {
   ArrowLeft,
   Check,
   CheckSquare,
+  Download,
   Loader2,
+  Package,
   Pencil,
   Plus,
   Rocket,
@@ -20,6 +23,12 @@ import {
 } from "lucide-react";
 import { hasExtremeAspectMismatch } from "@/lib/production/fit-mode";
 import { parseOverrides } from "@/lib/production/overrides";
+import {
+  captureNodeToJpeg,
+  downloadBlob,
+  sanitizeFilename,
+} from "@/lib/production/export";
+import { AdaptationRenderer } from "@/components/production/render/adaptation-renderer";
 import {
   TemplateDefinition,
   TemplateLayer,
@@ -242,6 +251,102 @@ export default function ProducirPage() {
     }
   };
 
+  // --- Export pipeline ---
+  // currentlyRendering: la adaptación que está montada en el container oculto
+  // a su tamaño nativo. captureResolverRef sostiene el resolve del Promise que
+  // espera el blob capturado. Trabajamos con un slot único: exportSingle
+  // serializa cualquier llamada (single-download o ítem de un batch).
+  const [currentlyRendering, setCurrentlyRendering] = useState<Adaptation | null>(null);
+  const captureResolverRef = useRef<((blob: Blob | null) => void) | null>(null);
+  const renderRef = useRef<HTMLDivElement | null>(null);
+  const [singleDownloadingId, setSingleDownloadingId] = useState<number | null>(null);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+
+  useEffect(() => {
+    if (!currentlyRendering) return;
+    let cancelled = false;
+    (async () => {
+      // Esperamos dos rAF para asegurar que React commit y el browser pinte.
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      );
+      if (cancelled) return;
+      const node = renderRef.current;
+      if (!node) {
+        captureResolverRef.current?.(null);
+        captureResolverRef.current = null;
+        setCurrentlyRendering(null);
+        return;
+      }
+      try {
+        const blob = await captureNodeToJpeg(node);
+        if (cancelled) return;
+        captureResolverRef.current?.(blob);
+      } catch (err) {
+        console.error("Capture failed:", err);
+        captureResolverRef.current?.(null);
+      } finally {
+        if (!cancelled) {
+          captureResolverRef.current = null;
+          setCurrentlyRendering(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentlyRendering]);
+
+  const exportAdaptation = useCallback(
+    (a: Adaptation): Promise<Blob | null> => {
+      return new Promise((resolve) => {
+        captureResolverRef.current = resolve;
+        setCurrentlyRendering(a);
+      });
+    },
+    []
+  );
+
+  const filenameFor = useCallback(
+    (a: Adaptation): string => {
+      const label = a.custom_name || a.preset_name || `${a.width}x${a.height}`;
+      const tpl = template?.name ?? "template";
+      return sanitizeFilename(`${tpl}_${label}_${a.width}x${a.height}.jpg`);
+    },
+    [template]
+  );
+
+  const handleDownloadSingle = async (a: Adaptation) => {
+    setSingleDownloadingId(a.id);
+    try {
+      const blob = await exportAdaptation(a);
+      if (blob) downloadBlob(blob, filenameFor(a));
+    } finally {
+      setSingleDownloadingId(null);
+    }
+  };
+
+  const handleDownloadAll = async () => {
+    if (adaptations.length === 0) return;
+    setBatchProgress({ current: 0, total: adaptations.length });
+    try {
+      const zip = new JSZip();
+      for (let i = 0; i < adaptations.length; i++) {
+        const a = adaptations[i];
+        setBatchProgress({ current: i + 1, total: adaptations.length });
+        const blob = await exportAdaptation(a);
+        if (blob) {
+          zip.file(filenameFor(a), blob);
+        }
+      }
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const tplName = template?.name ?? "template";
+      downloadBlob(zipBlob, sanitizeFilename(`${tplName}_adaptaciones.zip`));
+    } finally {
+      setBatchProgress(null);
+    }
+  };
+
   const handleFitModeChange = async (adaptationId: number, fitMode: FitMode) => {
     // Optimistic update.
     setAdaptations((cur) =>
@@ -364,9 +469,33 @@ export default function ProducirPage() {
                 Una pieza de salida por formato. Click en + para agregar.
               </p>
             </div>
-            <Button size="sm" onClick={() => setShowPicker(true)} className="gap-1">
-              <Plus className="h-4 w-4" /> Agregar adaptación
-            </Button>
+            <div className="flex items-center gap-2">
+              {adaptations.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleDownloadAll}
+                  disabled={!!batchProgress || !!singleDownloadingId}
+                  className="gap-1"
+                  title="Renderiza todas las adaptaciones y descarga un ZIP"
+                >
+                  {batchProgress ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      {batchProgress.current}/{batchProgress.total}
+                    </>
+                  ) : (
+                    <>
+                      <Package className="h-4 w-4" />
+                      Descargar todas (ZIP)
+                    </>
+                  )}
+                </Button>
+              )}
+              <Button size="sm" onClick={() => setShowPicker(true)} className="gap-1">
+                <Plus className="h-4 w-4" /> Agregar adaptación
+              </Button>
+            </div>
           </div>
 
           {adaptations.length === 0 ? (
@@ -384,6 +513,9 @@ export default function ProducirPage() {
                   templateId={templateId}
                   onDelete={() => handleDelete(a.id)}
                   onFitModeChange={(m) => handleFitModeChange(a.id, m)}
+                  onDownload={() => handleDownloadSingle(a)}
+                  downloading={singleDownloadingId === a.id}
+                  batchInProgress={!!batchProgress}
                   deleting={deletingId === a.id}
                 />
               ))}
@@ -401,6 +533,29 @@ export default function ProducirPage() {
           onAddCustom={handleAddCustom}
         />
       )}
+
+      {/* Container oculto para renderizar adaptaciones a tamaño nativo durante
+          export. Vive fuera del flujo visual; las dimensiones reales del
+          renderer escapan por overflow. */}
+      <div
+        aria-hidden
+        style={{
+          position: "fixed",
+          left: "-99999px",
+          top: 0,
+          pointerEvents: "none",
+          opacity: 0,
+        }}
+      >
+        {currentlyRendering && (
+          <AdaptationRenderer
+            ref={renderRef}
+            adaptation={currentlyRendering}
+            master={definition}
+            brandKit={brandKitContent}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -466,6 +621,9 @@ function AdaptationCard({
   templateId,
   onDelete,
   onFitModeChange,
+  onDownload,
+  downloading,
+  batchInProgress,
   deleting,
 }: {
   adaptation: Adaptation;
@@ -474,6 +632,9 @@ function AdaptationCard({
   templateId: string;
   onDelete: () => void;
   onFitModeChange: (m: FitMode) => void;
+  onDownload: () => void;
+  downloading: boolean;
+  batchInProgress: boolean;
   deleting: boolean;
 }) {
   const label =
@@ -576,6 +737,20 @@ function AdaptationCard({
           <Pencil className="h-3 w-3" />
           Ajustar
         </Link>
+        <button
+          type="button"
+          onClick={onDownload}
+          disabled={downloading || batchInProgress}
+          className="text-[11px] px-2 py-1 rounded border border-border/50 hover:bg-muted hover:border-foreground/30 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Descargar como JPG"
+        >
+          {downloading ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <Download className="h-3 w-3" />
+          )}
+          JPG
+        </button>
       </div>
     </div>
   );
