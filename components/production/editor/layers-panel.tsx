@@ -56,7 +56,9 @@ export function LayersPanel({
   onToggleLock,
   onLayerContextMenu,
 }: Props) {
-  const flat = flattenLayers(definition);
+  // Panel order = reverse of paint order: the row at the top of the panel is
+  // the layer painted on top of the canvas (Figma convention).
+  const flat = flattenLayers(definition, "panel");
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropHint, setDropHint] = useState<{ id: string; position: "before" | "after" } | null>(null);
 
@@ -106,8 +108,15 @@ export function LayersPanel({
   const handleDrop = (e: ReactDragEvent<HTMLDivElement>, id: string) => {
     if (!dragId || dragId === id) return;
     e.preventDefault();
-    const position = dropHint && dropHint.id === id ? dropHint.position : "after";
-    onReorder(dragId, id, position);
+    const visualPosition =
+      dropHint && dropHint.id === id ? dropHint.position : "after";
+    // Panel order is reversed vs. paint order, so dropping "above" in the
+    // panel means inserting "after" in the children array (later = painted on
+    // top). Flip the visual position before delegating to the reorder hook,
+    // which operates on the array directly.
+    const arrayPosition: "before" | "after" =
+      visualPosition === "before" ? "after" : "before";
+    onReorder(dragId, id, arrayPosition);
     setDragId(null);
     setDropHint(null);
   };

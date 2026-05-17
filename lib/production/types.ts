@@ -329,10 +329,21 @@ export interface FlatLayer {
   depth: number;
 }
 
-export function flattenLayers(root: TemplateDefinition): FlatLayer[] {
+// Order parameter:
+//   - "paint" (default): document order — first child first, last child last.
+//     Matches the array order and z-order from bottom to top.
+//   - "panel": reverse — last child first. Matches Figma's layers panel
+//     convention where the row at the top of the panel is the one painted on
+//     top of the canvas. Children of each frame are also reversed so a frame's
+//     topmost child appears right under it.
+export function flattenLayers(
+  root: TemplateDefinition,
+  order: "paint" | "panel" = "paint",
+): FlatLayer[] {
   const out: FlatLayer[] = [];
   const walk = (nodes: TemplateLayer[], depth: number) => {
-    for (const n of nodes) {
+    const list = order === "panel" ? [...nodes].reverse() : nodes;
+    for (const n of list) {
       out.push({ layer: n, depth });
       if (n.type === "frame") walk(n.children, depth + 1);
     }
