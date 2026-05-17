@@ -1131,8 +1131,11 @@ function AdaptationCard({
   const hasManualOverride = !!parseOverrides(adaptation.overrides_json).manual_layout;
 
   return (
-    <div className="bg-muted/50 rounded-lg p-3 flex flex-col gap-2 group">
-      <div className="flex items-center justify-center bg-background/40 rounded">
+    <div className="bg-muted/50 border border-border/60 rounded-lg p-3 flex flex-col gap-2 group">
+      <div
+        className="flex items-end justify-center bg-background/40 rounded"
+        style={{ minHeight: TARGET_H + 16 }}
+      >
         <AdaptationPreview
           adaptation={adaptation}
           definition={definition}
