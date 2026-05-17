@@ -7,7 +7,8 @@ import { useTemplateEditor } from "@/lib/production/use-template-editor";
 import { TemplateCanvas } from "./template-canvas";
 import { LayersPanel } from "./layers-panel";
 import { PropertiesPanel } from "./properties-panel";
-import { EditorToolbar, PreviewPreset } from "./editor-toolbar";
+import { EditorToolbar } from "./editor-toolbar";
+import { PreviewThumbnails, ThumbnailPreset } from "./preview-thumbnails";
 import { ProjectBrandKitModal } from "./project-brand-kit-modal";
 import { LayerContextMenu, LayerContextMenuPosition } from "./layer-context-menu";
 
@@ -41,16 +42,17 @@ export function TemplateEditor({
     onSave,
   });
 
-  const previewPresets: PreviewPreset[] = useMemo(
+  const previewPresets: ThumbnailPreset[] = useMemo(
     () => [
-      { id: "master", label: "Master", size: null },
-      { id: "square", label: "□ 1:1", size: { w: 1080, h: 1080 } },
-      { id: "vertical", label: "↕ 9:16", size: { w: 1080, h: 1920 } },
-      { id: "horizontal", label: "↔ 16:9", size: { w: 1920, h: 1080 } },
+      { id: "square", label: "1:1", size: { w: 1080, h: 1080 } },
+      { id: "vertical", label: "9:16", size: { w: 1080, h: 1920 } },
+      { id: "horizontal", label: "16:9", size: { w: 1920, h: 1080 } },
     ],
     []
   );
-  const [activePreviewId, setActivePreviewId] = useState("master");
+  // null = master (no preview overlay). Selecting a preset shows it in the
+  // main canvas; clicking the active thumb again returns to null/master.
+  const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [showProjectKit, setShowProjectKit] = useState(false);
   const [contextMenu, setContextMenu] = useState<LayerContextMenuPosition | null>(null);
 
@@ -70,10 +72,11 @@ export function TemplateEditor({
   const ctxParent = contextMenu ? findParent(editor.definition, contextMenu.layerId) : null;
   const ctxParentIsStack = ctxParent?.layout.mode === "stack";
 
-  // If editor.selectedId changes, clear preview? No — keep preview persistent
-  // until user toggles. They may want to inspect different selections.
-  const activePreview = previewPresets.find((p) => p.id === activePreviewId) ?? previewPresets[0];
-  const previewSize = activePreview.size; // null = master (full edit)
+  // null when no preview is active → main canvas shows the master.
+  const activePreview = activePreviewId
+    ? previewPresets.find((p) => p.id === activePreviewId)
+    : null;
+  const previewSize = activePreview?.size ?? null;
 
   // When entering preview mode, deselect to avoid showing handles for a layer
   // whose bounds were reflowed and don't match what the user could resize.
@@ -133,9 +136,6 @@ export function TemplateEditor({
         onAddShape={editor.addShape}
         saveStatus={editor.saveStatus}
         lastSavedAt={editor.lastSavedAt}
-        previewPresets={previewPresets}
-        activePreviewId={activePreviewId}
-        onSelectPreview={setActivePreviewId}
         onOpenProjectBrandKit={
           canOpenProjectKit ? () => setShowProjectKit(true) : undefined
         }
@@ -169,22 +169,6 @@ export function TemplateEditor({
         />
       )}
 
-      {previewSize && (
-        <div className="flex items-center justify-center gap-2 px-3 py-1.5 text-xs bg-blue-500/10 text-blue-300 border-b border-blue-500/20">
-          <span>
-            Vista previa · {previewSize.w} × {previewSize.h} px ·
-            Las ediciones están deshabilitadas.
-          </span>
-          <button
-            type="button"
-            onClick={() => setActivePreviewId("master")}
-            className="underline hover:no-underline"
-          >
-            Volver al master
-          </button>
-        </div>
-      )}
-
       <div className="flex flex-1 min-h-0">
         <LayersPanel
           definition={editor.definition}
@@ -195,15 +179,39 @@ export function TemplateEditor({
           onToggleLock={editor.toggleLock}
           onLayerContextMenu={previewSize ? undefined : openContextMenu}
         />
-        <TemplateCanvas
-          definition={editor.definition}
-          selectedId={editor.selectedId}
-          onSelect={editor.select}
-          onUpdateBounds={editor.updateBounds}
-          previewSize={previewSize}
-          brandKit={brandKit}
-          onLayerContextMenu={openContextMenu}
-        />
+        <div className="flex flex-col flex-1 min-w-0 min-h-0">
+          <PreviewThumbnails
+            definition={editor.definition}
+            brandKit={brandKit}
+            presets={previewPresets}
+            activePreviewId={activePreviewId}
+            onSelectPreview={setActivePreviewId}
+          />
+          {previewSize && (
+            <div className="flex items-center justify-center gap-2 px-3 py-1.5 text-xs bg-blue-500/10 text-blue-300 border-b border-blue-500/20">
+              <span>
+                Vista previa · {previewSize.w} × {previewSize.h} px ·
+                Las ediciones están deshabilitadas.
+              </span>
+              <button
+                type="button"
+                onClick={() => setActivePreviewId(null)}
+                className="underline hover:no-underline"
+              >
+                Volver al master
+              </button>
+            </div>
+          )}
+          <TemplateCanvas
+            definition={editor.definition}
+            selectedId={editor.selectedId}
+            onSelect={editor.select}
+            onUpdateBounds={editor.updateBounds}
+            previewSize={previewSize}
+            brandKit={brandKit}
+            onLayerContextMenu={openContextMenu}
+          />
+        </div>
         <PropertiesPanel
           definition={editor.definition}
           selectedLayer={editor.selectedLayer}
