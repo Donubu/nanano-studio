@@ -98,14 +98,17 @@ export function TemplateEditor({
 
       // Undo / redo work even in text fields when no native handler claims them,
       // but to avoid breaking native input undo we skip if a text field is focused.
+      // Both are also blocked while in preview mode since preview is read-only.
       if (mod && !isTextField) {
         const key = e.key.toLowerCase();
         if (key === "z" && !e.shiftKey) {
+          if (previewSize) return;
           e.preventDefault();
           editor.undo();
           return;
         }
         if ((key === "z" && e.shiftKey) || key === "y") {
+          if (previewSize) return;
           e.preventDefault();
           editor.redo();
           return;
@@ -128,22 +131,31 @@ export function TemplateEditor({
     return () => window.removeEventListener("keydown", onKey);
   }, [editor, previewSize]);
 
+  // Disable every editing surface (toolbar + side panels) while a preview is
+  // active. The thumbnail bar and the "Volver al master" link stay
+  // interactive because they live outside this wrapper.
+  const readOnlyClass = previewSize
+    ? "pointer-events-none opacity-60 select-none"
+    : "";
+
   return (
     <div className="flex flex-col h-full bg-background">
-      <EditorToolbar
-        onAddText={editor.addText}
-        onAddImage={editor.addImage}
-        onAddShape={editor.addShape}
-        saveStatus={editor.saveStatus}
-        lastSavedAt={editor.lastSavedAt}
-        onOpenProjectBrandKit={
-          canOpenProjectKit ? () => setShowProjectKit(true) : undefined
-        }
-        onUndo={editor.undo}
-        onRedo={editor.redo}
-        canUndo={editor.canUndo}
-        canRedo={editor.canRedo}
-      />
+      <div className={readOnlyClass}>
+        <EditorToolbar
+          onAddText={editor.addText}
+          onAddImage={editor.addImage}
+          onAddShape={editor.addShape}
+          saveStatus={editor.saveStatus}
+          lastSavedAt={editor.lastSavedAt}
+          onOpenProjectBrandKit={
+            canOpenProjectKit ? () => setShowProjectKit(true) : undefined
+          }
+          onUndo={editor.undo}
+          onRedo={editor.redo}
+          canUndo={editor.canUndo}
+          canRedo={editor.canRedo}
+        />
+      </div>
 
       {showProjectKit && clientId && projectId && (
         <ProjectBrandKitModal
@@ -170,15 +182,17 @@ export function TemplateEditor({
       )}
 
       <div className="flex flex-1 min-h-0">
-        <LayersPanel
-          definition={editor.definition}
-          selectedId={editor.selectedId}
-          onSelect={editor.select}
-          onDelete={editor.deleteLayer}
-          onReorder={editor.reorderRootChildren}
-          onToggleLock={editor.toggleLock}
-          onLayerContextMenu={previewSize ? undefined : openContextMenu}
-        />
+        <div className={readOnlyClass}>
+          <LayersPanel
+            definition={editor.definition}
+            selectedId={editor.selectedId}
+            onSelect={editor.select}
+            onDelete={editor.deleteLayer}
+            onReorder={editor.reorderRootChildren}
+            onToggleLock={editor.toggleLock}
+            onLayerContextMenu={previewSize ? undefined : openContextMenu}
+          />
+        </div>
         <div className="flex flex-col flex-1 min-w-0 min-h-0">
           <PreviewThumbnails
             definition={editor.definition}
@@ -212,17 +226,19 @@ export function TemplateEditor({
             onLayerContextMenu={openContextMenu}
           />
         </div>
-        <PropertiesPanel
-          definition={editor.definition}
-          selectedLayer={editor.selectedLayer}
-          onUpdateLayer={editor.updateLayer}
-          onUpdateRoot={editor.updateRoot}
-          brandKit={brandKit}
-          clientId={clientId ?? null}
-          projectId={projectId}
-          allBrandKits={allBrandKits}
-          onBrandKitsChange={onBrandKitsChange}
-        />
+        <div className={readOnlyClass}>
+          <PropertiesPanel
+            definition={editor.definition}
+            selectedLayer={editor.selectedLayer}
+            onUpdateLayer={editor.updateLayer}
+            onUpdateRoot={editor.updateRoot}
+            brandKit={brandKit}
+            clientId={clientId ?? null}
+            projectId={projectId}
+            allBrandKits={allBrandKits}
+            onBrandKitsChange={onBrandKitsChange}
+          />
+        </div>
       </div>
     </div>
   );
