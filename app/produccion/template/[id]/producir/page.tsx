@@ -87,6 +87,51 @@ const CHANNEL_ORDER: string[] = [
   "print",
 ];
 
+// Palette de badges para identificar visualmente cada orientación del master
+// (#1 = master, #2 = primera variante, etc.). Los colores son determinísticos
+// por índice — la misma orientación tiene el mismo color durante toda la
+// sesión, y cada AdaptationCard adopta el badge de su source para que el
+// productor sepa de qué variante hereda. Si hay más de 8 orientaciones el
+// palette cicla (raro en la práctica, los masters suelen tener 3-5).
+const ORIENTATION_BADGE_PALETTE: { bg: string; ring: string }[] = [
+  { bg: "bg-blue-500",   ring: "ring-blue-500/30" },
+  { bg: "bg-emerald-500", ring: "ring-emerald-500/30" },
+  { bg: "bg-orange-500", ring: "ring-orange-500/30" },
+  { bg: "bg-purple-500", ring: "ring-purple-500/30" },
+  { bg: "bg-pink-500",   ring: "ring-pink-500/30" },
+  { bg: "bg-cyan-500",   ring: "ring-cyan-500/30" },
+  { bg: "bg-yellow-500", ring: "ring-yellow-500/30" },
+  { bg: "bg-rose-500",   ring: "ring-rose-500/30" },
+];
+
+function orientationBadgeColors(num: number): { bg: string; ring: string } {
+  // num es 1-indexed; -1 para meter en el palette 0-indexed.
+  return ORIENTATION_BADGE_PALETTE[(num - 1) % ORIENTATION_BADGE_PALETTE.length];
+}
+
+// El sort del strip: master primero, después por aspect (h → cuadrado → v)
+// y por área dentro de cada grupo. Vive como helper a nivel de módulo para
+// que tanto el VariantsStrip como el page (para numerar adaptaciones) usen
+// el mismo orden y los números calcen visualmente.
+function sortOrientationsForBadging(
+  orientations: Orientation[],
+  principalId: number | null,
+): Orientation[] {
+  return [...orientations].sort((a, b) => {
+    if (a.id === principalId) return -1;
+    if (b.id === principalId) return 1;
+    const orient = (w: number, h: number) => {
+      const r = w / h;
+      if (Math.abs(r - 1) < 0.05) return 1;
+      return r > 1 ? 0 : 2;
+    };
+    const ao = orient(a.base_width, a.base_height);
+    const bo = orient(b.base_width, b.base_height);
+    if (ao !== bo) return ao - bo;
+    return a.base_width * a.base_height - b.base_width * b.base_height;
+  });
+}
+
 interface Template {
   id: number;
   production_project_id: number;
@@ -197,6 +242,15 @@ export default function ProducirPage() {
   const [adaptationsLoaded, setAdaptationsLoaded] = useState(false);
   const [adaptationCount, setAdaptationCount] = useState(0);
   const [adaptationsLoading, setAdaptationsLoading] = useState(false);
+  // Filtros del módulo adaptaciones. Set vacío significa "todos" — más
+  // simple para el toggle (un click agrega/quita un id del set). Search
+  // matchea contra custom_name + preset_name. onlyCustomized filtra a
+  // adaptaciones con manual_layout. Los filtros NO persisten — son por
+  // sesión, se reinician al volver a entrar a la página.
+  const [filterSourceIds, setFilterSourceIds] = useState<Set<number>>(new Set());
+  const [filterChannels, setFilterChannels] = useState<Set<string>>(new Set());
+  const [filterSearch, setFilterSearch] = useState("");
+  const [filterOnlyCustomized, setFilterOnlyCustomized] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showPicker, setShowPicker] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -495,6 +549,109 @@ export default function ProducirPage() {
       orientations[0],
     );
   }, [orientations]);
+
+  // Map orientationId → número (1-indexed) según el orden visual del strip.
+  // El #1 es siempre la principal/master. Cada AdaptationCard usa el número
+  // de su source para mostrar el mismo badge — así el productor identifica
+  // visualmente qué adaptaciones derivan de qué orientación.
+  const orientationNumberById = useMemo(() => {
+    if (orientations.length === 0) return new Map<number, number>();
+    const sorted = sortOrientationsForBadging(
+      orientations,
+      principalOrientation?.id ?? null,
+    );
+    const map = new Map<number, number>();
+    sorted.forEach((o, idx) => map.set(o.id, idx + 1));
+    return map;
+  }, [orientations, principalOrientation]);
+
+  // Lista ordenada de orientaciones (mismo orden que el strip y los badges).
+  // La usa el filtro de adaptaciones por origen.
+  const sortedOrientations = useMemo(
+    () =>
+      sortOrientationsForBadging(
+        orientations,
+        principalOrientation?.id ?? null,
+      ),
+    [orientations, principalOrientation],
+  );
+
+  // Aplica los filtros sobre la lista cruda de adaptaciones. El groupBy
+  // de canal se ejecuta DESPUÉS sobre la lista filtrada, así los headers
+  // de canal solo aparecen para los grupos con items visibles. resolveSource
+  // se llama acá para mapear cada adaptación a su orientación source y poder
+  // filtrar por orientation id.
+  const filteredAdaptations = useMemo(() => {
+    const searchLower = filterSearch.trim().toLowerCase();
+    return adaptations.filter((a) => {
+      // Source filter: si hay ids seleccionados, la source resuelta debe
+      // estar en el set. Si no hay seleccionados, pasa cualquiera.
+      if (filterSourceIds.size > 0) {
+        const src = resolveSource(a, orientations);
+        if (!src || !filterSourceIds.has(src.id)) return false;
+      }
+      // Channel filter: equivalente. El "custom" cubre adaptaciones sin
+      // preset (formato libre) — coincide con el groupBy.
+      if (filterChannels.size > 0) {
+        const ch = a.preset_channel ?? (a.format_preset_id == null ? "custom" : null);
+        if (!ch || !filterChannels.has(ch)) return false;
+      }
+      // Customized: filtra a las que tienen manual_layout (overrides_json).
+      if (filterOnlyCustomized) {
+        const overrides = parseOverrides(a.overrides_json);
+        if (!overrides.manual_layout) return false;
+      }
+      // Search: contra custom_name + preset_name. Si ambos null, no matchea
+      // a no ser que el search esté vacío.
+      if (searchLower) {
+        const name = (a.custom_name || a.preset_name || "").toLowerCase();
+        const dims = `${a.width}x${a.height}`;
+        if (!name.includes(searchLower) && !dims.includes(searchLower)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [
+    adaptations,
+    orientations,
+    filterSourceIds,
+    filterChannels,
+    filterOnlyCustomized,
+    filterSearch,
+  ]);
+
+  // Canales que existen en las adaptaciones del template (para los chips del
+  // filtro). Solo mostramos chips de canales presentes; no tiene sentido
+  // ofrecer "Meta" como filtro si el productor no tiene piezas de Meta.
+  const availableChannels = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of adaptations) {
+      const ch = a.preset_channel ?? (a.format_preset_id == null ? "custom" : null);
+      if (ch) set.add(ch);
+    }
+    return Array.from(set).sort((a, b) => {
+      const ai = CHANNEL_ORDER.indexOf(a);
+      const bi = CHANNEL_ORDER.indexOf(b);
+      if (ai === -1 && bi === -1) return a.localeCompare(b);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+  }, [adaptations]);
+
+  const anyFilterActive =
+    filterSourceIds.size > 0 ||
+    filterChannels.size > 0 ||
+    filterOnlyCustomized ||
+    filterSearch.trim().length > 0;
+
+  const clearAdaptationFilters = () => {
+    setFilterSourceIds(new Set());
+    setFilterChannels(new Set());
+    setFilterOnlyCustomized(false);
+    setFilterSearch("");
+  };
 
   // Definition que se está editando: viene de la orientación ACTIVA. El
   // useMemo evita reconstruir el objeto en cada render si la orientación no
@@ -1371,6 +1528,7 @@ export default function ProducirPage() {
                     orientations={orientations}
                     activeOrientationId={activeOrientationId}
                     brandKit={brandKitContent}
+                    orientationNumberById={orientationNumberById}
                     onSwitch={(id) => setActiveOrientationId(id)}
                     onAdd={() => setShowAddVariant(true)}
                     onDelete={handleDeleteOrientation}
@@ -1511,8 +1669,147 @@ export default function ProducirPage() {
               </Button>
             </div>
           ) : (
+            <>
+              {/* Filtros: visible solo cuando hay 2+ adaptaciones porque con
+                  1 sola no sirve filtrar. Compacto, 2 filas: source chips +
+                  channels + (búsqueda + solo manual + limpiar). */}
+              {adaptations.length >= 2 && (
+                <div className="mb-4 p-3 rounded-lg bg-muted/30 border border-border/40 space-y-2">
+                  {/* Fila 1: chips de orientación */}
+                  {sortedOrientations.length > 1 && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] text-muted-foreground shrink-0 uppercase tracking-wide">
+                        Origen
+                      </span>
+                      {sortedOrientations.map((o) => {
+                        const num = orientationNumberById.get(o.id);
+                        if (num == null) return null;
+                        const badge = orientationBadgeColors(num);
+                        const isActive = filterSourceIds.has(o.id);
+                        const label = o.id === principalOrientation?.id ? "master" : o.name;
+                        return (
+                          <button
+                            key={o.id}
+                            type="button"
+                            onClick={() => {
+                              setFilterSourceIds((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(o.id)) next.delete(o.id);
+                                else next.add(o.id);
+                                return next;
+                              });
+                            }}
+                            className={cn(
+                              "flex items-center gap-1.5 text-xs px-2 py-1 rounded-full border transition-colors",
+                              isActive
+                                ? "border-foreground/60 bg-foreground/10 text-foreground"
+                                : "border-border/50 bg-card/60 text-muted-foreground hover:text-foreground hover:border-foreground/30"
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "h-4 w-4 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0",
+                                badge.bg,
+                              )}
+                            >
+                              {num}
+                            </span>
+                            <span className="truncate max-w-[120px]">{label}</span>
+                            <span className="text-[10px] text-muted-foreground/70 font-mono">
+                              {o.base_width}×{o.base_height}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Fila 2: chips de canal (solo si hay >1) */}
+                  {availableChannels.length > 1 && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] text-muted-foreground shrink-0 uppercase tracking-wide">
+                        Canal
+                      </span>
+                      {availableChannels.map((ch) => {
+                        const isActive = filterChannels.has(ch);
+                        return (
+                          <button
+                            key={ch}
+                            type="button"
+                            onClick={() => {
+                              setFilterChannels((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(ch)) next.delete(ch);
+                                else next.add(ch);
+                                return next;
+                              });
+                            }}
+                            className={cn(
+                              "text-xs px-2 py-1 rounded-full border transition-colors",
+                              isActive
+                                ? "border-foreground/60 bg-foreground/10 text-foreground"
+                                : "border-border/50 bg-card/60 text-muted-foreground hover:text-foreground hover:border-foreground/30"
+                            )}
+                          >
+                            {CHANNEL_LABEL[ch] ?? ch}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Fila 3: buscar + solo manual + limpiar */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <input
+                      type="text"
+                      value={filterSearch}
+                      onChange={(e) => setFilterSearch(e.target.value)}
+                      placeholder="Buscar por nombre o dimensiones…"
+                      className="flex-1 min-w-[180px] bg-card/60 border border-border/50 rounded px-2 py-1 text-xs focus:outline-none focus:border-foreground/40"
+                    />
+                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={filterOnlyCustomized}
+                        onChange={(e) => setFilterOnlyCustomized(e.target.checked)}
+                      />
+                      <span>Solo con cambios manuales</span>
+                    </label>
+                    {anyFilterActive && (
+                      <button
+                        type="button"
+                        onClick={clearAdaptationFilters}
+                        className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1"
+                      >
+                        <X className="h-3 w-3" />
+                        Limpiar filtros
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Contador "X de Y" si hay filtro activo */}
+                  {anyFilterActive && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Mostrando {filteredAdaptations.length} de {adaptations.length} adaptaciones
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {filteredAdaptations.length === 0 ? (
+                <div className="text-sm text-muted-foreground py-6 text-center flex flex-col items-center gap-2">
+                  <p>Ninguna adaptación coincide con los filtros.</p>
+                  <button
+                    type="button"
+                    onClick={clearAdaptationFilters}
+                    className="text-xs underline hover:no-underline"
+                  >
+                    Limpiar filtros
+                  </button>
+                </div>
+              ) : (
             <div className="space-y-5">
-              {groupAdaptationsByChannel(adaptations).map((group) => (
+              {groupAdaptationsByChannel(filteredAdaptations).map((group) => (
                 <div key={group.channel}>
                   <h4 className="text-xs uppercase tracking-wider text-muted-foreground mb-2">
                     {CHANNEL_LABEL[group.channel] ?? group.channel}
@@ -1534,6 +1831,9 @@ export default function ProducirPage() {
                         orientations,
                       );
                       const sourceDef = sourceOrientation?.definition ?? definition;
+                      const sourceBadgeNumber = sourceOrientation
+                        ? orientationNumberById.get(sourceOrientation.id) ?? null
+                        : null;
                       return (
                         <AdaptationCard
                           key={a.id}
@@ -1541,6 +1841,7 @@ export default function ProducirPage() {
                           orientations={orientations}
                           principalId={principalOrientation?.id ?? null}
                           sourceOrientation={sourceOrientation}
+                          sourceBadgeNumber={sourceBadgeNumber}
                           definition={sourceDef}
                           brandKit={brandKitContent}
                           dataRow={previewRow}
@@ -1561,6 +1862,8 @@ export default function ProducirPage() {
                 </div>
               ))}
             </div>
+              )}
+            </>
           )}
         </section>
       </main>
@@ -1675,6 +1978,7 @@ function AdaptationCard({
   orientations,
   principalId,
   sourceOrientation,
+  sourceBadgeNumber,
   definition,
   brandKit,
   dataRow,
@@ -1698,6 +2002,10 @@ function AdaptationCard({
   // La orientación que realmente está alimentando esta adaptación (resuelta
   // antes por resolveSource). Se muestra como label del chip.
   sourceOrientation: Orientation | null;
+  // Número del badge (1-indexed) que corresponde a la sourceOrientation. Se
+  // pinta como círculo coloreado en la esquina sup-izq de la card para que
+  // el productor vea de qué variante hereda sin tener que leer el chip.
+  sourceBadgeNumber: number | null;
   definition: TemplateDefinition;
   brandKit: BrandKitContent;
   dataRow?: DataRow | null;
@@ -1794,8 +2102,33 @@ function AdaptationCard({
         </div>
       )}
       {/* Title bar: nombre + dims arriba, siempre visible. */}
-      <div className="px-3 pt-2 pb-1.5 flex items-baseline justify-between gap-2 min-w-0">
-        <p className={cn("text-sm font-medium truncate flex-1 min-w-0", hasManualOverride && "pl-20")}>{label}</p>
+      <div className="px-3 pt-2 pb-1.5 flex items-center justify-between gap-2 min-w-0">
+        <div className={cn("flex items-center gap-1.5 min-w-0 flex-1", hasManualOverride && "pl-20")}>
+          {/* Badge del source: identifica de qué orientación del master
+              hereda esta adaptación. Mismo número/color que el badge en
+              el VariantsStrip. */}
+          {sourceBadgeNumber != null && (() => {
+            const badge = orientationBadgeColors(sourceBadgeNumber);
+            const sourceName = sourceOrientation
+              ? sourceOrientation.id === principalId
+                ? "master"
+                : sourceOrientation.name
+              : "—";
+            return (
+              <div
+                className={cn(
+                  "shrink-0 h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-sm ring-2",
+                  badge.bg,
+                  badge.ring,
+                )}
+                title={`Hereda del ${sourceName} #${sourceBadgeNumber}`}
+              >
+                {sourceBadgeNumber}
+              </div>
+            );
+          })()}
+          <p className="text-sm font-medium truncate min-w-0">{label}</p>
+        </div>
         <span className="text-[10px] text-muted-foreground shrink-0 font-mono">
           {adaptation.width}×{adaptation.height}
         </span>
@@ -2744,6 +3077,7 @@ function VariantsStrip({
   orientations,
   activeOrientationId,
   brandKit,
+  orientationNumberById,
   onSwitch,
   onAdd,
   onDelete,
@@ -2754,6 +3088,9 @@ function VariantsStrip({
   orientations: Orientation[];
   activeOrientationId: number | null;
   brandKit: BrandKitContent;
+  // Map orientationId → número 1-indexed (master = #1). Lo provee el page
+  // para que el badge calce con el de AdaptationCard.
+  orientationNumberById: Map<number, number>;
   onSwitch: (id: number) => void;
   onAdd: () => void;
   onDelete: (id: number) => void;
@@ -2820,6 +3157,8 @@ function VariantsStrip({
         );
         const cssW = m.base_width * thumbScale;
         const cssH = m.base_height * thumbScale;
+        const num = orientationNumberById.get(m.id);
+        const badge = num != null ? orientationBadgeColors(num) : null;
         return (
           <div key={m.id} className="relative shrink-0 group">
             <button
@@ -2832,19 +3171,35 @@ function VariantsStrip({
               )}
               title={
                 isCurrent
-                  ? `${displayName} · orientación abierta`
-                  : `${displayName} · ${m.base_width}×${m.base_height} — click para abrir`
+                  ? `${displayName} #${num ?? "?"} · orientación abierta`
+                  : `${displayName} #${num ?? "?"} · ${m.base_width}×${m.base_height} — click para abrir`
               }
             >
               <div
                 className={cn(
-                  "rounded shadow-sm transition-colors overflow-hidden",
+                  "relative rounded shadow-sm transition-colors overflow-hidden",
                   isCurrent
                     ? "border-2 border-primary ring-2 ring-primary/30"
                     : "border border-border/50 hover:border-foreground/40"
                 )}
                 style={{ width: cssW, height: cssH }}
               >
+                {/* Badge numérico: identifica visualmente la orientación.
+                    El mismo número (y color) aparece en cada AdaptationCard
+                    cuyo source es esta orientación. Posicionado overlay en
+                    la esquina sup-izq para no tapar contenido del centro. */}
+                {badge && num != null && (
+                  <div
+                    className={cn(
+                      "absolute top-1 left-1 z-10 h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-md ring-2",
+                      badge.bg,
+                      badge.ring,
+                    )}
+                    style={{ pointerEvents: "none" }}
+                  >
+                    {num}
+                  </div>
+                )}
                 {/* Mini-preview real: renderizamos la definition de la
                     orientación a escala. El productor ve el contenido
                     actual (logo / textos / shapes) en miniatura, no un
