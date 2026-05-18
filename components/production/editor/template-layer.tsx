@@ -78,13 +78,24 @@ export function TemplateLayerView({
     onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => {
       e.stopPropagation();
       const additive = e.metaKey || e.ctrlKey || e.shiftKey;
-      onSelect(layer.id, { additive });
-      // En multi-select no iniciamos move drag — el productor está
-      // construyendo la selección, no moviendo. Move drag requiere click
-      // sin modifier sobre una capa.
-      if (!additive) {
-        onLayerPointerDown(e, layer.id);
+      // Tres casos:
+      //   1. Modifier presionado → toggle en multi-set, no drag.
+      //   2. Click sin modifier sobre layer ya en multi-set → CONSERVAR el
+      //      multi-set y empezar drag del grupo entero (multi-move).
+      //   3. Click sin modifier sobre layer fuera del set → reemplazar
+      //      selección por solo esa capa y empezar drag normal.
+      if (additive) {
+        onSelect(layer.id, { additive: true });
+        return;
       }
+      const inMulti =
+        !!selectedIds &&
+        selectedIds.length > 1 &&
+        selectedIds.includes(layer.id);
+      if (!inMulti) {
+        onSelect(layer.id);
+      }
+      onLayerPointerDown(e, layer.id);
     },
     onContextMenu: (e: React.MouseEvent<HTMLDivElement>) => {
       if (!onLayerContextMenu) return;

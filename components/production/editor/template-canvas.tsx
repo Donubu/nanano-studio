@@ -50,6 +50,11 @@ type DragOp =
       startMouseX: number;
       startMouseY: number;
       startBounds: Bounds;
+      // Cuando hay multi-select, las otras capas se mueven junto con el
+      // layerId primario manteniendo su delta inicial. Cada extra guarda
+      // su startBounds para que pointerMove pueda calcular su posición
+      // nueva como startBounds + (delta del mouse). Vacío en single-move.
+      extras: Array<{ id: string; startBounds: Bounds }>;
     }
   | {
       kind: "resize";
@@ -121,7 +126,10 @@ export function TemplateCanvas({
   const snapThresholdWorld = SNAP_THRESHOLD_PX / scale;
 
   const dragRef = useRef<DragOp | null>(null);
-  const [ghost, setGhost] = useState<{ id: string; bounds: Bounds } | null>(null);
+  // Ghost: durante un drag, qué bounds tiene cada capa (preview). En
+  // single-move/resize tiene 1 entrada; en multi-move tiene N. La key es
+  // el layer id. Renderizamos via applyGhostBounds iterando.
+  const [ghosts, setGhosts] = useState<Record<string, Bounds>>({});
   const [guides, setGuides] = useState<Guide[]>([]);
 
   const startMove = (e: ReactPointerEvent<HTMLDivElement>, layerId: string) => {
@@ -133,12 +141,34 @@ export function TemplateCanvas({
     // layer view) but we don't initiate a move op here.
     const parent = findParent(definition, layerId);
     if (parent && parent.layout.mode === "stack") return;
+
+    // Multi-move: si la capa que se está moviendo es parte del multi-set,
+    // capturamos las bounds iniciales de las demás capas del set para
+    // moverlas todas juntas. Filtramos por: misma posición free (no stack),
+    // no lockeadas, no la propia capa, no tpl_root.
+    const extras: Array<{ id: string; startBounds: Bounds }> = [];
+    if (
+      selectedIds &&
+      selectedIds.length > 1 &&
+      selectedIds.includes(layerId)
+    ) {
+      for (const id of selectedIds) {
+        if (id === layerId || id === "tpl_root") continue;
+        const l = findLayer(definition, id);
+        if (!l || l.locked) continue;
+        const p = findParent(definition, id);
+        if (p && p.layout.mode === "stack") continue;
+        extras.push({ id, startBounds: layerToBounds(l) });
+      }
+    }
+
     dragRef.current = {
       kind: "move",
       layerId,
       startMouseX: e.clientX,
       startMouseY: e.clientY,
       startBounds: layerToBounds(layer),
+      extras,
     };
     (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
   };
@@ -222,18 +252,44 @@ export function TemplateCanvas({
       h: Math.max(MIN_SIZE, Math.round(snapped.h)),
     };
 
-    setGhost({ id: drag.layerId, bounds: finalBounds });
+    // Construimos el ghost set. En single-move/resize tiene solo la primary;
+    // en multi-move iteramos las extras aplicándoles el mismo delta físico
+    // (mouse) que la primary, no el delta post-snap — así el grupo entero
+    // se mueve coherente. Las extras también se redondean.
+    const nextGhosts: Record<string, Bounds> = {
+      [drag.layerId]: finalBounds,
+    };
+    if (drag.kind === "move" && drag.extras.length > 0) {
+      // Delta efectivo aplicado a la primary (post-snap). Lo replicamos en
+      // las extras para que el snap de la primary arrastre a todo el grupo.
+      const effectiveDx = finalBounds.x - drag.startBounds.x;
+      const effectiveDy = finalBounds.y - drag.startBounds.y;
+      for (const ex of drag.extras) {
+        nextGhosts[ex.id] = {
+          x: Math.round(ex.startBounds.x + effectiveDx),
+          y: Math.round(ex.startBounds.y + effectiveDy),
+          w: ex.startBounds.w,
+          h: ex.startBounds.h,
+        };
+      }
+    }
+    setGhosts(nextGhosts);
     setGuides(nextGuides);
   };
 
   const handlePointerUp = () => {
     const drag = dragRef.current;
-    const g = ghost;
+    const currentGhosts = ghosts;
     dragRef.current = null;
-    if (drag && g && g.id === drag.layerId) {
-      onUpdateBounds(drag.layerId, g.bounds);
+    if (drag) {
+      // Persistimos todas las capas con ghost. En multi-move son N llamadas
+      // a onUpdateBounds — el hook gestiona el undo step batched porque
+      // todas caen dentro del mismo render cycle de useEffect.
+      for (const [id, bounds] of Object.entries(currentGhosts)) {
+        onUpdateBounds(id, bounds);
+      }
     }
-    setGhost(null);
+    setGhosts({});
     setGuides([]);
   };
 
@@ -252,9 +308,13 @@ export function TemplateCanvas({
   };
 
   // Apply ghost to selected layer for live drag preview (only outside preview mode).
-  const renderTree = ghost
-    ? applyGhostBounds(baseTree, ghost.id, ghost.bounds)
-    : baseTree;
+  // Aplicamos todos los ghosts iterativamente. Cada applyGhostBounds clona
+  // y modifica un layer; encadenarlas para N capas es O(N × tree) en el
+  // peor caso pero N suele ser ≤ 5-10 en multi-move práctico.
+  const renderTree = Object.entries(ghosts).reduce<typeof baseTree>(
+    (tree, [id, bounds]) => applyGhostBounds(tree, id, bounds),
+    baseTree,
+  );
   const selectedLayer = selectedId ? findLayer(renderTree, selectedId) : null;
 
   // When the selected layer is laid out by a stack parent its rendered
