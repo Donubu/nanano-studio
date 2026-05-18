@@ -38,6 +38,12 @@ interface Props {
   // solo el render del canvas muestra el valor sustituido.
   dataRow?: DataRow | null;
   onLayerContextMenu?: (clientX: number, clientY: number, layerId: string) => void;
+  // Cuando true, dibuja un rectángulo punteado al 5% del canvas (zona segura).
+  // El productor debe mantener todo el contenido crítico (texto, logo) dentro
+  // de ese rectángulo para que no se corte en placements que recortan los
+  // bordes (story de Instagram con UI overlay, foto de perfil cuando el banner
+  // se usa como cover, etc).
+  showSafetyZone?: boolean;
 }
 
 type Bounds = { x: number; y: number; w: number; h: number };
@@ -85,6 +91,7 @@ export function TemplateCanvas({
   brandKit = EMPTY_KIT_CONTENT,
   dataRow,
   onLayerContextMenu,
+  showSafetyZone = false,
 }: Props) {
   const isPreview = !!previewSize;
   // In preview mode, render against a reflowed clone derived from constraints.
@@ -221,15 +228,17 @@ export function TemplateCanvas({
       activeEdges = edgesForHandle(drag.handle);
     }
 
-    // Snap is disabled when the dragged layer's parent is in stack mode,
-    // since its sibling positions are layout-driven and not meaningful as
-    // reference lines. Resize still works in that case, just without snap.
+    // Snap is disabled when the dragged layer's parent is in stack mode
+    // (siblings are layout-driven, not meaningful as reference lines), o
+    // cuando el productor está presionando Alt — gesto estándar tipo Figma
+    // para colocar libremente sin atracción.
     const parent = findParent(definition, drag.layerId);
     const parentIsStack = parent?.layout.mode === "stack";
+    const snapDisabled = parentIsStack || e.altKey;
 
     let snapped: Bounds;
     let nextGuides: Guide[];
-    if (parentIsStack) {
+    if (snapDisabled) {
       snapped = nextBounds;
       nextGuides = [];
     } else {
@@ -449,6 +458,26 @@ export function TemplateCanvas({
                 }}
               />
             ))}
+
+            {/* Zona segura: rectángulo punteado al 5% del canvas. Solo
+                indicador visual — no interfiere con drag ni con la
+                exportación. El border-width se compensa con 1/scale para
+                que se vea siempre 1px en pantalla independiente del zoom. */}
+            {showSafetyZone && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: Math.round(baseW * 0.05),
+                  top: Math.round(baseH * 0.05),
+                  width: Math.round(baseW * 0.9),
+                  height: Math.round(baseH * 0.9),
+                  pointerEvents: "none",
+                  border: `${1 / scale}px dashed rgb(250, 204, 21)`,
+                  boxShadow: `0 0 0 ${1 / scale}px rgba(0,0,0,0.2)`,
+                  borderRadius: 1,
+                }}
+              />
+            )}
           </div>
         </div>
       )}

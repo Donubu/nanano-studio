@@ -79,6 +79,11 @@ export function TemplateEditor({
   // main canvas; clicking the active thumb again returns to null/master.
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<LayerContextMenuPosition | null>(null);
+  // Zona segura: toggle por sesión. No persistido — es una herramienta de
+  // visualización, no un atributo del template. Si el productor quiere
+  // distintos márgenes para distintas piezas, abre el toggle, edita, lo
+  // apaga. La constante de 5% vive en TemplateCanvas.
+  const [showSafetyZone, setShowSafetyZone] = useState(false);
 
   const openContextMenu = useCallback(
     (clientX: number, clientY: number, layerId: string) => {
@@ -235,29 +240,6 @@ export function TemplateEditor({
 
   return (
     <div className="flex flex-col h-full bg-background">
-      <div className={readOnlyClass}>
-        <EditorToolbar
-          onAddText={editor.addText}
-          onAddImage={editor.addImage}
-          onAddShape={editor.addShape}
-          onAddIcon={editor.addIcon}
-          onAddButton={editor.addButton}
-          onAddDivider={editor.addDivider}
-          onAddBadge={editor.addBadge}
-          onAddRibbon={editor.addRibbon}
-          saveStatus={editor.saveStatus}
-          lastSavedAt={editor.lastSavedAt}
-          // El opener del modal de brand kit ahora vive en el caller (producir
-          // page), no en el editor. El editor solo provee el slot vía el
-          // prop onOpenProjectBrandKit, que el padre decide si pasar.
-          onOpenProjectBrandKit={undefined}
-          onUndo={editor.undo}
-          onRedo={editor.redo}
-          canUndo={editor.canUndo}
-          canRedo={editor.canRedo}
-        />
-      </div>
-
       {contextMenu && ctxLayer && (
         <LayerContextMenu
           position={contextMenu}
@@ -331,6 +313,30 @@ export function TemplateEditor({
               </button>
             </div>
           )}
+          {/* Toolbar pegado al canvas (estilo Figma/Photoshop). En preview
+              mode toda la fila queda inactiva pero visible — el productor
+              entiende qué está pasando sin perder context. */}
+          <div className={readOnlyClass}>
+            <EditorToolbar
+              onAddText={editor.addText}
+              onAddImage={editor.addImage}
+              onAddShape={editor.addShape}
+              onAddIcon={editor.addIcon}
+              onAddButton={editor.addButton}
+              onAddDivider={editor.addDivider}
+              onAddBadge={editor.addBadge}
+              onAddRibbon={editor.addRibbon}
+              saveStatus={editor.saveStatus}
+              lastSavedAt={editor.lastSavedAt}
+              onOpenProjectBrandKit={undefined}
+              onUndo={editor.undo}
+              onRedo={editor.redo}
+              canUndo={editor.canUndo}
+              canRedo={editor.canRedo}
+              showSafetyZone={showSafetyZone}
+              onToggleSafetyZone={() => setShowSafetyZone((v) => !v)}
+            />
+          </div>
           <TemplateCanvas
             definition={editor.definition}
             selectedId={editor.selectedId}
@@ -341,6 +347,7 @@ export function TemplateEditor({
             brandKit={brandKit}
             dataRow={dataRow}
             onLayerContextMenu={openContextMenu}
+            showSafetyZone={showSafetyZone}
           />
         </div>
 

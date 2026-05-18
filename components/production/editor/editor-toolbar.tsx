@@ -15,6 +15,7 @@ import {
   BadgePercent,
   Tag,
   Smile,
+  ShieldCheck,
 } from "lucide-react";
 import { SaveStatus } from "@/lib/production/use-template-editor";
 import { formatDateTimeLocal } from "@/lib/utils";
@@ -35,6 +36,10 @@ interface Props {
   onRedo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+  // Toggle de zona segura. Cuando true, el canvas dibuja un rectángulo
+  // punteado al 5% del borde. Es un visual-aid, no afecta export.
+  showSafetyZone: boolean;
+  onToggleSafetyZone: () => void;
 }
 
 export function EditorToolbar({
@@ -53,6 +58,8 @@ export function EditorToolbar({
   onRedo,
   canUndo,
   canRedo,
+  showSafetyZone,
+  onToggleSafetyZone,
 }: Props) {
   return (
     <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50 bg-card/40">
@@ -154,6 +161,30 @@ export function EditorToolbar({
       </button>
 
       <div className="flex-1" />
+
+      {/* Zona segura. Tooltip explica el concepto porque no es obvio sin
+          contexto (especialmente para productores nuevos). El borde
+          amarillo del botón cuando está activo refuerza la asociación
+          con el color del overlay en el canvas. */}
+      <button
+        type="button"
+        onClick={onToggleSafetyZone}
+        className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors ${
+          showSafetyZone
+            ? "border-yellow-400/60 bg-yellow-400/10 text-yellow-200"
+            : "border-border/50 hover:bg-muted text-muted-foreground hover:text-foreground"
+        }`}
+        title={
+          "Zona segura: marca un margen del 5% al borde del banner. " +
+          "Mantén textos y logos dentro del rectángulo punteado para " +
+          "que no se corten en placements que recortan los bordes " +
+          "(stories, perfiles, miniaturas). No afecta la exportación, " +
+          "es solo una guía visual."
+        }
+      >
+        <ShieldCheck className="h-3.5 w-3.5" />
+        Zona segura
+      </button>
 
       {onOpenProjectBrandKit && (
         <button
