@@ -23,7 +23,10 @@ import { TemplateLayerView, stackToFlexStyle } from "./template-layer";
 interface Props {
   definition: TemplateDefinition;
   selectedId: string | null;
-  onSelect: (id: string | null) => void;
+  // Multi-select para resaltar capas en outline distinto. Pasado a
+  // TemplateLayerView para que pinte el outline acorde.
+  selectedIds?: string[];
+  onSelect: (id: string | null, opts?: { additive?: boolean }) => void;
   onUpdateBounds: (id: string, bounds: Bounds) => void;
   // When set, the canvas renders the template reflowed to this size (read-only).
   // Used by the editor's preview-format selector to inspect adaptations.
@@ -70,6 +73,7 @@ const MIN_SIZE = 8;
 export function TemplateCanvas({
   definition,
   selectedId,
+  selectedIds,
   onSelect,
   onUpdateBounds,
   previewSize,
@@ -344,6 +348,7 @@ export function TemplateCanvas({
                 key={child.id}
                 layer={child}
                 selectedId={selectedId}
+                selectedIds={selectedIds}
                 onSelect={onSelect}
                 onLayerPointerDown={startMove}
                 onLayerContextMenu={

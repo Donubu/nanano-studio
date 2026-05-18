@@ -12,7 +12,11 @@ import {
 interface Props {
   definition: TemplateDefinition;
   selectedId: string | null;
-  onSelect: (id: string | null) => void;
+  onSelect: (id: string | null, opts?: { additive?: boolean }) => void;
+  // Para resaltar capas en multi-select. Cuando no se pasa, el panel
+  // funciona en single-select como antes (compatible con consumers que no
+  // soportan multi).
+  selectedIds?: string[];
   onDelete: (id: string) => void;
   onReorder: (sourceId: string, targetId: string, position: "before" | "after") => void;
   onToggleLock: (id: string) => void;
@@ -72,6 +76,7 @@ function textLayerVariables(layer: TemplateLayer): string[] {
 export function LayersPanel({
   definition,
   selectedId,
+  selectedIds,
   onSelect,
   onDelete,
   onReorder,
@@ -193,6 +198,14 @@ export function LayersPanel({
             const showBefore = dropHint?.id === layer.id && dropHint.position === "before";
             const showAfter = dropHint?.id === layer.id && dropHint.position === "after";
             const vars = textLayerVariables(layer);
+            // Multi-select: la capa es "primary" (selectedId match) o
+            // forma parte del multi-set. El primary tiene azul más intenso;
+            // los del multi-set un azul más tenue.
+            const isPrimary = selectedId === layer.id;
+            const isMulti =
+              !!selectedIds &&
+              selectedIds.length > 1 &&
+              selectedIds.includes(layer.id);
             return (
               <div
                 key={layer.id}
@@ -205,7 +218,11 @@ export function LayersPanel({
                 onContextMenu={(e) => handleContextMenu(e, layer.id)}
                 className={cn(
                   "group relative flex items-center gap-1 rounded-md transition-colors",
-                  selectedId === layer.id ? "bg-blue-500/15" : "hover:bg-accent",
+                  isPrimary
+                    ? "bg-blue-500/15"
+                    : isMulti
+                      ? "bg-blue-500/8"
+                      : "hover:bg-accent",
                   dragId === layer.id && "opacity-50"
                 )}
                 style={{ paddingLeft: depth * 12 }}
@@ -230,10 +247,14 @@ export function LayersPanel({
                 )}
                 <button
                   type="button"
-                  onClick={() => onSelect(layer.id)}
+                  onClick={(e) =>
+                    onSelect(layer.id, {
+                      additive: e.metaKey || e.ctrlKey || e.shiftKey,
+                    })
+                  }
                   className={cn(
                     "flex-1 flex items-center gap-2 px-2 py-1.5 text-left text-sm",
-                    selectedId === layer.id ? "text-foreground" : "text-muted-foreground"
+                    isPrimary || isMulti ? "text-foreground" : "text-muted-foreground"
                   )}
                 >
                   {iconFor(layer)}

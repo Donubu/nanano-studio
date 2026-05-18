@@ -19,7 +19,11 @@ import { SmartText } from "./smart-text";
 interface Props {
   layer: TemplateLayer;
   selectedId: string | null;
-  onSelect: (id: string) => void;
+  // Multi-select. Cuando el layer está incluido y NO es el primary,
+  // se pinta un outline ámbar (en vez del azul del primary) para que
+  // el productor vea cuáles están en el set.
+  selectedIds?: string[];
+  onSelect: (id: string, opts?: { additive?: boolean }) => void;
   onLayerPointerDown: (e: ReactPointerEvent<HTMLDivElement>, layerId: string) => void;
   onLayerContextMenu?: (e: React.MouseEvent<HTMLDivElement>, layerId: string) => void;
   parentMode?: "free" | "stack";
@@ -57,18 +61,30 @@ function baseLayerStyle(layer: TemplateLayer, parentMode: "free" | "stack"): CSS
 export function TemplateLayerView({
   layer,
   selectedId,
+  selectedIds,
   onSelect,
   onLayerPointerDown,
   onLayerContextMenu,
   parentMode = "free",
 }: Props) {
   const isSelected = selectedId === layer.id;
+  const isInMulti =
+    !!selectedIds &&
+    selectedIds.length > 1 &&
+    selectedIds.includes(layer.id) &&
+    !isSelected;
   const commonProps = {
     "data-layer-id": layer.id,
     onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => {
       e.stopPropagation();
-      onSelect(layer.id);
-      onLayerPointerDown(e, layer.id);
+      const additive = e.metaKey || e.ctrlKey || e.shiftKey;
+      onSelect(layer.id, { additive });
+      // En multi-select no iniciamos move drag — el productor está
+      // construyendo la selección, no moviendo. Move drag requiere click
+      // sin modifier sobre una capa.
+      if (!additive) {
+        onLayerPointerDown(e, layer.id);
+      }
     },
     onContextMenu: (e: React.MouseEvent<HTMLDivElement>) => {
       if (!onLayerContextMenu) return;
@@ -82,9 +98,13 @@ export function TemplateLayerView({
       layer.locked
         ? "cursor-default"
         : parentMode === "stack"
-        ? "cursor-pointer"
-        : "cursor-move",
-      isSelected ? "outline outline-blue-500" : "outline-transparent hover:outline hover:outline-blue-300/60"
+          ? "cursor-pointer"
+          : "cursor-move",
+      isSelected
+        ? "outline outline-blue-500"
+        : isInMulti
+          ? "outline outline-amber-400/80"
+          : "outline-transparent hover:outline hover:outline-blue-300/60",
     ),
   };
 
@@ -92,6 +112,7 @@ export function TemplateLayerView({
     return renderFrame(layer, parentMode, {
       commonProps,
       selectedId,
+      selectedIds,
       onSelect,
       onLayerPointerDown,
       onLayerContextMenu,
@@ -149,7 +170,8 @@ function renderFrame(
   ctx: {
     commonProps: CommonProps;
     selectedId: string | null;
-    onSelect: (id: string) => void;
+    selectedIds?: string[];
+    onSelect: (id: string, opts?: { additive?: boolean }) => void;
     onLayerPointerDown: (e: ReactPointerEvent<HTMLDivElement>, layerId: string) => void;
     onLayerContextMenu?: (e: React.MouseEvent<HTMLDivElement>, layerId: string) => void;
   }
@@ -176,6 +198,7 @@ function renderFrame(
           key={child.id}
           layer={child}
           selectedId={ctx.selectedId}
+          selectedIds={ctx.selectedIds}
           onSelect={ctx.onSelect}
           onLayerPointerDown={ctx.onLayerPointerDown}
           onLayerContextMenu={ctx.onLayerContextMenu}

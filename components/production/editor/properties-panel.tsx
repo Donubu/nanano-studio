@@ -3,11 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import {
   AlignCenter,
+  AlignHorizontalJustifyCenter,
+  AlignHorizontalJustifyEnd,
+  AlignHorizontalJustifyStart,
+  AlignHorizontalSpaceAround,
   AlignLeft,
   AlignRight,
   AlignVerticalJustifyCenter,
   AlignVerticalJustifyEnd,
   AlignVerticalJustifyStart,
+  AlignVerticalSpaceAround,
   ImageIcon,
   Loader2,
   PanelRightClose,
@@ -46,6 +51,19 @@ import { ClientImagePicker } from "@/components/production/editor/client-image-p
 interface Props {
   definition: TemplateDefinition;
   selectedLayer: TemplateLayer | null;
+  // Multi-select. Cuando length > 1, mostramos un panel especial de
+  // alineación + distribución en vez del editor per-layer.
+  selectedIds?: string[];
+  onAlign?: (
+    direction:
+      | "left"
+      | "center-h"
+      | "right"
+      | "top"
+      | "center-v"
+      | "bottom",
+  ) => void;
+  onDistribute?: (axis: "horizontal" | "vertical") => void;
   onUpdateLayer: (id: string, mutator: (layer: TemplateLayer) => TemplateLayer) => void;
   onUpdateRoot: (mutator: (root: TemplateDefinition) => TemplateDefinition) => void;
   brandKit?: BrandKitContent;
@@ -490,6 +508,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export function PropertiesPanel({
   definition,
   selectedLayer,
+  selectedIds,
+  onAlign,
+  onDistribute,
   onUpdateLayer,
   onUpdateRoot,
   brandKit = EMPTY_KIT_CONTENT,
@@ -499,6 +520,9 @@ export function PropertiesPanel({
 }: Props) {
   const noSelection = !selectedLayer;
   const isRoot = selectedLayer?.id === "tpl_root";
+  // Multi-select activo cuando hay 2+ ids. Cuando lo es, reemplazamos el
+  // contenido per-layer por el panel de align/distribute.
+  const isMultiSelect = !!selectedIds && selectedIds.length > 1;
 
   return (
     <aside
@@ -527,17 +551,28 @@ export function PropertiesPanel({
         </div>
       )}
       <div className="p-3 space-y-4">
-        {noSelection && (
+        {/* Multi-select: el productor seleccionó 2+ capas. Mostramos el
+            panel de align/distribute en vez del editor per-layer — no tiene
+            sentido editar style cuando hay múltiples capas heterogéneas. */}
+        {isMultiSelect && (
+          <MultiSelectAlignPanel
+            count={selectedIds!.length}
+            onAlign={onAlign}
+            onDistribute={onDistribute}
+          />
+        )}
+
+        {!isMultiSelect && noSelection && (
           <p className="text-xs text-muted-foreground">
             Selecciona una capa para editar sus propiedades.
           </p>
         )}
 
-        {isRoot && (
+        {!isMultiSelect && isRoot && (
           <RootProps definition={definition} onUpdateRoot={onUpdateRoot} brandKit={brandKit} />
         )}
 
-        {selectedLayer && !isRoot && (
+        {!isMultiSelect && selectedLayer && !isRoot && (
           <LayerProps
             layer={selectedLayer}
             onUpdate={onUpdateLayer}
@@ -547,6 +582,87 @@ export function PropertiesPanel({
         )}
       </div>
     </aside>
+  );
+}
+
+// Panel que aparece cuando hay multi-selección. Botones de align al
+// bounding box común (6 direcciones) + distribute horizontal/vertical
+// (requiere 3+ capas).
+function MultiSelectAlignPanel({
+  count,
+  onAlign,
+  onDistribute,
+}: {
+  count: number;
+  onAlign?: (
+    direction:
+      | "left"
+      | "center-h"
+      | "right"
+      | "top"
+      | "center-v"
+      | "bottom",
+  ) => void;
+  onDistribute?: (axis: "horizontal" | "vertical") => void;
+}) {
+  const canDistribute = count >= 3;
+  const btnClass =
+    "flex items-center justify-center h-9 rounded border border-border/50 hover:bg-muted text-foreground transition-colors";
+  const btnDisabled =
+    "flex items-center justify-center h-9 rounded border border-border/30 text-muted-foreground/40 cursor-not-allowed";
+  return (
+    <Section title={`${count} capas seleccionadas`}>
+      <div>
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">
+          Alinear
+        </p>
+        <div className="grid grid-cols-3 gap-1.5">
+          <button type="button" onClick={() => onAlign?.("left")} className={btnClass} title="Alinear a la izquierda">
+            <AlignHorizontalJustifyStart className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={() => onAlign?.("center-h")} className={btnClass} title="Centrar horizontalmente">
+            <AlignHorizontalJustifyCenter className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={() => onAlign?.("right")} className={btnClass} title="Alinear a la derecha">
+            <AlignHorizontalJustifyEnd className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={() => onAlign?.("top")} className={btnClass} title="Alinear arriba">
+            <AlignVerticalJustifyStart className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={() => onAlign?.("center-v")} className={btnClass} title="Centrar verticalmente">
+            <AlignVerticalJustifyCenter className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={() => onAlign?.("bottom")} className={btnClass} title="Alinear abajo">
+            <AlignVerticalJustifyEnd className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+      <div>
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">
+          Distribuir {!canDistribute && <span className="normal-case text-muted-foreground/60">(necesita 3+)</span>}
+        </p>
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            type="button"
+            onClick={() => canDistribute && onDistribute?.("horizontal")}
+            className={canDistribute ? btnClass : btnDisabled}
+            disabled={!canDistribute}
+            title="Distribuir horizontalmente (gaps iguales en X)"
+          >
+            <AlignHorizontalSpaceAround className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => canDistribute && onDistribute?.("vertical")}
+            className={canDistribute ? btnClass : btnDisabled}
+            disabled={!canDistribute}
+            title="Distribuir verticalmente (gaps iguales en Y)"
+          >
+            <AlignVerticalSpaceAround className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </Section>
   );
 }
 

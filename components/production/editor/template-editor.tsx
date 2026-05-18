@@ -141,6 +141,14 @@ export function TemplateEditor({
       // Both are also blocked while in preview mode since preview is read-only.
       if (mod && !isTextField) {
         const key = e.key.toLowerCase();
+        // Cmd+A: seleccionar todos los root children. Necesita ir antes de
+        // que el browser intercepte para "seleccionar todo el body".
+        if (key === "a" && !e.shiftKey && !e.altKey) {
+          if (previewSize) return;
+          e.preventDefault();
+          editor.selectAllRoot();
+          return;
+        }
         if (key === "z" && !e.shiftKey) {
           if (previewSize) return;
           e.preventDefault();
@@ -198,9 +206,20 @@ export function TemplateEditor({
 
       if ((e.key === "Delete" || e.key === "Backspace") && !isTextField) {
         if (previewSize) return;
-        if (!editor.selectedId || editor.selectedId === "tpl_root") return;
+        // En multi-select, borramos todas las del set en una pasada.
+        // El hook clean-up de selectedIds por cada deleteLayer asegura que
+        // el estado quede coherente. Excluimos tpl_root.
+        const targets = (editor.selectedIds.length > 0
+          ? editor.selectedIds
+          : editor.selectedId
+            ? [editor.selectedId]
+            : []
+        ).filter((id) => id !== "tpl_root");
+        if (targets.length === 0) return;
         e.preventDefault();
-        editor.deleteLayer(editor.selectedId);
+        for (const id of targets) {
+          editor.deleteLayer(id);
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -271,6 +290,7 @@ export function TemplateEditor({
             <LayersPanel
               definition={editor.definition}
               selectedId={editor.selectedId}
+              selectedIds={editor.selectedIds}
               onSelect={editor.select}
               onDelete={editor.deleteLayer}
               onReorder={editor.reorderRootChildren}
@@ -313,6 +333,7 @@ export function TemplateEditor({
           <TemplateCanvas
             definition={editor.definition}
             selectedId={editor.selectedId}
+            selectedIds={editor.selectedIds}
             onSelect={editor.select}
             onUpdateBounds={editor.updateBounds}
             previewSize={previewSize}
@@ -346,7 +367,11 @@ export function TemplateEditor({
             )}
           >
             <AccordionSection
-              title={accordionPropsTitle(editor.selectedLayer)}
+              title={
+                editor.selectedIds.length > 1
+                  ? `${editor.selectedIds.length} capas`
+                  : accordionPropsTitle(editor.selectedLayer)
+              }
               open={propsSectionOpen}
               onToggle={() => setPropsSectionOpen((v) => !v)}
               trailing={
@@ -366,6 +391,9 @@ export function TemplateEditor({
               <PropertiesPanel
                 definition={editor.definition}
                 selectedLayer={editor.selectedLayer}
+                selectedIds={editor.selectedIds}
+                onAlign={editor.alignSelected}
+                onDistribute={editor.distributeSelected}
                 onUpdateLayer={editor.updateLayer}
                 onUpdateRoot={editor.updateRoot}
                 brandKit={brandKit}
