@@ -22,6 +22,7 @@ import {
 interface Template {
   id: number;
   production_project_id: number;
+  design_id: number | null;
   name: string;
   base_width: number;
   base_height: number;
@@ -30,7 +31,8 @@ interface Template {
 
 interface Adaptation {
   id: number;
-  template_id: number;
+  design_id: number;
+  source_template_id: number | null;
   format_preset_id: number | null;
   custom_name: string | null;
   preset_name: string | null;
@@ -88,8 +90,12 @@ export default function AdaptationEditorPage() {
       const tpl: Template = await tplRes.json();
       setTemplate(tpl);
 
+      if (tpl.design_id == null) {
+        router.push(`/produccion/template/${templateId}/producir`);
+        return;
+      }
       const adaptListRes = await fetch(
-        `/api/production/templates/${templateId}/adaptations`
+        `/api/production/designs/${tpl.design_id}/adaptations`
       );
       if (!adaptListRes.ok) return;
       const adaptList: Adaptation[] = await adaptListRes.json();
@@ -141,10 +147,15 @@ export default function AdaptationEditorPage() {
     fetchAll();
   }, [fetchAll, session, sessionStatus, router]);
 
+  const designId = template?.design_id ?? null;
+
   const handleSaveOverride = useCallback(
     async (def: TemplateDefinition) => {
+      if (designId == null) {
+        throw new Error("design_id no resuelto — no se puede guardar");
+      }
       const res = await fetch(
-        `/api/production/templates/${templateId}/adaptations/${adaptId}`,
+        `/api/production/designs/${designId}/adaptations/${adaptId}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -154,25 +165,24 @@ export default function AdaptationEditorPage() {
         }
       );
       if (!res.ok) {
-        // Leemos el cuerpo de error del servidor para que el dev sepa qué
-        // pasó (validación / 404 / 500). Antes solo veíamos el HTTP code.
         const body = await res.json().catch(() => null);
         const detail = body?.error ? ` — ${body.error}` : "";
         console.error("PATCH override failed:", res.status, body);
         throw new Error(`Save failed: ${res.status}${detail}`);
       }
     },
-    [templateId, adaptId]
+    [designId, adaptId]
   );
 
   const handleResetToMaster = async () => {
+    if (designId == null) return;
     if (!confirm("¿Descartar los ajustes manuales? La adaptación volverá a generarse automáticamente desde el master.")) {
       return;
     }
     setResetting(true);
     try {
       const res = await fetch(
-        `/api/production/templates/${templateId}/adaptations/${adaptId}`,
+        `/api/production/designs/${designId}/adaptations/${adaptId}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },

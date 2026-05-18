@@ -5,10 +5,16 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Loader2, Plus, Layers, Trash2, Rocket } from "lucide-react";
 import { formatDateLocal } from "@/lib/utils";
+import { LayoutTemplatePicker } from "@/components/dashboard/layout-template-picker";
+import {
+  findLayoutTemplate,
+  freshDefinitionIds,
+  CANONICAL_SIZES,
+} from "@/lib/production/layout-templates";
 
-// Master arranca siempre en 16:9 (1920×1080). El productor agrega variantes
-// (cuadrado, vertical, custom) desde el editor; ya no se selecciona el
-// formato al crear el template.
+// Master arranca siempre en 16:9 (1920×1080) cuando es Blank. Si el productor
+// elige un layout template, la dimensión sale del template (horizontal por
+// default; las otras orientaciones se crean como variantes linked).
 const DEFAULT_MASTER_WIDTH = 1920;
 const DEFAULT_MASTER_HEIGHT = 1080;
 
@@ -49,14 +55,8 @@ export default function ProductionTemplatesList({ productionProjectId }: Props) 
   const router = useRouter();
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
+  const [showPicker, setShowPicker] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-
-  const resetForm = () => {
-    setName("");
-  };
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -76,29 +76,62 @@ export default function ProductionTemplatesList({ productionProjectId }: Props) 
     fetchAll();
   }, [fetchAll]);
 
-  const handleCreate = async () => {
-    if (!name.trim()) return;
-    setCreating(true);
+  // Crea el template via POST. Dos rutas:
+  //   - layoutTemplateId == null  → Blank, master 16:9 sin definition (la API
+  //     usa el default vacío).
+  //   - layoutTemplateId != null  → instancia un layout template: el master
+  //     toma el aspect horizontal, y se envían las variantes square+vertical
+  //     en el mismo POST. Cada definition se pasa con ids regenerados.
+  const handleCreate = async ({
+    name,
+    layoutTemplateId,
+  }: {
+    name: string;
+    layoutTemplateId: string | null;
+  }) => {
     try {
+      let body: Record<string, unknown>;
+      if (layoutTemplateId) {
+        const lt = findLayoutTemplate(layoutTemplateId);
+        if (!lt) {
+          console.error("Layout template no encontrado:", layoutTemplateId);
+          return;
+        }
+        const masterAspect = CANONICAL_SIZES.horizontal;
+        body = {
+          production_project_id: productionProjectId,
+          name,
+          base_width: masterAspect.w,
+          base_height: masterAspect.h,
+          definition: freshDefinitionIds(lt.aspects.horizontal),
+          variants: (["square", "vertical"] as const).map((a) => ({
+            width: CANONICAL_SIZES[a].w,
+            height: CANONICAL_SIZES[a].h,
+            definition: freshDefinitionIds(lt.aspects[a]),
+          })),
+        };
+      } else {
+        body = {
+          production_project_id: productionProjectId,
+          name,
+          base_width: DEFAULT_MASTER_WIDTH,
+          base_height: DEFAULT_MASTER_HEIGHT,
+        };
+      }
       const res = await fetch(`/api/production/templates`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          production_project_id: productionProjectId,
-          name: name.trim(),
-          base_width: DEFAULT_MASTER_WIDTH,
-          base_height: DEFAULT_MASTER_HEIGHT,
-        }),
+        body: JSON.stringify(body),
       });
       if (res.ok) {
-        resetForm();
-        setShowForm(false);
+        setShowPicker(false);
         fetchAll();
+      } else {
+        const errBody = await res.json().catch(() => ({}));
+        console.error("POST template fallo:", res.status, errBody);
       }
     } catch (err) {
       console.error("Error creando template:", err);
-    } finally {
-      setCreating(false);
     }
   };
 
@@ -121,61 +154,20 @@ export default function ProductionTemplatesList({ productionProjectId }: Props) 
         <div>
           <h3 className="text-sm font-medium">Templates</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Cada template es un master 16:9. Adentro puedes agregar otras
-            orientaciones (cuadrado, vertical) y producir adaptaciones.
+            Cada template es un master con sus orientaciones (cuadrado,
+            vertical, horizontal). Empieza desde un layout pre-armado o blank.
           </p>
         </div>
-        {!showForm && (
-          <Button size="sm" onClick={() => setShowForm(true)} className="gap-1">
-            <Plus className="h-4 w-4" /> Nuevo template
-          </Button>
-        )}
+        <Button size="sm" onClick={() => setShowPicker(true)} className="gap-1">
+          <Plus className="h-4 w-4" /> Nuevo template
+        </Button>
       </div>
 
-      {showForm && (
-        <div className="mb-4 space-y-2 border border-border/50 rounded-lg p-3">
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Nombre del template"
-            className="w-full bg-muted border border-border/50 rounded-md px-3 py-2 text-sm"
-            autoFocus
-          />
-
-          <p className="text-xs text-muted-foreground">
-            Se crea en 16:9 (1920×1080). Después puedes agregar variantes
-            (cuadrado, vertical, custom) desde el editor.
-          </p>
-
-          <div className="flex items-center gap-2 justify-end">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setShowForm(false);
-                resetForm();
-              }}
-              disabled={creating}
-            >
-              Cancelar
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleCreate}
-              disabled={!name.trim() || creating}
-              className="gap-1"
-            >
-              {creating ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="h-4 w-4" />
-              )}
-              Crear
-            </Button>
-          </div>
-        </div>
-      )}
+      <LayoutTemplatePicker
+        open={showPicker}
+        onClose={() => setShowPicker(false)}
+        onCreate={handleCreate}
+      />
 
       {loading ? (
         <div className="flex items-center justify-center py-6">

@@ -27,10 +27,6 @@ interface BaseTemplateRow extends RowDataPacket {
   brand_kit_id: number | null;
 }
 
-interface DesignInsertRow extends RowDataPacket {
-  id: number;
-}
-
 function variantSuggestedName(width: number, height: number): string {
   const r = width / height;
   if (Math.abs(r - 1) < 0.05) return "Cuadrado";
@@ -83,8 +79,9 @@ export async function POST(
     try {
       await conn.beginTransaction();
 
-      // Aseguramos que el base tenga un design (auto-crea uno si no existe).
-      // Así las variantes se agrupan visualmente.
+      // Después de migration 113 + auto-create de design en POST templates,
+      // todo template tiene design_id. Si por alguna razón histórica este no
+      // lo tiene (DB previa a la migración), defensivamente creamos uno acá.
       let designId = base.design_id;
       if (designId == null) {
         const [createdDesign] = await conn.execute<ResultSetHeader>(
@@ -96,11 +93,6 @@ export async function POST(
         await conn.execute<ResultSetHeader>(
           "UPDATE production_templates SET design_id = ? WHERE id = ?",
           [designId, base.id]
-        );
-        // Refresh local
-        await conn.execute<DesignInsertRow[]>(
-          "SELECT id FROM production_designs WHERE id = ?",
-          [designId]
         );
       }
 

@@ -73,8 +73,16 @@ export async function GET(request: NextRequest) {
               pt.thumbnail_url, pt.brand_kit_id, pt.status, pt.version,
               pt.created_by, pt.created_at, pt.updated_at,
               d.name AS design_name,
-              (SELECT COUNT(*) FROM production_template_adaptations a
-                 WHERE a.template_id = pt.id) AS adaptation_count,
+              -- adaptation_count: las adaptaciones cuelgan del design (no de un
+              -- template), así que contamos las del design al que pertenece este
+              -- template. Si no tiene design (caso defensivo), retorna 0.
+              CASE
+                WHEN pt.design_id IS NULL THEN 0
+                ELSE (
+                  SELECT COUNT(*) FROM production_template_adaptations a
+                   WHERE a.design_id = pt.design_id
+                )
+              END AS adaptation_count,
               CASE
                 WHEN pt.design_id IS NULL THEN 0
                 ELSE (
@@ -100,7 +108,25 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST - Create template (with default empty definition_json)
+// POST - Crear template. Soporta dos modos:
+//   1. Default (sin definition): crea un master en blanco con definition_json
+//      derivado de DEFAULT_TEMPLATE_DEFINITION.
+//   2. Con definition: el cliente manda el árbol completo (típicamente desde
+//      un layout template instanciado en cliente). Opcionalmente además puede
+//      mandar `variants: [{ width, height, definition }]` para crear las
+//      orientaciones linked en la misma transacción — sirve para que un
+//      layout template multi-aspect cree master + variantes en un solo POST.
+//
+// definition / variants[].definition son `unknown` en el schema porque la
+// validación profunda del árbol de capas tiene mucha superficie; confiamos
+// en que el cliente manda bien-formado y el renderer es tolerante a faltas.
+// Validamos lo crítico (es objeto + tiene size) acá; el resto es runtime.
+const variantSchema = z.object({
+  width: z.number().int().positive().max(10000),
+  height: z.number().int().positive().max(10000),
+  definition: z.unknown(),
+});
+
 export async function POST(request: NextRequest) {
   try {
     const session = await auth();
@@ -115,6 +141,8 @@ export async function POST(request: NextRequest) {
       base_width: z.number().int().positive().max(10000).optional(),
       base_height: z.number().int().positive().max(10000).optional(),
       brand_kit_id: z.number().int().positive().optional().nullable(),
+      definition: z.unknown().optional(),
+      variants: z.array(variantSchema).optional(),
     });
     const parsed = await parseBody(request, schema);
     if (parsed.error) return parsed.error;
@@ -125,36 +153,109 @@ export async function POST(request: NextRequest) {
       base_width = DEFAULT_TEMPLATE_WIDTH,
       base_height = DEFAULT_TEMPLATE_HEIGHT,
       brand_kit_id,
+      definition: clientDefinition,
+      variants,
     } = parsed.data;
 
-    const definition = {
+    // Si el cliente mandó una definition la usamos tal cual; si no, default
+    // vacío con el tamaño del template.
+    const definition = clientDefinition ?? {
       ...DEFAULT_TEMPLATE_DEFINITION,
       size: { w: base_width, h: base_height },
     };
 
-    const [result] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO production_templates
-         (production_project_id, name, description, base_width, base_height,
-          definition_json, brand_kit_id, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        production_project_id,
-        name,
-        description ?? null,
-        base_width,
-        base_height,
-        JSON.stringify(definition),
-        brand_kit_id ?? null,
-        Number(session.user.id),
-      ]
-    );
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [designRes] = await conn.execute<ResultSetHeader>(
+        `INSERT INTO production_designs (production_project_id, name, description, created_by)
+         VALUES (?, ?, ?, ?)`,
+        [production_project_id, name, description ?? null, Number(session.user.id)]
+      );
+      const designId = designRes.insertId;
+      const [result] = await conn.execute<ResultSetHeader>(
+        `INSERT INTO production_templates
+           (production_project_id, design_id, name, description, base_width, base_height,
+            definition_json, brand_kit_id, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          production_project_id,
+          designId,
+          name,
+          description ?? null,
+          base_width,
+          base_height,
+          JSON.stringify(definition),
+          brand_kit_id ?? null,
+          Number(session.user.id),
+        ]
+      );
+      const masterId = result.insertId;
 
-    return NextResponse.json(
-      { id: result.insertId, production_project_id, name, base_width, base_height },
-      { status: 201 }
-    );
+      // Variants (linked al master): se crean con su propia definition. Cada
+      // variant queda `linked_to_template_id = master.id`, así pertenecen al
+      // mismo grupo de sync — aunque sus definitions iniciales sean DISTINTAS
+      // (típico al instanciar un layout template multi-aspect). El motor de
+      // propagación bidireccional re-flowa después si el usuario edita el master.
+      const createdVariantIds: number[] = [];
+      if (variants && variants.length > 0) {
+        for (const v of variants) {
+          // Saltamos duplicados exactos del master.
+          if (v.width === base_width && v.height === base_height) continue;
+          const [vRes] = await conn.execute<ResultSetHeader>(
+            `INSERT INTO production_templates
+               (production_project_id, design_id, linked_to_template_id, name,
+                base_width, base_height, definition_json, brand_kit_id, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              production_project_id,
+              designId,
+              masterId,
+              variantSuggestedName(v.width, v.height),
+              v.width,
+              v.height,
+              JSON.stringify(v.definition),
+              brand_kit_id ?? null,
+              Number(session.user.id),
+            ],
+          );
+          createdVariantIds.push(vRes.insertId);
+        }
+      }
+
+      await conn.commit();
+      return NextResponse.json(
+        {
+          id: masterId,
+          production_project_id,
+          design_id: designId,
+          name,
+          base_width,
+          base_height,
+          variant_ids: createdVariantIds,
+        },
+        { status: 201 }
+      );
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
   } catch (error) {
     console.error("Error creando production_template:", error);
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });
   }
+}
+
+// Nombre legible de la orientación según el aspect. Mismo criterio que el
+// endpoint variants/route.ts para mantener consistencia visual.
+function variantSuggestedName(width: number, height: number): string {
+  const r = width / height;
+  if (Math.abs(r - 1) < 0.05) return "Cuadrado";
+  if (Math.abs(r - 16 / 9) < 0.05) return "Horizontal";
+  if (Math.abs(r - 9 / 16) < 0.05) return "Vertical";
+  if (r > 1) return "Horizontal";
+  if (r < 1) return "Vertical";
+  return "Personalizado";
 }

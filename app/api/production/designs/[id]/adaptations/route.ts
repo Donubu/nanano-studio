@@ -1,3 +1,15 @@
+// Adaptaciones de un design.
+//
+// Una adaptación = una pieza de salida (banner, story, etc.) en un tamaño
+// específico. Pertenece a un design, no a una orientación. Al renderear, el
+// frontend elige el "source template" así:
+//   1. overrides_json.manual_layout gana siempre que exista.
+//   2. Si adaptation.source_template_id está set, esa orientación es la fuente.
+//   3. Si NULL, auto-pick por aspect ratio más cercano dentro del design.
+//
+// Las URLs antiguas vivían bajo /templates/[id]/adaptations — eso confundía
+// el modelo porque una adaptación NO pertenece a una orientación. Acá viven
+// donde corresponden: bajo el design.
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
@@ -6,7 +18,8 @@ import { suggestFitMode } from "@/lib/production/fit-mode";
 
 interface AdaptationRow extends RowDataPacket {
   id: number;
-  template_id: number;
+  design_id: number;
+  source_template_id: number | null;
   format_preset_id: number | null;
   custom_name: string | null;
   width: number;
@@ -18,7 +31,6 @@ interface AdaptationRow extends RowDataPacket {
   sort_order: number;
   created_at: string;
   updated_at: string;
-  // Joined from the preset (nullable when adaptation is custom)
   preset_channel: string | null;
   preset_group_name: string | null;
   preset_name: string | null;
@@ -31,42 +43,91 @@ interface PresetRow extends RowDataPacket {
   height: number;
 }
 
-interface TemplateRow extends RowDataPacket {
+interface DesignTemplateRow extends RowDataPacket {
   id: number;
   base_width: number;
   base_height: number;
 }
 
-// GET - List adaptations for a template (admin only).
+interface DesignRow extends RowDataPacket {
+  id: number;
+}
+
+// Para sugerir fit_mode en una adaptación auto-pick: comparamos contra la
+// orientación del design cuyo aspect sea más cercano (la que el renderer
+// terminará usando). Si no hay orientaciones, fallback al rect 1:1 — esto
+// solo pasaría con un design recién creado sin templates, condición que en
+// teoría no ocurre porque POST template siempre crea ambos.
+function pickClosestForFit(
+  templates: DesignTemplateRow[],
+  adaptW: number,
+  adaptH: number,
+): { w: number; h: number } {
+  if (templates.length === 0) return { w: adaptW, h: adaptH };
+  const r = adaptW / adaptH;
+  let best = templates[0];
+  let bestDiff = Infinity;
+  for (const t of templates) {
+    const tr = t.base_width / t.base_height;
+    const diff = Math.abs(tr - r) / Math.min(tr, r);
+    if (diff < bestDiff) {
+      best = t;
+      bestDiff = diff;
+    }
+  }
+  return { w: best.base_width, h: best.base_height };
+}
+
+async function ensureDesign(designId: number): Promise<boolean> {
+  const [rows] = await pool.execute<DesignRow[]>(
+    "SELECT id FROM production_designs WHERE id = ? AND deleted_at IS NULL",
+    [designId],
+  );
+  return rows.length > 0;
+}
+
+async function getDesignTemplates(designId: number): Promise<DesignTemplateRow[]> {
+  const [rows] = await pool.execute<DesignTemplateRow[]>(
+    `SELECT id, base_width, base_height
+       FROM production_templates
+      WHERE design_id = ? AND deleted_at IS NULL`,
+    [designId],
+  );
+  return rows;
+}
+
+// GET - Lista adaptaciones del design (admin only).
 export async function GET(
   _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const session = await auth();
     if (!session?.user || session.user.role !== "admin") {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
-
-    const { id: templateIdRaw } = await params;
-    const templateId = Number(templateIdRaw);
-    if (!Number.isFinite(templateId)) {
-      return NextResponse.json({ error: "Template inválido" }, { status: 400 });
+    const { id: rawId } = await params;
+    const designId = Number(rawId);
+    if (!Number.isFinite(designId)) {
+      return NextResponse.json({ error: "Design inválido" }, { status: 400 });
     }
-
+    const exists = await ensureDesign(designId);
+    if (!exists) {
+      return NextResponse.json({ error: "Design no encontrado" }, { status: 404 });
+    }
     const [rows] = await pool.execute<AdaptationRow[]>(
-      `SELECT a.id, a.template_id, a.format_preset_id, a.custom_name, a.width,
-              a.height, a.overrides_json, a.fit_mode, a.is_active,
-              a.thumbnail_url, a.sort_order, a.created_at, a.updated_at,
+      `SELECT a.id, a.design_id, a.source_template_id, a.format_preset_id,
+              a.custom_name, a.width, a.height, a.overrides_json, a.fit_mode,
+              a.is_active, a.thumbnail_url, a.sort_order,
+              a.created_at, a.updated_at,
               fp.channel AS preset_channel, fp.group_name AS preset_group_name,
               fp.name AS preset_name, fp.orientation AS preset_orientation
          FROM production_template_adaptations a
          LEFT JOIN production_format_presets fp ON fp.id = a.format_preset_id
-        WHERE a.template_id = ?
+        WHERE a.design_id = ?
         ORDER BY a.sort_order ASC, a.id ASC`,
-      [templateId]
+      [designId],
     );
-
     return NextResponse.json(rows);
   } catch (error) {
     console.error("Error listando adaptaciones:", error);
@@ -74,39 +135,32 @@ export async function GET(
   }
 }
 
-// POST - Create one or more adaptations (admin only). Body shapes:
+// POST - Crear adaptaciones del design. Body shapes:
 //   { format_preset_id: number }                          — single from preset
 //   { custom_name: string, width: number, height: number }— single custom
 //   { format_preset_ids: number[] }                       — bulk from presets
-// Bulk runs in a single transaction so the sort_order numbering stays
-// contiguous and we don't end up half-applied on a failure.
+//
+// source_template_id queda en NULL (auto-pick). El usuario lo cambia después
+// vía PATCH si quiere fijar una orientación específica como fuente.
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const session = await auth();
     if (!session?.user || session.user.role !== "admin") {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
-
-    const { id: templateIdRaw } = await params;
-    const templateId = Number(templateIdRaw);
-    if (!Number.isFinite(templateId)) {
-      return NextResponse.json({ error: "Template inválido" }, { status: 400 });
+    const { id: rawId } = await params;
+    const designId = Number(rawId);
+    if (!Number.isFinite(designId)) {
+      return NextResponse.json({ error: "Design inválido" }, { status: 400 });
     }
-
-    // Verify the template exists. Fetch base dimensions so we can pick a
-    // smart fit_mode default per adaptation based on aspect ratio.
-    const [tpl] = await pool.execute<TemplateRow[]>(
-      "SELECT id, base_width, base_height FROM production_templates WHERE id = ? AND deleted_at IS NULL",
-      [templateId]
-    );
-    if (tpl.length === 0) {
-      return NextResponse.json({ error: "Template no encontrado" }, { status: 404 });
+    const exists = await ensureDesign(designId);
+    if (!exists) {
+      return NextResponse.json({ error: "Design no encontrado" }, { status: 404 });
     }
-    const masterW = tpl[0].base_width;
-    const masterH = tpl[0].base_height;
+    const designTemplates = await getDesignTemplates(designId);
 
     const body = await request.json();
     const bulkIds: number[] | null = Array.isArray(body.format_preset_ids)
@@ -120,12 +174,12 @@ export async function POST(
       const placeholders = bulkIds.map(() => "?").join(",");
       const [presets] = await pool.execute<PresetRow[]>(
         `SELECT id, width, height FROM production_format_presets WHERE id IN (${placeholders})`,
-        bulkIds
+        bulkIds,
       );
       if (presets.length === 0) {
         return NextResponse.json(
           { error: "Ningún format preset válido" },
-          { status: 400 }
+          { status: 400 },
         );
       }
       const presetMap = new Map(presets.map((p) => [p.id, p]));
@@ -136,26 +190,31 @@ export async function POST(
         const [[{ next_order }]] = await conn.execute<
           (RowDataPacket & { next_order: number })[]
         >(
-          "SELECT COALESCE(MAX(sort_order), 0) + 10 AS next_order FROM production_template_adaptations WHERE template_id = ?",
-          [templateId]
+          "SELECT COALESCE(MAX(sort_order), 0) + 10 AS next_order FROM production_template_adaptations WHERE design_id = ?",
+          [designId],
         );
         let order = Number(next_order);
         const insertedIds: number[] = [];
         for (const id of bulkIds) {
           const preset = presetMap.get(id);
           if (!preset) continue;
-          const fitMode = suggestFitMode(masterW, masterH, preset.width, preset.height);
+          const ref = pickClosestForFit(designTemplates, preset.width, preset.height);
+          const fitMode = suggestFitMode(ref.w, ref.h, preset.width, preset.height);
           const [result] = await conn.execute<ResultSetHeader>(
             `INSERT INTO production_template_adaptations
-               (template_id, format_preset_id, custom_name, width, height, fit_mode, sort_order)
-             VALUES (?, ?, NULL, ?, ?, ?, ?)`,
-            [templateId, id, preset.width, preset.height, fitMode, order]
+               (design_id, source_template_id, format_preset_id, custom_name,
+                width, height, fit_mode, sort_order)
+             VALUES (?, NULL, ?, NULL, ?, ?, ?, ?)`,
+            [designId, id, preset.width, preset.height, fitMode, order],
           );
           insertedIds.push(result.insertId);
           order += 10;
         }
         await conn.commit();
-        return NextResponse.json({ ids: insertedIds, count: insertedIds.length }, { status: 201 });
+        return NextResponse.json(
+          { ids: insertedIds, count: insertedIds.length },
+          { status: 201 },
+        );
       } catch (err) {
         await conn.rollback();
         throw err;
@@ -177,55 +236,55 @@ export async function POST(
     if (formatPresetId !== null) {
       const [presets] = await pool.execute<PresetRow[]>(
         "SELECT id, width, height FROM production_format_presets WHERE id = ?",
-        [formatPresetId]
+        [formatPresetId],
       );
       if (presets.length === 0) {
         return NextResponse.json(
           { error: "Format preset no encontrado" },
-          { status: 400 }
+          { status: 400 },
         );
       }
-      // Preset wins — ignore client-sent w/h to avoid drift.
       width = presets[0].width;
       height = presets[0].height;
     } else {
-      // Custom adaptation: requires name + dimensions.
       if (!customName) {
         return NextResponse.json(
           { error: "Falta custom_name para adaptación personalizada" },
-          { status: 400 }
+          { status: 400 },
         );
       }
-      if (!Number.isFinite(width) || !Number.isFinite(height) || width! <= 0 || height! <= 0) {
-        return NextResponse.json(
-          { error: "Dimensiones inválidas" },
-          { status: 400 }
-        );
+      if (
+        !Number.isFinite(width) ||
+        !Number.isFinite(height) ||
+        width! <= 0 ||
+        height! <= 0
+      ) {
+        return NextResponse.json({ error: "Dimensiones inválidas" }, { status: 400 });
       }
     }
 
-    // Pick next sort_order (append at end).
     const [[{ next_order }]] = await pool.execute<
       (RowDataPacket & { next_order: number })[]
     >(
-      "SELECT COALESCE(MAX(sort_order), 0) + 10 AS next_order FROM production_template_adaptations WHERE template_id = ?",
-      [templateId]
+      "SELECT COALESCE(MAX(sort_order), 0) + 10 AS next_order FROM production_template_adaptations WHERE design_id = ?",
+      [designId],
     );
-
-    const fitMode = suggestFitMode(masterW, masterH, width!, height!);
+    const ref = pickClosestForFit(designTemplates, width!, height!);
+    const fitMode = suggestFitMode(ref.w, ref.h, width!, height!);
     const [result] = await pool.execute<ResultSetHeader>(
       `INSERT INTO production_template_adaptations
-         (template_id, format_preset_id, custom_name, width, height, fit_mode, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         (design_id, source_template_id, format_preset_id, custom_name,
+          width, height, fit_mode, sort_order)
+       VALUES (?, NULL, ?, ?, ?, ?, ?, ?)`,
       [
-        templateId,
+        designId,
         formatPresetId,
         customName,
         width,
         height,
         fitMode,
         next_order,
-      ]
+      ],
     );
 
     return NextResponse.json({ id: result.insertId }, { status: 201 });

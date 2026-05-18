@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { PanelLeftOpen, PanelRightOpen } from "lucide-react";
+import { ChevronDown, ChevronRight, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { TemplateDefinition, findLayer, findParent } from "@/lib/production/types";
+import { TemplateDefinition, TemplateLayer, findLayer, findParent } from "@/lib/production/types";
 import { BrandKit, BrandKitContent, EMPTY_KIT_CONTENT } from "@/lib/production/brand-kit";
 import { DataRow } from "@/lib/production/variables";
 import { useTemplateEditor } from "@/lib/production/use-template-editor";
@@ -56,6 +56,11 @@ export function TemplateEditor({
   // Estado de colapso de los paneles laterales. Por default abiertos.
   const [layersCollapsed, setLayersCollapsed] = useState(false);
   const [propsCollapsed, setPropsCollapsed] = useState(false);
+  // Acordeón de la columna derecha. Default: Propiedades abierta, Variables
+  // y datos colapsada — al seleccionar una capa abrimos automáticamente
+  // Propiedades y cerramos Variables y datos (efecto reactivo más abajo).
+  const [propsSectionOpen, setPropsSectionOpen] = useState(true);
+  const [dataSectionOpen, setDataSectionOpen] = useState(false);
   const editor = useTemplateEditor({
     initial,
     baseWidth,
@@ -105,6 +110,18 @@ export function TemplateEditor({
     if (previewSize) editor.select(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewSize?.w, previewSize?.h]);
+
+  // Al seleccionar una capa (no-root), priorizamos Propiedades: la abrimos si
+  // estaba colapsada y cerramos Variables y datos para que no compita por el
+  // alto. El productor puede re-abrir Variables manualmente cuando quiera.
+  // Cuando deselecciona o vuelve al root, no tocamos el acordeón (respetamos
+  // su elección).
+  const selectedLayerId = editor.selectedLayer?.id;
+  useEffect(() => {
+    if (!selectedLayerId || selectedLayerId === "tpl_root") return;
+    setPropsSectionOpen(true);
+    setDataSectionOpen(false);
+  }, [selectedLayerId]);
 
   // Keyboard shortcuts. Skip when typing in an input/textarea or in preview mode.
   useEffect(() => {
@@ -272,7 +289,11 @@ export function TemplateEditor({
           />
         </div>
 
-        {/* Columna derecha — Propiedades + rightAccessory. Colapsable. */}
+        {/* Columna derecha — acordeón con Propiedades + rightAccessory.
+            Cada sección se puede colapsar independiente; al menos una abierta
+            ocupa el alto restante con scroll propio. Antes las secciones se
+            apilaban sin scroll y se cortaba el contenido cuando había mucho
+            que editar (texto + variables + dataset). */}
         {propsCollapsed ? (
           <div className="w-8 shrink-0 border-l border-border/50 bg-card/40 flex items-start justify-center py-2">
             <button
@@ -285,23 +306,120 @@ export function TemplateEditor({
             </button>
           </div>
         ) : (
-          <div className={cn("flex flex-col shrink-0", readOnlyClass)}>
-            <PropertiesPanel
-              definition={editor.definition}
-              selectedLayer={editor.selectedLayer}
-              onUpdateLayer={editor.updateLayer}
-              onUpdateRoot={editor.updateRoot}
-              brandKit={brandKit}
-              clientId={clientId ?? null}
-              projectId={projectId}
-              allBrandKits={allBrandKits}
-              onBrandKitsChange={onBrandKitsChange}
-              onCollapse={() => setPropsCollapsed(true)}
-            />
-            {rightAccessory}
+          <div
+            className={cn(
+              "flex flex-col shrink-0 w-64 border-l border-border/50 bg-card/40 min-h-0",
+              readOnlyClass,
+            )}
+          >
+            <AccordionSection
+              title={accordionPropsTitle(editor.selectedLayer)}
+              open={propsSectionOpen}
+              onToggle={() => setPropsSectionOpen((v) => !v)}
+              trailing={
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPropsCollapsed(true);
+                  }}
+                  className="text-muted-foreground hover:text-foreground p-0.5 rounded"
+                  title="Colapsar columna"
+                >
+                  <PanelRightClose className="h-3.5 w-3.5" />
+                </button>
+              }
+            >
+              <PropertiesPanel
+                definition={editor.definition}
+                selectedLayer={editor.selectedLayer}
+                onUpdateLayer={editor.updateLayer}
+                onUpdateRoot={editor.updateRoot}
+                brandKit={brandKit}
+                clientId={clientId ?? null}
+                projectId={projectId}
+                allBrandKits={allBrandKits}
+                onBrandKitsChange={onBrandKitsChange}
+                embedded
+              />
+            </AccordionSection>
+            {rightAccessory && (
+              <AccordionSection
+                title="Variables y datos"
+                open={dataSectionOpen}
+                onToggle={() => setDataSectionOpen((v) => !v)}
+              >
+                {rightAccessory}
+              </AccordionSection>
+            )}
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+// Título de la sección Propiedades — varía según la capa seleccionada (la
+// lógica vivía adentro de PropertiesPanel; al embeberlo en el acordeón
+// movemos el cálculo acá para que el header del acordeón refleje el contexto).
+function accordionPropsTitle(selectedLayer: TemplateLayer | null): string {
+  if (!selectedLayer) return "Propiedades";
+  if (selectedLayer.id === "tpl_root") return "Canvas";
+  switch (selectedLayer.type) {
+    case "text":
+      return "Texto";
+    case "image":
+      return "Imagen";
+    case "shape":
+      return "Forma";
+    case "frame":
+      return "Frame";
+  }
+}
+
+// Sección colapsable del acordeón. Header clickable con chevron + título +
+// slot opcional para acciones (ej. cerrar la columna entera). Cuando open
+// el body ocupa el espacio disponible (flex-1) con scroll propio; cuando
+// cerrado solo se ve el header. Varias secciones abiertas comparten alto
+// equitativamente — las cerradas se aplastan al header.
+function AccordionSection({
+  title,
+  open,
+  onToggle,
+  trailing,
+  children,
+}: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  trailing?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      className={cn(
+        "flex flex-col border-b border-border/50 last:border-b-0 min-h-0",
+        open ? "flex-1" : "shrink-0",
+      )}
+    >
+      <header className="flex items-center justify-between px-3 py-2 bg-card/60 hover:bg-card/80 transition-colors">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex-1 flex items-center gap-1.5 text-left"
+        >
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+          )}
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {title}
+          </h3>
+        </button>
+        {trailing}
+      </header>
+      {open && <div className="flex-1 min-h-0 overflow-hidden">{children}</div>}
+    </section>
   );
 }

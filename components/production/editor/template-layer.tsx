@@ -189,6 +189,12 @@ function renderFrame(
 function renderText(layer: TextLayer, parentMode: "free" | "stack", common: CommonProps) {
   const { style } = layer;
   if (style.fontFamily) ensureGoogleFontLoaded(style.fontFamily);
+  // Vertical align: implementado vía display: flex en el contenedor de texto.
+  // Default top (alineación original). El textAlign sigue siendo CSS horizontal
+  // normal — el contenedor solo posiciona el bloque dentro de la caja.
+  const vAlign = style.verticalAlign ?? "top";
+  const justifyContent =
+    vAlign === "middle" ? "center" : vAlign === "bottom" ? "flex-end" : "flex-start";
   const baseCss: CSSProperties = {
     ...baseLayerStyle(layer, parentMode),
     fontFamily: style.fontFamily,
@@ -200,6 +206,9 @@ function renderText(layer: TextLayer, parentMode: "free" | "stack", common: Comm
     fontStyle: style.italic ? "italic" : undefined,
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent,
   };
   // Smart text: el render busca el font-size más grande que entre en la caja.
   if (isFontSizeRange(style.fontSize)) {

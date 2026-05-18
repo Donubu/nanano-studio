@@ -214,25 +214,42 @@ export async function PUT(
       // Caller editó esta orientación. Solo propagamos si pertenece al grupo
       // linked. Si es el master, su id es la fuente. Si es una linked variant,
       // su linked_to_template_id apunta al master.
+      //
+      // IMPORTANTE: usamos el linked_to_template_id POST-update, no el de
+      // `current` (que es pre-update). Si el cliente está SETEANDO
+      // linked_to_template_id a NULL en este mismo PUT (típico al aceptar
+      // una propuesta de IA o al diferenciar), no debemos propagar como si
+      // todavía estuviera linkeado — la intención del cliente es detach.
+      const effectiveLink =
+        parsed.data.linked_to_template_id !== undefined
+          ? parsed.data.linked_to_template_id
+          : current.linked_to_template_id;
       let masterId: number | null = null;
-      if (current.linked_to_template_id != null) {
-        masterId = current.linked_to_template_id;
+      if (effectiveLink != null) {
+        masterId = effectiveLink;
       } else if (current.design_id != null) {
-        // Si tiene design pero linked_to_template_id es null, verificamos si
-        // es el principal (MIN id sin link). Si lo es, ES el master del grupo.
+        // linked_to_template_id es null post-update. Verificamos si current
+        // es el principal (MIN id sin link) — si lo es, ES el master del grupo
+        // y propaga. Si no, es una orientación diferenciada (standalone) y
+        // NO propaga.
         const [minRows] = await pool.execute<RowDataPacket[]>(
           `SELECT MIN(id) AS min_id
              FROM production_templates
             WHERE design_id = ?
               AND linked_to_template_id IS NULL
+              AND id != ?
               AND deleted_at IS NULL`,
-          [current.design_id]
+          [current.design_id, id]
         );
-        const minId = (minRows[0] as { min_id: number | null })?.min_id ?? null;
-        // Si current.id es el menor sin link, asumimos master. Si no, es una
-        // orientación diferenciada y no propaga (queda standalone).
-        if (minId === current.id) {
-          masterId = current.id;
+        const minIdExcludingCurrent =
+          (minRows[0] as { min_id: number | null })?.min_id ?? null;
+        // current es el principal si no hay otro template del design sin
+        // link con id menor. Si minIdExcludingCurrent es null o > current.id,
+        // current es el menor → es el principal.
+        const isPrincipal =
+          minIdExcludingCurrent === null || minIdExcludingCurrent > id;
+        if (isPrincipal) {
+          masterId = id;
         }
       }
 

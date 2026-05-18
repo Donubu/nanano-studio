@@ -21,6 +21,7 @@ import {
   Pencil,
   Plus,
   Rocket,
+  Sparkles,
   Trash2,
   Unlink,
   X,
@@ -149,7 +150,9 @@ const FIT_MODE_DESCRIPTION: Record<FitMode, string> = {
 
 interface Adaptation {
   id: number;
-  template_id: number;
+  design_id: number;
+  // null = auto-pick por aspect; number = orientación pinned como fuente.
+  source_template_id: number | null;
   format_preset_id: number | null;
   custom_name: string | null;
   width: number;
@@ -206,10 +209,30 @@ export default function ProducirPage() {
   // Modal para agregar variante del master.
   const [showAddVariant, setShowAddVariant] = useState(false);
 
+  // Modal de Banner Designer (IA): id de la orientación que se está adaptando.
+  // null = modal cerrado. La modal se monta como overlay y maneja su propio
+  // ciclo de pedida → preview → accept/regenerate/cancel.
+  const [aiAdaptTargetId, setAiAdaptTargetId] = useState<number | null>(null);
+  // Contador que se incrementa cuando aplicamos una propuesta de IA. Va en
+  // el `key` del editor para forzar remount aun cuando la orientación activa
+  // no cambia — sin esto, React no detecta que la definition cambió y el
+  // editor sigue mostrando el contenido viejo.
+  const [editorRemountKey, setEditorRemountKey] = useState(0);
+  // Toast efímero que confirma una acción exitosa de IA. Se muestra unos
+  // segundos y luego se limpia solo.
+  const [aiSuccessToast, setAiSuccessToast] = useState<string | null>(null);
+
+  // designId del template actual. Las adaptaciones cuelgan del design, no
+  // del template — la URL del producir page sigue siendo por template_id
+  // (es el contexto de edición del productor) pero internamente todo se
+  // resuelve por design_id.
+  const designId = template?.design_id ?? null;
+
   const fetchAdaptations = useCallback(async () => {
+    if (designId == null) return;
     setAdaptationsLoading(true);
     try {
-      const res = await fetch(`/api/production/templates/${templateId}/adaptations`);
+      const res = await fetch(`/api/production/designs/${designId}/adaptations`);
       if (res.ok) {
         const data: Adaptation[] = await res.json();
         setAdaptations(data);
@@ -219,18 +242,18 @@ export default function ProducirPage() {
     } finally {
       setAdaptationsLoading(false);
     }
-  }, [templateId]);
+  }, [designId]);
 
   // Carga liviana: solo cuenta cuántas adaptaciones hay. Se llama al inicio
   // así el botón "Ver adaptaciones (N)" muestra el número sin pagar el
   // costo de renderizar las cards.
-  const fetchAdaptationCount = useCallback(async () => {
-    const res = await fetch(`/api/production/templates/${templateId}/adaptations`);
+  const fetchAdaptationCount = useCallback(async (dId: number) => {
+    const res = await fetch(`/api/production/designs/${dId}/adaptations`);
     if (res.ok) {
       const data: Adaptation[] = await res.json();
       setAdaptationCount(data.length);
     }
-  }, [templateId]);
+  }, []);
 
   // Re-fetcheable desde el TemplateEditor cuando el modal de brand-kit del
   // proyecto guarda cambios; también lo usa fetchAll para hidratar al cargar.
@@ -299,7 +322,11 @@ export default function ProducirPage() {
       // contamos cuántas hay para el botón "Ver adaptaciones (N)". Cada
       // card hace un reflow + token resolve + render del layer tree, así
       // que cargar 12+ tarda. El productor pide verlas cuando las necesita.
-      await fetchAdaptationCount();
+      // design_id viene del template — después de migration 113 siempre
+      // existe; defensive check por si vienes de una DB previa.
+      if (tpl.design_id != null) {
+        await fetchAdaptationCount(tpl.design_id);
+      }
 
       // Hidratar dataset persistido (si existe).
       const dsRes = await fetch(`/api/production/templates/${templateId}/datasets`);
@@ -352,33 +379,6 @@ export default function ProducirPage() {
     );
   }, [orientations]);
 
-  const isActivePrincipal =
-    !!activeOrientation &&
-    !!principalOrientation &&
-    activeOrientation.id === principalOrientation.id;
-
-  // Diferenciada = no es la principal Y no tiene link al master. Aislada del
-  // grupo de sync. Se puede re-conectar vía "Ajustar formato por...".
-  const isActiveDifferentiated =
-    !!activeOrientation &&
-    !isActivePrincipal &&
-    activeOrientation.linked_to_template_id == null;
-
-  // Orientaciones distintas a la activa, ordenadas: master primero, después
-  // por id ascendente. Sirven como opciones del menú "Ajustar formato por...".
-  const relinkSources = useMemo(() => {
-    if (!activeOrientation) return [];
-    return orientations
-      .filter((o) => o.id !== activeOrientation.id)
-      .sort((a, b) => {
-        if (principalOrientation) {
-          if (a.id === principalOrientation.id) return -1;
-          if (b.id === principalOrientation.id) return 1;
-        }
-        return a.id - b.id;
-      });
-  }, [orientations, activeOrientation, principalOrientation]);
-
   // Definition que se está editando: viene de la orientación ACTIVA. El
   // useMemo evita reconstruir el objeto en cada render si la orientación no
   // cambió.
@@ -393,8 +393,8 @@ export default function ProducirPage() {
   }, [activeOrientation]);
 
   // Cuando se edita una adaptación, derivamos su layout inicial desde la
-  // orientación del MASTER cuyo aspect ratio sea más cercano a la
-  // adaptación. Esa es la "source" implícita del adaptación.
+  // source orientation (pinned o auto-pick). El manual_layout en overrides_json
+  // gana si existe.
   const editingAdaptation = editingId != null
     ? adaptations.find((a) => a.id === editingId) ?? null
     : null;
@@ -402,12 +402,7 @@ export default function ProducirPage() {
     if (!editingAdaptation) return null;
     const overrides = parseOverrides(editingAdaptation.overrides_json);
     if (overrides.manual_layout) return overrides.manual_layout;
-    // No hay override manual: derivamos del master más cercano por aspect.
-    const source = pickClosestOrientation(
-      orientations,
-      editingAdaptation.width,
-      editingAdaptation.height,
-    );
+    const source = resolveSource(editingAdaptation, orientations);
     const sourceDef = source?.definition ?? definition;
     return deriveManualLayoutFromMaster(
       sourceDef,
@@ -454,9 +449,9 @@ export default function ProducirPage() {
   // Save de una adaptación: PATCH overrides_json con manual_layout.
   const handleSaveAdapt = useCallback(
     async (def: TemplateDefinition) => {
-      if (editingId == null) return;
+      if (editingId == null || designId == null) return;
       const res = await fetch(
-        `/api/production/templates/${templateId}/adaptations/${editingId}`,
+        `/api/production/designs/${designId}/adaptations/${editingId}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -467,8 +462,6 @@ export default function ProducirPage() {
         const body = await res.json().catch(() => null);
         throw new Error(`Save adapt failed: ${res.status}${body?.error ? ` — ${body.error}` : ""}`);
       }
-      // Solo actualizamos la fila de la adaptación editada — sin refetch
-      // completo para evitar parpadeos en el resto de la grilla.
       setAdaptations((cur) =>
         cur.map((a) =>
           a.id === editingId
@@ -477,61 +470,29 @@ export default function ProducirPage() {
         )
       );
     },
-    [templateId, editingId]
+    [designId, editingId]
   );
 
-  const handleAddBulk = async (presetIds: number[], autoDistribute: boolean) => {
-    if (presetIds.length === 0) return;
-    // Si no hay design o el productor optó por no distribuir, todo cae en el
-    // template actual.
-    if (!autoDistribute || siblings.length === 0) {
-      const res = await fetch(`/api/production/templates/${templateId}/adaptations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ format_preset_ids: presetIds }),
-      });
-      if (res.ok) {
-        setShowPicker(false);
-        fetchAdaptations();
-      }
-      return;
+  // Bulk add de adaptaciones. Ya no hay autoDistribute — todas las adaptaciones
+  // cuelgan del design entero, y el renderer auto-selecciona la orientación
+  // más cercana por aspect en cada pieza. El productor puede después fijar
+  // una source distinta vía el picker de la card.
+  const handleAddBulk = async (presetIds: number[]) => {
+    if (presetIds.length === 0 || designId == null) return;
+    const res = await fetch(`/api/production/designs/${designId}/adaptations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ format_preset_ids: presetIds }),
+    });
+    if (res.ok) {
+      setShowPicker(false);
+      fetchAdaptations();
     }
-
-    // Modo auto-distribuir: cada preset va al template (master actual o
-    // hermano del design) cuyo aspect ratio sea más cercano. Llamamos POST
-    // por template en paralelo con su lote de presets.
-    const candidates: { id: number; base_width: number; base_height: number }[] = [
-      ...(template
-        ? [{ id: template.id, base_width: template.base_width, base_height: template.base_height }]
-        : []),
-      ...siblings.map((s) => ({ id: s.id, base_width: s.base_width, base_height: s.base_height })),
-    ];
-
-    const groups = new Map<number, number[]>();
-    for (const pid of presetIds) {
-      const preset = presets.find((p) => p.id === pid);
-      if (!preset) continue;
-      const best = pickBestTemplate(preset.width, preset.height, candidates);
-      const arr = groups.get(best) ?? [];
-      arr.push(pid);
-      groups.set(best, arr);
-    }
-
-    await Promise.all(
-      Array.from(groups.entries()).map(([tplId, ids]) =>
-        fetch(`/api/production/templates/${tplId}/adaptations`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ format_preset_ids: ids }),
-        })
-      )
-    );
-    setShowPicker(false);
-    fetchAdaptations();
   };
 
   const handleAddCustom = async (name: string, w: number, h: number) => {
-    const res = await fetch(`/api/production/templates/${templateId}/adaptations`, {
+    if (designId == null) return;
+    const res = await fetch(`/api/production/designs/${designId}/adaptations`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ custom_name: name, width: w, height: h }),
@@ -541,6 +502,32 @@ export default function ProducirPage() {
       fetchAdaptations();
     }
   };
+
+  // Cambia la source orientation de una adaptación. null = auto-pick.
+  // Optimistic update + read-back para confirmar.
+  const handleSourceChange = useCallback(
+    async (adaptationId: number, sourceTemplateId: number | null) => {
+      if (designId == null) return;
+      setAdaptations((cur) =>
+        cur.map((a) =>
+          a.id === adaptationId ? { ...a, source_template_id: sourceTemplateId } : a,
+        ),
+      );
+      const res = await fetch(
+        `/api/production/designs/${designId}/adaptations/${adaptationId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source_template_id: sourceTemplateId }),
+        },
+      );
+      if (!res.ok) {
+        // Rollback con re-fetch para volver al estado canónico de la BD.
+        fetchAdaptations();
+      }
+    },
+    [designId, fetchAdaptations],
+  );
 
   // --- Export pipeline ---
   // currentlyRendering: la adaptación que está montada en el container oculto
@@ -749,12 +736,6 @@ export default function ProducirPage() {
 
   const [fitModeError, setFitModeError] = useState<string | null>(null);
 
-  // siblings: orientations.filter(o => o.id !== activeOrientationId).
-  //   (Mantengo el nombre para minimizar cambios donde se usaba.)
-  const siblings = useMemo(
-    () => orientations.filter((o) => o.id !== activeOrientationId),
-    [orientations, activeOrientationId],
-  );
   const designMembers = useMemo(() => {
     if (orientations.length === 0) return [];
     return orientations
@@ -849,38 +830,41 @@ export default function ProducirPage() {
     [orientations, activeOrientationId, templateId]
   );
 
-  // Diferencia la orientación activa del grupo linked. Solo válido si está
-  // vinculada (linked_to_template_id != null). El re-linkeo no pasa por acá
-  // — para eso está handleRelinkTo.
-  const handleDifferentiate = useCallback(async () => {
-    if (!activeOrientation) return;
-    if (activeOrientation.linked_to_template_id == null) return;
-    const ok = confirm(
-      "¿Diferenciar esta orientación del resto? Dejará de heredar cambios del master base."
-    );
-    if (!ok) return;
-    const res = await fetch(`/api/production/templates/${activeOrientation.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ linked_to_template_id: null }),
-    });
-    if (res.ok) {
-      setOrientations((cur) =>
-        cur.map((o) =>
-          o.id === activeOrientation.id ? { ...o, linked_to_template_id: null } : o,
-        ),
+  // Diferencia una orientación específica del grupo linked. Acepta el id
+  // como param para poder invocarse desde el strip sobre cualquier orientación
+  // (no solo la activa).
+  const handleDifferentiate = useCallback(
+    async (orientationId: number) => {
+      const target = orientations.find((o) => o.id === orientationId);
+      if (!target || target.linked_to_template_id == null) return;
+      const ok = confirm(
+        `¿Diferenciar "${target.name}" del resto? Dejará de heredar cambios del master base.`,
       );
-    }
-  }, [activeOrientation]);
+      if (!ok) return;
+      const res = await fetch(`/api/production/templates/${orientationId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ linked_to_template_id: null }),
+      });
+      if (res.ok) {
+        setOrientations((cur) =>
+          cur.map((o) =>
+            o.id === orientationId ? { ...o, linked_to_template_id: null } : o,
+          ),
+        );
+      }
+    },
+    [orientations],
+  );
 
-  // Re-vincula la orientación activa a otra (típicamente el master) y reemplaza
-  // su definition por la fuente reflowed. El backend hace ambas cosas en el
-  // mismo PUT; acá refetcheamos las orientaciones para que el editor se
-  // remonte con el contenido nuevo.
+  // Re-vincula una orientación a otra fuente (por defecto el master) y
+  // reemplaza su definition por la fuente reflowed. Sirve para "re-engancharla"
+  // al grupo de sync después de haberla diferenciado.
   const handleRelinkTo = useCallback(
-    async (sourceId: number) => {
-      if (!activeOrientation) return;
-      if (sourceId === activeOrientation.id) return;
+    async (targetId: number, sourceId: number) => {
+      if (sourceId === targetId) return;
+      const target = orientations.find((o) => o.id === targetId);
+      if (!target) return;
       const sourceOri = orientations.find((o) => o.id === sourceId);
       const sourceLabel = sourceOri
         ? principalOrientation && sourceOri.id === principalOrientation.id
@@ -888,11 +872,11 @@ export default function ProducirPage() {
           : `"${sourceOri.name}"`
         : "esa orientación";
       const ok = confirm(
-        `¿Reemplazar el contenido de esta orientación por el de ${sourceLabel}? El layout actual se pierde.`,
+        `¿Reemplazar el contenido de "${target.name}" por el de ${sourceLabel}? El layout actual se pierde.`,
       );
       if (!ok) return;
       const res = await fetch(
-        `/api/production/templates/${activeOrientation.id}`,
+        `/api/production/templates/${targetId}`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -904,7 +888,6 @@ export default function ProducirPage() {
         alert(body?.error || `No se pudo ajustar el formato (HTTP ${res.status})`);
         return;
       }
-      // Refetch para tener la nueva definition reflowed que produjo el backend.
       const refresh = await fetch(
         `/api/production/templates/${templateId}/orientations`,
       );
@@ -913,18 +896,67 @@ export default function ProducirPage() {
         setOrientations(list);
       }
     },
-    [activeOrientation, orientations, principalOrientation, templateId],
+    [orientations, principalOrientation, templateId],
+  );
+
+  // Acepta una propuesta del Banner Designer.
+  //   - applyToAllLinked = false  → PUT con linked_to_template_id=null.
+  //     La propuesta queda solo en esta orientación. Diferenciada del master.
+  //   - applyToAllLinked = true   → PUT sin tocar linked_to_template_id.
+  //     El backend propaga (reflowed) al master + todas las linked variants
+  //     del grupo. Útil cuando la propuesta IA es lo suficientemente buena
+  //     como para volverse el nuevo "canónico" del concepto.
+  //
+  // Después de aplicar: refetch + switch + remount + toast.
+  const handleAiAcceptProposal = useCallback(
+    async (
+      targetId: number,
+      definition: TemplateDefinition,
+      applyToAllLinked: boolean,
+    ) => {
+      const body: Record<string, unknown> = { definition };
+      if (!applyToAllLinked) {
+        body.linked_to_template_id = null;
+      }
+      const res = await fetch(`/api/production/templates/${targetId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err?.error || `No se pudo aplicar la propuesta (HTTP ${res.status})`);
+        return false;
+      }
+      const refresh = await fetch(
+        `/api/production/templates/${templateId}/orientations`,
+      );
+      if (refresh.ok) {
+        const list: Orientation[] = await refresh.json();
+        setOrientations(list);
+      }
+      setActiveOrientationId(targetId);
+      setEditorRemountKey((k) => k + 1);
+      setAiSuccessToast(
+        applyToAllLinked
+          ? "Propuesta aplicada al master y a todas las variantes linkeadas"
+          : "Propuesta aplicada · orientación diferenciada del master",
+      );
+      window.setTimeout(() => setAiSuccessToast(null), 3500);
+      return true;
+    },
+    [templateId],
   );
 
   const handleFitModeChange = async (adaptationId: number, fitMode: FitMode) => {
+    if (designId == null) return;
     setFitModeError(null);
-    // Optimistic update.
     setAdaptations((cur) =>
       cur.map((a) => (a.id === adaptationId ? { ...a, fit_mode: fitMode } : a))
     );
     try {
       const res = await fetch(
-        `/api/production/templates/${templateId}/adaptations/${adaptationId}`,
+        `/api/production/designs/${designId}/adaptations/${adaptationId}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -937,13 +969,9 @@ export default function ProducirPage() {
         setFitModeError(
           body?.error || `No se pudo guardar el fit (HTTP ${res.status})`
         );
-        // Rollback usando el valor canónico de la BD.
         fetchAdaptations();
         return;
       }
-      // Read-back: el endpoint devuelve la fila actual; sincronizamos el
-      // valor local con el persistido por si la BD canónicamente quedó en
-      // otro estado del que asumimos.
       const data = await res.json().catch(() => null);
       if (data?.adaptation?.fit_mode) {
         const canonical = data.adaptation.fit_mode as FitMode;
@@ -961,11 +989,12 @@ export default function ProducirPage() {
   };
 
   const handleDelete = async (adaptationId: number) => {
+    if (designId == null) return;
     if (!confirm("¿Eliminar esta adaptación?")) return;
     setDeletingId(adaptationId);
     try {
       const res = await fetch(
-        `/api/production/templates/${templateId}/adaptations/${adaptationId}`,
+        `/api/production/designs/${designId}/adaptations/${adaptationId}`,
         { method: "DELETE" }
       );
       if (res.ok) fetchAdaptations();
@@ -1071,7 +1100,7 @@ export default function ProducirPage() {
                 // key incluye la orientación: al cambiar de orientación se
                 // desmonta y remonta el editor con la definition correcta.
                 // No hay navegación, no recarga — solo el remount React.
-                key={`orientation-${activeOrientation.id}`}
+                key={`orientation-${activeOrientation.id}-${editorRemountKey}`}
                 initial={definition}
                 baseWidth={activeOrientation.base_width}
                 baseHeight={activeOrientation.base_height}
@@ -1093,6 +1122,13 @@ export default function ProducirPage() {
                     onSwitch={(id) => setActiveOrientationId(id)}
                     onAdd={() => setShowAddVariant(true)}
                     onDelete={handleDeleteOrientation}
+                    onDifferentiate={handleDifferentiate}
+                    onRelinkToMaster={(id) => {
+                      if (principalOrientation) {
+                        handleRelinkTo(id, principalOrientation.id);
+                      }
+                    }}
+                    onAiAdapt={(id) => setAiAdaptTargetId(id)}
                   />
                 }
                 rightAccessory={
@@ -1128,31 +1164,11 @@ export default function ProducirPage() {
               />
             ) : null}
 
-            {/* Acción flotante según el estado de la orientación activa:
-                - Linked al master: "Diferenciar del resto" (corta el sync).
-                - Diferenciada: "Ajustar formato por..." (re-link + reflow).
-                - Master/principal: nada — es la fuente del grupo. */}
-            {editingId == null &&
-              activeOrientation &&
-              !isActivePrincipal &&
-              activeOrientation.linked_to_template_id != null && (
-                <button
-                  type="button"
-                  onClick={handleDifferentiate}
-                  className="absolute bottom-4 right-4 z-30 flex items-center gap-1.5 text-xs px-3 py-2 rounded-md bg-amber-500 hover:bg-amber-600 text-white shadow-lg font-medium transition-colors"
-                  title="Esta orientación hereda del master base. Diferenciarla para que tenga su propio layout."
-                >
-                  <Unlink className="h-3.5 w-3.5" />
-                  Diferenciar del resto
-                </button>
-              )}
-            {editingId == null && isActiveDifferentiated && relinkSources.length > 0 && (
-              <RelinkMenu
-                sources={relinkSources}
-                principalId={principalOrientation?.id ?? null}
-                onPick={handleRelinkTo}
-              />
-            )}
+            {/* Las acciones de diferenciar / ajustar formato dejaron de ser
+                botones flotantes sobre el canvas (el ámbar se perdía contra
+                fondos saturados). Ahora viven dentro del mini-preview de cada
+                orientación en el VariantsStrip — botón Unlink (linked) o
+                Link (diferenciada) on hover. */}
           </div>
         </section>
 
@@ -1255,20 +1271,24 @@ export default function ProducirPage() {
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                     {group.items.map((a) => {
-                      // Cada adaptación toma como master a la orientación
-                      // del master cuyo aspect es más cercano. Default
-                      // automático — el override manual sigue siendo el
-                      // manual_layout en overrides_json.
-                      const sourceOrientation = pickClosestOrientation(
+                      // Source resolution:
+                      //   1. Si la adaptación tiene source_template_id pinned,
+                      //      esa orientación es la fuente.
+                      //   2. Si NULL, auto-pick por aspect ratio más cercano.
+                      // El manual_layout (overrides_json) gana por encima de
+                      // todo dentro del renderer de la card.
+                      const sourceOrientation = resolveSource(
+                        a,
                         orientations,
-                        a.width,
-                        a.height,
                       );
                       const sourceDef = sourceOrientation?.definition ?? definition;
                       return (
                         <AdaptationCard
                           key={a.id}
                           adaptation={a}
+                          orientations={orientations}
+                          principalId={principalOrientation?.id ?? null}
+                          sourceOrientation={sourceOrientation}
                           definition={sourceDef}
                           brandKit={brandKitContent}
                           dataRow={previewRow}
@@ -1276,6 +1296,7 @@ export default function ProducirPage() {
                           onEdit={() => setEditingId(a.id)}
                           onDelete={() => handleDelete(a.id)}
                           onFitModeChange={(m) => handleFitModeChange(a.id, m)}
+                          onSourceChange={(srcId) => handleSourceChange(a.id, srcId)}
                           onDownload={() => handleDownloadSingle(a)}
                           downloading={singleDownloadingId === a.id}
                           batchInProgress={!!batchProgress}
@@ -1302,21 +1323,41 @@ export default function ProducirPage() {
         />
       )}
 
+      {aiAdaptTargetId != null && (() => {
+        const targetOri = orientations.find((o) => o.id === aiAdaptTargetId);
+        if (!targetOri || !principalOrientation) return null;
+        return (
+          <AiAdaptModal
+            templateId={Number(templateId)}
+            target={targetOri}
+            master={principalOrientation}
+            brandKit={brandKitContent}
+            onClose={() => setAiAdaptTargetId(null)}
+            onAccept={async (def, applyToAllLinked) => {
+              const ok = await handleAiAcceptProposal(
+                targetOri.id,
+                def,
+                applyToAllLinked,
+              );
+              if (ok) setAiAdaptTargetId(null);
+            }}
+          />
+        );
+      })()}
+
+      {/* Toast efímero de éxito tras aplicar una propuesta IA. Aparece abajo
+          al centro durante 3.5s; el clear lo hace handleAiAcceptProposal. */}
+      {aiSuccessToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] bg-violet-500 text-white text-sm font-medium px-4 py-2.5 rounded-lg shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">
+          <Check className="h-4 w-4" />
+          {aiSuccessToast}
+        </div>
+      )}
+
       {showPicker && (
         <PresetPickerModal
           presets={presets}
           existingAdaptations={adaptations}
-          siblings={siblings}
-          currentTemplate={
-            template
-              ? {
-                  id: template.id,
-                  name: template.name,
-                  base_width: template.base_width,
-                  base_height: template.base_height,
-                }
-              : null
-          }
           onClose={() => setShowPicker(false)}
           onConfirmPresets={handleAddBulk}
           onAddCustom={handleAddCustom}
@@ -1337,16 +1378,9 @@ export default function ProducirPage() {
         }}
       >
         {currentlyRendering && (() => {
-          // El export usa la misma lógica que el preview: para cada
-          // adaptación se elige la orientación del master cuyo aspect ratio
-          // sea más cercano. Así un banner horizontal renderiza desde la
-          // orientación horizontal del master, no del 9:16 que estaba
-          // siendo editado.
-          const src = pickClosestOrientation(
-            orientations,
-            currentlyRendering.adaptation.width,
-            currentlyRendering.adaptation.height,
-          );
+          // El export usa la misma resolución que el preview: source_template_id
+          // si está pinned, sino auto-pick por aspect.
+          const src = resolveSource(currentlyRendering.adaptation, orientations);
           const srcDef = src?.definition ?? definition;
           return (
             <AdaptationRenderer
@@ -1367,6 +1401,9 @@ export default function ProducirPage() {
 
 function AdaptationCard({
   adaptation,
+  orientations,
+  principalId,
+  sourceOrientation,
   definition,
   brandKit,
   dataRow,
@@ -1374,12 +1411,21 @@ function AdaptationCard({
   onEdit,
   onDelete,
   onFitModeChange,
+  onSourceChange,
   onDownload,
   downloading,
   batchInProgress,
   deleting,
 }: {
   adaptation: Adaptation;
+  // Todas las orientaciones del design — necesarias para el dropdown de source.
+  orientations: Orientation[];
+  // Id del master/principal del design (MIN id). Se muestra como "master" en
+  // el dropdown.
+  principalId: number | null;
+  // La orientación que realmente está alimentando esta adaptación (resuelta
+  // antes por resolveSource). Se muestra como label del chip.
+  sourceOrientation: Orientation | null;
   definition: TemplateDefinition;
   brandKit: BrandKitContent;
   dataRow?: DataRow | null;
@@ -1387,11 +1433,20 @@ function AdaptationCard({
   onEdit: () => void;
   onDelete: () => void;
   onFitModeChange: (m: FitMode) => void;
+  // null = volver a auto-pick. number = fijar esa orientación como source.
+  onSourceChange: (sourceTemplateId: number | null) => void;
   onDownload: () => void;
   downloading: boolean;
   batchInProgress: boolean;
   deleting: boolean;
 }) {
+  const sourceIsPinned = adaptation.source_template_id != null;
+  const sourceLabel = sourceOrientation
+    ? sourceOrientation.id === principalId
+      ? "master"
+      : sourceOrientation.name
+    : "—";
+  const [showSourceMenu, setShowSourceMenu] = useState(false);
   const label =
     adaptation.custom_name ||
     adaptation.preset_name ||
@@ -1434,6 +1489,31 @@ function AdaptationCard({
           {adaptation.width}×{adaptation.height}
         </span>
       </div>
+      {/* Tags siempre visibles bajo el título: "Aspect distinto" y "Ajuste
+          manual". Antes vivían dentro del overlay hover y costaban leer; ahora
+          son chips sólidos en alto contraste que se ven todo el tiempo. */}
+      {(extremeMismatch || hasManualOverride) && (
+        <div className="px-3 pb-1.5 flex items-center gap-1.5 flex-wrap">
+          {hasManualOverride && (
+            <span
+              className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500 text-white"
+              title="Esta pieza tiene un layout manual; los cambios al master no la afectan"
+            >
+              <Pencil className="h-3 w-3" />
+              Ajuste manual
+            </span>
+          )}
+          {extremeMismatch && !hasManualOverride && (
+            <span
+              className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500 text-white"
+              title="Este formato tiene un aspect ratio muy distinto al del master — considera ajustarlo a mano"
+            >
+              <AlertTriangle className="h-3 w-3" />
+              Aspect distinto
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Banner area con overlay hover. */}
       <div
@@ -1476,21 +1556,106 @@ function AdaptationCard({
                   {CHANNEL_LABEL[channel] ?? channel}
                 </span>
               )}
-              {hasManualOverride && (
-                <div className="flex items-start gap-1.5 text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded px-1.5 py-0.5">
-                  <Pencil className="h-3 w-3 shrink-0 mt-0.5" />
-                  <span>Ajuste manual</span>
+              {/* Source chip: muestra de qué orientación se está alimentando
+                  la pieza. "auto" cuando se elige por aspect, "fijo" cuando
+                  hay source_template_id pinned. Click abre el dropdown para
+                  cambiar. Disabled si solo hay 1 orientación (no hay nada
+                  que elegir). */}
+              {orientations.length >= 1 && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (orientations.length > 1) setShowSourceMenu((v) => !v);
+                    }}
+                    disabled={orientations.length <= 1}
+                    className={cn(
+                      "flex items-start gap-1.5 text-[10px] rounded px-1.5 py-0.5 border transition-colors",
+                      sourceIsPinned
+                        ? "text-blue-200 bg-blue-500/15 border-blue-500/40 hover:bg-blue-500/25"
+                        : "text-muted-foreground bg-background/40 border-border/40 hover:bg-background/60",
+                      orientations.length <= 1 && "cursor-default opacity-70",
+                    )}
+                    title={
+                      sourceIsPinned
+                        ? `Source fijo: ${sourceLabel}`
+                        : `Auto-pick: ${sourceLabel}`
+                    }
+                  >
+                    {sourceIsPinned ? (
+                      <Link2 className="h-3 w-3 shrink-0 mt-0.5" />
+                    ) : (
+                      <ChevronDown className="h-3 w-3 shrink-0 mt-0.5" />
+                    )}
+                    <span>
+                      {sourceIsPinned ? "Source: " : "Auto: "}
+                      {sourceLabel}
+                    </span>
+                  </button>
+                  {showSourceMenu && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowSourceMenu(false);
+                        }}
+                        className="fixed inset-0 z-40 cursor-default"
+                        aria-label="Cerrar"
+                      />
+                      <div className="absolute top-full left-0 mt-1 z-50 min-w-[180px] rounded-md bg-popover border border-border shadow-lg overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowSourceMenu(false);
+                            onSourceChange(null);
+                          }}
+                          className={cn(
+                            "w-full text-left px-3 py-1.5 text-xs hover:bg-accent flex items-center justify-between gap-2",
+                            !sourceIsPinned && "bg-accent/60",
+                          )}
+                        >
+                          <span>Auto (más cercano)</span>
+                          {!sourceIsPinned && <Check className="h-3 w-3" />}
+                        </button>
+                        <div className="border-t border-border/50" />
+                        {orientations.map((o) => {
+                          const isPicked = adaptation.source_template_id === o.id;
+                          const isMaster = o.id === principalId;
+                          return (
+                            <button
+                              key={o.id}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowSourceMenu(false);
+                                onSourceChange(o.id);
+                              }}
+                              className={cn(
+                                "w-full text-left px-3 py-1.5 text-xs hover:bg-accent flex items-center justify-between gap-2",
+                                isPicked && "bg-accent/60",
+                              )}
+                            >
+                              <span className="flex items-center gap-1.5">
+                                {isMaster ? "master" : o.name}
+                                <span className="text-muted-foreground/70">
+                                  {o.base_width}×{o.base_height}
+                                </span>
+                              </span>
+                              {isPicked && <Check className="h-3 w-3" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
-              {extremeMismatch && !hasManualOverride && (
-                <div
-                  className="flex items-start gap-1.5 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5"
-                  title="Este formato tiene un aspect ratio muy distinto al del master."
-                >
-                  <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
-                  <span>Aspect muy distinto</span>
-                </div>
-              )}
+              {/* Los tags "Aspect distinto" y "Ajuste manual" se muestran
+                  bajo el título de la card, no acá. Acá solo va el source
+                  picker y los controles. */}
             </div>
             <Button
               variant="ghost"
@@ -1776,25 +1941,20 @@ function AdaptationPreview({
 function PresetPickerModal({
   presets,
   existingAdaptations,
-  siblings,
-  currentTemplate,
   onClose,
   onConfirmPresets,
   onAddCustom,
 }: {
   presets: FormatPreset[];
   existingAdaptations: Adaptation[];
-  // El modal solo necesita id / nombre / dimensiones de los hermanos para
-  // calcular la auto-distribución. Le pasamos un shape mínimo compatible
-  // con Orientation u otros tipos.
-  siblings: Array<{ id: number; name: string; base_width: number; base_height: number }>;
-  currentTemplate: { id: number; name: string; base_width: number; base_height: number } | null;
   onClose: () => void;
-  onConfirmPresets: (presetIds: number[], autoDistribute: boolean) => void;
+  // Bulk add — el design entero recibe las nuevas adaptaciones y el renderer
+  // se encarga de elegir orientación. Antes había un autoDistribute toggle
+  // para repartir manualmente entre templates, pero con el nuevo modelo
+  // (adaptaciones por design + source_template_id) eso ya no aplica.
+  onConfirmPresets: (presetIds: number[]) => void;
   onAddCustom: (name: string, w: number, h: number) => void;
 }) {
-  const hasDesign = siblings.length > 0 && !!currentTemplate;
-  const [autoDistribute, setAutoDistribute] = useState(hasDesign);
   const usedPresetIds = useMemo(
     () =>
       new Set(
@@ -2091,35 +2251,6 @@ function PresetPickerModal({
         {/* Confirm bar */}
         {activeChannel !== "custom" && (
           <div className="flex flex-col gap-2 px-5 py-3 border-t border-border/50 bg-muted/20">
-            {hasDesign && (
-              <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={autoDistribute}
-                  onChange={(e) => setAutoDistribute(e.target.checked)}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="text-foreground font-medium">
-                    Auto-distribuir entre las variantes del design
-                  </span>
-                  {" — "}
-                  cada formato cae en el master del design cuya orientación
-                  sea más parecida (actual + {siblings.length} hermano
-                  {siblings.length === 1 ? "" : "s"}).
-                </span>
-              </label>
-            )}
-            {hasDesign && autoDistribute && selectedCount > 0 && currentTemplate && (
-              <DistributionPreview
-                presets={presets}
-                selectedIds={Array.from(selected)}
-                candidates={[
-                  { id: currentTemplate.id, name: currentTemplate.name, base_width: currentTemplate.base_width, base_height: currentTemplate.base_height },
-                  ...siblings.map((s) => ({ id: s.id, name: s.name, base_width: s.base_width, base_height: s.base_height })),
-                ]}
-              />
-            )}
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
                 {selectedCount === 0
@@ -2139,7 +2270,7 @@ function PresetPickerModal({
                 <Button
                   size="sm"
                   disabled={selectedCount === 0}
-                  onClick={() => onConfirmPresets(Array.from(selected), autoDistribute)}
+                  onClick={() => onConfirmPresets(Array.from(selected))}
                   className="gap-1"
                 >
                   <Plus className="h-4 w-4" />
@@ -2151,49 +2282,6 @@ function PresetPickerModal({
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-// Muestra cuántos formatos van a cada master cuando el toggle de
-// auto-distribuir está activo. Le da feedback al productor antes de confirmar.
-function DistributionPreview({
-  presets,
-  selectedIds,
-  candidates,
-}: {
-  presets: FormatPreset[];
-  selectedIds: number[];
-  candidates: { id: number; name: string; base_width: number; base_height: number }[];
-}) {
-  const counts = useMemo(() => {
-    const m = new Map<number, number>();
-    for (const id of selectedIds) {
-      const p = presets.find((x) => x.id === id);
-      if (!p) continue;
-      const best = pickBestTemplate(p.width, p.height, candidates);
-      m.set(best, (m.get(best) ?? 0) + 1);
-    }
-    return m;
-  }, [presets, selectedIds, candidates]);
-
-  return (
-    <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground bg-background/40 rounded px-2 py-1.5">
-      {candidates.map((c) => {
-        const n = counts.get(c.id) ?? 0;
-        if (n === 0) return null;
-        return (
-          <span key={c.id} className="inline-flex items-center gap-1">
-            <span className="font-medium text-foreground">{c.name}</span>
-            <span className="text-muted-foreground/70">
-              ({c.base_width}×{c.base_height})
-            </span>
-            <span className="bg-primary/20 text-foreground rounded-full px-1.5">
-              {n}
-            </span>
-          </span>
-        );
-      })}
     </div>
   );
 }
@@ -2229,89 +2317,6 @@ function PresetShape({
 
 function noop() {}
 
-// Menú flotante para re-conectar una orientación diferenciada a otra fuente.
-// El backend al recibir el PUT con linked_to_template_id copia la definition
-// de la fuente reflowed a las dims de esta. El master aparece primero en la
-// lista; si solo hay una opción (típico: solo master), no mostramos dropdown,
-// hacemos directamente click → confirm → relink.
-function RelinkMenu({
-  sources,
-  principalId,
-  onPick,
-}: {
-  sources: Orientation[];
-  principalId: number | null;
-  onPick: (sourceId: number) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const onlyMaster =
-    sources.length === 1 &&
-    principalId != null &&
-    sources[0].id === principalId;
-  if (onlyMaster) {
-    return (
-      <button
-        type="button"
-        onClick={() => onPick(sources[0].id)}
-        className="absolute bottom-4 right-4 z-30 flex items-center gap-1.5 text-xs px-3 py-2 rounded-md bg-blue-500 hover:bg-blue-600 text-white shadow-lg font-medium transition-colors"
-        title="Reemplaza el contenido de esta orientación por el del master, reflowed a este tamaño"
-      >
-        <Link2 className="h-3.5 w-3.5" />
-        Ajustar formato por master
-      </button>
-    );
-  }
-  return (
-    <div className="absolute bottom-4 right-4 z-30">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-md bg-blue-500 hover:bg-blue-600 text-white shadow-lg font-medium transition-colors"
-        title="Reemplazar el contenido de esta orientación por el de otra"
-      >
-        <Link2 className="h-3.5 w-3.5" />
-        Ajustar formato por...
-        <ChevronDown className="h-3 w-3" />
-      </button>
-      {open && (
-        <>
-          {/* backdrop transparente para cerrar al click afuera */}
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            className="fixed inset-0 z-30 cursor-default"
-            aria-label="Cerrar menú"
-          />
-          <div className="absolute bottom-full right-0 mb-2 z-40 min-w-[200px] rounded-md bg-popover border border-border shadow-lg overflow-hidden">
-            {sources.map((s) => {
-              const isMaster = principalId != null && s.id === principalId;
-              return (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => {
-                    setOpen(false);
-                    onPick(s.id);
-                  }}
-                  className="w-full text-left px-3 py-2 text-xs hover:bg-accent flex items-center justify-between gap-2"
-                >
-                  <span className="flex items-center gap-1.5">
-                    <Link2 className="h-3 w-3 text-blue-400" />
-                    {isMaster ? "master" : s.name}
-                  </span>
-                  <span className="text-muted-foreground/70">
-                    {s.base_width}×{s.base_height}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 // VariantsStrip: barra horizontal con TODAS las orientaciones del master,
 // incluyendo la que está abierta en el editor (marcada con border primary).
 // Click cambia la orientación activa SIN navegar. La PRINCIPAL (MIN id)
@@ -2325,6 +2330,9 @@ function VariantsStrip({
   onSwitch,
   onAdd,
   onDelete,
+  onDifferentiate,
+  onRelinkToMaster,
+  onAiAdapt,
 }: {
   orientations: Orientation[];
   activeOrientationId: number | null;
@@ -2332,16 +2340,25 @@ function VariantsStrip({
   onSwitch: (id: number) => void;
   onAdd: () => void;
   onDelete: (id: number) => void;
+  onDifferentiate: (id: number) => void;
+  onRelinkToMaster: (id: number) => void;
+  // Abre el modal del Banner Designer para esa orientación. El handler vive en
+  // el padre porque maneja state (proposal, loading, errores, persistencia).
+  onAiAdapt: (id: number) => void;
 }) {
   // Identificamos la principal por MIN id.
   const principalId =
     orientations.length > 0
       ? orientations.reduce((min, o) => (o.id < min ? o.id : min), orientations[0].id)
       : null;
-  // Orden visual: horizontal → cuadrado → vertical → custom; dentro de cada
-  // orientación, por área de menor a mayor.
+  // Orden visual: master SIEMPRE primero (es la fuente del grupo), después
+  // las demás agrupadas por orientación (horizontal → cuadrado → vertical →
+  // custom) y dentro de cada grupo por área. Antes el master quedaba mezclado
+  // entre las variantes según su aspect, lo que costaba ubicarlo.
   const designMembers = useMemo(() => {
     return [...orientations].sort((a, b) => {
+      if (a.id === principalId) return -1;
+      if (b.id === principalId) return 1;
       const orient = (w: number, h: number) => {
         const r = w / h;
         if (Math.abs(r - 1) < 0.05) return 1;
@@ -2352,7 +2369,7 @@ function VariantsStrip({
       if (ao !== bo) return ao - bo;
       return a.base_width * a.base_height - b.base_width * b.base_height;
     });
-  }, [orientations]);
+  }, [orientations, principalId]);
   // Una sola orientación: la strip queda discreta con solo el botón "+ Formato".
   if (designMembers.length <= 1) {
     return (
@@ -2449,6 +2466,58 @@ function VariantsStrip({
                 {m.base_width}×{m.base_height}
               </span>
             </button>
+            {/* Banner Designer (IA): botón explícito + siempre visible bajo
+                cada variante no-principal. Llama al agente que reorganiza el
+                contenido del master para este aspect — distinto del reflow,
+                puede mover capas, no solo escalar. El master no se adapta a
+                sí mismo, por eso no aparece ahí. */}
+            {!isPrincipal && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAiAdapt(m.id);
+                }}
+                className="mt-1 w-full flex items-center justify-center gap-1 text-[10px] font-medium px-2 py-1 rounded border border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 hover:border-violet-500/60 transition-colors"
+                title="Pide al Banner Designer (IA) que reorganice el contenido para este formato"
+              >
+                <Sparkles className="h-3 w-3" />
+                Adaptar con IA
+              </button>
+            )}
+            {/* Acciones de sync — solo en orientaciones no-principal:
+                  Linked al master:  Unlink (ámbar)  → diferenciar
+                  Diferenciada:      Link  (azul)    → re-link al master
+                Ambas piden confirm en el handler del padre. Visibles on hover
+                como el delete X, pero en la esquina superior izquierda para
+                no chocar. La principal no se puede diferenciar — siempre es
+                la fuente del grupo. */}
+            {!isPrincipal && m.linked_to_template_id != null && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDifferentiate(m.id);
+                }}
+                className="absolute -top-1 -left-1 h-5 w-5 rounded-full bg-amber-500 hover:bg-amber-600 text-white shadow-md opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                title="Diferenciar esta orientación del resto"
+              >
+                <Unlink className="h-3 w-3" />
+              </button>
+            )}
+            {!isPrincipal && m.linked_to_template_id == null && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRelinkToMaster(m.id);
+                }}
+                className="absolute -top-1 -left-1 h-5 w-5 rounded-full bg-blue-500 hover:bg-blue-600 text-white shadow-md opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                title="Re-vincular al master (reemplaza el contenido por el del master reflowed)"
+              >
+                <Link2 className="h-3 w-3" />
+              </button>
+            )}
             {/* Borrar variante: solo visible al hover y solo cuando NO es la
                 principal. La principal es el master y no se elimina desde
                 acá (se elimina el template entero desde el listado). */}
@@ -2668,6 +2737,434 @@ function AddVariantModal({
   );
 }
 
+// Modal del Banner Designer: invoca al agente de practicante para que adapte
+// el master a la dimensión de la orientación target, muestra preview side-by-side
+// y permite aceptar / regenerar / cancelar. La propuesta aceptada se aplica
+// vía PUT al template (con linked_to_template_id=null porque deja de heredar
+// del master — el contenido es distinto intencionalmente).
+function AiAdaptModal({
+  templateId,
+  target,
+  master,
+  brandKit,
+  onClose,
+  onAccept,
+}: {
+  templateId: number;
+  target: Orientation;
+  master: Orientation;
+  brandKit: BrandKitContent;
+  onClose: () => void;
+  // applyToAllLinked: true cuando el productor elige "aplicar al master y
+  // todas las linkeadas"; false cuando opta por "solo este formato"
+  // (diferenciar).
+  onAccept: (def: TemplateDefinition, applyToAllLinked: boolean) => Promise<void>;
+}) {
+  const [instructions, setInstructions] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [proposal, setProposal] = useState<TemplateDefinition | null>(null);
+  const [rationale, setRationale] = useState<string | null>(null);
+  const [cost, setCost] = useState<number | null>(null);
+  const [accepting, setAccepting] = useState(false);
+  // Referencia visual del master para input multi-modal al agente. Se captura
+  // del DOM render oculto (abajo) y se sube a GCS vía /api/production/upload.
+  // Cuando referenceUrl está set, se pasa en `files` a la siguiente llamada.
+  // Si la captura/upload falla, seguimos sin imagen (degradación gracil).
+  const [referenceUrl, setReferenceUrl] = useState<string | null>(null);
+  const [capturePhase, setCapturePhase] = useState<"pending" | "done">("pending");
+  const captureWrapRef = useRef<HTMLDivElement | null>(null);
+
+  const targetDef =
+    target.definition && target.definition.type === "frame" ? target.definition : null;
+  const masterDef =
+    master.definition && master.definition.type === "frame" ? master.definition : null;
+
+  // Escala de captura: cap a 1280px en el lado largo para no mandar imágenes
+  // enormes (cost + latencia + límites de vision API).
+  const CAPTURE_MAX_SIDE = 1280;
+  const captureScale = Math.min(
+    1,
+    CAPTURE_MAX_SIDE / Math.max(master.base_width, master.base_height),
+  );
+
+  // Captura el master renderizado, sube a GCS, guarda la URL. Best-effort:
+  // si algo falla, seguimos al callAgent sin imagen.
+  const captureAndUpload = useCallback(async () => {
+    const node = captureWrapRef.current;
+    if (!node) {
+      setCapturePhase("done");
+      return;
+    }
+    try {
+      // Esperamos un tick a que el DOM termine de pintar el preview.
+      await new Promise((r) => setTimeout(r, 80));
+      const blob = await captureNodeToJpeg(node);
+      const dataUri: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("FileReader falló"));
+        reader.readAsDataURL(blob);
+      });
+      const upRes = await fetch("/api/production/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageData: dataUri }),
+      });
+      if (upRes.ok) {
+        const body = await upRes.json();
+        if (typeof body.url === "string") {
+          setReferenceUrl(body.url);
+        }
+      } else {
+        console.warn("Upload de referencia visual falló:", upRes.status);
+      }
+    } catch (e) {
+      console.warn("Captura/upload del master falló:", (e as Error).message);
+    } finally {
+      setCapturePhase("done");
+    }
+  }, []);
+
+  const callAgent = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setProposal(null);
+    setRationale(null);
+    try {
+      const filesParam =
+        referenceUrl != null
+          ? [
+              {
+                filename: "master-reference.jpg",
+                publicUrl: referenceUrl,
+                mimeType: "image/jpeg",
+              },
+            ]
+          : undefined;
+      const res = await fetch(
+        `/api/production/templates/${target.id}/ai/adapt-orientation`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            instructions: instructions.trim() || undefined,
+            files: filesParam,
+          }),
+        },
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(body?.error || `Error ${res.status} del Banner Designer`);
+        return;
+      }
+      setProposal(body.proposal as TemplateDefinition);
+      setRationale(typeof body.rationale === "string" ? body.rationale : null);
+      setCost(
+        typeof body.tokenUsage?.estimatedCost === "number"
+          ? body.tokenUsage.estimatedCost
+          : null,
+      );
+    } catch (e) {
+      setError(`Error de red: ${(e as Error).message}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [target.id, instructions, referenceUrl]);
+
+  // Pipeline al abrir el modal:
+  //   1. Capture + upload del master (capturePhase: pending → done).
+  //   2. Cuando capture termina (con o sin URL), llamamos al agente.
+  // Si el productor aprieta "Regenerar" después, se reusa el referenceUrl
+  // cacheado — no re-capturamos a menos que el target cambie.
+  useEffect(() => {
+    captureAndUpload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [master.id]);
+
+  useEffect(() => {
+    if (capturePhase === "done") {
+      callAgent();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [capturePhase]);
+
+  // ¿La orientación target está linkeada al master? Determina si la modal
+  // ofrece la elección "solo este formato vs. también al master" o si va
+  // directo (diferenciada → no hay master con quien compartir).
+  const targetIsLinked = target.linked_to_template_id != null;
+
+  const handleAccept = async (applyToAllLinked: boolean) => {
+    if (!proposal) return;
+    setAccepting(true);
+    try {
+      await onAccept(proposal, applyToAllLinked);
+    } finally {
+      setAccepting(false);
+    }
+  };
+
+  // Escala para el preview side-by-side: cada lado ocupa ~50% del ancho del
+  // modal. Calculamos el alto manteniendo aspect.
+  const previewMaxW = 360;
+  const previewMaxH = 320;
+  const previewScale = Math.min(
+    previewMaxW / target.base_width,
+    previewMaxH / target.base_height,
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-6"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !loading && !accepting) onClose();
+      }}
+    >
+      <div className="bg-background border border-border/50 rounded-xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border/50">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-violet-400" />
+            <div>
+              <h2 className="text-sm font-semibold">Adaptar con Banner Designer</h2>
+              <p className="text-xs text-muted-foreground">
+                {target.name} · {target.base_width}×{target.base_height} ·
+                derivado de master {master.base_width}×{master.base_height}
+              </p>
+            </div>
+          </div>
+          <Button variant="ghost" size="icon" onClick={onClose} disabled={loading || accepting}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">
+              Instrucciones (opcional)
+            </label>
+            <textarea
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              placeholder="Ej: mantén el badge de descuento bien visible; el headline debe estar arriba en este formato"
+              rows={2}
+              disabled={loading || accepting}
+              className="w-full bg-muted border border-border/50 rounded-md px-3 py-2 text-sm disabled:opacity-50"
+            />
+          </div>
+
+          {capturePhase === "pending" && (
+            <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin text-violet-400" />
+              <span>Preparando referencia visual del master…</span>
+            </div>
+          )}
+
+          {capturePhase === "done" && loading && (
+            <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin text-violet-400" />
+              <span>
+                Pidiéndole al Banner Designer una propuesta
+                {referenceUrl ? " (con imagen de referencia)" : ""}…
+              </span>
+            </div>
+          )}
+
+          {error && !loading && (
+            <div className="bg-red-500/10 border border-red-500/30 text-red-300 text-xs rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          {proposal && !loading && (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Actual
+                  </p>
+                  <div className="bg-muted/30 rounded-lg p-2 flex items-center justify-center">
+                    {targetDef ? (
+                      <div
+                        className="overflow-hidden rounded border border-border/30"
+                        style={{
+                          width: target.base_width * previewScale,
+                          height: target.base_height * previewScale,
+                        }}
+                      >
+                        <OrientationMiniPreview
+                          definition={targetDef}
+                          brandKit={brandKit}
+                          nativeW={target.base_width}
+                          nativeH={target.base_height}
+                          scale={previewScale}
+                        />
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground py-4">
+                        Sin contenido
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs uppercase tracking-wide text-violet-400">
+                    Propuesta IA
+                  </p>
+                  <div className="bg-muted/30 rounded-lg p-2 flex items-center justify-center">
+                    <div
+                      className="overflow-hidden rounded border border-violet-500/40 ring-1 ring-violet-500/20"
+                      style={{
+                        width: target.base_width * previewScale,
+                        height: target.base_height * previewScale,
+                      }}
+                    >
+                      <OrientationMiniPreview
+                        definition={proposal}
+                        brandKit={brandKit}
+                        nativeW={target.base_width}
+                        nativeH={target.base_height}
+                        scale={previewScale}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {rationale && (
+                <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wide text-violet-400 mb-1">
+                    Decisión del agente
+                  </p>
+                  <p className="text-xs text-foreground">{rationale}</p>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end text-[10px] text-muted-foreground">
+                {cost != null && (
+                  <span title="Costo estimado de esta invocación">
+                    ~ USD {cost.toFixed(4)}
+                  </span>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2 px-5 py-3 border-t border-border/50 bg-muted/20">
+          {/* Cuando target está linkeado al master, el productor decide si
+              aplica la propuesta solo acá (diferenciar) o si la promueve al
+              master (propaga a todas las linkeadas). Cuando está diferenciada,
+              no hay decisión — va directo a esta. */}
+          {proposal && targetIsLinked && (
+            <p className="text-xs text-muted-foreground">
+              Esta orientación está vinculada al master. Elegí cómo aplicar la
+              propuesta:
+            </p>
+          )}
+          <div className="flex items-center justify-end gap-2 flex-wrap">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              disabled={loading || accepting}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={callAgent}
+              disabled={loading || accepting}
+              className="gap-1"
+            >
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              Regenerar
+            </Button>
+            {proposal && targetIsLinked && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleAccept(true)}
+                disabled={!proposal || loading || accepting}
+                className="gap-1"
+                title="Aplica la propuesta al master y propaga a todas las orientaciones linkeadas (reflowed)"
+              >
+                {accepting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4" />
+                )}
+                Aplicar a todas las linkeadas
+              </Button>
+            )}
+            <Button
+              size="sm"
+              onClick={() => handleAccept(false)}
+              disabled={!proposal || loading || accepting}
+              className="gap-1"
+              title={
+                targetIsLinked
+                  ? "Diferencia esta orientación del master y deja la propuesta solo acá"
+                  : "Guarda la propuesta en esta orientación"
+              }
+            >
+              {accepting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Check className="h-4 w-4" />
+              )}
+              {targetIsLinked ? "Solo este formato" : "Aceptar y aplicar"}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Render oculto del master a tamaño nativo (escalado a CAPTURE_MAX_SIDE
+          en el lado largo). Sirve para capturarlo con html-to-image y subirlo
+          como referencia visual al agente. Se renderea solo si tenemos masterDef;
+          el resultado se cachea en referenceUrl tras el upload. Off-screen via
+          left: -99999. */}
+      {masterDef && (
+        <div
+          aria-hidden
+          style={{
+            position: "fixed",
+            left: -99999,
+            top: 0,
+            pointerEvents: "none",
+            opacity: 0,
+          }}
+        >
+          <div
+            ref={captureWrapRef}
+            style={{
+              width: master.base_width * captureScale,
+              height: master.base_height * captureScale,
+              overflow: "hidden",
+            }}
+          >
+            <OrientationMiniPreview
+              definition={masterDef}
+              brandKit={brandKit}
+              nativeW={master.base_width}
+              nativeH={master.base_height}
+              scale={captureScale}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* templateId queda capturado para futuras llamadas (ej. listar
+          invocaciones recientes), pero hoy no se usa explícitamente. */}
+      <input type="hidden" value={templateId} readOnly />
+    </div>
+  );
+}
+
 // Panel compacto de Variables y Datos para la columna derecha del editor.
 // Vive dentro del rightAccessory del TemplateEditor — debajo de Propiedades.
 // Versión condensada de la sección que antes vivía abajo del editor: solo
@@ -2685,6 +3182,7 @@ function DatasetPanel({
   onFileChange,
   onSelectRow,
   onClear,
+  embedded = false,
 }: {
   detectedVariables: string[];
   dataset: ParsedDataset | null;
@@ -2696,20 +3194,29 @@ function DatasetPanel({
   onFileChange: (f: File) => void;
   onSelectRow: (idx: number) => void;
   onClear: () => void;
+  // Cuando true, no rendereamos chrome propio (border/width/header); el panel
+  // vive dentro de un acordeón que ya provee título y scroll.
+  embedded?: boolean;
 }) {
-  // No mostramos el panel si no hay nada que mostrar: ni variables detectadas
-  // ni dataset cargado. Mantiene la columna limpia hasta que el productor
-  // empieza a usar variables.
   if (detectedVariables.length === 0 && !dataset) return null;
   const row = dataset && selectedRowIdx !== null ? dataset.rows[selectedRowIdx] : null;
   return (
-    <aside className="w-64 shrink-0 border-l border-t border-border/50 bg-card/40 overflow-y-auto">
-      <div className="p-3 border-b border-border/50 flex items-center gap-2">
-        <Database className="h-3.5 w-3.5 text-muted-foreground" />
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Variables y datos
-        </h3>
-      </div>
+    <aside
+      className={cn(
+        "flex flex-col min-h-0",
+        embedded
+          ? "h-full overflow-y-auto"
+          : "w-64 shrink-0 border-l border-t border-border/50 bg-card/40 overflow-y-auto",
+      )}
+    >
+      {!embedded && (
+        <div className="p-3 border-b border-border/50 flex items-center gap-2">
+          <Database className="h-3.5 w-3.5 text-muted-foreground" />
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Variables y datos
+          </h3>
+        </div>
+      )}
       <div className="p-3 space-y-3">
         {detectedVariables.length === 0 ? (
           <p className="text-xs text-muted-foreground">
@@ -2963,24 +3470,19 @@ function pickClosestOrientation(
   return best;
 }
 
-// Devuelve el id del template cuyo aspect ratio es más cercano al del preset.
-// Usado por la distribución automática dentro de un design: cada formato va
-// al master de orientación más parecida.
-function pickBestTemplate(
-  presetW: number,
-  presetH: number,
-  candidates: { id: number; base_width: number; base_height: number }[],
-): number {
-  const presetRatio = presetW / presetH;
-  let bestId = candidates[0].id;
-  let bestDiff = Infinity;
-  for (const c of candidates) {
-    const r = c.base_width / c.base_height;
-    const diff = Math.abs(presetRatio - r) / Math.min(presetRatio, r);
-    if (diff < bestDiff) {
-      bestId = c.id;
-      bestDiff = diff;
-    }
+// Resolución de source para una adaptación:
+//   1. Si source_template_id está pinned y existe en orientations, esa gana.
+//   2. Si la pinned referencia un template que ya no existe (borrado), cae a
+//      auto-pick.
+//   3. NULL: auto-pick por aspect ratio más cercano.
+// Devuelve null solo si orientations está vacío.
+function resolveSource(
+  adaptation: Adaptation,
+  orientations: Orientation[],
+): Orientation | null {
+  if (adaptation.source_template_id != null) {
+    const pinned = orientations.find((o) => o.id === adaptation.source_template_id);
+    if (pinned) return pinned;
   }
-  return bestId;
+  return pickClosestOrientation(orientations, adaptation.width, adaptation.height);
 }

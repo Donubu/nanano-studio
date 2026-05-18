@@ -188,3 +188,126 @@ docker compose up -d                              # Development
 - Timezone: `America/Santiago` (-03:00)
 - Body size limit: 50MB (middleware + server actions)
 - Env files: `.env.local` (dev), `.env.gcp` (production, gitignored), `.env.private` (reference)
+
+## Production Templates — Banner Designer (Practicante AI)
+
+### Visión general
+Los templates de producción tienen integración con un agente especialista de
+**Practicante** (plataforma de agentes interna del usuario, Sonnet 4.6) llamado
+**Banner Designer**. El agente acepta dos operaciones:
+
+- `ADAPT_ORIENTATION`: recibe un master + dims target, devuelve una nueva
+  `TemplateDefinition` adaptada a la nueva orientación.
+- `GENERATE_FROM_PROMPT`: recibe intent + dims + brand kit, genera master +
+  variantes coherentes.
+
+El system prompt completo del agente vive en `BANNERS.md` (raíz del repo).
+Ese archivo se copia tal cual en la configuración del agente "Banner
+Designer" en practicante. **Cualquier cambio en lo que el agente sabe/decide
+se hace ahí y se re-pega en practicante.** No hay otro origen de verdad.
+
+### Wiring existente con Practicante
+- Proxy: `app/api/practicante/run/route.ts` — POSTea a
+  `${PRACTICANTE_URL}/api/external/run` con `X-API-Key` y `X-User-Email`.
+- Listado: `app/api/practicante/agents/route.ts` — proxy a
+  `/api/external/agents` para que el cliente vea agentes disponibles.
+- Vars: `PRACTICANTE_URL`, `PRACTICANTE_API_KEY`, `PRACTICANTE_USER_EMAIL`
+  (fallback si el email del session no existe en practicante).
+- Targeting de agente: enviar `agentName: "Banner Designer"` en el body.
+  Sin esto, va al orquestador (más caro/lento).
+
+### Contrato de llamada al Banner Designer
+- `message` (string): prompt humano corto. Ej. `"Adapta este master a 1080x1920 vertical"`.
+- `promptSuffix` (string JSON): contexto estructurado completo. Incluye
+  `operation`, `master`, `master_dims`, `target_dims`, `brand_kit`,
+  `instructions`, etc. Ver §3 de `BANNERS.md`.
+- `agentName: "Banner Designer"` (forceAgent vía proxy).
+- `returnOnlyFinalText: true` (la respuesta es JSON parseable).
+- `existingConversationId` (opcional): permite retry contextual cuando la
+  validación zod falla en el lado puerto.studio.
+
+### Respuesta del agente
+```json
+{
+  "definition": { "id": "tpl_root", "type": "frame", "...": "..." },
+  "variants": [{ "dims": { "w": 1080, "h": 1080 }, "definition": {...} }],
+  "rationale": "Una frase explicando la decisión"
+}
+```
+- `variants` solo en `GENERATE_FROM_PROMPT`.
+- `rationale` siempre (UI lo muestra en el preview antes de aceptar).
+
+### Validación server-side
+1. `JSON.parse` el `response` del proxy.
+2. Zod schema validation de la `definition` contra
+   `TemplateDefinition` (declarar en `lib/production/types.ts` o un
+   `lib/production/template-schema.ts` separado).
+3. Si falla validación: reintento (max 1) usando `existingConversationId` y
+   un `message` describiendo el error específico. El agente corrige solo
+   ese error (ver §10 de `BANNERS.md`).
+4. Si tras retry sigue fallando: error visible al usuario con la opción de
+   regenerar manualmente.
+
+### Cost tracking
+La respuesta de `/api/practicante/run` incluye:
+```json
+{
+  "response": "...",
+  "tokenUsage": {
+    "inputTokens": 18234,
+    "outputTokens": 3120,
+    "estimatedCost": 0.0473
+  },
+  "toolsUsed": ["..."],
+  "conversationId": "...",
+  "delegatedTo": "..."
+}
+```
+
+- **Origen del costo**: `tokenUsage.estimatedCost` (USD) viene directo del
+  agente. Lo calcula practicante con los pricing actuales de Anthropic.
+- **Almacenamiento**: cada invocación queda registrada en
+  `production_ai_invocations` (tabla nueva, ver migración pendiente). Campos:
+  `id`, `production_project_id`, `template_id`, `operation`, `agent_name`,
+  `input_tokens`, `output_tokens`, `estimated_cost`, `success`, `error_msg`,
+  `conversation_id`, `created_by`, `created_at`.
+- **Acumulación**: el dashboard de costos del proyecto suma `estimated_cost`
+  de las invocaciones del proyecto y lo expone junto a los costos de GCP.
+- **Rate limiting**: opcional, por proyecto/día. Se chequea contra la suma
+  acumulada de `estimated_cost` del día actual.
+
+### Endpoints que invocan al agente
+Por crear (estos NO existen aún):
+- `POST /api/production/templates/[id]/ai/adapt-orientation`
+  - Body: `{ target_template_id: number, instructions?: string }`.
+  - Resuelve master + target + brand_kit, llama al agente, valida, retorna
+    `{ proposal: TemplateDefinition, rationale: string, cost: number }`.
+- `POST /api/production/designs/ai/generate`
+  - Body: `{ production_project_id: number, intent: string, tone?: string, master_dims?: {w,h}, secondary_aspects?: [{w,h}], instructions?: string }`.
+  - Genera master + variantes, retorna lo mismo + variantes.
+
+### UI integration points (planeados)
+- Botón ✨ "Adaptar con IA" en cada mini preview no-master del `VariantsStrip`
+  (`app/produccion/template/[id]/producir/page.tsx`). Click → modal con
+  `instructions` opcional → preview side-by-side actual vs propuesta →
+  Aceptar / Regenerar / Cancelar.
+- Card "Crear con IA" en el `LayoutTemplatePicker`
+  (`components/dashboard/layout-template-picker.tsx`). Click → prompt
+  textbox → genera master + 3 orientaciones.
+
+### Reglas operativas
+- El agente NUNCA escribe a la BD directamente. Solo devuelve JSON. El backend
+  de puerto.studio es responsable de PUT al template tras validar.
+- El usuario SIEMPRE ve un preview antes de aplicar. Sin aceptación explícita,
+  no se persiste.
+- Imágenes generadas en `src: null`. El productor las sube después por el
+  flujo normal de `ImagePicker` en el editor.
+- Los `rationale` quedan registrados en `production_ai_invocations.rationale`
+  (TEXT) por si el usuario quiere auditar después.
+
+### Si el agente "Banner Designer" no existe todavía en practicante
+- `/api/practicante/agents` GET no lo retorna → el botón ✨ debe deshabilitarse
+  con tooltip "Banner Designer no configurado en practicante".
+- Fallback alternativo: usar el orquestador (sin `agentName`) con todo el
+  contexto de BANNERS.md inyectado como `promptSuffix`. Es más caro y lento
+  pero funciona como bridge mientras se crea el agente especialista.

@@ -94,6 +94,11 @@ export interface TextLayer extends BaseLayer {
     lineHeight?: number;
     letterSpacing?: number;
     align?: "left" | "center" | "right";
+    // Alineación vertical del bloque de texto dentro de su caja. Útil cuando
+    // la caja es más alta que el contenido renderizado (típico en banners
+    // chatos o cuando se usa SmartText auto-fit que deja sobrante). Default
+    // = "top" para mantener el comportamiento histórico.
+    verticalAlign?: "top" | "middle" | "bottom";
     italic?: boolean;
   };
 }

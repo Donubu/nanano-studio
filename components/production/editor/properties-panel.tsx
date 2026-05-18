@@ -1,7 +1,18 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ImageIcon, Loader2, PanelRightClose, Upload } from "lucide-react";
+import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
+  AlignVerticalJustifyCenter,
+  AlignVerticalJustifyEnd,
+  AlignVerticalJustifyStart,
+  ImageIcon,
+  Loader2,
+  PanelRightClose,
+  Upload,
+} from "lucide-react";
 import {
   TemplateDefinition,
   TemplateLayer,
@@ -43,6 +54,10 @@ interface Props {
   onBrandKitsChange?: () => void;
   // Cuando viene, el panel muestra un botón para colapsarse.
   onCollapse?: () => void;
+  // Cuando true, no rendereamos ni el header interno ni el border/width del
+  // <aside>. Se usa cuando el panel vive dentro de un acordeón que ya provee
+  // su propia chrome.
+  embedded?: boolean;
 }
 
 function NumberRow({
@@ -228,8 +243,13 @@ function FontSizeRow({
         </div>
       </div>
       {isRange ? (
-        <div className="flex items-center gap-2 pl-14">
-          <label className="flex-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+        // Antes el bloque tenía pl-14 + dos labels con flex-1 sin min-w-0.
+        // En la columna fija de 256px el max se desbordaba y aparecía scroll
+        // horizontal. Quitamos el pl-14 (no aporta acá, ya hay alineación por
+        // el row de arriba) y forzamos min-w-0 + w-full en los inputs para
+        // que se encojan dentro de su columna.
+        <div className="flex items-center gap-2">
+          <label className="flex-1 min-w-0 flex items-center gap-1 text-[10px] text-muted-foreground">
             min
             <input
               type="number"
@@ -241,10 +261,10 @@ function FontSizeRow({
                   min: Math.max(1, Number(e.target.value) || 1),
                 })
               }
-              className="flex-1 bg-muted border border-border/50 rounded px-1.5 py-1 text-xs"
+              className="flex-1 min-w-0 w-full bg-muted border border-border/50 rounded px-1.5 py-1 text-xs"
             />
           </label>
-          <label className="flex-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+          <label className="flex-1 min-w-0 flex items-center gap-1 text-[10px] text-muted-foreground">
             max
             <input
               type="number"
@@ -256,7 +276,7 @@ function FontSizeRow({
                   max: Math.max(value.min, Number(e.target.value) || value.min),
                 })
               }
-              className="flex-1 bg-muted border border-border/50 rounded px-1.5 py-1 text-xs"
+              className="flex-1 min-w-0 w-full bg-muted border border-border/50 rounded px-1.5 py-1 text-xs"
             />
           </label>
         </div>
@@ -395,7 +415,11 @@ function ColorRow({
               type="color"
               value={value}
               onChange={(e) => onChange(e.target.value)}
-              className="w-8 h-7 rounded border border-border/50 bg-muted cursor-pointer"
+              // w-7 h-7 = cuadrado 28×28. Los selectores
+              // ::-webkit-color-swatch-wrapper y ::-webkit-color-swatch quitan
+              // el padding interno de Chrome/Edge que aplastaba el color
+              // visible adentro del input.
+              className="w-7 h-7 shrink-0 rounded border border-border/50 bg-muted cursor-pointer p-0 [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:border-0 [&::-webkit-color-swatch]:rounded-sm [&::-moz-color-swatch]:border-0 [&::-moz-color-swatch]:rounded-sm"
             />
             <input
               type="text"
@@ -469,27 +493,37 @@ export function PropertiesPanel({
   brandKit = EMPTY_KIT_CONTENT,
   clientId = null,
   onCollapse,
+  embedded = false,
 }: Props) {
   const noSelection = !selectedLayer;
   const isRoot = selectedLayer?.id === "tpl_root";
 
   return (
-    <aside className="w-64 shrink-0 border-l border-border/50 bg-card/40 overflow-y-auto">
-      <div className="p-3 border-b border-border/50 flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {noSelection ? "Propiedades" : isRoot ? "Canvas" : labelForType(selectedLayer!.type)}
-        </h3>
-        {onCollapse && (
-          <button
-            type="button"
-            onClick={onCollapse}
-            className="text-muted-foreground hover:text-foreground p-0.5 rounded"
-            title="Colapsar"
-          >
-            <PanelRightClose className="h-3.5 w-3.5" />
-          </button>
-        )}
-      </div>
+    <aside
+      className={cn(
+        "flex flex-col min-h-0",
+        embedded
+          ? "h-full overflow-y-auto overflow-x-hidden"
+          : "w-64 shrink-0 border-l border-border/50 bg-card/40 overflow-y-auto overflow-x-hidden",
+      )}
+    >
+      {!embedded && (
+        <div className="p-3 border-b border-border/50 flex items-center justify-between">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {noSelection ? "Propiedades" : isRoot ? "Canvas" : labelForType(selectedLayer!.type)}
+          </h3>
+          {onCollapse && (
+            <button
+              type="button"
+              onClick={onCollapse}
+              className="text-muted-foreground hover:text-foreground p-0.5 rounded"
+              title="Colapsar"
+            >
+              <PanelRightClose className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      )}
       <div className="p-3 space-y-4">
         {noSelection && (
           <p className="text-xs text-muted-foreground">
@@ -702,19 +736,56 @@ function TextProps({
           tokens={brandKit.colors}
           onChange={(v) => updateStyle({ color: v })}
         />
+        {/* Alineación horizontal — text-align. Iconos lucide propios de texto
+            (AlignLeft/Center/Right) en vez de flechas ASCII genéricas. */}
         <div className="flex items-center gap-1">
-          {(["left", "center", "right"] as const).map((a) => (
+          {(
+            [
+              { v: "left", Icon: AlignLeft, title: "Alinear texto a la izquierda" },
+              { v: "center", Icon: AlignCenter, title: "Centrar texto horizontalmente" },
+              { v: "right", Icon: AlignRight, title: "Alinear texto a la derecha" },
+            ] as const
+          ).map(({ v, Icon, title }) => (
             <button
-              key={a}
+              key={v}
               type="button"
-              onClick={() => updateStyle({ align: a })}
-              className={`flex-1 text-xs py-1 rounded border ${
-                (layer.style.align ?? "left") === a
-                  ? "border-primary bg-primary/10"
-                  : "border-border/50 hover:bg-muted"
-              }`}
+              onClick={() => updateStyle({ align: v })}
+              title={title}
+              className={cn(
+                "flex-1 flex items-center justify-center py-1 rounded border transition-colors",
+                (layer.style.align ?? "left") === v
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
             >
-              {a === "left" ? "←" : a === "center" ? "↔" : "→"}
+              <Icon className="h-3.5 w-3.5" />
+            </button>
+          ))}
+        </div>
+        {/* Alineación vertical — flex justify-content sobre el contenedor del
+            texto. Útil para banners chatos donde la caja es más alta que el
+            contenido, o smart text con espacio sobrante. */}
+        <div className="flex items-center gap-1">
+          {(
+            [
+              { v: "top", Icon: AlignVerticalJustifyStart, title: "Alinear arriba" },
+              { v: "middle", Icon: AlignVerticalJustifyCenter, title: "Centrar verticalmente" },
+              { v: "bottom", Icon: AlignVerticalJustifyEnd, title: "Alinear abajo" },
+            ] as const
+          ).map(({ v, Icon, title }) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => updateStyle({ verticalAlign: v })}
+              title={title}
+              className={cn(
+                "flex-1 flex items-center justify-center py-1 rounded border transition-colors",
+                (layer.style.verticalAlign ?? "top") === v
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
             </button>
           ))}
         </div>
