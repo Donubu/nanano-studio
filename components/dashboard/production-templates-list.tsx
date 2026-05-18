@@ -171,6 +171,24 @@ export default function ProductionTemplatesList({ productionProjectId }: Props) 
               definition: freshDefinitionIds(v.definition as TemplateDefinition),
             })),
         };
+      } else if (source.kind === "ai-reference") {
+        // La proposal del agente ya viene validada por el endpoint
+        // /generate-from-reference. Solo armamos el POST templates con la
+        // definition + variants frescas (ids regenerados por si el agente
+        // usó ids semánticos repetidos entre master y variants).
+        const masterDef = freshDefinitionIds(source.definition);
+        body = {
+          production_project_id: productionProjectId,
+          name,
+          base_width: source.definition.size.w,
+          base_height: source.definition.size.h,
+          definition: masterDef,
+          variants: source.variants.map((v) => ({
+            width: v.dims.w,
+            height: v.dims.h,
+            definition: freshDefinitionIds(v.definition),
+          })),
+        };
       } else {
         // blank
         body = {

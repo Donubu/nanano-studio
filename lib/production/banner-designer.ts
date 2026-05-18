@@ -70,6 +70,37 @@ export interface AdaptOrientationInput {
   referenceFiles?: AgentReferenceFile[];
 }
 
+// Input para GENERATE_FROM_REFERENCE: el productor sube imágenes de banners
+// que quiere replicar. El agente extrae estilo (paleta, jerarquía, layout)
+// vía analyze_media y compone master + variantes con el brand kit del cliente.
+export interface GenerateFromReferenceInput {
+  masterDims: { w: number; h: number };
+  secondaryAspects: Array<{ w: number; h: number }>;
+  brandKit: BrandKitForAgent;
+  intent?: string;
+  instructions?: string;
+  userEmail: string;
+  // Las imágenes de referencia. En este modo es OBLIGATORIO mandar al menos
+  // una — la operación no tiene sentido sin nada que replicar.
+  referenceFiles: AgentReferenceFile[];
+}
+
+// Output unificado para GENERATE: master + array de variantes por aspect.
+// Cada variante trae sus dims así el caller puede mapearlas al endpoint
+// POST templates sin recalcular.
+export interface AgentGenerateResult {
+  ok: true;
+  definition: TemplateDefinition;
+  variants: Array<{ dims: { w: number; h: number }; definition: TemplateDefinition }>;
+  rationale: string;
+  conversationId?: string;
+  tokenUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    estimatedCost?: number;
+  };
+}
+
 export interface AgentInvocationResult {
   ok: true;
   definition: TemplateDefinition;
@@ -185,7 +216,12 @@ async function callPracticante(payload: {
 
 // Parsea la respuesta del agente. Tolera markdown code fences por si el
 // agente se equivoca y los incluye (no debería, pero defendemos).
-function parseAgentResponse(raw: string): { definition?: unknown; rationale?: string; error?: string } {
+function parseAgentResponse(raw: string): {
+  definition?: unknown;
+  variants?: unknown;
+  rationale?: string;
+  error?: string;
+} {
   let cleaned = raw.trim();
   // Strip ```json ... ``` o ``` ... ``` defensively.
   if (cleaned.startsWith("```")) {
@@ -196,12 +232,11 @@ function parseAgentResponse(raw: string): { definition?: unknown; rationale?: st
     if (typeof parsed !== "object" || parsed === null) {
       return { error: "Respuesta no es un objeto JSON" };
     }
+    const obj = parsed as Record<string, unknown>;
     return {
-      definition: (parsed as Record<string, unknown>).definition,
-      rationale:
-        typeof (parsed as Record<string, unknown>).rationale === "string"
-          ? ((parsed as Record<string, unknown>).rationale as string)
-          : undefined,
+      definition: obj.definition,
+      variants: obj.variants,
+      rationale: typeof obj.rationale === "string" ? obj.rationale : undefined,
     };
   } catch (e) {
     return { error: `JSON inválido: ${(e as Error).message}` };
@@ -330,6 +365,185 @@ function validateAgentResponse(
   return {
     ok: true,
     definition: v.definition,
+    rationale: parsed.rationale ?? "",
+  };
+}
+
+// Operación GENERATE_FROM_REFERENCE: el productor sube imágenes que quiere
+// replicar de estilo. El agente las analiza con analyze_media (obligatorio
+// en este modo) y genera master + variants aplicando el brand kit del cliente.
+// El brand_kit es OBLIGATORIO en el contexto — el agente lo necesita para
+// reemplazar la paleta de la referencia con los tokens del cliente.
+export async function runGenerateFromReference(
+  input: GenerateFromReferenceInput,
+): Promise<AgentGenerateResult | AgentInvocationError> {
+  if (input.referenceFiles.length === 0) {
+    return {
+      ok: false,
+      error: "GENERATE_FROM_REFERENCE requiere al menos una imagen de referencia",
+    };
+  }
+  const refList = input.referenceFiles.map((f) => f.filename).join(", ");
+  const message = `Genera un banner ${input.masterDims.w}x${input.masterDims.h} replicando el estilo de las referencias adjuntas (${refList}). Aplicá el brand kit del cliente. Si vienen secondary_aspects, generá también esas variantes.`;
+  const context = {
+    operation: "GENERATE_FROM_REFERENCE" as const,
+    master_dims: input.masterDims,
+    secondary_aspects: input.secondaryAspects,
+    brand_kit: input.brandKit,
+    intent: input.intent ?? null,
+    instructions: input.instructions ?? null,
+  };
+  const promptSuffix = JSON.stringify(context);
+
+  let response: PracticanteRunResponse;
+  try {
+    response = await callPracticante({
+      message,
+      promptSuffix,
+      agentName: BANNER_DESIGNER_AGENT_NAME,
+      userEmail: input.userEmail,
+      files: input.referenceFiles,
+    });
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+
+  const validation = validateGenerateResponse(
+    response,
+    input.masterDims,
+    input.secondaryAspects,
+  );
+  if (validation.ok) {
+    return {
+      ok: true,
+      definition: validation.definition,
+      variants: validation.variants,
+      rationale: validation.rationale,
+      conversationId: response.conversationId,
+      tokenUsage: response.tokenUsage,
+    };
+  }
+
+  // Retry una sola vez con feedback. Mismo patrón que adapt.
+  const retryMessage = `Tu respuesta anterior falló validación: ${validation.error}. Corrige solo ese error y devuelve el JSON completo nuevamente.`;
+  let retryResponse: PracticanteRunResponse;
+  try {
+    retryResponse = await callPracticante({
+      message: retryMessage,
+      promptSuffix,
+      agentName: BANNER_DESIGNER_AGENT_NAME,
+      existingConversationId: response.conversationId,
+      userEmail: input.userEmail,
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      error: `Retry falló: ${(e as Error).message}`,
+      conversationId: response.conversationId,
+      tokenUsage: response.tokenUsage,
+    };
+  }
+
+  const retryValidation = validateGenerateResponse(
+    retryResponse,
+    input.masterDims,
+    input.secondaryAspects,
+  );
+  if (retryValidation.ok) {
+    const combinedTokens = combineTokenUsage(
+      response.tokenUsage,
+      retryResponse.tokenUsage,
+    );
+    return {
+      ok: true,
+      definition: retryValidation.definition,
+      variants: retryValidation.variants,
+      rationale: retryValidation.rationale,
+      conversationId: retryResponse.conversationId ?? response.conversationId,
+      tokenUsage: combinedTokens,
+    };
+  }
+  return {
+    ok: false,
+    error: `Tras retry: ${retryValidation.error}`,
+    conversationId: retryResponse.conversationId ?? response.conversationId,
+    tokenUsage: combineTokenUsage(response.tokenUsage, retryResponse.tokenUsage),
+  };
+}
+
+type GenerateValidated =
+  | {
+      ok: true;
+      definition: TemplateDefinition;
+      variants: Array<{ dims: { w: number; h: number }; definition: TemplateDefinition }>;
+      rationale: string;
+    }
+  | ValidationErr;
+
+// Valida la respuesta de un GENERATE_* — master + variants. Las variants
+// son opcionales en el output del agente (si no vienen secondary_aspects
+// nadie las espera) pero si vienen tienen que matchear las dims esperadas.
+function validateGenerateResponse(
+  response: PracticanteRunResponse,
+  masterSize: { w: number; h: number },
+  expectedVariants: Array<{ w: number; h: number }>,
+): GenerateValidated {
+  if (!response.response) {
+    return { ok: false, error: "Practicante no devolvió texto de respuesta" };
+  }
+  const parsed = parseAgentResponse(response.response);
+  if (parsed.error || !parsed.definition) {
+    return {
+      ok: false,
+      error: parsed.error || "La respuesta no contiene 'definition'",
+    };
+  }
+  const masterValidation = validateTemplateDefinition(parsed.definition, masterSize);
+  if (!masterValidation.ok) {
+    return { ok: false, error: `master: ${masterValidation.error}` };
+  }
+
+  // Validamos cada variant. Si secondary_aspects está vacío, ignoramos
+  // variants aunque el agente las haya mandado. Si tiene aspects, exigimos
+  // que el agente devuelva uno por cada uno.
+  const validatedVariants: Array<{
+    dims: { w: number; h: number };
+    definition: TemplateDefinition;
+  }> = [];
+
+  if (expectedVariants.length > 0) {
+    if (!Array.isArray(parsed.variants)) {
+      return {
+        ok: false,
+        error: `Se esperaban ${expectedVariants.length} variantes pero variants no es array`,
+      };
+    }
+    for (const expected of expectedVariants) {
+      const match = (parsed.variants as Array<Record<string, unknown>>).find((v) => {
+        const dims = v.dims as { w?: number; h?: number } | undefined;
+        return dims?.w === expected.w && dims?.h === expected.h;
+      });
+      if (!match) {
+        return {
+          ok: false,
+          error: `Falta la variante ${expected.w}x${expected.h}`,
+        };
+      }
+      const v = validateTemplateDefinition(match.definition, expected);
+      if (!v.ok) {
+        return {
+          ok: false,
+          error: `variant ${expected.w}x${expected.h}: ${v.error}`,
+        };
+      }
+      validatedVariants.push({ dims: expected, definition: v.definition });
+    }
+  }
+
+  return {
+    ok: true,
+    definition: masterValidation.definition,
+    variants: validatedVariants,
     rationale: parsed.rationale ?? "",
   };
 }

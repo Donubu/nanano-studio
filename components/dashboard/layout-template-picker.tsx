@@ -13,8 +13,18 @@
 // Crear, el caller recibe el source y arma el POST correspondiente:
 // blank/layout → definition pre-armada; clone → fetch + replicar.
 
-import { CSSProperties, useCallback, useEffect, useState } from "react";
-import { Copy, Loader2, Plus, Rocket, Sparkles, X } from "lucide-react";
+import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Copy,
+  Image as ImageIcon,
+  Loader2,
+  Plus,
+  Rocket,
+  Sparkles,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -27,7 +37,18 @@ import { TemplateDefinition, TemplateLayer } from "@/lib/production/types";
 export type PickerSource =
   | { kind: "blank" }
   | { kind: "layout"; id: string }
-  | { kind: "clone"; templateId: number };
+  | { kind: "clone"; templateId: number }
+  // Generación IA desde imágenes de referencia ya generada y validada.
+  // La definition + variants vienen del endpoint /api/production/ai/
+  // generate-from-reference y el caller solo arma el POST templates.
+  | {
+      kind: "ai-reference";
+      definition: TemplateDefinition;
+      variants: Array<{
+        dims: { w: number; h: number };
+        definition: TemplateDefinition;
+      }>;
+    };
 
 // Shape mínimo de un template existente del proyecto, según lo que devuelve
 // /api/production/templates. Solo usamos los campos visibles en la card.
@@ -48,7 +69,7 @@ interface Props {
   onCreate: (params: { name: string; source: PickerSource }) => Promise<void>;
 }
 
-type TabKey = "templates" | "clone";
+type TabKey = "templates" | "clone" | "reference";
 
 export function LayoutTemplatePicker({
   open,
@@ -114,8 +135,11 @@ export function LayoutTemplatePicker({
       const t = LAYOUT_TEMPLATES.find((x) => x.id === pickedSource.id);
       return t ? `Plantilla: ${t.name}` : "Plantilla";
     }
-    const t = existing?.find((x) => x.id === pickedSource.templateId);
-    return t ? `Clonando: ${t.name}` : "Clon de template existente";
+    if (pickedSource.kind === "clone") {
+      const t = existing?.find((x) => x.id === pickedSource.templateId);
+      return t ? `Clonando: ${t.name}` : "Clon de template existente";
+    }
+    return "Propuesta IA desde referencia";
   })();
 
   return (
@@ -164,6 +188,13 @@ export function LayoutTemplatePicker({
             icon={<Copy className="h-3.5 w-3.5" />}
           >
             Clonar existente
+          </TabButton>
+          <TabButton
+            active={tab === "reference"}
+            onClick={() => setTab("reference")}
+            icon={<ImageIcon className="h-3.5 w-3.5" />}
+          >
+            Subir referencia
           </TabButton>
         </div>
 
@@ -247,6 +278,14 @@ export function LayoutTemplatePicker({
               )}
             </>
           )}
+
+          {tab === "reference" && (
+            <ReferenceUploadTab
+              productionProjectId={productionProjectId}
+              pickedSource={pickedSource}
+              onPicked={(source) => setPickedSource(source)}
+            />
+          )}
         </div>
 
         <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-border/50 bg-muted/20">
@@ -275,6 +314,326 @@ export function LayoutTemplatePicker({
       </div>
     </div>
   );
+}
+
+// Tab "Subir referencia": permite arrastrar/cargar 1-3 imágenes, mandarlas
+// al Banner Designer para que extraiga estilo y proponga un template, y
+// mostrar el rationale del agente. Cuando la generación es exitosa, el
+// pickedSource del picker pasa a ser { kind: "ai-reference", definition,
+// variants } y el botón "Crear" del footer del picker arma el POST final
+// con esa proposal.
+function ReferenceUploadTab({
+  productionProjectId,
+  pickedSource,
+  onPicked,
+}: {
+  productionProjectId: number;
+  pickedSource: PickerSource;
+  onPicked: (source: PickerSource) => void;
+}) {
+  const [files, setFiles] = useState<UploadedReference[]>([]);
+  const [intent, setIntent] = useState("");
+  const [instructions, setInstructions] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [rationale, setRationale] = useState<string | null>(null);
+  const [cost, setCost] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleFilePick = async (selected: FileList | null) => {
+    if (!selected || selected.length === 0) return;
+    setError(null);
+    const remaining = 3 - files.length;
+    if (remaining <= 0) {
+      setError("Máximo 3 referencias por generación");
+      return;
+    }
+    const toUpload = Array.from(selected).slice(0, remaining);
+    setUploading(true);
+    try {
+      const uploaded: UploadedReference[] = [];
+      for (const file of toUpload) {
+        if (!file.type.startsWith("image/")) {
+          setError(`Archivo no soportado: ${file.name} (solo imágenes)`);
+          continue;
+        }
+        const dataUri = await fileToDataUri(file);
+        const res = await fetch("/api/production/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageData: dataUri }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          setError(body?.error || `Error subiendo ${file.name}`);
+          continue;
+        }
+        const body = await res.json();
+        uploaded.push({
+          filename: file.name,
+          publicUrl: body.url as string,
+          mimeType: file.type,
+          previewUrl: dataUri,
+        });
+      }
+      setFiles((cur) => [...cur, ...uploaded]);
+    } catch (e) {
+      setError(`Error subiendo: ${(e as Error).message}`);
+    } finally {
+      setUploading(false);
+      // Limpiamos el input para permitir re-subir la misma file si la
+      // borraron y la volvieron a elegir.
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const removeFile = (idx: number) => {
+    setFiles((cur) => cur.filter((_, i) => i !== idx));
+    // Cuando borrás la última referencia, invalidamos la selección IA pendiente
+    // para que el botón Crear no quede activo apuntando a algo desconectado.
+    if (pickedSource.kind === "ai-reference") {
+      onPicked({ kind: "blank" });
+    }
+  };
+
+  const callAgent = async () => {
+    if (files.length === 0) {
+      setError("Subí al menos una imagen de referencia");
+      return;
+    }
+    setGenerating(true);
+    setError(null);
+    setRationale(null);
+    try {
+      const res = await fetch(
+        "/api/production/ai/generate-from-reference",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            production_project_id: productionProjectId,
+            reference_files: files.map((f) => ({
+              filename: f.filename,
+              publicUrl: f.publicUrl,
+              mimeType: f.mimeType,
+            })),
+            intent: intent.trim() || undefined,
+            instructions: instructions.trim() || undefined,
+          }),
+        },
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(body?.error || `Error ${res.status}`);
+        return;
+      }
+      const proposal = body.proposal as {
+        definition: TemplateDefinition;
+        variants: Array<{
+          dims: { w: number; h: number };
+          definition: TemplateDefinition;
+        }>;
+      };
+      setRationale(typeof body.rationale === "string" ? body.rationale : null);
+      setCost(
+        typeof body.tokenUsage?.estimatedCost === "number"
+          ? body.tokenUsage.estimatedCost
+          : null,
+      );
+      // Marcamos pickedSource como ai-reference con la proposal: ahora el
+      // botón "Crear" del footer del picker la usa.
+      onPicked({
+        kind: "ai-reference",
+        definition: proposal.definition,
+        variants: proposal.variants,
+      });
+    } catch (e) {
+      setError(`Error de red: ${(e as Error).message}`);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const hasProposal = pickedSource.kind === "ai-reference";
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="text-xs text-muted-foreground block mb-1">
+          Imágenes de referencia (máx. 3)
+        </label>
+        <div
+          className="border-2 border-dashed border-border/50 rounded-lg p-4"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            handleFilePick(e.dataTransfer.files);
+          }}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => handleFilePick(e.target.files)}
+          />
+          {files.length === 0 ? (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="w-full flex flex-col items-center justify-center gap-2 py-8 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {uploading ? (
+                <Loader2 className="h-6 w-6 animate-spin text-violet-400" />
+              ) : (
+                <Upload className="h-6 w-6 text-muted-foreground/60" />
+              )}
+              <span>
+                Click para seleccionar imágenes o arrastrá acá (1-3
+                referencias)
+              </span>
+            </button>
+          ) : (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {files.map((f, i) => (
+                  <div
+                    key={i}
+                    className="relative border border-border/50 rounded overflow-hidden bg-muted/30"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={f.previewUrl}
+                      alt={f.filename}
+                      className="w-full h-32 object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeFile(i)}
+                      className="absolute top-1 right-1 h-6 w-6 rounded-full bg-red-500 hover:bg-red-600 text-white shadow flex items-center justify-center"
+                      title="Quitar referencia"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                    <p className="text-[10px] truncate px-1 py-0.5 bg-background/80">
+                      {f.filename}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              {files.length < 3 && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="w-full text-xs text-muted-foreground hover:text-foreground flex items-center justify-center gap-1.5 py-2 border border-dashed border-border/40 rounded hover:border-foreground/40 transition-colors disabled:opacity-50"
+                >
+                  {uploading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Plus className="h-3.5 w-3.5" />
+                  )}
+                  Agregar más referencias ({3 - files.length} disponibles)
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1">
+            Intención (opcional)
+          </label>
+          <input
+            type="text"
+            value={intent}
+            onChange={(e) => setIntent(e.target.value)}
+            placeholder="Ej: campaña de invierno"
+            disabled={generating}
+            className="w-full bg-muted border border-border/50 rounded-md px-3 py-2 text-sm disabled:opacity-50"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1">
+            Instrucciones extra (opcional)
+          </label>
+          <input
+            type="text"
+            value={instructions}
+            onChange={(e) => setInstructions(e.target.value)}
+            placeholder="Ej: usá nuestro azul, no el rojo"
+            disabled={generating}
+            className="w-full bg-muted border border-border/50 rounded-md px-3 py-2 text-sm disabled:opacity-50"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] text-muted-foreground">
+          El agente extrae paleta, jerarquía y layout de las referencias y los
+          aplica con el brand kit del cliente. No copia logos ni texto literal.
+        </p>
+        <Button
+          size="sm"
+          onClick={callAgent}
+          disabled={files.length === 0 || uploading || generating}
+          className="gap-1 shrink-0"
+        >
+          {generating ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Sparkles className="h-4 w-4" />
+          )}
+          {hasProposal ? "Regenerar" : "Generar con IA"}
+        </Button>
+      </div>
+
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/30 text-red-300 text-xs rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+
+      {hasProposal && rationale && (
+        <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg px-3 py-2">
+          <p className="text-[10px] uppercase tracking-wide text-violet-400 mb-1 flex items-center justify-between">
+            <span>Decisión del agente</span>
+            {cost != null && (
+              <span className="text-muted-foreground normal-case tracking-normal">
+                ~ USD {cost.toFixed(4)}
+              </span>
+            )}
+          </p>
+          <p className="text-xs text-foreground">{rationale}</p>
+          <p className="text-[10px] text-muted-foreground mt-2">
+            Propuesta lista. Pulsá Crear abajo para instanciar el template.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface UploadedReference {
+  filename: string;
+  publicUrl: string;
+  mimeType: string;
+  // dataUri local para mostrar preview inline sin hacer otro fetch.
+  previewUrl: string;
+}
+
+function fileToDataUri(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error("FileReader falló"));
+    reader.readAsDataURL(file);
+  });
 }
 
 function TabButton({
