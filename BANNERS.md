@@ -646,6 +646,51 @@ interface DropShadow {
 - Para sombras sutiles usá blur alto (16-32) + opacity baja
   (`rgba(0,0,0,0.15)` aprox).
 
+### 5.1.2 Gradientes en fills
+
+Cualquier campo de tipo "color string" que va al CSS como `background` o
+`fill` puede contener un gradiente CSS en lugar de un color sólido. Los
+campos que aceptan gradiente son:
+
+- `FrameLayer.background.value`
+- `ShapeLayer.fill`
+- `TextLayer.style.backgroundColor`
+
+NO aceptan gradiente (deben ser color sólido):
+
+- `TextLayer.style.color` (el color del texto en sí)
+- `ShapeLayer.stroke.color`
+- `DropShadow.color`
+
+**Formatos soportados:**
+
+```
+linear-gradient(<angle>deg, <colorA>, <colorB>)
+radial-gradient(circle, <colorA>, <colorB>)
+```
+
+`<angle>` es un número entero entre 0 y 360. `<colorA>` y `<colorB>`
+pueden ser hex (`#RRGGBB`), `rgba(...)` o token refs (`{color.primary}`).
+El renderer sustituye los tokens embebidos antes de pasar el string al CSS.
+
+**Ejemplos válidos:**
+
+```
+"linear-gradient(135deg, {color.primary}, {color.accent})"
+"linear-gradient(0deg, #000000, rgba(0,0,0,0))"     // overlay de oscurecimiento
+"radial-gradient(circle, {color.primary}, #000000)"
+```
+
+**Reglas de uso:**
+- Solo dos color stops por gradiente (la UI de edición no permite más; si
+  emites más stops, el editor no puede roundtripear el valor).
+- Para overlays sobre imágenes, prefiere un `frame` con `background` =
+  `linear-gradient(0deg, rgba(0,0,0,0.7), rgba(0,0,0,0))` por encima del
+  image layer en vez de una shape con fill sólido + opacity.
+- Cuando uses gradientes en botones (TextLayer con backgroundColor), elegí
+  un `letterSpacing` ligeramente positivo (0.5-1px) para mantener
+  legibilidad — los gradientes saturados restan contraste percibido.
+
 ### 5.2 FrameLayer
 
 ```typescript

@@ -390,6 +390,164 @@ function TokenTextRow<T extends { name: string; label: string }>({
   );
 }
 
+// Detección + construcción de gradientes. Solo soportamos en UI los dos
+// formatos canónicos que generamos nosotros:
+//   linear-gradient(<angle>deg, <c1>, <c2>)
+//   radial-gradient(circle, <c1>, <c2>)
+// Si el productor (o el agente) mete un gradiente con más stops o sintaxis
+// custom, el render CSS sigue funcionando pero la UI no puede roundtripear
+// — se cae al modo "string libre" y muestra el campo de texto.
+
+interface ParsedGradient {
+  kind: "linear" | "radial";
+  angle: number; // solo aplica a linear
+  colorA: string;
+  colorB: string;
+}
+
+function parseGradient(value: string): ParsedGradient | null {
+  const trimmed = value.trim();
+  // linear-gradient(123deg, #aaa, #bbb)
+  const linear = trimmed.match(
+    /^linear-gradient\(\s*(-?\d+(?:\.\d+)?)deg\s*,\s*([^,]+?)\s*,\s*([^)]+?)\s*\)$/i,
+  );
+  if (linear) {
+    return {
+      kind: "linear",
+      angle: Number(linear[1]),
+      colorA: linear[2].trim(),
+      colorB: linear[3].trim(),
+    };
+  }
+  // radial-gradient(circle, #aaa, #bbb)
+  const radial = trimmed.match(
+    /^radial-gradient\(\s*circle\s*,\s*([^,]+?)\s*,\s*([^)]+?)\s*\)$/i,
+  );
+  if (radial) {
+    return {
+      kind: "radial",
+      angle: 0,
+      colorA: radial[1].trim(),
+      colorB: radial[2].trim(),
+    };
+  }
+  return null;
+}
+
+function buildGradient(g: ParsedGradient): string {
+  if (g.kind === "linear") {
+    return `linear-gradient(${g.angle}deg, ${g.colorA}, ${g.colorB})`;
+  }
+  return `radial-gradient(circle, ${g.colorA}, ${g.colorB})`;
+}
+
+// FillRow extiende el concepto de ColorRow agregando soporte para gradiente.
+// Modo toggle Sólido / Linear / Radial. En modos gradient muestra 2 color
+// inputs + (para linear) un slider de ángulo. Genera el string CSS y lo
+// guarda en el mismo campo.
+function FillRow({
+  label,
+  value,
+  onChange,
+  tokens,
+}: {
+  label: string;
+  value: string;
+  onChange: (s: string) => void;
+  tokens?: ColorToken[];
+}) {
+  const parsed = parseGradient(value);
+  const mode: "solid" | "linear" | "radial" = parsed?.kind ?? "solid";
+
+  // Cambiar de modo: si vamos a gradient desde solid, usamos el color actual
+  // como colorA y un blanco como colorB. Si volvemos a solid, usamos colorA
+  // del gradient como el color sólido (preservamos el primer color).
+  const switchTo = (next: "solid" | "linear" | "radial") => {
+    if (next === "solid") {
+      const fallback = parsed?.colorA ?? value;
+      onChange(fallback);
+      return;
+    }
+    const base: ParsedGradient = {
+      kind: next,
+      angle: parsed?.kind === "linear" ? parsed.angle : 90,
+      colorA: parsed?.colorA ?? value,
+      colorB: parsed?.colorB ?? "#ffffff",
+    };
+    onChange(buildGradient(base));
+  };
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-1 text-[10px]">
+        <span className="w-12 text-muted-foreground">{label}</span>
+        {(["solid", "linear", "radial"] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => switchTo(m)}
+            className={cn(
+              "flex-1 py-1 rounded border transition-colors",
+              mode === m
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            {m === "solid" ? "Sólido" : m === "linear" ? "Linear" : "Radial"}
+          </button>
+        ))}
+      </div>
+      {mode === "solid" && (
+        <ColorRow
+          label=""
+          value={value}
+          tokens={tokens}
+          onChange={onChange}
+        />
+      )}
+      {parsed && (mode === "linear" || mode === "radial") && (
+        <>
+          <ColorRow
+            label="Color 1"
+            value={parsed.colorA}
+            tokens={tokens}
+            onChange={(v) =>
+              onChange(buildGradient({ ...parsed, colorA: v }))
+            }
+          />
+          <ColorRow
+            label="Color 2"
+            value={parsed.colorB}
+            tokens={tokens}
+            onChange={(v) =>
+              onChange(buildGradient({ ...parsed, colorB: v }))
+            }
+          />
+          {mode === "linear" && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="w-12 text-muted-foreground">Ángulo</span>
+              <input
+                type="range"
+                min={0}
+                max={360}
+                step={5}
+                value={parsed.angle}
+                onChange={(e) =>
+                  onChange(buildGradient({ ...parsed, angle: Number(e.target.value) }))
+                }
+                className="flex-1"
+              />
+              <span className="text-[10px] text-muted-foreground w-10 text-right">
+                {parsed.angle}°
+              </span>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function ColorRow({
   label,
   value,
@@ -696,7 +854,7 @@ function RootProps({
   return (
     <>
       <Section title="Fondo">
-        <ColorRow
+        <FillRow
           label="Color"
           value={bgColor}
           tokens={brandKit.colors}
@@ -1024,7 +1182,7 @@ function TextProps({
         </div>
         {layer.style.backgroundColor != null && (
           <>
-            <ColorRow
+            <FillRow
               label="Color"
               value={layer.style.backgroundColor}
               tokens={brandKit.colors}
@@ -1310,7 +1468,7 @@ function ShapeProps({
           </button>
         ))}
       </div>
-      <ColorRow
+      <FillRow
         label="Relleno"
         value={layer.fill}
         tokens={brandKit.colors}
@@ -1407,7 +1565,7 @@ function FrameProps({
   return (
     <>
       <Section title="Frame">
-        <ColorRow
+        <FillRow
           label="Fondo"
           value={bgColor}
           tokens={brandKit.colors}

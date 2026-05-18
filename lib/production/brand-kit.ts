@@ -206,12 +206,29 @@ export function makeRef(kind: "color" | "font" | "scale" | "spacing" | "logo", n
 
 // ---------- Resolution ----------
 
+// Sustitución global de {color.X} dentro de cualquier string. La usamos para
+// strings que pueden contener varios token refs embebidos — típicamente
+// gradientes CSS como "linear-gradient(45deg, {color.primary}, {color.bg})".
+const EMBEDDED_COLOR_REF = /\{color\.([a-zA-Z0-9_-]+)\}/g;
+
 export function resolveColor(value: string | undefined, kit: BrandKitContent, fallback = "#000000"): string {
   if (!value) return fallback;
   const ref = parseRef(value);
-  if (!ref || ref.kind !== "color") return value;
-  const t = kit.colors.find((c) => c.name === ref.name);
-  return t ? t.value : fallback;
+  if (ref && ref.kind === "color") {
+    const t = kit.colors.find((c) => c.name === ref.name);
+    return t ? t.value : fallback;
+  }
+  // String compuesto (gradiente, rgba con var, etc.). Sustituimos cada
+  // {color.X} embebido por su valor resuelto. Si el token no existe, lo
+  // dejamos literal — el navegador lo ignorará silenciosamente, pero al
+  // menos no rompe los tokens que sí existen.
+  if (value.includes("{color.")) {
+    return value.replace(EMBEDDED_COLOR_REF, (full, name) => {
+      const t = kit.colors.find((c) => c.name === name);
+      return t ? t.value : full;
+    });
+  }
+  return value;
 }
 
 export function resolveFontFamily(value: string | undefined, kit: BrandKitContent, fallback = "inherit"): string {
@@ -270,21 +287,32 @@ export function resolveTreeTokens(
   return resolveLayer(root, kit) as TemplateDefinition;
 }
 
+// Sombra: el color puede ser token ref. Resuelvo siempre antes de despachar
+// al specializer de cada tipo, así no hay que repetirlo en cada uno.
+function resolveBaseShadow<T extends TemplateLayer>(layer: T, kit: BrandKitContent): T {
+  if (!layer.shadow) return layer;
+  return {
+    ...layer,
+    shadow: { ...layer.shadow, color: resolveColor(layer.shadow.color, kit, "rgba(0,0,0,0.25)") },
+  };
+}
+
 function resolveLayer(layer: TemplateLayer, kit: BrandKitContent): TemplateLayer {
-  switch (layer.type) {
+  const base = resolveBaseShadow(layer, kit);
+  switch (base.type) {
     case "frame":
-      return resolveFrame(layer, kit);
+      return resolveFrame(base, kit);
     case "text":
-      return resolveText(layer, kit);
+      return resolveText(base, kit);
     case "image":
-      return resolveImage(layer, kit);
+      return resolveImage(base, kit);
     case "shape":
       return {
-        ...layer,
-        fill: resolveColor(layer.fill, kit, "#cccccc"),
-        stroke: layer.stroke
-          ? { ...layer.stroke, color: resolveColor(layer.stroke.color, kit, "#000000") }
-          : layer.stroke,
+        ...base,
+        fill: resolveColor(base.fill, kit, "#cccccc"),
+        stroke: base.stroke
+          ? { ...base.stroke, color: resolveColor(base.stroke.color, kit, "#000000") }
+          : base.stroke,
       };
   }
 }
@@ -327,6 +355,9 @@ function resolveText(layer: TextLayer, kit: BrandKitContent): TextLayer {
       fontSize: resolveSize(s.fontSize as number | string, kit, s.fontSize as number),
       fontWeight: resolveFontWeight(s.fontWeight, kit, 400),
       color: resolveColor(s.color, kit, "#000000"),
+      backgroundColor: s.backgroundColor
+        ? resolveColor(s.backgroundColor, kit, "#ffffff")
+        : s.backgroundColor,
     },
   };
 }
