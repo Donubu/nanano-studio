@@ -10,17 +10,16 @@ import {
   newShapeLayer,
   updateLayer as updateLayerInTree,
   addLayerToFrame,
-  addLayersToFrame,
   deleteLayer as deleteLayerInTree,
   findLayer,
   findParent,
   cloneWithNewIds,
 } from "./types";
 import {
-  newButtonLayers,
+  newButtonLayer,
   newDividerLayer,
-  newBadgeLayers,
-  newRibbonLayers,
+  newBadgeLayer,
+  newRibbonLayer,
 } from "./preset-layers";
 
 export type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
@@ -428,14 +427,12 @@ export function useTemplateEditor({
     selectSingle(layer.id);
   }, [baseWidth, baseHeight, mutate, selectSingle]);
 
-  // Inserciones de presets compuestos. Cada uno crea las capas en orden
-  // natural de z (background primero, foreground después) y selecciona la
-  // última (típicamente el texto, donde el productor suele querer editar
-  // primero).
+  // Inserciones de presets. Cada uno crea UNA capa (TextLayer con fondo
+  // nativo para botón/badge/ribbon, ShapeLayer para divider) y la selecciona.
   const addButton = useCallback(() => {
-    const layers = newButtonLayers(baseWidth / 2, baseHeight / 2);
-    mutate((d) => addLayersToFrame(d, "tpl_root", layers));
-    selectSingle(layers[layers.length - 1]!.id);
+    const layer = newButtonLayer(baseWidth / 2, baseHeight / 2);
+    mutate((d) => addLayerToFrame(d, "tpl_root", layer));
+    selectSingle(layer.id);
   }, [baseWidth, baseHeight, mutate, selectSingle]);
 
   const addDivider = useCallback(() => {
@@ -445,15 +442,15 @@ export function useTemplateEditor({
   }, [baseWidth, baseHeight, mutate, selectSingle]);
 
   const addBadge = useCallback(() => {
-    const layers = newBadgeLayers(baseWidth / 2, baseHeight / 2);
-    mutate((d) => addLayersToFrame(d, "tpl_root", layers));
-    selectSingle(layers[layers.length - 1]!.id);
+    const layer = newBadgeLayer(baseWidth / 2, baseHeight / 2);
+    mutate((d) => addLayerToFrame(d, "tpl_root", layer));
+    selectSingle(layer.id);
   }, [baseWidth, baseHeight, mutate, selectSingle]);
 
   const addRibbon = useCallback(() => {
-    const layers = newRibbonLayers(baseWidth / 2, baseHeight / 2);
-    mutate((d) => addLayersToFrame(d, "tpl_root", layers));
-    selectSingle(layers[layers.length - 1]!.id);
+    const layer = newRibbonLayer(baseWidth / 2, baseHeight / 2);
+    mutate((d) => addLayerToFrame(d, "tpl_root", layer));
+    selectSingle(layer.id);
   }, [baseWidth, baseHeight, mutate, selectSingle]);
 
   const reorderInParent = useCallback(

@@ -925,10 +925,9 @@ altura para que las puntas no queden cortantes.
 
 **Reglas clave**:
 - **Una sola capa** cuando el patrón es "fondo coloreado + texto encima".
-  Esto colapsa shape+text que antes eran 2 layers. **NUNCA emitas más el
-  patrón viejo** (shape de fondo + text con position/size idénticos
-  encima) — el editor lo deja al productor pero el agente debe generar
-  siempre el patrón nuevo.
+  Usá `TextLayer.style.backgroundColor` + `backgroundCornerRadius` para
+  hacer el fondo. **NUNCA emitas el combo shape + text encima con
+  position/size idénticos** — es el patrón viejo, no existe más.
 - Para compuestos donde texto y fondo SÍ tienen tamaños distintos (ej.
   precio dentro de una shape ancha con varios elementos), seguí usando
   layers separadas. La regla es: si la shape tiene EXACTAMENTE las mismas

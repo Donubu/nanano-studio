@@ -10,11 +10,7 @@
 //
 // Divider sigue como ShapeLayer porque no lleva texto.
 
-import {
-  TemplateLayer,
-  TextLayer,
-  ShapeLayer,
-} from "./types";
+import { TextLayer, ShapeLayer } from "./types";
 
 function uid(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -120,17 +116,3 @@ export function newRibbonLayer(cx: number, cy: number): TextLayer {
   };
 }
 
-// Mantengo los nombres viejos (plurales) por compat con código que ya los
-// llama. Cada uno wrapea el nuevo singular en un array.
-//
-// TODO eventual: borrar estos wrappers y migrar las llamadas en
-// use-template-editor.ts a los singulares.
-export function newButtonLayers(cx: number, cy: number): TemplateLayer[] {
-  return [newButtonLayer(cx, cy)];
-}
-export function newBadgeLayers(cx: number, cy: number): TemplateLayer[] {
-  return [newBadgeLayer(cx, cy)];
-}
-export function newRibbonLayers(cx: number, cy: number): TemplateLayer[] {
-  return [newRibbonLayer(cx, cy)];
-}
