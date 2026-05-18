@@ -1,6 +1,20 @@
 "use client";
 
-import { Type, Image as ImageIcon, Square, Loader2, Check, AlertCircle, Palette, Undo2, Redo2 } from "lucide-react";
+import {
+  Type,
+  Image as ImageIcon,
+  Square,
+  Loader2,
+  Check,
+  AlertCircle,
+  Palette,
+  Undo2,
+  Redo2,
+  MousePointerClick,
+  Minus,
+  BadgePercent,
+  Tag,
+} from "lucide-react";
 import { SaveStatus } from "@/lib/production/use-template-editor";
 import { formatDateTimeLocal } from "@/lib/utils";
 
@@ -8,6 +22,10 @@ interface Props {
   onAddText: () => void;
   onAddImage: () => void;
   onAddShape: () => void;
+  onAddButton: () => void;
+  onAddDivider: () => void;
+  onAddBadge: () => void;
+  onAddRibbon: () => void;
   saveStatus: SaveStatus;
   lastSavedAt: Date | null;
   onOpenProjectBrandKit?: () => void;
@@ -21,6 +39,10 @@ export function EditorToolbar({
   onAddText,
   onAddImage,
   onAddShape,
+  onAddButton,
+  onAddDivider,
+  onAddBadge,
+  onAddRibbon,
   saveStatus,
   lastSavedAt,
   onOpenProjectBrandKit,
@@ -75,6 +97,48 @@ export function EditorToolbar({
       >
         <Square className="h-3.5 w-3.5" />
         Forma
+      </button>
+
+      <div className="h-5 w-px bg-border/50 mx-1" />
+
+      {/* Presets compuestos. Cada uno inserta múltiples capas relacionadas
+          (button = shape + text, badge = ellipse + text, etc.) en una
+          sola acción undo-able. */}
+      <button
+        type="button"
+        onClick={onAddButton}
+        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border/50 hover:bg-muted transition-colors"
+        title="Botón CTA (pill + texto)"
+      >
+        <MousePointerClick className="h-3.5 w-3.5" />
+        Botón
+      </button>
+      <button
+        type="button"
+        onClick={onAddDivider}
+        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border/50 hover:bg-muted transition-colors"
+        title="Línea divisoria horizontal"
+      >
+        <Minus className="h-3.5 w-3.5" />
+        Línea
+      </button>
+      <button
+        type="button"
+        onClick={onAddBadge}
+        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border/50 hover:bg-muted transition-colors"
+        title="Badge circular de descuento"
+      >
+        <BadgePercent className="h-3.5 w-3.5" />
+        Badge
+      </button>
+      <button
+        type="button"
+        onClick={onAddRibbon}
+        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border/50 hover:bg-muted transition-colors"
+        title="Ribbon diagonal tipo cinta de oferta"
+      >
+        <Tag className="h-3.5 w-3.5" />
+        Ribbon
       </button>
 
       <div className="flex-1" />

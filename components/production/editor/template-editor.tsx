@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TemplateDefinition, TemplateLayer, findLayer, findParent } from "@/lib/production/types";
@@ -119,6 +119,12 @@ export function TemplateEditor({
     setDataSectionOpen(false);
   }, [selectedLayerId]);
 
+  // Style clipboard. No vive en localStorage — es per-sesión y per-editor.
+  // Guarda solo properties visuales (style/fill/stroke/cornerRadius/opacity/
+  // rotation), NO position/size/content. Pegar style mantiene el contenido
+  // del target intacto y solo le aplica el look del source.
+  const styleClipboardRef = useRef<TemplateLayer | null>(null);
+
   // Keyboard shortcuts. Skip when typing in an input/textarea or in preview mode.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -152,6 +158,42 @@ export function TemplateEditor({
           editor.duplicateLayer(editor.selectedId);
           return;
         }
+        // Z-order keyboard shortcuts (Figma convention):
+        //   Cmd+]        → forward (sube 1 nivel)
+        //   Cmd+[        → backward (baja 1 nivel)
+        //   Cmd+Shift+]  → bring to front (al tope)
+        //   Cmd+Shift+[  → send to back (al fondo)
+        // Solo aplica a capas root-level (que es donde reorderInParent funciona).
+        if ((key === "]" || key === "[") && editor.selectedId && editor.selectedId !== "tpl_root" && !previewSize) {
+          e.preventDefault();
+          const op =
+            key === "]"
+              ? e.shiftKey
+                ? "front"
+                : "up"
+              : e.shiftKey
+                ? "back"
+                : "down";
+          editor.reorderInParent(editor.selectedId, op);
+          return;
+        }
+        // Copy/paste style (Figma: Cmd+Opt+C / Cmd+Opt+V).
+        //   Copia: snapshot del layer entero al clipboard ref.
+        //   Pega: aplica style/fill/stroke/cornerRadius/opacity/rotation del
+        //         source al target SOLO si comparten type (text→text,
+        //         shape→shape, image→image). NO copia position/size/content.
+        if (e.altKey && key === "c" && editor.selectedLayer && !previewSize) {
+          e.preventDefault();
+          styleClipboardRef.current = editor.selectedLayer;
+          return;
+        }
+        if (e.altKey && key === "v" && editor.selectedLayer && styleClipboardRef.current && !previewSize) {
+          e.preventDefault();
+          const src = styleClipboardRef.current;
+          const targetId = editor.selectedLayer.id;
+          editor.updateLayer(targetId, (l) => applyStyleFromSource(l, src));
+          return;
+        }
       }
 
       if ((e.key === "Delete" || e.key === "Backspace") && !isTextField) {
@@ -179,6 +221,10 @@ export function TemplateEditor({
           onAddText={editor.addText}
           onAddImage={editor.addImage}
           onAddShape={editor.addShape}
+          onAddButton={editor.addButton}
+          onAddDivider={editor.addDivider}
+          onAddBadge={editor.addBadge}
+          onAddRibbon={editor.addRibbon}
           saveStatus={editor.saveStatus}
           lastSavedAt={editor.lastSavedAt}
           // El opener del modal de brand kit ahora vive en el caller (producir
@@ -349,6 +395,55 @@ export function TemplateEditor({
 // Título de la sección Propiedades — varía según la capa seleccionada (la
 // lógica vivía adentro de PropertiesPanel; al embeberlo en el acordeón
 // movemos el cálculo acá para que el header del acordeón refleje el contexto).
+// Aplica las propiedades visuales del source al target preservando contenido
+// estructural (position, size, content/src/shape). Solo aplica si comparten
+// type — pegar style de un text en una image no tiene sentido y se ignora.
+//
+// Properties que viajan:
+//   - todos: opacity, rotation, constraints.
+//   - text → text: style completo (font, size, color, align, etc.).
+//   - shape → shape: fill, stroke, cornerRadius (NO el shape kind para no
+//     transformar rect en ellipse).
+//   - image → image: cornerRadius, fit.
+//   - frame → frame: background, cornerRadius (NO layout, no children).
+function applyStyleFromSource(target: TemplateLayer, source: TemplateLayer): TemplateLayer {
+  if (target.type !== source.type) return target;
+  const common: Partial<TemplateLayer> = {
+    opacity: source.opacity,
+    rotation: source.rotation,
+    constraints: source.constraints,
+  };
+  if (target.type === "text" && source.type === "text") {
+    return { ...target, ...common, style: source.style } as TemplateLayer;
+  }
+  if (target.type === "shape" && source.type === "shape") {
+    return {
+      ...target,
+      ...common,
+      fill: source.fill,
+      stroke: source.stroke,
+      cornerRadius: source.cornerRadius,
+    } as TemplateLayer;
+  }
+  if (target.type === "image" && source.type === "image") {
+    return {
+      ...target,
+      ...common,
+      cornerRadius: source.cornerRadius,
+      fit: source.fit,
+    } as TemplateLayer;
+  }
+  if (target.type === "frame" && source.type === "frame") {
+    return {
+      ...target,
+      ...common,
+      background: source.background,
+      cornerRadius: source.cornerRadius,
+    } as TemplateLayer;
+  }
+  return target;
+}
+
 function accordionPropsTitle(selectedLayer: TemplateLayer | null): string {
   if (!selectedLayer) return "Propiedades";
   if (selectedLayer.id === "tpl_root") return "Canvas";

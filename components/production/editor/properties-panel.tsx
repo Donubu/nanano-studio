@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlignCenter,
   AlignLeft,
@@ -11,6 +11,7 @@ import {
   ImageIcon,
   Loader2,
   PanelRightClose,
+  Pipette,
   Upload,
 } from "lucide-react";
 import {
@@ -427,6 +428,7 @@ function ColorRow({
               onChange={(e) => onChange(e.target.value)}
               className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-xs font-mono"
             />
+            <EyeDropperButton onPick={onChange} />
           </>
         )}
       </div>
@@ -1040,6 +1042,63 @@ function ShapeProps({
           }
         />
       )}
+      {/* Stroke / borde. El schema ya lo soporta (ShapeLayer.stroke) y el
+          renderer SVG lo dibuja; faltaba la UI. Toggle de "tiene borde" +
+          color + width cuando está activo. width=0 equivale a sin borde,
+          pero usamos null en la BD para distinguirlo del 0 explícito. */}
+      <div className="flex items-center gap-2 text-xs">
+        <span className="w-12 text-muted-foreground">Borde</span>
+        <label className="flex items-center gap-1 cursor-pointer flex-1">
+          <input
+            type="checkbox"
+            checked={layer.stroke != null}
+            onChange={(e) =>
+              onUpdate(layer.id, (l) =>
+                l.type === "shape"
+                  ? {
+                      ...l,
+                      stroke: e.target.checked
+                        ? { color: l.stroke?.color ?? "#0F172A", width: l.stroke?.width ?? 2 }
+                        : null,
+                    }
+                  : l
+              )
+            }
+          />
+          <span className="text-muted-foreground">
+            {layer.stroke ? "Activado" : "Sin borde"}
+          </span>
+        </label>
+      </div>
+      {layer.stroke && (
+        <>
+          <ColorRow
+            label="Color"
+            value={layer.stroke.color}
+            tokens={brandKit.colors}
+            onChange={(v) =>
+              onUpdate(layer.id, (l) =>
+                l.type === "shape" && l.stroke
+                  ? { ...l, stroke: { ...l.stroke, color: v } }
+                  : l
+              )
+            }
+          />
+          <NumberRow
+            label="Grosor"
+            value={layer.stroke.width}
+            min={0}
+            max={50}
+            onChange={(v) =>
+              onUpdate(layer.id, (l) =>
+                l.type === "shape" && l.stroke
+                  ? { ...l, stroke: { ...l.stroke, width: Math.max(0, v) } }
+                  : l
+              )
+            }
+          />
+        </>
+      )}
     </Section>
   );
 }
@@ -1397,5 +1456,57 @@ function StackControls({
         </div>
       </div>
     </div>
+  );
+}
+
+// Botón eyedropper: usa la EyeDropper API del browser (Chrome 95+, Edge 95+).
+// Si no está disponible, no se renderea — degradación gracil. Permite chupar
+// un color de cualquier pixel de la pantalla (no solo del canvas del editor).
+function EyeDropperButton({ onPick }: { onPick: (color: string) => void }) {
+  const [supported, setSupported] = useState(false);
+  const [picking, setPicking] = useState(false);
+  useEffect(() => {
+    setSupported(
+      typeof window !== "undefined" &&
+        "EyeDropper" in window &&
+        typeof (window as unknown as { EyeDropper: unknown }).EyeDropper ===
+          "function",
+    );
+  }, []);
+  if (!supported) return null;
+
+  const handleClick = async () => {
+    setPicking(true);
+    try {
+      // EyeDropper no está tipada en lib.dom hasta TS 5.5; casteamos manual.
+      interface EyeDropperLike {
+        open(): Promise<{ sRGBHex: string }>;
+      }
+      const Ctor = (window as unknown as { EyeDropper: new () => EyeDropperLike })
+        .EyeDropper;
+      const ed = new Ctor();
+      const result = await ed.open();
+      onPick(result.sRGBHex);
+    } catch {
+      // El usuario canceló con Escape — silenciamos, no es error.
+    } finally {
+      setPicking(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={picking}
+      className="w-7 h-7 shrink-0 rounded border border-border/50 bg-muted hover:bg-accent transition-colors flex items-center justify-center disabled:opacity-50"
+      title="Eyedropper — chupá un color de la pantalla"
+    >
+      {picking ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <Pipette className="h-3.5 w-3.5" />
+      )}
+    </button>
   );
 }

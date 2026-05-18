@@ -878,7 +878,54 @@ esquinas.
 - **NO permitido**: más de 2 shapes decorativas en piezas pequeñas (banner
   728×90, etc.).
 
-### 8.6 Smart text para headlines
+### 8.6 Patrones compuestos canónicos
+
+El editor del cliente tiene botones rápidos para insertar estos compuestos.
+Cuando generes/adaptes banners, usá las **mismas composiciones** para que el
+productor pueda editarlos con la misma UI sin sorpresas. Cada patrón = capas
+siblings (no agrupadas en frame), en el orden de z indicado.
+
+**Botón / CTA** — pill clickeable:
+1. `ShapeLayer` rect con `cornerRadius = size.h / 2` (forma pill). Fill
+   sólido del color principal del kit (`{color.primary}` o similar).
+2. `TextLayer` con `position` y `size` IDÉNTICOS al shape, `align: "center"`,
+   `verticalAlign: "middle"`. Color que contraste con el fondo.
+
+Ejemplo conciso:
+```json
+{ "id":"cta-bg","type":"shape","position":{"x":760,"y":820},"size":{"w":400,"h":120},
+  "shape":"rect","fill":"{color.primary}","cornerRadius":60 },
+{ "id":"cta","type":"text","position":{"x":760,"y":820},"size":{"w":400,"h":120},
+  "content":"Comprar","style":{"fontFamily":"{font.body}","fontSize":36,
+  "color":"{color.neutral-light}","align":"center","verticalAlign":"middle","fontWeight":700} }
+```
+
+**Línea / Divider** — separador:
+- Una sola `ShapeLayer` rect con altura 2-8px, ancho razonable.
+  `cornerRadius` igual a la altura para que las puntas no queden cortantes.
+
+**Badge circular** — sello de descuento:
+1. `ShapeLayer` ellipse con `size` cuadrado (ej. 200×200). Fill color de
+   acento (típico amarillo `{color.secondary}` o rojo).
+2. `TextLayer` con position+size idénticos, fontSize grande, `align:center`,
+   `verticalAlign:middle`. Color que contraste.
+
+**Ribbon / cinta diagonal** — pinning de oferta en esquina:
+1. `ShapeLayer` rect con `rotation: -25` (o +25 para opuesto). Fill rojo
+   accent.
+2. `TextLayer` con misma position+size+rotation, texto centrado en mayúsculas
+   con `letterSpacing` 2-4 para look de cinta impresa.
+
+**Reglas clave** para todos los compuestos:
+- Las dos capas siempre tienen `position` y `size` idénticos. El renderer
+  asegura que el texto se centra exactamente sobre la shape.
+- `name` de las capas debe describir su rol: `"cta-bg"` / `"cta"`,
+  `"badge-bg"` / `"badge"`, etc. Sufijar con `-bg` la capa de shape ayuda
+  al editor humano a entender la composición.
+- **NUNCA** uses 3+ capas para un compuesto simple. Si necesitás eso (ej.
+  botón con icono), considerá si vale la pena vs solo texto.
+
+### 8.7 Smart text para headlines
 
 Cuando generas variantes multi-aspect (`GENERATE_FROM_PROMPT` con
 `secondary_aspects`), **OBLIGATORIO** usar `FontSizeRange` en el headline

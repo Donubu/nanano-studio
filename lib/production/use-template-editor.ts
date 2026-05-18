@@ -10,11 +10,18 @@ import {
   newShapeLayer,
   updateLayer as updateLayerInTree,
   addLayerToFrame,
+  addLayersToFrame,
   deleteLayer as deleteLayerInTree,
   findLayer,
   findParent,
   cloneWithNewIds,
 } from "./types";
+import {
+  newButtonLayers,
+  newDividerLayer,
+  newBadgeLayers,
+  newRibbonLayers,
+} from "./preset-layers";
 
 export type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
 
@@ -38,6 +45,10 @@ interface UseTemplateEditorResult {
   addText: () => void;
   addImage: () => void;
   addShape: () => void;
+  addButton: () => void;
+  addDivider: () => void;
+  addBadge: () => void;
+  addRibbon: () => void;
 
   updateLayer: (id: string, mutator: (layer: TemplateLayer) => TemplateLayer) => void;
   updateRoot: (mutator: (root: TemplateDefinition) => TemplateDefinition) => void;
@@ -237,6 +248,34 @@ export function useTemplateEditor({
     setSelectedId(layer.id);
   }, [baseWidth, baseHeight, mutate]);
 
+  // Inserciones de presets compuestos. Cada uno crea las capas en orden
+  // natural de z (background primero, foreground después) y selecciona la
+  // última (típicamente el texto, donde el productor suele querer editar
+  // primero).
+  const addButton = useCallback(() => {
+    const layers = newButtonLayers(baseWidth / 2, baseHeight / 2);
+    mutate((d) => addLayersToFrame(d, "tpl_root", layers));
+    setSelectedId(layers[layers.length - 1]!.id);
+  }, [baseWidth, baseHeight, mutate]);
+
+  const addDivider = useCallback(() => {
+    const layer = newDividerLayer(baseWidth / 2, baseHeight / 2);
+    mutate((d) => addLayerToFrame(d, "tpl_root", layer));
+    setSelectedId(layer.id);
+  }, [baseWidth, baseHeight, mutate]);
+
+  const addBadge = useCallback(() => {
+    const layers = newBadgeLayers(baseWidth / 2, baseHeight / 2);
+    mutate((d) => addLayersToFrame(d, "tpl_root", layers));
+    setSelectedId(layers[layers.length - 1]!.id);
+  }, [baseWidth, baseHeight, mutate]);
+
+  const addRibbon = useCallback(() => {
+    const layers = newRibbonLayers(baseWidth / 2, baseHeight / 2);
+    mutate((d) => addLayersToFrame(d, "tpl_root", layers));
+    setSelectedId(layers[layers.length - 1]!.id);
+  }, [baseWidth, baseHeight, mutate]);
+
   const reorderInParent = useCallback(
     (id: string, op: "front" | "back" | "up" | "down") => {
       if (id === "tpl_root") return;
@@ -388,6 +427,10 @@ export function useTemplateEditor({
     addText,
     addImage,
     addShape,
+    addButton,
+    addDivider,
+    addBadge,
+    addRibbon,
     updateLayer,
     updateRoot,
     updateBounds,

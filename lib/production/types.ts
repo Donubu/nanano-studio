@@ -302,6 +302,22 @@ export function addLayerToFrame(
   };
 }
 
+// Variante para insertar múltiples capas de una sola pasada. Útil para
+// presets compuestos (botón = shape + text, badge = ellipse + text) donde
+// queremos UN solo undo step y orden de inserción explícito (background
+// primero, foreground después → respeta z-order natural).
+export function addLayersToFrame(
+  root: TemplateDefinition,
+  frameId: string,
+  layers: TemplateLayer[]
+): TemplateDefinition {
+  let next = root;
+  for (const l of layers) {
+    next = addLayerToFrame(next, frameId, l);
+  }
+  return next;
+}
+
 function addToFrameInChildren(
   children: TemplateLayer[],
   frameId: string,
