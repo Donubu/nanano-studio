@@ -127,9 +127,11 @@ export interface AgentInvocationError {
 }
 
 interface PracticanteRunResponse {
+  jobId?: string;
   status?: string;
   response?: string;
   conversationId?: string;
+  messageId?: string;
   delegatedTo?: string;
   toolsUsed?: string[];
   tokenUsage?: {
@@ -137,6 +139,13 @@ interface PracticanteRunResponse {
     outputTokens?: number;
     estimatedCost?: number;
   };
+  // Cuando practicante intentó parsear la respuesta del modelo como JSON y
+  // falló, marca este campo. response trae el texto crudo. Lo tratamos como
+  // failure controlado (no llega a zod) y le devolvemos retry al agente.
+  parseError?: string;
+  // Warnings no críticos (ej: sanitizer aplicado). Los logueamos para
+  // observabilidad; no bloquean el flujo.
+  warnings?: string[];
   error?: string;
   code?: string;
 }
@@ -165,6 +174,10 @@ async function callPracticante(payload: {
   const body: Record<string, unknown> = {
     message: payload.message,
     dryRun: false,
+    // normalize:false confirma que el message le llega al agente tal cual
+    // — sin pre-procesamiento del orquestador de practicante. Necesario
+    // para que el agente reciba el verbo de operación intacto.
+    normalize: false,
     returnOnlyFinalText: true,
     context: {
       responseFormat: "json",
@@ -348,6 +361,15 @@ function validateAgentResponse(
   response: PracticanteRunResponse,
   expectedSize: { w: number; h: number },
 ): Validated {
+  if (response.parseError) {
+    return {
+      ok: false,
+      error: `Practicante reportó parseError: ${response.parseError}`,
+    };
+  }
+  if (response.warnings && response.warnings.length > 0) {
+    console.warn("[banner-designer] warnings:", response.warnings);
+  }
   if (!response.response) {
     return { ok: false, error: "Practicante no devolvió texto de respuesta" };
   }
@@ -488,6 +510,15 @@ function validateGenerateResponse(
   masterSize: { w: number; h: number },
   expectedVariants: Array<{ w: number; h: number }>,
 ): GenerateValidated {
+  if (response.parseError) {
+    return {
+      ok: false,
+      error: `Practicante reportó parseError: ${response.parseError}`,
+    };
+  }
+  if (response.warnings && response.warnings.length > 0) {
+    console.warn("[banner-designer] warnings:", response.warnings);
+  }
   if (!response.response) {
     return { ok: false, error: "Practicante no devolvió texto de respuesta" };
   }
