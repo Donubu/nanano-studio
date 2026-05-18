@@ -36,6 +36,24 @@ const constraintsSchema = z
   .object({ h: constraintH, v: constraintV })
   .optional();
 
+// Color: hex con o sin alfa, rgb(a), o token "{kind.name}". No validamos a
+// fondo (el renderer es tolerante con cualquier CSS color); solo descartamos
+// strings vacíos. Definido temprano porque otros schemas lo referencian.
+const cssColorSchema = z
+  .string()
+  .min(1, { message: "color string vacío" })
+  .max(200);
+
+// Drop shadow opcional para cualquier capa.
+const shadowSchema = z
+  .object({
+    x: z.number().min(-2000).max(2000),
+    y: z.number().min(-2000).max(2000),
+    blur: z.number().min(0).max(2000),
+    color: cssColorSchema,
+  })
+  .optional();
+
 // Base de toda capa.
 const baseLayerSchema = z.object({
   id: idSchema,
@@ -47,15 +65,8 @@ const baseLayerSchema = z.object({
   visible: z.boolean().optional(),
   locked: z.boolean().optional(),
   constraints: constraintsSchema,
+  shadow: shadowSchema,
 });
-
-// Color: hex con o sin alfa, rgb(a), o token "{kind.name}". No validamos a
-// fondo (el renderer es tolerante con cualquier CSS color); solo descartamos
-// strings vacíos.
-const cssColorSchema = z
-  .string()
-  .min(1, { message: "color string vacío" })
-  .max(200);
 
 // fontSize puede ser número, token string "{scale.X}", o FontSizeRange.
 const fontSizeRangeSchema = z.object({

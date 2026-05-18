@@ -15,6 +15,17 @@ export interface Constraints {
 
 export const DEFAULT_CONSTRAINTS: Constraints = { h: "left", v: "top" };
 
+// Drop shadow opcional para cualquier capa. Para text SIN backgroundColor
+// el renderer aplica textShadow (sombra sobre los glyphs); para todo lo
+// demás (shape, image, frame, text-con-bg) aplica boxShadow. Sin esto el
+// productor no puede agregar profundidad visual a botones, badges, etc.
+export interface DropShadow {
+  x: number;        // offset horizontal en px (positivo = derecha)
+  y: number;        // offset vertical en px (positivo = abajo)
+  blur: number;     // radio de blur en px (≥ 0)
+  color: string;    // hex, rgba o token "{color.X}"
+}
+
 export interface BaseLayer {
   id: string;
   type: LayerType;
@@ -26,6 +37,7 @@ export interface BaseLayer {
   visible?: boolean;
   locked?: boolean;
   constraints?: Constraints;
+  shadow?: DropShadow;
 }
 
 export type StackAlign = "start" | "center" | "end" | "stretch";

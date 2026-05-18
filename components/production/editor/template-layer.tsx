@@ -29,7 +29,32 @@ interface Props {
   parentMode?: "free" | "stack";
 }
 
+// Genera el string CSS de box-shadow/text-shadow desde el shape DropShadow
+// del schema. Sin spread (lo omitimos del MVP — confunde más que aporta).
+function shadowCss(s: TemplateLayer["shadow"]): string | undefined {
+  if (!s) return undefined;
+  return `${s.x}px ${s.y}px ${s.blur}px ${s.color}`;
+}
+
+// Decide si la sombra del layer debe aplicarse como boxShadow (la caja
+// proyecta sombra) o textShadow (los glyphs del texto la proyectan).
+//
+//   - Text SIN backgroundColor → textShadow: la caja es transparente, no
+//     tiene sentido tirar sombra de un rect invisible; lo que el productor
+//     quiere es que el texto cast shadow.
+//   - Text CON backgroundColor → boxShadow: ahora hay una pill/badge
+//     visible y la sombra va debajo de ella, no de los glyphs.
+//   - Cualquier otro tipo (shape/image/frame) → boxShadow.
+function shadowKind(layer: TemplateLayer): "box" | "text" {
+  if (layer.type === "text" && !layer.style.backgroundColor) return "text";
+  return "box";
+}
+
 function baseLayerStyle(layer: TemplateLayer, parentMode: "free" | "stack"): CSSProperties {
+  // El shadow se aplica como boxShadow por default — el caso de text-shadow
+  // se sobreescribe en renderText cuando aplica.
+  const shadow = shadowCss(layer.shadow);
+  const useBoxShadow = shadow && shadowKind(layer) === "box";
   if (parentMode === "stack") {
     // Position is determined by the parent's flex layout. We keep width/height
     // as the layer's stored size; align "stretch" on the cross-axis is handled
@@ -43,6 +68,7 @@ function baseLayerStyle(layer: TemplateLayer, parentMode: "free" | "stack"): CSS
       transform: layer.rotation ? `rotate(${layer.rotation}deg)` : undefined,
       display: layer.visible === false ? "none" : undefined,
       boxSizing: "border-box",
+      boxShadow: useBoxShadow ? shadow : undefined,
     };
   }
   return {
@@ -55,6 +81,7 @@ function baseLayerStyle(layer: TemplateLayer, parentMode: "free" | "stack"): CSS
     transform: layer.rotation ? `rotate(${layer.rotation}deg)` : undefined,
     display: layer.visible === false ? "none" : undefined,
     boxSizing: "border-box",
+    boxShadow: useBoxShadow ? shadow : undefined,
   };
 }
 
@@ -248,6 +275,12 @@ function renderText(layer: TextLayer, parentMode: "free" | "stack", common: Comm
     // hace una pill; =size.w/2 con caja cuadrada hace un círculo.
     background: style.backgroundColor,
     borderRadius: style.backgroundCornerRadius,
+    // textShadow para texto sin fondo (los glyphs casean sombra). El
+    // baseLayerStyle ya manejó el boxShadow caso text-con-bg.
+    textShadow:
+      layer.shadow && !style.backgroundColor
+        ? `${layer.shadow.x}px ${layer.shadow.y}px ${layer.shadow.blur}px ${layer.shadow.color}`
+        : undefined,
   };
   // Smart text: el render busca el font-size más grande que entre en la caja.
   if (isFontSizeRange(style.fontSize)) {

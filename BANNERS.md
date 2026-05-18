@@ -623,8 +623,28 @@ interface BaseLayer {
   visible?: boolean;                // default true
   locked?: boolean;                 // default false — NUNCA lo pongas a true en output
   constraints?: Constraints;        // anchors en el padre; ver §5.6
+  shadow?: DropShadow;              // drop shadow opcional; ver abajo
+}
+
+interface DropShadow {
+  x: number;        // offset horizontal en px (positivo = derecha)
+  y: number;        // offset vertical en px (positivo = abajo)
+  blur: number;     // radio de blur en px (≥ 0)
+  color: string;    // hex, rgba o token "{color.X}"
 }
 ```
+
+**Reglas de uso del `shadow`:**
+- Para **text sin backgroundColor**: la sombra se aplica a los glyphs
+  (textShadow). Útil cuando el texto está sobre una imagen con poco
+  contraste; agrega `{ x: 0, y: 2, blur: 8, color: "rgba(0,0,0,0.6)" }`
+  para mejorar legibilidad.
+- Para **text con backgroundColor / shape / image / frame**: la sombra
+  se aplica a la caja del layer (boxShadow). Útil para botones que se
+  ven "elevados" del fondo: `{ x: 0, y: 8, blur: 16, color: "rgba(0,0,0,0.25)" }`.
+- **NO abuses**: máximo 1-2 sombras por composición. Decora, no protagonizes.
+- Para sombras sutiles usá blur alto (16-32) + opacity baja
+  (`rgba(0,0,0,0.15)` aprox).
 
 ### 5.2 FrameLayer
 

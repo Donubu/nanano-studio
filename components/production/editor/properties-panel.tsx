@@ -795,7 +795,94 @@ function LayerProps({
       {layer.type === "frame" && (
         <FrameProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} />
       )}
+
+      {/* Drop shadow — disponible para cualquier layer type. El renderer
+          decide internamente si aplica boxShadow o textShadow según el
+          contexto (text-sin-bg → textShadow; resto → boxShadow). */}
+      <ShadowSection layer={layer} onUpdate={onUpdate} brandKit={brandKit} />
     </>
+  );
+}
+
+// Sección de drop shadow común a todos los layer types. Toggle + offsets +
+// blur + color. Sin spread (lo dejamos fuera del MVP — confunde y es
+// redundante con blur para 90% de los casos).
+function ShadowSection({
+  layer,
+  onUpdate,
+  brandKit,
+}: {
+  layer: TemplateLayer;
+  onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
+  brandKit: BrandKitContent;
+}) {
+  const s = layer.shadow;
+  return (
+    <Section title="Sombra">
+      <div className="flex items-center gap-2 text-xs">
+        <span className="w-12 text-muted-foreground">Sombra</span>
+        <label className="flex items-center gap-1 cursor-pointer flex-1">
+          <input
+            type="checkbox"
+            checked={s != null}
+            onChange={(e) =>
+              onUpdate(layer.id, (l) => ({
+                ...l,
+                shadow: e.target.checked
+                  ? (l.shadow ?? { x: 0, y: 8, blur: 16, color: "rgba(0,0,0,0.25)" })
+                  : undefined,
+              }))
+            }
+          />
+          <span className="text-muted-foreground">
+            {s ? "Activada" : "Sin sombra"}
+          </span>
+        </label>
+      </div>
+      {s && (
+        <>
+          <NumberRow
+            label="X"
+            value={s.x}
+            onChange={(v) =>
+              onUpdate(layer.id, (l) =>
+                l.shadow ? { ...l, shadow: { ...l.shadow, x: v } } : l,
+              )
+            }
+          />
+          <NumberRow
+            label="Y"
+            value={s.y}
+            onChange={(v) =>
+              onUpdate(layer.id, (l) =>
+                l.shadow ? { ...l, shadow: { ...l.shadow, y: v } } : l,
+              )
+            }
+          />
+          <NumberRow
+            label="Blur"
+            value={s.blur}
+            min={0}
+            max={200}
+            onChange={(v) =>
+              onUpdate(layer.id, (l) =>
+                l.shadow ? { ...l, shadow: { ...l.shadow, blur: Math.max(0, v) } } : l,
+              )
+            }
+          />
+          <ColorRow
+            label="Color"
+            value={s.color}
+            tokens={brandKit.colors}
+            onChange={(v) =>
+              onUpdate(layer.id, (l) =>
+                l.shadow ? { ...l, shadow: { ...l.shadow, color: v } } : l,
+              )
+            }
+          />
+        </>
+      )}
+    </Section>
   );
 }
 
