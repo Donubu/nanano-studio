@@ -14,6 +14,7 @@ import {
   Minus,
   BadgePercent,
   Tag,
+  Smile,
 } from "lucide-react";
 import { SaveStatus } from "@/lib/production/use-template-editor";
 import { formatDateTimeLocal } from "@/lib/utils";
@@ -22,6 +23,7 @@ interface Props {
   onAddText: () => void;
   onAddImage: () => void;
   onAddShape: () => void;
+  onAddIcon: () => void;
   onAddButton: () => void;
   onAddDivider: () => void;
   onAddBadge: () => void;
@@ -39,6 +41,7 @@ export function EditorToolbar({
   onAddText,
   onAddImage,
   onAddShape,
+  onAddIcon,
   onAddButton,
   onAddDivider,
   onAddBadge,
@@ -97,6 +100,15 @@ export function EditorToolbar({
       >
         <Square className="h-3.5 w-3.5" />
         Forma
+      </button>
+      <button
+        type="button"
+        onClick={onAddIcon}
+        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border/50 hover:bg-muted transition-colors"
+        title="Ícono del catálogo curado"
+      >
+        <Smile className="h-3.5 w-3.5" />
+        Ícono
       </button>
 
       <div className="h-5 w-px bg-border/50 mx-1" />

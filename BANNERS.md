@@ -602,7 +602,7 @@ salvo donde se indica explícitamente).
 ### 5.1 Tipos base
 
 ```typescript
-type LayerType = "frame" | "text" | "image" | "shape";
+type LayerType = "frame" | "text" | "image" | "shape" | "icon";
 
 type ConstraintH = "left" | "right" | "center" | "stretch" | "scale";
 type ConstraintV = "top" | "bottom" | "center" | "stretch" | "scale";
@@ -797,6 +797,54 @@ interface ShapeLayer extends BaseLayer {
 - Overlays oscuros para legibilidad: `shape: "rect"`,
   `fill: "rgba(0,0,0,0.45)"`, `position: {0,0}`, `size: { w: canvasW, h: canvasH }`,
   insertado **antes** del texto en `children`.
+
+### 5.7 IconLayer
+
+```typescript
+interface IconLayer extends BaseLayer {
+  type: "icon";
+  iconName: string;       // nombre del catálogo curado (ver más abajo)
+  color: string;          // hex, rgba o token "{color.X}" — NO gradientes
+  strokeWidth?: number;   // grosor del trazo lucide (0.5-4, default 2)
+}
+```
+
+**Reglas:**
+- `iconName` DEBE ser exactamente uno de los nombres del catálogo. Si
+  inventás un nombre que no está en la lista, la validación zod falla y
+  el editor pinta un ícono de fallback (`HelpCircle`) — fea UX.
+- El SVG se escala a `min(size.w, size.h)`. Para íconos NO uses cajas
+  rectangulares — mantené `size.w === size.h`. Si necesitás un ícono
+  alargado, es señal de que querés una imagen, no un ícono.
+- `color` NO acepta gradientes (los íconos lucide son SVG con stroke/fill
+  pero los gradientes en SVG requieren `<defs>` que el renderer no inyecta).
+- `strokeWidth` por default 2 — el grosor "nominal" de lucide. Para banners
+  pequeños subí a 2.5-3 (mejor legibilidad). Para banners XL o estilos
+  "thin/airy" bajá a 1-1.5.
+
+**Catálogo curado de `iconName` (48 íconos):**
+
+- **Ecommerce**: `ShoppingCart`, `ShoppingBag`, `Tag`, `Percent`,
+  `DollarSign`, `CreditCard`, `Gift`, `Truck`
+- **Social**: `Instagram`, `Facebook`, `Twitter`, `Youtube`, `Linkedin`,
+  `Github`, `Heart`, `Share2`
+- **Comunicación**: `Mail`, `Phone`, `MessageCircle`, `Send`, `Bell`,
+  `AtSign`
+- **Transporte**: `MapPin`, `Map`, `Plane`, `Car`, `Bike`
+- **Multimedia**: `Play`, `Pause`, `Music`, `Camera`, `Video`, `Image`,
+  `Headphones`
+- **UI**: `Check`, `X`, `Plus`, `Minus`, `ArrowRight`, `ArrowLeft`,
+  `ArrowUpRight`, `ChevronRight`
+- **General**: `Star`, `Sparkles`, `Flame`, `Zap`, `Crown`, `Award`, `Clock`
+
+**Casos típicos:**
+- Botón CTA con flecha: TextLayer del botón + IconLayer `ArrowRight` a la
+  derecha del texto, mismo color que el texto del botón.
+- Banner de envío gratis: IconLayer `Truck` + TextLayer "Envío gratis".
+- Tarjeta de descuento: IconLayer `Percent` adentro de un círculo (shape
+  con fill brand + cornerRadius=w/2) + TextLayer con el % grande al lado.
+- Listado de features con checks: 1 IconLayer `Check` por feature, en
+  color de marca, alineados a la izquierda de cada TextLayer.
 
 ### 5.6 Constraints (anchors)
 

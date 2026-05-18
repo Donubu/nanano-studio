@@ -1,6 +1,7 @@
 "use client";
 
 import { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
+import * as LucideIcons from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   TemplateLayer,
@@ -8,6 +9,7 @@ import {
   TextLayer,
   ImageLayer,
   ShapeLayer,
+  IconLayer,
   StackLayout,
   StackAlign,
   StackJustify,
@@ -15,6 +17,32 @@ import {
 } from "@/lib/production/types";
 import { ensureGoogleFontLoaded } from "@/lib/production/google-fonts";
 import { SmartText } from "./smart-text";
+
+// Resolver lucide por nombre. El zod schema garantiza que solo lleguen nombres
+// del catálogo, pero como defensa por si la BD tiene basura vieja, caemos a
+// "HelpCircle" cuando el nombre no existe en el bundle de lucide.
+function getLucideIcon(name: string): React.ComponentType<{
+  size?: number;
+  color?: string;
+  strokeWidth?: number;
+  className?: string;
+}> {
+  const Comp = (LucideIcons as Record<string, unknown>)[name];
+  if (Comp && typeof Comp === "function") {
+    return Comp as React.ComponentType<{
+      size?: number;
+      color?: string;
+      strokeWidth?: number;
+      className?: string;
+    }>;
+  }
+  return LucideIcons.HelpCircle as unknown as React.ComponentType<{
+    size?: number;
+    color?: string;
+    strokeWidth?: number;
+    className?: string;
+  }>;
+}
 
 interface Props {
   layer: TemplateLayer;
@@ -158,6 +186,7 @@ export function TemplateLayerView({
   if (layer.type === "text") return renderText(layer, parentMode, commonProps);
   if (layer.type === "image") return renderImage(layer, parentMode, commonProps);
   if (layer.type === "shape") return renderShape(layer, parentMode, commonProps);
+  if (layer.type === "icon") return renderIcon(layer, parentMode, commonProps);
   return null;
 }
 
@@ -359,4 +388,29 @@ function renderShape(layer: ShapeLayer, parentMode: "free" | "stack", common: Co
       : undefined,
   };
   return <div style={style} {...common} />;
+}
+
+// Renderea un ícono lucide dentro de la caja del layer. El size del SVG se
+// fija a min(w, h) y el contenedor lo centra — esto hace que cambiar el
+// aspect ratio del box no deforme el ícono (los íconos son cuadrados por
+// definición). El color va vía la prop, no CSS, porque lucide pinta stroke
+// y fill condicionalmente según el ícono.
+function renderIcon(layer: IconLayer, parentMode: "free" | "stack", common: CommonProps) {
+  const Icon = getLucideIcon(layer.iconName);
+  const iconSize = Math.min(layer.size.w, layer.size.h);
+  const style: CSSProperties = {
+    ...baseLayerStyle(layer, parentMode),
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  };
+  return (
+    <div style={style} {...common}>
+      <Icon
+        size={iconSize}
+        color={layer.color}
+        strokeWidth={layer.strokeWidth ?? 2}
+      />
+    </div>
+  );
 }

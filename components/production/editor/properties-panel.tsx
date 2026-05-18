@@ -19,6 +19,7 @@ import {
   Pipette,
   Upload,
 } from "lucide-react";
+import * as LucideIcons from "lucide-react";
 import {
   TemplateDefinition,
   TemplateLayer,
@@ -26,6 +27,7 @@ import {
   ImageLayer,
   ShapeLayer,
   FrameLayer,
+  IconLayer,
   StackLayout,
   StackAlign,
   StackJustify,
@@ -37,6 +39,11 @@ import {
   FontSizeRange,
   isFontSizeRange,
 } from "@/lib/production/types";
+import {
+  ICON_CATALOG,
+  ICON_CATEGORIES,
+  type IconCategory,
+} from "@/lib/production/icon-catalog";
 import {
   BrandKit,
   BrandKitContent,
@@ -834,6 +841,8 @@ function labelForType(type: TemplateLayer["type"]) {
       return "Imagen";
     case "shape":
       return "Forma";
+    case "icon":
+      return "Ícono";
   }
 }
 
@@ -949,6 +958,9 @@ function LayerProps({
       )}
       {layer.type === "shape" && (
         <ShapeProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} />
+      )}
+      {layer.type === "icon" && (
+        <IconProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} />
       )}
       {layer.type === "frame" && (
         <FrameProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} />
@@ -1545,6 +1557,100 @@ function ShapeProps({
           />
         </>
       )}
+    </Section>
+  );
+}
+
+// IconProps: panel para IconLayer. Tres secciones:
+//   1. Selector visual del catálogo curado (grid + tabs de categorías).
+//   2. Color del trazo/fill (sin gradiente — los íconos lucide pintan en
+//      SVG y los gradientes requieren <defs>; el ROI es bajo).
+//   3. Grosor del trazo (1-3 con paso 0.5).
+function IconProps({
+  layer,
+  onUpdate,
+  brandKit,
+}: {
+  layer: IconLayer;
+  onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
+  brandKit: BrandKitContent;
+}) {
+  const [activeCategory, setActiveCategory] = useState<IconCategory>(() => {
+    const found = ICON_CATALOG.find((i) => i.name === layer.iconName);
+    return found?.category ?? "general";
+  });
+  const filtered = ICON_CATALOG.filter((i) => i.category === activeCategory);
+  return (
+    <Section title="Ícono">
+      {/* Tabs de categoría — colapsado en 2 filas para no comer altura. */}
+      <div className="flex flex-wrap gap-1 text-[10px]">
+        {ICON_CATEGORIES.map((c) => (
+          <button
+            key={c.value}
+            type="button"
+            onClick={() => setActiveCategory(c.value)}
+            className={cn(
+              "px-1.5 py-0.5 rounded border transition-colors",
+              activeCategory === c.value
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+      {/* Grid de íconos. 6 columnas para que entren al menos 12 sin scroll
+          en el panel típico de propiedades. Click → setea iconName. */}
+      <div className="grid grid-cols-6 gap-1 pt-1">
+        {filtered.map((entry) => {
+          const Icon = (LucideIcons as Record<string, unknown>)[entry.name] as
+            | React.ComponentType<{ size?: number; className?: string }>
+            | undefined;
+          if (!Icon) return null;
+          const isCurrent = entry.name === layer.iconName;
+          return (
+            <button
+              key={entry.name}
+              type="button"
+              onClick={() =>
+                onUpdate(layer.id, (l) =>
+                  l.type === "icon" ? { ...l, iconName: entry.name } : l,
+                )
+              }
+              className={cn(
+                "aspect-square flex items-center justify-center rounded border transition-colors",
+                isCurrent
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+              title={entry.label}
+            >
+              <Icon size={18} />
+            </button>
+          );
+        })}
+      </div>
+      <ColorRow
+        label="Color"
+        value={layer.color}
+        tokens={brandKit.colors}
+        onChange={(v) =>
+          onUpdate(layer.id, (l) => (l.type === "icon" ? { ...l, color: v } : l))
+        }
+      />
+      <NumberRow
+        label="Grosor"
+        value={layer.strokeWidth ?? 2}
+        min={0.5}
+        max={4}
+        step={0.5}
+        onChange={(v) =>
+          onUpdate(layer.id, (l) =>
+            l.type === "icon" ? { ...l, strokeWidth: Math.max(0.5, Math.min(4, v)) } : l,
+          )
+        }
+      />
     </Section>
   );
 }

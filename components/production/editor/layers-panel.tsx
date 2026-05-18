@@ -2,7 +2,7 @@
 
 import { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, useState } from "react";
 import { cn } from "@/lib/utils";
-import { Trash2, Type, Image as ImageIcon, Square, Layers as LayersIcon, GripVertical, Lock, Unlock, PanelLeftClose, Braces } from "lucide-react";
+import { Trash2, Type, Image as ImageIcon, Square, Layers as LayersIcon, GripVertical, Lock, Unlock, PanelLeftClose, Braces, Smile } from "lucide-react";
 import {
   TemplateDefinition,
   TemplateLayer,
@@ -37,6 +37,8 @@ function defaultName(layer: TemplateLayer): string {
       return "Imagen";
     case "shape":
       return layer.shape === "ellipse" ? "Elipse" : "Rectángulo";
+    case "icon":
+      return layer.iconName;
   }
 }
 
@@ -51,6 +53,8 @@ function iconFor(layer: TemplateLayer) {
       return <ImageIcon className={cls} />;
     case "shape":
       return <Square className={cls} />;
+    case "icon":
+      return <Smile className={cls} />;
   }
 }
 

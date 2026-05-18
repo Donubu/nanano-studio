@@ -3,7 +3,7 @@
 // Slice 2A scope: free-position layers only. Auto-layout (stack), constraints,
 // brand tokens, and variables come in later slices.
 
-export type LayerType = "frame" | "text" | "image" | "shape";
+export type LayerType = "frame" | "text" | "image" | "shape" | "icon";
 
 export type ConstraintH = "left" | "right" | "center" | "stretch" | "scale";
 export type ConstraintV = "top" | "bottom" | "center" | "stretch" | "scale";
@@ -151,7 +151,24 @@ export interface ShapeLayer extends BaseLayer {
   cornerRadius?: number;
 }
 
-export type TemplateLayer = FrameLayer | TextLayer | ImageLayer | ShapeLayer;
+// IconLayer: ícono vectorial de lucide-react. El nombre es validado contra
+// un catálogo curado (ICON_CATALOG) en el zod schema y en el editor — no
+// permitimos cualquier nombre lucide porque la lista completa es de >1500
+// y la mayoría no son útiles para banners. El color es CSS string (acepta
+// tokens {color.X} pero NO gradientes — los íconos lucide se pintan vía
+// SVG stroke/fill y los gradientes en SVG requieren <defs> que no quiero
+// inyectar). El render usa el tamaño de la caja para escalar el SVG.
+export interface IconLayer extends BaseLayer {
+  type: "icon";
+  // iconName (no "name") porque BaseLayer.name ya es el label visible del
+  // layer en el panel. Estos son nombres del catálogo curado, en PascalCase
+  // matcheando los exports de lucide-react. Ej. "ShoppingCart", "Heart".
+  iconName: string;
+  color: string;           // hex, rgba o token "{color.X}" — sin gradientes
+  strokeWidth?: number;    // grosor del trazo lucide (1-3, default 2)
+}
+
+export type TemplateLayer = FrameLayer | TextLayer | ImageLayer | ShapeLayer | IconLayer;
 
 // The root is always a FrameLayer with id "tpl_root" and size matching the
 // template base_width/base_height.
@@ -213,6 +230,21 @@ export function newImageLayer(centerX: number, centerY: number): ImageLayer {
     size: { w, h },
     src: null,
     fit: "cover",
+  };
+}
+
+export function newIconLayer(centerX: number, centerY: number, iconName = "Star"): IconLayer {
+  const w = 96;
+  const h = 96;
+  return {
+    id: uid(),
+    type: "icon",
+    name: "Ícono",
+    position: { x: centerX - w / 2, y: centerY - h / 2 },
+    size: { w, h },
+    iconName,
+    color: "#0F172A",
+    strokeWidth: 2,
   };
 }
 

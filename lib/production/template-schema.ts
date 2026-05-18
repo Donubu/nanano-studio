@@ -13,6 +13,7 @@
 
 import { z } from "zod";
 import { TemplateDefinition, TemplateLayer } from "./types";
+import { ICON_NAMES } from "./icon-catalog";
 
 // IDs: alfanuméricos + - + _. No permitimos espacios ni caracteres raros
 // para que sean usables como keys, anchors HTML, etc.
@@ -121,6 +122,21 @@ const shapeLayerSchema = baseLayerSchema.extend({
   cornerRadius: z.number().int().min(0).max(2000).optional(),
 });
 
+// IconLayer: el iconName debe estar en el catálogo curado, si no falla con
+// un error específico que el agente puede corregir. El catálogo se importa
+// desde lib/production/icon-catalog y se inyecta en el schema vía
+// z.enum con un cast — zod necesita tuple readonly literal.
+const iconNameSchema = z.string().refine((v) => ICON_NAMES.includes(v), {
+  message: `iconName fuera del catálogo. Usa uno de: ${ICON_NAMES.slice(0, 8).join(", ")}, …`,
+});
+
+const iconLayerSchema = baseLayerSchema.extend({
+  type: z.literal("icon"),
+  iconName: iconNameSchema,
+  color: cssColorSchema,
+  strokeWidth: z.number().min(0.5).max(4).optional(),
+});
+
 const stackLayoutSchema = z.object({
   mode: z.literal("stack"),
   direction: z.enum(["vertical", "horizontal"]),
@@ -169,7 +185,13 @@ const frameLayerSchema: z.ZodType<TemplateLayer> = z.lazy(() =>
 // equivalente, solo cambia la inferencia de TS — que de todos modos casteamos
 // a TemplateLayer.
 const layerSchema: z.ZodType<TemplateLayer> = z.lazy(() =>
-  z.union([frameLayerSchema, textLayerSchema, imageLayerSchema, shapeLayerSchema]),
+  z.union([
+    frameLayerSchema,
+    textLayerSchema,
+    imageLayerSchema,
+    shapeLayerSchema,
+    iconLayerSchema,
+  ]),
 );
 
 // Root definition: frame con id "tpl_root" exacto y layout = free (los

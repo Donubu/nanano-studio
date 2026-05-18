@@ -314,6 +314,11 @@ function resolveLayer(layer: TemplateLayer, kit: BrandKitContent): TemplateLayer
           ? { ...base.stroke, color: resolveColor(base.stroke.color, kit, "#000000") }
           : base.stroke,
       };
+    case "icon":
+      return {
+        ...base,
+        color: resolveColor(base.color, kit, "#0F172A"),
+      };
   }
 }
 

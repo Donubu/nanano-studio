@@ -8,6 +8,7 @@ import {
   newTextLayer,
   newImageLayer,
   newShapeLayer,
+  newIconLayer,
   updateLayer as updateLayerInTree,
   addLayerToFrame,
   deleteLayer as deleteLayerInTree,
@@ -66,6 +67,7 @@ interface UseTemplateEditorResult {
   addText: () => void;
   addImage: () => void;
   addShape: () => void;
+  addIcon: () => void;
   addButton: () => void;
   addDivider: () => void;
   addBadge: () => void;
@@ -427,6 +429,12 @@ export function useTemplateEditor({
     selectSingle(layer.id);
   }, [baseWidth, baseHeight, mutate, selectSingle]);
 
+  const addIcon = useCallback(() => {
+    const layer = newIconLayer(baseWidth / 2, baseHeight / 2);
+    mutate((d) => addLayerToFrame(d, "tpl_root", layer));
+    selectSingle(layer.id);
+  }, [baseWidth, baseHeight, mutate, selectSingle]);
+
   // Inserciones de presets. Cada uno crea UNA capa (TextLayer con fondo
   // nativo para botón/badge/ribbon, ShapeLayer para divider) y la selecciona.
   const addButton = useCallback(() => {
@@ -610,6 +618,7 @@ export function useTemplateEditor({
     addText,
     addImage,
     addShape,
+    addIcon,
     addButton,
     addDivider,
     addBadge,

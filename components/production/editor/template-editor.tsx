@@ -240,6 +240,7 @@ export function TemplateEditor({
           onAddText={editor.addText}
           onAddImage={editor.addImage}
           onAddShape={editor.addShape}
+          onAddIcon={editor.addIcon}
           onAddButton={editor.addButton}
           onAddDivider={editor.addDivider}
           onAddBadge={editor.addBadge}
@@ -469,6 +470,14 @@ function applyStyleFromSource(target: TemplateLayer, source: TemplateLayer): Tem
       cornerRadius: source.cornerRadius,
     } as TemplateLayer;
   }
+  if (target.type === "icon" && source.type === "icon") {
+    return {
+      ...target,
+      ...common,
+      color: source.color,
+      strokeWidth: source.strokeWidth,
+    } as TemplateLayer;
+  }
   return target;
 }
 
@@ -482,6 +491,8 @@ function accordionPropsTitle(selectedLayer: TemplateLayer | null): string {
       return "Imagen";
     case "shape":
       return "Forma";
+    case "icon":
+      return "Ícono";
     case "frame":
       return "Frame";
   }
