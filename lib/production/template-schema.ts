@@ -93,6 +93,16 @@ const textStyleSchema = z.object({
   // Fondo opcional del text layer (botones/badges en una sola capa).
   backgroundColor: cssColorSchema.optional(),
   backgroundCornerRadius: z.number().int().min(0).max(2000).optional(),
+  // Efectos de texto.
+  textDecoration: z.enum(["none", "underline", "line-through"]).optional(),
+  textTransform: z.enum(["none", "uppercase", "lowercase", "capitalize"]).optional(),
+  outline: z
+    .object({
+      color: cssColorSchema,
+      width: z.number().min(0).max(20),
+    })
+    .nullable()
+    .optional(),
 });
 
 const textLayerSchema = baseLayerSchema.extend({

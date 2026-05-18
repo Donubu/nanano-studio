@@ -120,6 +120,21 @@ export interface TextLayer extends BaseLayer {
     // cuadrada. Para una pill: backgroundCornerRadius = size.h/2.
     backgroundColor?: string;
     backgroundCornerRadius?: number;
+    // Decoración del texto: underline (precios "antes"), line-through (precio
+    // tachado), o "none" (default). El color hereda del style.color por
+    // simplicidad — un decoration con color custom requiere otro campo y la
+    // ROI es baja.
+    textDecoration?: "none" | "underline" | "line-through";
+    // Transformación de mayúsculas/minúsculas. Útil cuando el dataset puede
+    // venir en mixed case pero el banner debe quedar consistente. NO toca
+    // el `content` original — solo el render.
+    textTransform?: "none" | "uppercase" | "lowercase" | "capitalize";
+    // Contorno alrededor de los glyphs (via -webkit-text-stroke). Mejora
+    // legibilidad sobre imágenes con contraste irregular. width = 0 o ausencia
+    // = sin contorno. width útiles: 0.5-2 para texto chico, 2-6 para texto
+    // grande/headline. color suele ser blanco con texto oscuro, o negro con
+    // texto claro — al revés que la sombra.
+    outline?: { color: string; width: number } | null;
   };
 }
 

@@ -1165,6 +1165,122 @@ function TextProps({
           ))}
         </div>
       </Section>
+      {/* Efectos de texto: decoración (underline/strike), case transform y
+          outline. Tres controles independientes; cada uno default "off" para
+          no aplicar cambios visuales en capas existentes. */}
+      <Section title="Efectos">
+        {/* Decoración: chips simples ninguna / underline / strike */}
+        <div className="flex items-center gap-1 text-[10px]">
+          <span className="w-12 text-muted-foreground">Decoración</span>
+          {(
+            [
+              { v: "none",         label: "Ninguna" },
+              { v: "underline",    label: "Subrayado" },
+              { v: "line-through", label: "Tachado" },
+            ] as const
+          ).map(({ v, label }) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => updateStyle({ textDecoration: v })}
+              className={cn(
+                "flex-1 py-1 rounded border transition-colors",
+                (layer.style.textDecoration ?? "none") === v
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {/* Mayúsculas/minúsculas */}
+        <div className="flex items-center gap-1 text-[10px]">
+          <span className="w-12 text-muted-foreground">Case</span>
+          {(
+            [
+              { v: "none",       label: "Aa" },
+              { v: "uppercase",  label: "AA" },
+              { v: "lowercase",  label: "aa" },
+              { v: "capitalize", label: "Aa." },
+            ] as const
+          ).map(({ v, label }) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => updateStyle({ textTransform: v })}
+              className={cn(
+                "flex-1 py-1 rounded border transition-colors font-mono",
+                (layer.style.textTransform ?? "none") === v
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+              title={
+                v === "none"
+                  ? "Sin cambios"
+                  : v === "uppercase"
+                  ? "MAYÚSCULAS"
+                  : v === "lowercase"
+                  ? "minúsculas"
+                  : "Capitalizar"
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {/* Outline (text stroke). Toggle "tiene contorno" + color + width.
+            width=0 equivale a sin outline; usamos null vs presente para
+            distinguir el toggle off vs un width=0 explícito. */}
+        <div className="flex items-center gap-2 text-xs">
+          <span className="w-12 text-muted-foreground">Contorno</span>
+          <label className="flex items-center gap-1 cursor-pointer flex-1">
+            <input
+              type="checkbox"
+              checked={layer.style.outline != null}
+              onChange={(e) =>
+                updateStyle({
+                  outline: e.target.checked
+                    ? (layer.style.outline ?? { color: "#ffffff", width: 1 })
+                    : null,
+                })
+              }
+            />
+            <span className="text-muted-foreground">
+              {layer.style.outline ? "Activado" : "Sin contorno"}
+            </span>
+          </label>
+        </div>
+        {layer.style.outline && (
+          <>
+            <ColorRow
+              label="Color"
+              value={layer.style.outline.color}
+              tokens={brandKit.colors}
+              onChange={(v) =>
+                updateStyle({
+                  outline: { ...(layer.style.outline ?? { width: 1 }), color: v },
+                })
+              }
+            />
+            <NumberRow
+              label="Grosor"
+              value={layer.style.outline.width}
+              min={0}
+              max={20}
+              step={0.5}
+              onChange={(v) =>
+                updateStyle({
+                  outline: {
+                    ...(layer.style.outline ?? { color: "#ffffff" }),
+                    width: Math.max(0, Math.min(20, v)),
+                  },
+                })
+              }
+            />
+          </>
+        )}
+      </Section>
       {/* Fondo del text layer — colapsa el patrón viejo de shape+text a una
           sola capa. Toggle "tiene fondo" + color + radius. Quitar el toggle
           es lo mismo que limpiar backgroundColor → la capa vuelve a ser

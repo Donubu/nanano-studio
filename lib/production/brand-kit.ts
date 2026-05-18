@@ -363,6 +363,9 @@ function resolveText(layer: TextLayer, kit: BrandKitContent): TextLayer {
       backgroundColor: s.backgroundColor
         ? resolveColor(s.backgroundColor, kit, "#ffffff")
         : s.backgroundColor,
+      outline: s.outline
+        ? { ...s.outline, color: resolveColor(s.outline.color, kit, "#000000") }
+        : s.outline,
     },
   };
 }

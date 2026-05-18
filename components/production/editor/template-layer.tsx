@@ -310,6 +310,22 @@ function renderText(layer: TextLayer, parentMode: "free" | "stack", common: Comm
       layer.shadow && !style.backgroundColor
         ? `${layer.shadow.x}px ${layer.shadow.y}px ${layer.shadow.blur}px ${layer.shadow.color}`
         : undefined,
+    // Efectos de texto. textDecoration y textTransform son CSS estándar;
+    // outline usa -webkit-text-stroke que React expone como WebkitTextStroke.
+    // Soporte: Chrome/Safari/Firefox modernos — en el editor (Chrome) y en
+    // el export html-to-image funciona.
+    textDecoration:
+      style.textDecoration && style.textDecoration !== "none"
+        ? style.textDecoration
+        : undefined,
+    textTransform:
+      style.textTransform && style.textTransform !== "none"
+        ? style.textTransform
+        : undefined,
+    WebkitTextStroke:
+      style.outline && style.outline.width > 0
+        ? `${style.outline.width}px ${style.outline.color}`
+        : undefined,
   };
   // Smart text: el render busca el font-size más grande que entre en la caja.
   if (isFontSizeRange(style.fontSize)) {

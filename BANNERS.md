@@ -739,6 +739,13 @@ interface TextLayer extends BaseLayer {
     align?: "left" | "center" | "right";       // default "left"
     verticalAlign?: "top" | "middle" | "bottom"; // default "top"
     italic?: boolean;
+    // Fondo + radius opcionales (botón/badge/ribbon en una sola capa).
+    backgroundColor?: string;       // acepta gradient (ver §5.1.2)
+    backgroundCornerRadius?: number;
+    // Efectos de texto (ver "Efectos" abajo).
+    textDecoration?: "none" | "underline" | "line-through";
+    textTransform?: "none" | "uppercase" | "lowercase" | "capitalize";
+    outline?: { color: string; width: number } | null;
   };
 }
 
@@ -757,6 +764,23 @@ interface FontSizeRange { min: number; max: number; }  // smart text auto-fit
   vertical y horizontal sin pensarlo.
 - `verticalAlign` aplica solo cuando la caja del texto es más alta que el
   contenido renderizado. Útil con SmartText o cuando el espacio sobra.
+
+**Efectos (`textDecoration`, `textTransform`, `outline`):**
+- `textDecoration: "line-through"` → para precio "antes" tachado, sobre el
+  precio nuevo destacado.
+- `textDecoration: "underline"` → uso muy puntual; en banners suele leerse
+  como un link y resta jerarquía visual. Evítalo salvo en casos especiales
+  (precio promocional, link explícito).
+- `textTransform: "uppercase"` → para CTAs cortos ("COMPRAR", "DESCUBRIR")
+  o overlines pequeños. NO uses uppercase en headlines largos: cansa la
+  lectura y rompe el tracking de la tipografía.
+- `outline: { color, width }` → contorno alrededor de los glyphs (CSS
+  `-webkit-text-stroke`). Úsalo SOLO cuando el texto va sobre una imagen
+  con mucho contraste irregular. Para texto sobre fondos planos prefiere
+  `shadow` (más sutil). Reglas: `width` 1-2 para texto chico, 2-5 para
+  headline. Color: blanco con texto oscuro, negro con texto claro — al
+  revés que el `color`. NO uses outline + shadow al mismo tiempo, es ruido
+  visual.
 
 ### 5.4 ImageLayer
 
