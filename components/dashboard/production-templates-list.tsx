@@ -5,12 +5,16 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Loader2, Plus, Layers, Trash2, Rocket } from "lucide-react";
 import { formatDateLocal } from "@/lib/utils";
-import { LayoutTemplatePicker } from "@/components/dashboard/layout-template-picker";
+import {
+  LayoutTemplatePicker,
+  type PickerSource,
+} from "@/components/dashboard/layout-template-picker";
 import {
   findLayoutTemplate,
   freshDefinitionIds,
   CANONICAL_SIZES,
 } from "@/lib/production/layout-templates";
+import { TemplateDefinition } from "@/lib/production/types";
 
 // Master arranca siempre en 16:9 (1920×1080) cuando es Blank. Si el productor
 // elige un layout template, la dimensión sale del template (horizontal por
@@ -76,25 +80,26 @@ export default function ProductionTemplatesList({ productionProjectId }: Props) 
     fetchAll();
   }, [fetchAll]);
 
-  // Crea el template via POST. Dos rutas:
-  //   - layoutTemplateId == null  → Blank, master 16:9 sin definition (la API
-  //     usa el default vacío).
-  //   - layoutTemplateId != null  → instancia un layout template: el master
-  //     toma el aspect horizontal, y se envían las variantes square+vertical
-  //     en el mismo POST. Cada definition se pasa con ids regenerados.
+  // Crea el template via POST. Tres rutas según el source elegido por el
+  // productor en el picker:
+  //   - blank  → POST sin definition: la API arma uno vacío 16:9.
+  //   - layout → instancia un layout del catálogo: master horizontal +
+  //              variants square/vertical, todos con ids frescos.
+  //   - clone  → fetch del template fuente + sus orientaciones, replica
+  //              cada definition con ids frescos para que sea independiente.
   const handleCreate = async ({
     name,
-    layoutTemplateId,
+    source,
   }: {
     name: string;
-    layoutTemplateId: string | null;
+    source: PickerSource;
   }) => {
     try {
       let body: Record<string, unknown>;
-      if (layoutTemplateId) {
-        const lt = findLayoutTemplate(layoutTemplateId);
+      if (source.kind === "layout") {
+        const lt = findLayoutTemplate(source.id);
         if (!lt) {
-          console.error("Layout template no encontrado:", layoutTemplateId);
+          console.error("Layout template no encontrado:", source.id);
           return;
         }
         const masterAspect = CANONICAL_SIZES.horizontal;
@@ -110,7 +115,64 @@ export default function ProductionTemplatesList({ productionProjectId }: Props) 
             definition: freshDefinitionIds(lt.aspects[a]),
           })),
         };
+      } else if (source.kind === "clone") {
+        // Fetcheamos las orientaciones del template fuente (master + variants)
+        // con sus definitions parseadas. El endpoint /orientations devuelve
+        // todos los miembros del design ordenados por id ASC, así que el
+        // primero es el master/principal.
+        const oriRes = await fetch(
+          `/api/production/templates/${source.templateId}/orientations`,
+        );
+        if (!oriRes.ok) {
+          const errBody = await oriRes.json().catch(() => ({}));
+          console.error("Clone: no se pudo leer orientaciones:", errBody);
+          alert("No se pudo leer el template a clonar");
+          return;
+        }
+        interface OrientationRow {
+          id: number;
+          base_width: number;
+          base_height: number;
+          brand_kit_id: number | null;
+          definition: TemplateDefinition | null;
+        }
+        const orientations: OrientationRow[] = await oriRes.json();
+        if (orientations.length === 0) {
+          alert("El template a clonar no tiene orientaciones válidas");
+          return;
+        }
+        // Sort por id ASC para garantizar que el principal (MIN id) sea el
+        // master del clon.
+        orientations.sort((a, b) => a.id - b.id);
+        const master = orientations[0];
+        const variants = orientations.slice(1);
+        if (!master.definition) {
+          alert("El template a clonar no tiene definición");
+          return;
+        }
+        // brand_kit_id se replica desde el master del source: si el productor
+        // venía usando un fork project-scoped customizado, el clon arranca
+        // con el mismo kit (no se re-forkea — sigue siendo el mismo fork
+        // compartido con el original dentro del proyecto). Si después el
+        // productor quiere divergir, lo hace con "Personalizar" desde el
+        // editor del clon, que sí dispara un fork independiente.
+        body = {
+          production_project_id: productionProjectId,
+          name,
+          base_width: master.base_width,
+          base_height: master.base_height,
+          brand_kit_id: master.brand_kit_id ?? null,
+          definition: freshDefinitionIds(master.definition),
+          variants: variants
+            .filter((v) => v.definition != null)
+            .map((v) => ({
+              width: v.base_width,
+              height: v.base_height,
+              definition: freshDefinitionIds(v.definition as TemplateDefinition),
+            })),
+        };
       } else {
+        // blank
         body = {
           production_project_id: productionProjectId,
           name,
@@ -165,6 +227,7 @@ export default function ProductionTemplatesList({ productionProjectId }: Props) 
 
       <LayoutTemplatePicker
         open={showPicker}
+        productionProjectId={productionProjectId}
         onClose={() => setShowPicker(false)}
         onCreate={handleCreate}
       />

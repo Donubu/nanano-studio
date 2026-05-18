@@ -21,6 +21,7 @@ interface OrientationRow extends RowDataPacket {
   production_project_id: number;
   design_id: number | null;
   linked_to_template_id: number | null;
+  brand_kit_id: number | null;
   name: string;
   base_width: number;
   base_height: number;
@@ -61,8 +62,8 @@ export async function GET(
     if (designId == null) {
       const [r] = await pool.execute<OrientationRow[]>(
         `SELECT id, production_project_id, design_id, linked_to_template_id,
-                name, base_width, base_height, thumbnail_url, definition_json,
-                version, created_at, updated_at
+                brand_kit_id, name, base_width, base_height, thumbnail_url,
+                definition_json, version, created_at, updated_at
            FROM production_templates
           WHERE id = ? AND deleted_at IS NULL`,
         [id]
@@ -71,8 +72,8 @@ export async function GET(
     } else {
       const [r] = await pool.execute<OrientationRow[]>(
         `SELECT id, production_project_id, design_id, linked_to_template_id,
-                name, base_width, base_height, thumbnail_url, definition_json,
-                version, created_at, updated_at
+                brand_kit_id, name, base_width, base_height, thumbnail_url,
+                definition_json, version, created_at, updated_at
            FROM production_templates
           WHERE design_id = ? AND deleted_at IS NULL
           ORDER BY id ASC`,
@@ -93,6 +94,7 @@ export async function GET(
         production_project_id: r.production_project_id,
         design_id: r.design_id,
         linked_to_template_id: r.linked_to_template_id,
+        brand_kit_id: r.brand_kit_id,
         name: r.name,
         base_width: r.base_width,
         base_height: r.base_height,

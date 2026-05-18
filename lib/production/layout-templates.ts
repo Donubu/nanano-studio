@@ -144,6 +144,35 @@ const SUBTITLE_STYLE = (size: number): TextLayer["style"] => ({
   align: "left",
 });
 
+// Estilo neutro para fondos claros (cuando el banner usa cream / blanco).
+const TITLE_DARK = (size: number): TextLayer["style"] => ({
+  fontFamily: "Inter, system-ui, sans-serif",
+  fontSize: size,
+  fontWeight: 800,
+  color: "#0F172A",
+  lineHeight: 1.05,
+  align: "left",
+});
+const SUBTITLE_DARK = (size: number): TextLayer["style"] => ({
+  fontFamily: "Inter, system-ui, sans-serif",
+  fontSize: size,
+  fontWeight: 500,
+  color: "#475569",
+  lineHeight: 1.3,
+  align: "left",
+});
+
+// Estilo para botones / CTAs renderizados como text encima de una shape.
+const CTA_STYLE = (size: number): TextLayer["style"] => ({
+  fontFamily: "Inter, system-ui, sans-serif",
+  fontSize: size,
+  fontWeight: 700,
+  color: "#ffffff",
+  lineHeight: 1,
+  align: "center",
+  verticalAlign: "middle",
+});
+
 // ---- Templates ----
 
 // 1. Hero Centered — fondo rojo, titular grande arriba, imagen centro,
@@ -248,10 +277,248 @@ const badgePromo: LayoutTemplate = {
   },
 };
 
+// 4. Compact Sale — banner tipo "ribbon" para promos chatas y wide. Texto
+//    grande a la izq, precio destacado al centro, CTA a la der. Estilo retail
+//    típico de Adwords / banner web.
+const compactSale: LayoutTemplate = {
+  id: "compact-sale",
+  name: "Compact Sale",
+  description: "Banner promo en row: título a la izq, precio al centro, CTA a la der. Ideal para banners web horizontales.",
+  aspects: {
+    horizontal: root(1920, 1080, "#0EA5E9", [
+      text("title", { x: 80, y: 380 }, { w: 900, h: 280 }, "OFERTA\nDEL DÍA", { ...TITLE_STYLE(180), align: "left", lineHeight: 0.95 }, "Headline"),
+      shape("price-bg", { x: 1040, y: 360 }, { w: 480, h: 320 }, "#FACC15", 24, "Fondo precio"),
+      text("price", { x: 1040, y: 360 }, { w: 480, h: 320 }, "$0.000", { ...PRICE_STYLE(140), verticalAlign: "middle" }, "Precio"),
+      shape("cta-bg", { x: 1600, y: 460 }, { w: 240, h: 120 }, "#0F172A", 60, "Fondo CTA"),
+      text("cta", { x: 1600, y: 460 }, { w: 240, h: 120 }, "COMPRAR", CTA_STYLE(38), "CTA"),
+    ]),
+    square: root(1080, 1080, "#0EA5E9", [
+      text("title", { x: 60, y: 120 }, { w: 960, h: 320 }, "OFERTA\nDEL DÍA", { ...TITLE_STYLE(160), align: "center", lineHeight: 0.95 }, "Headline"),
+      shape("price-bg", { x: 240, y: 500 }, { w: 600, h: 280 }, "#FACC15", 20, "Fondo precio"),
+      text("price", { x: 240, y: 500 }, { w: 600, h: 280 }, "$0.000", { ...PRICE_STYLE(140), verticalAlign: "middle" }, "Precio"),
+      shape("cta-bg", { x: 340, y: 880 }, { w: 400, h: 120 }, "#0F172A", 60, "Fondo CTA"),
+      text("cta", { x: 340, y: 880 }, { w: 400, h: 120 }, "COMPRAR", CTA_STYLE(44), "CTA"),
+    ]),
+    vertical: root(1080, 1920, "#0EA5E9", [
+      text("title", { x: 60, y: 180 }, { w: 960, h: 480 }, "OFERTA\nDEL DÍA", { ...TITLE_STYLE(220), align: "center", lineHeight: 0.9 }, "Headline"),
+      shape("price-bg", { x: 140, y: 880 }, { w: 800, h: 360 }, "#FACC15", 28, "Fondo precio"),
+      text("price", { x: 140, y: 880 }, { w: 800, h: 360 }, "$0.000", { ...PRICE_STYLE(180), verticalAlign: "middle" }, "Precio"),
+      shape("cta-bg", { x: 290, y: 1620 }, { w: 500, h: 160 }, "#0F172A", 80, "Fondo CTA"),
+      text("cta", { x: 290, y: 1620 }, { w: 500, h: 160 }, "COMPRAR", CTA_STYLE(60), "CTA"),
+    ]),
+  },
+};
+
+// 5. Product Spotlight — fondo claro, etiqueta "NUEVO" arriba, imagen
+//    centrada del producto, nombre y precio abajo. Estilo e-commerce.
+const productSpotlight: LayoutTemplate = {
+  id: "product-spotlight",
+  name: "Product Spotlight",
+  description: "Producto centrado con tag NUEVO arriba, nombre y precio abajo. Fondo claro, estilo e-commerce premium.",
+  aspects: {
+    horizontal: root(1920, 1080, "#FAFAF9", [
+      shape("tag-bg", { x: 860, y: 60 }, { w: 200, h: 60 }, "#DC2626", 30, "Tag NUEVO"),
+      text("tag", { x: 860, y: 60 }, { w: 200, h: 60 }, "NUEVO", CTA_STYLE(28), "Texto tag"),
+      image("hero", { x: 660, y: 160 }, { w: 600, h: 600 }, "Imagen producto"),
+      text("title", { x: 80, y: 800 }, { w: 1760, h: 100 }, "Nombre del producto", { ...TITLE_DARK(70), align: "center" }, "Nombre"),
+      text("price", { x: 80, y: 920 }, { w: 1760, h: 100 }, "$0.000", { ...PRICE_STYLE(72), align: "center", color: "#DC2626" }, "Precio"),
+    ]),
+    square: root(1080, 1080, "#FAFAF9", [
+      shape("tag-bg", { x: 440, y: 60 }, { w: 200, h: 60 }, "#DC2626", 30, "Tag NUEVO"),
+      text("tag", { x: 440, y: 60 }, { w: 200, h: 60 }, "NUEVO", CTA_STYLE(28), "Texto tag"),
+      image("hero", { x: 240, y: 160 }, { w: 600, h: 600 }, "Imagen producto"),
+      text("title", { x: 60, y: 800 }, { w: 960, h: 80 }, "Nombre del producto", { ...TITLE_DARK(56), align: "center" }, "Nombre"),
+      text("price", { x: 60, y: 900 }, { w: 960, h: 100 }, "$0.000", { ...PRICE_STYLE(64), align: "center", color: "#DC2626" }, "Precio"),
+    ]),
+    vertical: root(1080, 1920, "#FAFAF9", [
+      shape("tag-bg", { x: 440, y: 120 }, { w: 200, h: 60 }, "#DC2626", 30, "Tag NUEVO"),
+      text("tag", { x: 440, y: 120 }, { w: 200, h: 60 }, "NUEVO", CTA_STYLE(28), "Texto tag"),
+      image("hero", { x: 90, y: 280 }, { w: 900, h: 900 }, "Imagen producto"),
+      text("title", { x: 60, y: 1280 }, { w: 960, h: 200 }, "Nombre del producto", { ...TITLE_DARK(90), align: "center" }, "Nombre"),
+      text("price", { x: 60, y: 1520 }, { w: 960, h: 200 }, "$0.000", { ...PRICE_STYLE(120), align: "center", color: "#DC2626" }, "Precio"),
+    ]),
+  },
+};
+
+// 6. Urgency — texto urgente arriba ("ÚLTIMOS 3 DÍAS"), producto al centro,
+//    precio destacado. Comunica scarcity. Fondo rojo oscuro intenso.
+const urgency: LayoutTemplate = {
+  id: "urgency",
+  name: "Urgency / Countdown",
+  description: "Mensaje de urgencia arriba ('ÚLTIMOS 3 DÍAS'), producto al centro, precio destacado. Para flash sales.",
+  aspects: {
+    horizontal: root(1920, 1080, "#7F1D1D", [
+      text("urgency", { x: 80, y: 60 }, { w: 1760, h: 100 }, "⏰ ÚLTIMOS 3 DÍAS", { ...TITLE_STYLE(72), align: "center", color: "#FACC15" }, "Urgencia"),
+      text("title", { x: 80, y: 200 }, { w: 1100, h: 280 }, "Tu titular promo", TITLE_STYLE(110), "Headline"),
+      text("subtitle", { x: 80, y: 500 }, { w: 1100, h: 80 }, "Descripción breve del descuento", SUBTITLE_STYLE(36), "Subtítulo"),
+      image("hero", { x: 1280, y: 200 }, { w: 560, h: 700 }, "Imagen producto"),
+      shape("price-bg", { x: 80, y: 800 }, { w: 480, h: 180 }, "#FACC15", 20, "Fondo precio"),
+      text("price", { x: 80, y: 800 }, { w: 480, h: 180 }, "$0.000", { ...PRICE_STYLE(96), verticalAlign: "middle" }, "Precio"),
+    ]),
+    square: root(1080, 1080, "#7F1D1D", [
+      text("urgency", { x: 60, y: 60 }, { w: 960, h: 80 }, "⏰ ÚLTIMOS 3 DÍAS", { ...TITLE_STYLE(56), align: "center", color: "#FACC15" }, "Urgencia"),
+      text("title", { x: 60, y: 180 }, { w: 960, h: 200 }, "Tu titular promo", { ...TITLE_STYLE(90), align: "center" }, "Headline"),
+      image("hero", { x: 240, y: 420 }, { w: 600, h: 480 }, "Imagen producto"),
+      shape("price-bg", { x: 340, y: 920 }, { w: 400, h: 120 }, "#FACC15", 16, "Fondo precio"),
+      text("price", { x: 340, y: 920 }, { w: 400, h: 120 }, "$0.000", { ...PRICE_STYLE(72), verticalAlign: "middle" }, "Precio"),
+    ]),
+    vertical: root(1080, 1920, "#7F1D1D", [
+      text("urgency", { x: 60, y: 120 }, { w: 960, h: 100 }, "⏰ ÚLTIMOS 3 DÍAS", { ...TITLE_STYLE(64), align: "center", color: "#FACC15" }, "Urgencia"),
+      text("title", { x: 60, y: 260 }, { w: 960, h: 320 }, "Tu titular promo", { ...TITLE_STYLE(120), align: "center" }, "Headline"),
+      image("hero", { x: 90, y: 660 }, { w: 900, h: 900 }, "Imagen producto"),
+      shape("price-bg", { x: 290, y: 1660 }, { w: 500, h: 180 }, "#FACC15", 18, "Fondo precio"),
+      text("price", { x: 290, y: 1660 }, { w: 500, h: 180 }, "$0.000", { ...PRICE_STYLE(110), verticalAlign: "middle" }, "Precio"),
+    ]),
+  },
+};
+
+// 7. Testimonial — comillas grandes decorativas + quote en texto grande +
+//    autor abajo. Fondo dark sobrio.
+const testimonial: LayoutTemplate = {
+  id: "testimonial",
+  name: "Testimonial",
+  description: "Quote grande con comillas decorativas y autor abajo. Para social proof y referencias.",
+  aspects: {
+    horizontal: root(1920, 1080, "#1E293B", [
+      text("quotemark", { x: 80, y: 60 }, { w: 200, h: 200 }, '"', { ...TITLE_STYLE(240), color: "#FACC15", lineHeight: 1 }, "Comillas"),
+      text("quote", { x: 80, y: 260 }, { w: 1760, h: 500 }, "“Texto del testimonial. Sustituí esto con la cita real del cliente que mejor exprese el valor.”", { ...TITLE_STYLE(56), lineHeight: 1.3, fontWeight: 500 }, "Quote"),
+      text("author", { x: 80, y: 820 }, { w: 1760, h: 80 }, "— Nombre del autor", { ...SUBTITLE_STYLE(36), color: "#FACC15" }, "Autor"),
+      text("role", { x: 80, y: 910 }, { w: 1760, h: 60 }, "Cargo · Empresa", SUBTITLE_STYLE(28), "Cargo"),
+    ]),
+    square: root(1080, 1080, "#1E293B", [
+      text("quotemark", { x: 60, y: 60 }, { w: 160, h: 160 }, '"', { ...TITLE_STYLE(200), color: "#FACC15", lineHeight: 1 }, "Comillas"),
+      text("quote", { x: 60, y: 240 }, { w: 960, h: 540 }, "“Texto del testimonial. Sustituí esto con la cita del cliente.”", { ...TITLE_STYLE(54), lineHeight: 1.3, fontWeight: 500 }, "Quote"),
+      text("author", { x: 60, y: 840 }, { w: 960, h: 80 }, "— Nombre del autor", { ...SUBTITLE_STYLE(34), color: "#FACC15" }, "Autor"),
+      text("role", { x: 60, y: 940 }, { w: 960, h: 60 }, "Cargo · Empresa", SUBTITLE_STYLE(26), "Cargo"),
+    ]),
+    vertical: root(1080, 1920, "#1E293B", [
+      text("quotemark", { x: 60, y: 200 }, { w: 200, h: 200 }, '"', { ...TITLE_STYLE(240), color: "#FACC15", lineHeight: 1 }, "Comillas"),
+      text("quote", { x: 60, y: 460 }, { w: 960, h: 1000 }, "“Texto del testimonial. Sustituí esto con la cita real del cliente que mejor exprese el valor entregado.”", { ...TITLE_STYLE(72), lineHeight: 1.3, fontWeight: 500 }, "Quote"),
+      text("author", { x: 60, y: 1560 }, { w: 960, h: 100 }, "— Nombre del autor", { ...SUBTITLE_STYLE(44), color: "#FACC15" }, "Autor"),
+      text("role", { x: 60, y: 1680 }, { w: 960, h: 80 }, "Cargo · Empresa", SUBTITLE_STYLE(34), "Cargo"),
+    ]),
+  },
+};
+
+// 8. CTA Block — texto grande sobre fondo sólido + botón shape + texto.
+//    Minimalista, alta legibilidad. Para anuncios de feature / landing.
+const ctaBlock: LayoutTemplate = {
+  id: "cta-block",
+  name: "CTA Block",
+  description: "Mensaje grande + botón. Minimalista y de alta legibilidad. Para anuncios sin imagen.",
+  aspects: {
+    horizontal: root(1920, 1080, "#FACC15", [
+      text("headline", { x: 80, y: 200 }, { w: 1760, h: 360 }, "Tu mensaje grande acá", { ...TITLE_DARK(140), align: "center", lineHeight: 1.05 }, "Headline"),
+      text("subtitle", { x: 80, y: 600 }, { w: 1760, h: 100 }, "Texto secundario explicando el valor", { ...SUBTITLE_DARK(40), align: "center" }, "Subtítulo"),
+      shape("cta-bg", { x: 760, y: 800 }, { w: 400, h: 140 }, "#0F172A", 70, "Fondo CTA"),
+      text("cta", { x: 760, y: 800 }, { w: 400, h: 140 }, "Probar ahora", CTA_STYLE(40), "CTA"),
+    ]),
+    square: root(1080, 1080, "#FACC15", [
+      text("headline", { x: 60, y: 200 }, { w: 960, h: 400 }, "Tu mensaje grande acá", { ...TITLE_DARK(110), align: "center", lineHeight: 1.05 }, "Headline"),
+      text("subtitle", { x: 60, y: 640 }, { w: 960, h: 100 }, "Texto secundario", { ...SUBTITLE_DARK(36), align: "center" }, "Subtítulo"),
+      shape("cta-bg", { x: 340, y: 820 }, { w: 400, h: 140 }, "#0F172A", 70, "Fondo CTA"),
+      text("cta", { x: 340, y: 820 }, { w: 400, h: 140 }, "Probar ahora", CTA_STYLE(40), "CTA"),
+    ]),
+    vertical: root(1080, 1920, "#FACC15", [
+      text("headline", { x: 60, y: 360 }, { w: 960, h: 720 }, "Tu mensaje grande acá", { ...TITLE_DARK(160), align: "center", lineHeight: 1.05 }, "Headline"),
+      text("subtitle", { x: 60, y: 1140 }, { w: 960, h: 160 }, "Texto secundario explicando el valor", { ...SUBTITLE_DARK(44), align: "center" }, "Subtítulo"),
+      shape("cta-bg", { x: 290, y: 1500 }, { w: 500, h: 160 }, "#0F172A", 80, "Fondo CTA"),
+      text("cta", { x: 290, y: 1500 }, { w: 500, h: 160 }, "Probar ahora", CTA_STYLE(50), "CTA"),
+    ]),
+  },
+};
+
+// 9. Coupon — estilo de cupón con borde dashed (representado por shape rect
+//    sobre bg con leve offset) + código de descuento prominente + términos.
+const coupon: LayoutTemplate = {
+  id: "coupon",
+  name: "Coupon / Código",
+  description: "Cupón con código de descuento, descuento prominente y términos chicos. Para email/SMS marketing.",
+  aspects: {
+    horizontal: root(1920, 1080, "#FFFFFF", [
+      shape("frame-outer", { x: 80, y: 80 }, { w: 1760, h: 920 }, "#FACC15", 24, "Marco"),
+      shape("frame-inner", { x: 120, y: 120 }, { w: 1680, h: 840 }, "#FFFFFF", 16, "Interior"),
+      text("title", { x: 160, y: 180 }, { w: 1600, h: 100 }, "DESCUENTO EXCLUSIVO", { ...TITLE_DARK(60), align: "center", letterSpacing: 4 }, "Headline"),
+      text("discount", { x: 160, y: 320 }, { w: 1600, h: 280 }, "-30%", { ...PRICE_STYLE(280), align: "center", color: "#DC2626" }, "Descuento"),
+      text("code-label", { x: 160, y: 640 }, { w: 1600, h: 60 }, "Usa el código:", { ...SUBTITLE_DARK(32), align: "center", color: "#475569" }, "Label código"),
+      shape("code-bg", { x: 660, y: 720 }, { w: 600, h: 100 }, "#0F172A", 8, "Fondo código"),
+      text("code", { x: 660, y: 720 }, { w: 600, h: 100 }, "PROMO30", { ...CTA_STYLE(54), letterSpacing: 8 }, "Código"),
+      text("terms", { x: 160, y: 880 }, { w: 1600, h: 40 }, "Válido hasta el 31/12. No acumulable con otras promociones.", { ...SUBTITLE_DARK(20), align: "center", color: "#94A3B8" }, "Términos"),
+    ]),
+    square: root(1080, 1080, "#FFFFFF", [
+      shape("frame-outer", { x: 60, y: 60 }, { w: 960, h: 960 }, "#FACC15", 24, "Marco"),
+      shape("frame-inner", { x: 100, y: 100 }, { w: 880, h: 880 }, "#FFFFFF", 16, "Interior"),
+      text("title", { x: 140, y: 160 }, { w: 800, h: 80 }, "DESCUENTO EXCLUSIVO", { ...TITLE_DARK(44), align: "center", letterSpacing: 3 }, "Headline"),
+      text("discount", { x: 140, y: 280 }, { w: 800, h: 280 }, "-30%", { ...PRICE_STYLE(220), align: "center", color: "#DC2626" }, "Descuento"),
+      text("code-label", { x: 140, y: 620 }, { w: 800, h: 60 }, "Usa el código:", { ...SUBTITLE_DARK(28), align: "center", color: "#475569" }, "Label código"),
+      shape("code-bg", { x: 240, y: 700 }, { w: 600, h: 100 }, "#0F172A", 8, "Fondo código"),
+      text("code", { x: 240, y: 700 }, { w: 600, h: 100 }, "PROMO30", { ...CTA_STYLE(48), letterSpacing: 6 }, "Código"),
+      text("terms", { x: 140, y: 880 }, { w: 800, h: 60 }, "Válido hasta el 31/12. No acumulable.", { ...SUBTITLE_DARK(18), align: "center", color: "#94A3B8" }, "Términos"),
+    ]),
+    vertical: root(1080, 1920, "#FFFFFF", [
+      shape("frame-outer", { x: 60, y: 200 }, { w: 960, h: 1520 }, "#FACC15", 24, "Marco"),
+      shape("frame-inner", { x: 100, y: 240 }, { w: 880, h: 1440 }, "#FFFFFF", 16, "Interior"),
+      text("title", { x: 140, y: 320 }, { w: 800, h: 100 }, "DESCUENTO EXCLUSIVO", { ...TITLE_DARK(52), align: "center", letterSpacing: 3 }, "Headline"),
+      text("discount", { x: 140, y: 500 }, { w: 800, h: 480 }, "-30%", { ...PRICE_STYLE(320), align: "center", color: "#DC2626" }, "Descuento"),
+      text("code-label", { x: 140, y: 1080 }, { w: 800, h: 80 }, "Usa el código:", { ...SUBTITLE_DARK(36), align: "center", color: "#475569" }, "Label código"),
+      shape("code-bg", { x: 240, y: 1200 }, { w: 600, h: 140 }, "#0F172A", 8, "Fondo código"),
+      text("code", { x: 240, y: 1200 }, { w: 600, h: 140 }, "PROMO30", { ...CTA_STYLE(64), letterSpacing: 8 }, "Código"),
+      text("terms", { x: 140, y: 1580 }, { w: 800, h: 80 }, "Válido hasta el 31/12. No acumulable con otras promociones.", { ...SUBTITLE_DARK(22), align: "center", color: "#94A3B8" }, "Términos"),
+    ]),
+  },
+};
+
+// 10. Event Promo — fecha grande prominente, título del evento, venue/info.
+//     Para anuncios de eventos, lanzamientos, conferencias.
+const eventPromo: LayoutTemplate = {
+  id: "event-promo",
+  name: "Event Promo",
+  description: "Fecha prominente, título del evento y venue/info abajo. Para eventos, lanzamientos, conferencias.",
+  aspects: {
+    horizontal: root(1920, 1080, "#1E293B", [
+      shape("date-bg", { x: 80, y: 200 }, { w: 600, h: 680 }, "#DC2626", 24, "Fondo fecha"),
+      text("day", { x: 80, y: 240 }, { w: 600, h: 280 }, "15", { ...PRICE_STYLE(240), color: "#FFFFFF", align: "center", verticalAlign: "middle" }, "Día"),
+      text("month", { x: 80, y: 520 }, { w: 600, h: 120 }, "MARZO", { ...TITLE_STYLE(96), align: "center", letterSpacing: 8 }, "Mes"),
+      text("year", { x: 80, y: 680 }, { w: 600, h: 180 }, "2025", { ...PRICE_STYLE(140), color: "#FACC15", align: "center" }, "Año"),
+      text("title", { x: 760, y: 240 }, { w: 1080, h: 320 }, "Título del evento", { ...TITLE_STYLE(110), lineHeight: 1.05 }, "Título"),
+      text("venue", { x: 760, y: 580 }, { w: 1080, h: 80 }, "📍 Venue / Ubicación", SUBTITLE_STYLE(40), "Venue"),
+      text("time", { x: 760, y: 680 }, { w: 1080, h: 80 }, "🕐 19:00 hrs", SUBTITLE_STYLE(40), "Hora"),
+      shape("cta-bg", { x: 760, y: 820 }, { w: 400, h: 100 }, "#FACC15", 50, "Fondo CTA"),
+      text("cta", { x: 760, y: 820 }, { w: 400, h: 100 }, "Reservar", { ...CTA_STYLE(36), color: "#0F172A" }, "CTA"),
+    ]),
+    square: root(1080, 1080, "#1E293B", [
+      shape("date-bg", { x: 290, y: 60 }, { w: 500, h: 400 }, "#DC2626", 24, "Fondo fecha"),
+      text("day", { x: 290, y: 80 }, { w: 500, h: 200 }, "15", { ...PRICE_STYLE(180), color: "#FFFFFF", align: "center", verticalAlign: "middle" }, "Día"),
+      text("month-year", { x: 290, y: 300 }, { w: 500, h: 140 }, "MARZO 2025", { ...TITLE_STYLE(56), align: "center", letterSpacing: 4 }, "Mes / año"),
+      text("title", { x: 60, y: 520 }, { w: 960, h: 220 }, "Título del evento", { ...TITLE_STYLE(80), align: "center", lineHeight: 1.05 }, "Título"),
+      text("venue", { x: 60, y: 780 }, { w: 960, h: 60 }, "📍 Venue · 🕐 19:00", { ...SUBTITLE_STYLE(34), align: "center" }, "Venue + hora"),
+      shape("cta-bg", { x: 340, y: 900 }, { w: 400, h: 100 }, "#FACC15", 50, "Fondo CTA"),
+      text("cta", { x: 340, y: 900 }, { w: 400, h: 100 }, "Reservar", { ...CTA_STYLE(36), color: "#0F172A" }, "CTA"),
+    ]),
+    vertical: root(1080, 1920, "#1E293B", [
+      shape("date-bg", { x: 140, y: 160 }, { w: 800, h: 500 }, "#DC2626", 24, "Fondo fecha"),
+      text("day", { x: 140, y: 180 }, { w: 800, h: 240 }, "15", { ...PRICE_STYLE(220), color: "#FFFFFF", align: "center", verticalAlign: "middle" }, "Día"),
+      text("month-year", { x: 140, y: 440 }, { w: 800, h: 180 }, "MARZO 2025", { ...TITLE_STYLE(80), align: "center", letterSpacing: 6 }, "Mes / año"),
+      text("title", { x: 60, y: 760 }, { w: 960, h: 380 }, "Título del evento", { ...TITLE_STYLE(120), align: "center", lineHeight: 1.05 }, "Título"),
+      text("venue", { x: 60, y: 1200 }, { w: 960, h: 100 }, "📍 Venue / Ubicación", { ...SUBTITLE_STYLE(48), align: "center" }, "Venue"),
+      text("time", { x: 60, y: 1320 }, { w: 960, h: 100 }, "🕐 19:00 hrs", { ...SUBTITLE_STYLE(48), align: "center" }, "Hora"),
+      shape("cta-bg", { x: 290, y: 1600 }, { w: 500, h: 160 }, "#FACC15", 80, "Fondo CTA"),
+      text("cta", { x: 290, y: 1600 }, { w: 500, h: 160 }, "Reservar", { ...CTA_STYLE(52), color: "#0F172A" }, "CTA"),
+    ]),
+  },
+};
+
 export const LAYOUT_TEMPLATES: LayoutTemplate[] = [
   heroCentered,
   split,
   badgePromo,
+  compactSale,
+  productSpotlight,
+  urgency,
+  testimonial,
+  ctaBlock,
+  coupon,
+  eventPromo,
 ];
 
 // Devuelve el template por id, o null si no existe.

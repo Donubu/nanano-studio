@@ -17,6 +17,7 @@ interface BrandKitRow extends RowDataPacket {
   is_default: number;
   created_at: Date;
   updated_at: Date;
+  deleted_at: Date | null;
 }
 
 export async function GET(
@@ -31,7 +32,8 @@ export async function GET(
     const { id } = await params;
     const [rows] = await pool.execute<BrandKitRow[]>(
       `SELECT id, client_id, name, colors_json, typography_json, logos_json,
-              spacing_json, rules_text, is_default, created_at, updated_at
+              spacing_json, rules_text, is_default, created_at, updated_at,
+              deleted_at
          FROM production_brand_kits WHERE id = ?`,
       [id]
     );
@@ -64,6 +66,9 @@ export async function PUT(
       spacing_json: z.unknown().optional(),
       rules_text: z.string().max(20000).nullable().optional(),
       is_default: z.boolean().optional(),
+      // restore=true reactiva un kit soft-deleted: deleted_at vuelve a NULL.
+      // Lo usa el dashboard del cliente desde la sección "Eliminados".
+      restore: z.boolean().optional(),
     });
     const parsed = await parseBody(request, schema);
     if (parsed.error) return parsed.error;
@@ -95,6 +100,9 @@ export async function PUT(
     }
     if (d.rules_text !== undefined) { updates.push("rules_text = ?"); values.push(d.rules_text); }
     if (d.is_default !== undefined) { updates.push("is_default = ?"); values.push(d.is_default ? 1 : 0); }
+    if (d.restore === true) {
+      updates.push("deleted_at = NULL");
+    }
 
     if (updates.length === 0) {
       return NextResponse.json({ success: true });
@@ -115,6 +123,13 @@ export async function PUT(
   }
 }
 
+// DELETE - Soft delete. Setea deleted_at=NOW() en vez de remover la fila.
+// El admin puede listar los soft-deleted via GET ?include_deleted=true y
+// reactivar via PUT { restore: true }. Templates que apuntaban al kit no
+// pierden la referencia — al reactivarlo vuelven a funcionar.
+//
+// Solo idempotente sobre rows no-deleted; si ya estaba soft-deleted devuelve
+// 404 (igual que si no existiera) para evitar timestamps fantasma.
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -126,7 +141,8 @@ export async function DELETE(
     }
     const { id } = await params;
     const [result] = await pool.execute<ResultSetHeader>(
-      `DELETE FROM production_brand_kits WHERE id = ?`,
+      `UPDATE production_brand_kits SET deleted_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND deleted_at IS NULL`,
       [id]
     );
     if (result.affectedRows === 0) {

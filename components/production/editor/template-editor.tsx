@@ -12,7 +12,6 @@ import { LayersPanel } from "./layers-panel";
 import { PropertiesPanel } from "./properties-panel";
 import { EditorToolbar } from "./editor-toolbar";
 import { PreviewThumbnails, ThumbnailPreset } from "./preview-thumbnails";
-import { ProjectBrandKitModal } from "./project-brand-kit-modal";
 import { LayerContextMenu, LayerContextMenuPosition } from "./layer-context-menu";
 
 interface Props {
@@ -79,10 +78,7 @@ export function TemplateEditor({
   // null = master (no preview overlay). Selecting a preset shows it in the
   // main canvas; clicking the active thumb again returns to null/master.
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
-  const [showProjectKit, setShowProjectKit] = useState(false);
   const [contextMenu, setContextMenu] = useState<LayerContextMenuPosition | null>(null);
-
-  const canOpenProjectKit = !!(clientId && projectId);
 
   const openContextMenu = useCallback(
     (clientX: number, clientY: number, layerId: string) => {
@@ -185,25 +181,16 @@ export function TemplateEditor({
           onAddShape={editor.addShape}
           saveStatus={editor.saveStatus}
           lastSavedAt={editor.lastSavedAt}
-          onOpenProjectBrandKit={
-            canOpenProjectKit ? () => setShowProjectKit(true) : undefined
-          }
+          // El opener del modal de brand kit ahora vive en el caller (producir
+          // page), no en el editor. El editor solo provee el slot vía el
+          // prop onOpenProjectBrandKit, que el padre decide si pasar.
+          onOpenProjectBrandKit={undefined}
           onUndo={editor.undo}
           onRedo={editor.redo}
           canUndo={editor.canUndo}
           canRedo={editor.canRedo}
         />
       </div>
-
-      {showProjectKit && clientId && projectId && (
-        <ProjectBrandKitModal
-          clientId={clientId}
-          projectId={projectId}
-          existingKits={allBrandKits}
-          onClose={() => setShowProjectKit(false)}
-          onChanged={() => onBrandKitsChange?.()}
-        />
-      )}
 
       {contextMenu && ctxLayer && (
         <LayerContextMenu

@@ -19,14 +19,17 @@ interface BrandKitRow extends RowDataPacket {
   created_by: number | null;
   created_at: Date;
   updated_at: Date;
+  deleted_at: Date | null;
 }
 
 // GET - List brand kits.
 // Query params:
-//   - client_id (required): the owning client
-//   - production_project_id (optional): when provided, the response also
-//     includes kits scoped to that project. Without it, only client-wide
-//     kits (production_project_id IS NULL) are returned.
+//   - client_id (required): the owning client.
+//   - production_project_id (optional): cuando se pasa, además incluye los
+//     kits project-scoped del proyecto. Sin él, solo cliente-wide.
+//   - include_deleted (optional, "true"/"1"): incluye los soft-deleted. Por
+//     default los filtramos para que el editor de producción no los liste.
+//     El dashboard del cliente lo pasa para mostrar la sección "Eliminados".
 export async function GET(request: NextRequest) {
   try {
     const session = await auth();
@@ -36,13 +39,16 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const clientId = searchParams.get("client_id");
     const projectId = searchParams.get("production_project_id");
+    const includeDeletedRaw = searchParams.get("include_deleted");
+    const includeDeleted =
+      includeDeletedRaw === "true" || includeDeletedRaw === "1";
     if (!clientId) {
       return NextResponse.json({ error: "client_id es requerido" }, { status: 400 });
     }
 
     let sql = `SELECT id, client_id, production_project_id, name, colors_json,
                       typography_json, logos_json, spacing_json, rules_text,
-                      is_default, created_by, created_at, updated_at
+                      is_default, created_by, created_at, updated_at, deleted_at
                  FROM production_brand_kits
                 WHERE client_id = ?`;
     const values: (string | number)[] = [clientId];
@@ -52,7 +58,10 @@ export async function GET(request: NextRequest) {
     } else {
       sql += ` AND production_project_id IS NULL`;
     }
-    sql += ` ORDER BY production_project_id IS NULL DESC, is_default DESC, name ASC`;
+    if (!includeDeleted) {
+      sql += ` AND deleted_at IS NULL`;
+    }
+    sql += ` ORDER BY deleted_at IS NULL DESC, production_project_id IS NULL DESC, is_default DESC, name ASC`;
 
     const [rows] = await pool.execute<BrandKitRow[]>(sql, values);
     return NextResponse.json(rows);

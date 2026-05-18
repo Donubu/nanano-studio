@@ -1,16 +1,20 @@
 "use client";
 
-// Modal-style picker para elegir un layout template inicial al crear un
-// nuevo production_template. Las opciones son:
-//   - "Blank" (canvas vacío, comportamiento histórico).
-//   - Cada LayoutTemplate del catálogo en lib/production/layout-templates.ts.
+// Modal-style picker para elegir el punto de partida de un nuevo template.
+// Tres orígenes posibles, todos en una sola UI con tabs:
 //
-// Cada card muestra previews scaled de las 3 orientaciones (horizontal,
-// square, vertical) para que el productor entienda cómo cambia el layout
-// entre formatos antes de instanciar.
+//   1. "Blank"            — canvas vacío.
+//   2. "Plantillas"       — uno de los layouts pre-armados del catálogo.
+//   3. "Clonar existente" — copia exacta de otro template del mismo proyecto
+//                          (master + variantes), útil para variar contenido
+//                          sin re-componer el layout desde cero.
+//
+// Cada selección actualiza `pickedSource` (discriminated union). Al pulsar
+// Crear, el caller recibe el source y arma el POST correspondiente:
+// blank/layout → definition pre-armada; clone → fetch + replicar.
 
-import { CSSProperties, useState } from "react";
-import { Loader2, Plus, Sparkles, X } from "lucide-react";
+import { CSSProperties, useCallback, useEffect, useState } from "react";
+import { Copy, Loader2, Plus, Rocket, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -20,16 +24,72 @@ import {
 } from "@/lib/production/layout-templates";
 import { TemplateDefinition, TemplateLayer } from "@/lib/production/types";
 
-interface Props {
-  open: boolean;
-  onClose: () => void;
-  onCreate: (params: { name: string; layoutTemplateId: string | null }) => Promise<void>;
+export type PickerSource =
+  | { kind: "blank" }
+  | { kind: "layout"; id: string }
+  | { kind: "clone"; templateId: number };
+
+// Shape mínimo de un template existente del proyecto, según lo que devuelve
+// /api/production/templates. Solo usamos los campos visibles en la card.
+interface ExistingTemplate {
+  id: number;
+  name: string;
+  base_width: number;
+  base_height: number;
+  variant_count: number;
+  adaptation_count: number;
+  updated_at: string;
 }
 
-export function LayoutTemplatePicker({ open, onClose, onCreate }: Props) {
+interface Props {
+  open: boolean;
+  productionProjectId: number;
+  onClose: () => void;
+  onCreate: (params: { name: string; source: PickerSource }) => Promise<void>;
+}
+
+type TabKey = "templates" | "clone";
+
+export function LayoutTemplatePicker({
+  open,
+  productionProjectId,
+  onClose,
+  onCreate,
+}: Props) {
   const [name, setName] = useState("");
-  const [pickedId, setPickedId] = useState<string | null>(null); // null = blank
+  const [tab, setTab] = useState<TabKey>("templates");
+  const [pickedSource, setPickedSource] = useState<PickerSource>({ kind: "blank" });
   const [creating, setCreating] = useState(false);
+
+  // Templates existentes del proyecto para el tab "Clonar". Se cargan al
+  // entrar al tab por primera vez para no pagar el fetch si el productor
+  // solo usa el catálogo.
+  const [existing, setExisting] = useState<ExistingTemplate[] | null>(null);
+  const [loadingExisting, setLoadingExisting] = useState(false);
+
+  const fetchExisting = useCallback(async () => {
+    setLoadingExisting(true);
+    try {
+      const res = await fetch(
+        `/api/production/templates?production_project_id=${productionProjectId}`,
+      );
+      if (res.ok) {
+        setExisting(await res.json());
+      } else {
+        setExisting([]);
+      }
+    } catch {
+      setExisting([]);
+    } finally {
+      setLoadingExisting(false);
+    }
+  }, [productionProjectId]);
+
+  useEffect(() => {
+    if (open && tab === "clone" && existing == null && !loadingExisting) {
+      fetchExisting();
+    }
+  }, [open, tab, existing, loadingExisting, fetchExisting]);
 
   if (!open) return null;
 
@@ -37,13 +97,26 @@ export function LayoutTemplatePicker({ open, onClose, onCreate }: Props) {
     if (!name.trim() || creating) return;
     setCreating(true);
     try {
-      await onCreate({ name: name.trim(), layoutTemplateId: pickedId });
+      await onCreate({ name: name.trim(), source: pickedSource });
       setName("");
-      setPickedId(null);
+      setPickedSource({ kind: "blank" });
+      setTab("templates");
     } finally {
       setCreating(false);
     }
   };
+
+  // Descripción del source actual para que el productor sepa qué va a crear
+  // antes de pulsar el botón final.
+  const sourceLabel = (() => {
+    if (pickedSource.kind === "blank") return "Canvas vacío";
+    if (pickedSource.kind === "layout") {
+      const t = LAYOUT_TEMPLATES.find((x) => x.id === pickedSource.id);
+      return t ? `Plantilla: ${t.name}` : "Plantilla";
+    }
+    const t = existing?.find((x) => x.id === pickedSource.templateId);
+    return t ? `Clonando: ${t.name}` : "Clon de template existente";
+  })();
 
   return (
     <div
@@ -57,7 +130,7 @@ export function LayoutTemplatePicker({ open, onClose, onCreate }: Props) {
           <div>
             <h2 className="text-sm font-semibold">Nuevo template</h2>
             <p className="text-xs text-muted-foreground">
-              Empieza desde un layout pre-armado o desde un canvas vacío.
+              Empieza desde una plantilla, clona uno existente o canvas vacío.
             </p>
           </div>
           <Button variant="ghost" size="icon" onClick={onClose}>
@@ -76,54 +149,159 @@ export function LayoutTemplatePicker({ open, onClose, onCreate }: Props) {
           />
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Card "Blank" — siempre primera, default */}
-            <TemplateCard
-              picked={pickedId === null}
-              onPick={() => setPickedId(null)}
-              title="Blank"
-              description="Canvas 16:9 vacío. Construye desde cero."
-            >
-              <div className="flex items-center justify-center w-full h-full bg-muted/30 border border-dashed border-border/40 rounded">
-                <Plus className="h-8 w-8 text-muted-foreground/40" />
-              </div>
-            </TemplateCard>
-
-            {LAYOUT_TEMPLATES.map((lt) => (
-              <TemplateCard
-                key={lt.id}
-                picked={pickedId === lt.id}
-                onPick={() => setPickedId(lt.id)}
-                title={lt.name}
-                description={lt.description}
-              >
-                <TemplateMultiPreview template={lt} />
-              </TemplateCard>
-            ))}
-          </div>
+        {/* Tabs */}
+        <div className="flex items-center gap-1 px-5 pt-3 border-b border-border/50">
+          <TabButton
+            active={tab === "templates"}
+            onClick={() => setTab("templates")}
+            icon={<Sparkles className="h-3.5 w-3.5" />}
+          >
+            Plantillas
+          </TabButton>
+          <TabButton
+            active={tab === "clone"}
+            onClick={() => setTab("clone")}
+            icon={<Copy className="h-3.5 w-3.5" />}
+          >
+            Clonar existente
+          </TabButton>
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border/50 bg-muted/20">
-          <Button variant="ghost" size="sm" onClick={onClose} disabled={creating}>
-            Cancelar
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleSubmit}
-            disabled={!name.trim() || creating}
-            className="gap-1"
-          >
-            {creating ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="h-4 w-4" />
-            )}
-            Crear
-          </Button>
+        <div className="flex-1 overflow-y-auto p-5">
+          {tab === "templates" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* Card "Blank" — siempre primera, default. */}
+              <TemplateCard
+                picked={pickedSource.kind === "blank"}
+                onPick={() => setPickedSource({ kind: "blank" })}
+                title="Blank"
+                description="Canvas 16:9 vacío. Construye desde cero."
+              >
+                <div className="flex items-center justify-center w-full h-full bg-muted/30 border border-dashed border-border/40 rounded">
+                  <Plus className="h-8 w-8 text-muted-foreground/40" />
+                </div>
+              </TemplateCard>
+
+              {LAYOUT_TEMPLATES.map((lt) => (
+                <TemplateCard
+                  key={lt.id}
+                  picked={
+                    pickedSource.kind === "layout" && pickedSource.id === lt.id
+                  }
+                  onPick={() => setPickedSource({ kind: "layout", id: lt.id })}
+                  title={lt.name}
+                  description={lt.description}
+                >
+                  <TemplateMultiPreview template={lt} />
+                </TemplateCard>
+              ))}
+            </div>
+          )}
+
+          {tab === "clone" && (
+            <>
+              {loadingExisting ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : !existing || existing.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">
+                  Aún no hay templates en este proyecto para clonar.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {existing.map((t) => (
+                    <TemplateCard
+                      key={t.id}
+                      picked={
+                        pickedSource.kind === "clone" &&
+                        pickedSource.templateId === t.id
+                      }
+                      onPick={() =>
+                        setPickedSource({ kind: "clone", templateId: t.id })
+                      }
+                      title={t.name}
+                      description={`${t.base_width}×${t.base_height}${
+                        t.variant_count > 0
+                          ? ` · +${t.variant_count} orientación${
+                              t.variant_count === 1 ? "" : "es"
+                            }`
+                          : ""
+                      }${
+                        t.adaptation_count > 0
+                          ? ` · ${t.adaptation_count} adaptaciones`
+                          : ""
+                      }`}
+                    >
+                      <div
+                        className="flex items-center justify-center w-full h-full bg-muted/30 rounded"
+                        style={{
+                          aspectRatio: `${t.base_width} / ${t.base_height}`,
+                        }}
+                      >
+                        <Rocket className="h-8 w-8 text-muted-foreground/40" />
+                      </div>
+                    </TemplateCard>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-border/50 bg-muted/20">
+          <span className="text-xs text-muted-foreground truncate">
+            {sourceLabel}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={onClose} disabled={creating}>
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSubmit}
+              disabled={!name.trim() || creating}
+              className="gap-1"
+            >
+              {creating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              Crear
+            </Button>
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  icon,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors -mb-px",
+        active
+          ? "border-primary text-foreground"
+          : "border-transparent text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {icon}
+      {children}
+    </button>
   );
 }
 

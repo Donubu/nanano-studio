@@ -47,13 +47,13 @@ import {
   newRootFrame,
 } from "@/lib/production/types";
 import { TemplateEditor } from "@/components/production/editor/template-editor";
+import { ProjectBrandKitModal } from "@/components/production/editor/project-brand-kit-modal";
 import { deriveManualLayoutFromMaster } from "@/lib/production/overrides";
 import {
   BrandKit,
   BrandKitContent,
   EMPTY_KIT_CONTENT,
   brandKitFromApi,
-  mergeKits,
   resolveTreeTokens,
 } from "@/lib/production/brand-kit";
 import { reflowForPreview } from "@/lib/production/reflow";
@@ -92,6 +92,7 @@ interface Template {
   production_project_id: number;
   design_id: number | null;
   linked_to_template_id: number | null;
+  brand_kit_id: number | null;
   name: string;
   base_width: number;
   base_height: number;
@@ -205,9 +206,22 @@ export default function ProducirPage() {
   //   null  → master del template (variante activa)
   //   N     → adaptación N (override editing)
   const [editingId, setEditingId] = useState<number | null>(null);
+  // Snapshot del overrides_json de la adaptación al momento de entrar a
+  // editarla. Si el productor cancela, restauramos este valor (o reset_overrides
+  // si no había). Sin esto, los cambios auto-guardados del editor ya están
+  // persistidos y "cancelar" no podría revertirlos.
+  const editSnapshotRef = useRef<string | null>(null);
+  // Ref del wrapper de la section del editor — sirve para hacer scrollIntoView
+  // cuando el productor clickea Editar en una adaptación lejos del viewport.
+  const editorSectionRef = useRef<HTMLElement | null>(null);
 
   // Modal para agregar variante del master.
   const [showAddVariant, setShowAddVariant] = useState(false);
+
+  // Modal de edición del brand kit ACTIVO. Cuando es != null, se monta el
+  // modal sobre el kit con ese id. El productor lo dispara con "Editar" o
+  // "Personalizar para este proyecto" (fork + abrir editor).
+  const [editingKitId, setEditingKitId] = useState<number | null>(null);
 
   // Modal de Banner Designer (IA): id de la orientación que se está adaptando.
   // null = modal cerrado. La modal se monta como overlay y maneja su propio
@@ -255,8 +269,9 @@ export default function ProducirPage() {
     }
   }, []);
 
-  // Re-fetcheable desde el TemplateEditor cuando el modal de brand-kit del
-  // proyecto guarda cambios; también lo usa fetchAll para hidratar al cargar.
+  // Re-fetcheable cuando se guardan cambios en un brand kit o se crea un fork.
+  // Solo actualiza la lista — el `brandKitContent` activo se deriva aparte
+  // desde `template.brand_kit_id` (ver useEffect más abajo).
   const fetchBrandKits = useCallback(async (cid: number, projectId: number) => {
     const res = await fetch(
       `/api/production/brand-kits?client_id=${cid}&production_project_id=${projectId}`
@@ -266,13 +281,6 @@ export default function ProducirPage() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const parsed: BrandKit[] = rows.map((r: any) => brandKitFromApi(r));
     setBrandKits(parsed);
-    const clientWide = parsed.filter((k) => k.production_project_id === null);
-    const projectScoped = parsed.filter((k) => k.production_project_id != null);
-    const baseClient = clientWide.find((k) => k.is_default) ?? clientWide[0];
-    const baseProject = projectScoped.find((k) => k.is_default) ?? projectScoped[0];
-    setBrandKitContent(
-      mergeKits(...[baseClient, baseProject].filter((x): x is BrandKit => !!x))
-    );
   }, []);
 
   const fetchAll = useCallback(async () => {
@@ -361,6 +369,115 @@ export default function ProducirPage() {
     }
     fetchAll();
   }, [fetchAll, session, sessionStatus, router]);
+
+  // El brand kit ACTIVO viene de template.brand_kit_id. Si no apunta a ningún
+  // kit válido, queda vacío (EMPTY_KIT_CONTENT). El cascade default+default
+  // que existía antes se eliminó: ahora el productor elige explícitamente
+  // qué kit usar.
+  const activeBrandKit = useMemo(() => {
+    if (!template?.brand_kit_id) return null;
+    return brandKits.find((k) => k.id === template.brand_kit_id) ?? null;
+  }, [template?.brand_kit_id, brandKits]);
+
+  useEffect(() => {
+    setBrandKitContent(activeBrandKit?.content ?? EMPTY_KIT_CONTENT);
+  }, [activeBrandKit]);
+
+  // Cambia el brand kit base del template. PUT al template + estado local
+  // optimista (cambio inmediato; si falla, el siguiente refetch lo corrige).
+  const handleSelectBrandKit = useCallback(
+    async (kitId: number | null) => {
+      if (!template) return;
+      const prev = template.brand_kit_id;
+      setTemplate((cur) => (cur ? { ...cur, brand_kit_id: kitId } : cur));
+      const res = await fetch(`/api/production/templates/${template.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brand_kit_id: kitId }),
+      });
+      if (!res.ok) {
+        setTemplate((cur) => (cur ? { ...cur, brand_kit_id: prev } : cur));
+        const body = await res.json().catch(() => ({}));
+        alert(body?.error || `No se pudo cambiar el brand kit (HTTP ${res.status})`);
+      }
+    },
+    [template]
+  );
+
+  // Soft-delete del brand kit ACTIVO (debe ser project-scoped). Pide confirm.
+  // Después de borrar: refetch kits, y si el template apuntaba a este kit,
+  // re-asignamos al default cliente-wide (o NULL si no hay) para que el
+  // editor no quede en estado "kit roto".
+  const handleDeleteActiveBrandKit = useCallback(async () => {
+    if (!template || !activeBrandKit) return;
+    if (activeBrandKit.production_project_id == null) {
+      // Kits cliente-wide no se borran desde producción. Esa acción vive en
+      // el dashboard del cliente. Acá solo se borran forks project-scoped.
+      return;
+    }
+    const ok = confirm(
+      `¿Eliminar el brand kit "${activeBrandKit.name}"? Queda como eliminado y el administrador podrá reactivarlo desde el dashboard del cliente.`,
+    );
+    if (!ok) return;
+    const res = await fetch(
+      `/api/production/brand-kits/${activeBrandKit.id}`,
+      { method: "DELETE" },
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      alert(body?.error || `No se pudo eliminar (HTTP ${res.status})`);
+      return;
+    }
+    // Refetch + reasignar a un fallback razonable.
+    if (clientId) {
+      await fetchBrandKits(clientId, template.production_project_id);
+    }
+    // Buscamos el default cliente-wide para reasignar; si no hay, queda null.
+    const fallbackRes = await fetch(
+      `/api/production/brand-kits?client_id=${clientId}&production_project_id=${template.production_project_id}`,
+    );
+    if (fallbackRes.ok) {
+      const rows: unknown[] = await fallbackRes.json();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const parsed: BrandKit[] = rows.map((r: any) => brandKitFromApi(r));
+      const fallback =
+        parsed.find((k) => k.production_project_id == null && k.is_default) ??
+        parsed.find((k) => k.production_project_id == null) ??
+        null;
+      await handleSelectBrandKit(fallback?.id ?? null);
+    }
+  }, [template, activeBrandKit, clientId, fetchBrandKits, handleSelectBrandKit]);
+
+  // Forkea el brand kit activo (snapshot independiente al proyecto) y lo
+  // marca como activo. Devuelve el nuevo kit id para que el caller pueda
+  // abrir el editor sobre él. Si no hay kit activo o no es cliente-wide,
+  // no hace nada.
+  const handleForkBrandKit = useCallback(async (): Promise<number | null> => {
+    if (!template || !activeBrandKit) return null;
+    if (activeBrandKit.production_project_id != null) {
+      // Ya es project-scoped: no forkeamos, retornamos su id para abrir editor.
+      return activeBrandKit.id;
+    }
+    const res = await fetch("/api/production/brand-kits/fork", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source_kit_id: activeBrandKit.id,
+        production_project_id: template.production_project_id,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      alert(body?.error || `No se pudo personalizar (HTTP ${res.status})`);
+      return null;
+    }
+    const newKitRow = await res.json();
+    if (clientId) {
+      await fetchBrandKits(clientId, template.production_project_id);
+    }
+    await handleSelectBrandKit(newKitRow.id);
+    return newKitRow.id as number;
+  }, [template, activeBrandKit, clientId, fetchBrandKits, handleSelectBrandKit]);
 
   // Orientación activa: la que está abierta en el editor en este momento.
   // Cambia con setActiveOrientationId (no requiere recarga ni navegación).
@@ -471,6 +588,98 @@ export default function ProducirPage() {
       );
     },
     [designId, editingId]
+  );
+
+  // Entra al modo edición de una adaptación: snapshot del overrides_json
+  // actual (para poder cancelar después) + scroll del editor al viewport
+  // para que el productor entienda que la pieza está abierta arriba.
+  const handleEditAdaptation = useCallback((adaptationId: number) => {
+    const adapt = adaptations.find((a) => a.id === adaptationId);
+    editSnapshotRef.current = adapt?.overrides_json ?? null;
+    setEditingId(adaptationId);
+    // requestAnimationFrame asegura que el editor terminó de renderear con
+    // la nueva initial definition antes de hacer scroll.
+    requestAnimationFrame(() => {
+      editorSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }, [adaptations]);
+
+  // Cancela la edición de la adaptación: descarta los cambios que se hayan
+  // auto-guardado restaurando el overrides_json al snapshot inicial. Si no
+  // había overrides previos, ejecuta reset_overrides=true (vuelve a derivar
+  // del master). Después cierra el modo edición.
+  const handleCancelEditAdaptation = useCallback(async () => {
+    if (editingId == null || designId == null) {
+      setEditingId(null);
+      return;
+    }
+    const snapshot = editSnapshotRef.current;
+    let body: Record<string, unknown>;
+    if (snapshot) {
+      // Restaurar al overrides_json original. Como ya es un string JSON
+      // serializado, podemos mandarlo así — el endpoint acepta string.
+      body = { overrides_json: snapshot };
+    } else {
+      body = { reset_overrides: true };
+    }
+    const res = await fetch(
+      `/api/production/designs/${designId}/adaptations/${editingId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      alert(errBody?.error || `No se pudo cancelar los cambios (HTTP ${res.status})`);
+      return;
+    }
+    setAdaptations((cur) =>
+      cur.map((a) =>
+        a.id === editingId ? { ...a, overrides_json: snapshot } : a,
+      ),
+    );
+    setEditingId(null);
+    editSnapshotRef.current = null;
+  }, [designId, editingId]);
+
+  // Quita el ajuste manual de una adaptación SIN tocar el modo edición
+  // (esto se invoca desde la card al hacer hover, fuera del flujo de editar).
+  // La adaptación vuelve a derivar automáticamente del master cercano.
+  const handleResetAdaptationOverride = useCallback(
+    async (adaptationId: number) => {
+      if (designId == null) return;
+      if (
+        !confirm(
+          "¿Quitar el ajuste manual? La pieza volverá a derivar automáticamente del master.",
+        )
+      ) {
+        return;
+      }
+      const res = await fetch(
+        `/api/production/designs/${designId}/adaptations/${adaptationId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reset_overrides: true }),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        alert(body?.error || `No se pudo quitar el ajuste (HTTP ${res.status})`);
+        return;
+      }
+      setAdaptations((cur) =>
+        cur.map((a) =>
+          a.id === adaptationId ? { ...a, overrides_json: null } : a,
+        ),
+      );
+    },
+    [designId],
   );
 
   // Bulk add de adaptaciones. Ya no hay autoDistribute — todas las adaptaciones
@@ -1065,33 +1274,76 @@ export default function ProducirPage() {
             Por defecto edita el master. Click en una adaptación más abajo
             cambia el editor a esa adaptación; el botón "Volver al master"
             arriba del editor regresa al master. */}
-        <section className="bg-card rounded-xl border border-border/50 overflow-hidden">
-          {/* Barra superior del editor: solo aparece cuando hay algo que
-              indicar (estamos editando una adaptación). El master por
-              defecto se ve sin chrome arriba. */}
+        <section
+          ref={editorSectionRef}
+          className="bg-card rounded-xl border border-border/50 overflow-hidden scroll-mt-4"
+        >
+          {/* Selector de brand kit base. Lista todos los kits disponibles
+              (client-wide + project-scoped del proyecto) y permite cambiar
+              el activo. Si el activo es client-wide, el botón ofrece
+              "Personalizar para este proyecto" (fork). Si ya es un fork
+              project-scoped, el botón ofrece "Editar". */}
+          {editingId == null && (
+            <BrandKitSelectorBar
+              kits={brandKits}
+              activeKit={activeBrandKit}
+              onSelect={handleSelectBrandKit}
+              onPersonalize={async () => {
+                const newKitId = await handleForkBrandKit();
+                if (newKitId != null) setEditingKitId(newKitId);
+              }}
+              onEdit={() => {
+                if (activeBrandKit) setEditingKitId(activeBrandKit.id);
+              }}
+              onDelete={handleDeleteActiveBrandKit}
+            />
+          )}
+
+          {/* Huincha de edición independiente. Visible cuando se está
+              editando una adaptación (no el master). Color sólido alto
+              contraste para que el productor entienda que no está editando
+              el master. Dos acciones:
+                - "Cancelar": revierte los cambios auto-guardados al estado
+                  original (snapshot al entrar) y vuelve al master.
+                - "Listo": deja los cambios persistidos y vuelve al master.
+              El auto-save del editor sigue corriendo en background. */}
           {editingId != null && editingAdaptation && (
-            <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50 bg-muted/30">
+            <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-500 text-white border-b border-amber-600">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium leading-tight">
+                  Editando pieza independiente ·{" "}
+                  {editingAdaptation.custom_name ||
+                    editingAdaptation.preset_name ||
+                    `${editingAdaptation.width}×${editingAdaptation.height}`}{" "}
+                  ({editingAdaptation.width}×{editingAdaptation.height})
+                </p>
+                <p className="text-[11px] text-amber-50/90 leading-tight mt-0.5">
+                  Los cambios solo se reflejan en esta pieza, no en el master
+                  ni en otras adaptaciones.
+                </p>
+              </div>
               <button
                 type="button"
-                onClick={() => setEditingId(null)}
-                className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-border/50 hover:bg-muted hover:border-foreground/40 transition-colors"
+                onClick={handleCancelEditAdaptation}
+                className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded bg-white/15 hover:bg-white/25 border border-white/30 transition-colors font-medium"
+                title="Descarta los cambios y vuelve al master"
               >
-                <ArrowLeft className="h-3 w-3" />
-                Volver al master
+                <X className="h-3.5 w-3.5" />
+                Cancelar
               </button>
-              <span className="text-muted-foreground/50">·</span>
-              <span className="text-[10px] uppercase tracking-wider text-amber-300">
-                Ajustando adaptación
-              </span>
-              <span className="text-foreground font-medium text-xs">
-                {editingAdaptation.custom_name ||
-                  editingAdaptation.preset_name ||
-                  `${editingAdaptation.width}×${editingAdaptation.height}`}
-              </span>
-              <span className="text-muted-foreground/50">·</span>
-              <span className="text-xs text-muted-foreground">
-                {editingAdaptation.width}×{editingAdaptation.height}
-              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingId(null);
+                  editSnapshotRef.current = null;
+                }}
+                className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded bg-white text-amber-700 hover:bg-amber-50 transition-colors font-medium"
+                title="Guarda los cambios y vuelve al master"
+              >
+                <Check className="h-3.5 w-3.5" />
+                Listo
+              </button>
             </div>
           )}
           <div className="h-[70vh] min-h-[480px] relative">
@@ -1293,10 +1545,11 @@ export default function ProducirPage() {
                           brandKit={brandKitContent}
                           dataRow={previewRow}
                           isEditing={editingId === a.id}
-                          onEdit={() => setEditingId(a.id)}
+                          onEdit={() => handleEditAdaptation(a.id)}
                           onDelete={() => handleDelete(a.id)}
                           onFitModeChange={(m) => handleFitModeChange(a.id, m)}
                           onSourceChange={(srcId) => handleSourceChange(a.id, srcId)}
+                          onResetOverride={() => handleResetAdaptationOverride(a.id)}
                           onDownload={() => handleDownloadSingle(a)}
                           downloading={singleDownloadingId === a.id}
                           batchInProgress={!!batchProgress}
@@ -1322,6 +1575,24 @@ export default function ProducirPage() {
           onAdd={handleAddVariant}
         />
       )}
+
+      {/* Modal de edición de brand kit (fork project-scoped). El productor
+          lo dispara con "Editar" o "Personalizar". Al guardar refetchea la
+          lista y cierra el modal. */}
+      {editingKitId != null && clientId && template && (() => {
+        const kit = brandKits.find((k) => k.id === editingKitId);
+        if (!kit) return null;
+        return (
+          <ProjectBrandKitModal
+            kit={kit}
+            onClose={() => setEditingKitId(null)}
+            onSaved={() => {
+              if (clientId)
+                fetchBrandKits(clientId, template.production_project_id);
+            }}
+          />
+        );
+      })()}
 
       {aiAdaptTargetId != null && (() => {
         const targetOri = orientations.find((o) => o.id === aiAdaptTargetId);
@@ -1412,6 +1683,7 @@ function AdaptationCard({
   onDelete,
   onFitModeChange,
   onSourceChange,
+  onResetOverride,
   onDownload,
   downloading,
   batchInProgress,
@@ -1435,6 +1707,10 @@ function AdaptationCard({
   onFitModeChange: (m: FitMode) => void;
   // null = volver a auto-pick. number = fijar esa orientación como source.
   onSourceChange: (sourceTemplateId: number | null) => void;
+  // Quita el ajuste manual (overrides_json.manual_layout) — la adaptación
+  // vuelve a derivar automáticamente del master. Visible solo cuando la
+  // adaptación tiene manual_layout.
+  onResetOverride: () => void;
   onDownload: () => void;
   downloading: boolean;
   batchInProgress: boolean;
@@ -1476,42 +1752,66 @@ function AdaptationCard({
   return (
     <div
       className={cn(
-        "bg-muted/50 rounded-lg flex flex-col group border transition-colors overflow-hidden",
+        "bg-muted/50 rounded-lg flex flex-col group border-2 transition-colors overflow-hidden relative",
         isEditing
           ? "border-primary ring-2 ring-primary/40"
-          : "border-border/60 hover:border-foreground/30"
+          : hasManualOverride
+            // Cuando la pieza tiene manual_layout: borde emerald sólido +
+            // ring tenue. Se distingue a simple vista en la grilla — el
+            // productor ve cuáles están "desconectadas" de su source y ya no
+            // siguen al master automáticamente.
+            ? "border-emerald-500/70 ring-1 ring-emerald-500/20 hover:border-emerald-400"
+            : "border-border/60 hover:border-foreground/30"
       )}
     >
+      {/* Esquina superior izquierda: marca visual de "desconectada". Igual
+          que el ícono Unlink que usa el strip para orientaciones diferenciadas,
+          acá el cable cortado señala que esta adaptación no recibe cambios
+          del source automáticamente. El botón X (visible on hover de la card)
+          quita el ajuste manual y devuelve la pieza a depender del master. */}
+      {hasManualOverride && (
+        <div
+          className="absolute top-0 left-0 z-10 flex items-stretch text-[10px] font-medium rounded-br-md bg-emerald-500 text-white overflow-hidden shadow-sm"
+        >
+          <span
+            className="flex items-center gap-1 px-1.5 py-0.5"
+            title="Esta pieza está desconectada de su source — cambios al master no se propagan acá."
+          >
+            <Unlink className="h-3 w-3" />
+            Independiente
+          </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onResetOverride();
+            }}
+            className="px-1.5 border-l border-white/30 bg-emerald-600 hover:bg-emerald-700 opacity-0 group-hover:opacity-100 transition-opacity flex items-center"
+            title="Quitar ajuste manual y volver a depender del master"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
       {/* Title bar: nombre + dims arriba, siempre visible. */}
       <div className="px-3 pt-2 pb-1.5 flex items-baseline justify-between gap-2 min-w-0">
-        <p className="text-sm font-medium truncate flex-1 min-w-0">{label}</p>
+        <p className={cn("text-sm font-medium truncate flex-1 min-w-0", hasManualOverride && "pl-20")}>{label}</p>
         <span className="text-[10px] text-muted-foreground shrink-0 font-mono">
           {adaptation.width}×{adaptation.height}
         </span>
       </div>
-      {/* Tags siempre visibles bajo el título: "Aspect distinto" y "Ajuste
-          manual". Antes vivían dentro del overlay hover y costaban leer; ahora
-          son chips sólidos en alto contraste que se ven todo el tiempo. */}
-      {(extremeMismatch || hasManualOverride) && (
+      {/* "Aspect distinto" se mantiene como chip sólido bajo el título.
+          "Independiente" se muestra como badge en la esquina superior izq
+          (arriba) — no se duplica acá para no saturar visualmente. */}
+      {extremeMismatch && !hasManualOverride && (
         <div className="px-3 pb-1.5 flex items-center gap-1.5 flex-wrap">
-          {hasManualOverride && (
-            <span
-              className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500 text-white"
-              title="Esta pieza tiene un layout manual; los cambios al master no la afectan"
-            >
-              <Pencil className="h-3 w-3" />
-              Ajuste manual
-            </span>
-          )}
-          {extremeMismatch && !hasManualOverride && (
-            <span
-              className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500 text-white"
-              title="Este formato tiene un aspect ratio muy distinto al del master — considera ajustarlo a mano"
-            >
-              <AlertTriangle className="h-3 w-3" />
-              Aspect distinto
-            </span>
-          )}
+          <span
+            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500 text-white"
+            title="Este formato tiene un aspect ratio muy distinto al del master — considera ajustarlo a mano"
+          >
+            <AlertTriangle className="h-3 w-3" />
+            Aspect distinto
+          </span>
         </div>
       )}
 
@@ -2317,6 +2617,123 @@ function PresetShape({
 
 function noop() {}
 
+// BrandKitSelectorBar: barra arriba del editor con dropdown de brand kits
+// disponibles + acción de editar/personalizar. Reemplaza al cascade default
+// implícito que existía antes — ahora el productor elige el kit base de
+// forma explícita y los forks project-scoped se acumulan en la lista.
+function BrandKitSelectorBar({
+  kits,
+  activeKit,
+  onSelect,
+  onPersonalize,
+  onEdit,
+  onDelete,
+}: {
+  kits: BrandKit[];
+  activeKit: BrandKit | null;
+  onSelect: (kitId: number | null) => void;
+  // Forkea el kit cliente-wide activo y abre el editor sobre el fork.
+  // Solo se invoca cuando el activo es cliente-wide.
+  onPersonalize: () => void;
+  // Abre el editor sobre el activo (que ya debe ser project-scoped).
+  onEdit: () => void;
+  // Soft-delete del kit activo. Solo aplica a project-scoped forks.
+  onDelete: () => void;
+}) {
+  const isClientWide = activeKit?.production_project_id == null;
+  const activeIsProjectScoped = !!activeKit && activeKit.production_project_id != null;
+
+  return (
+    <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50 bg-muted/20 text-xs">
+      {/* Acciones a la izquierda; label + select + badge alineados a la
+          derecha. El spacer flex-1 va ANTES del label para empujarlos. */}
+      {activeIsProjectScoped && (
+        <>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="flex items-center gap-1 px-2 py-1 rounded border border-border/50 hover:bg-muted hover:border-foreground/40 transition-colors text-foreground"
+            title="Editar tokens del kit del proyecto"
+          >
+            <Pencil className="h-3 w-3" />
+            Editar
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            className="flex items-center gap-1 px-2 py-1 rounded border border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors"
+            title="Eliminar este brand kit del proyecto (soft-delete; el admin puede reactivarlo desde el dashboard)"
+          >
+            <Trash2 className="h-3 w-3" />
+            Eliminar
+          </button>
+        </>
+      )}
+      <div className="flex-1" />
+      <span className="text-muted-foreground shrink-0">Brand kit base:</span>
+      <select
+        value={activeKit?.id ?? ""}
+        onChange={(e) => {
+          const v = e.target.value;
+          onSelect(v === "" ? null : Number(v));
+        }}
+        className="bg-muted border border-border/50 rounded px-2 py-1 text-xs min-w-0 max-w-xs"
+        title="Elegí qué brand kit alimenta tokens al editor en este template"
+      >
+        <option value="">— sin brand kit —</option>
+        {/* Agrupamos por scope para que el productor distinga visualmente */}
+        <optgroup label="Cliente">
+          {kits
+            .filter((k) => k.production_project_id == null)
+            .map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.name}
+                {k.is_default ? " · default" : ""}
+              </option>
+            ))}
+        </optgroup>
+        <optgroup label="Proyecto (forks)">
+          {kits
+            .filter((k) => k.production_project_id != null)
+            .map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.name}
+              </option>
+            ))}
+        </optgroup>
+      </select>
+      {activeKit && (
+        <span
+          className={cn(
+            "text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0",
+            isClientWide
+              ? "bg-blue-500/15 text-blue-300 border border-blue-500/30"
+              : "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30",
+          )}
+          title={
+            isClientWide
+              ? "Este kit pertenece al cliente y se comparte con todos sus proyectos."
+              : "Este kit es un fork específico de este proyecto; editarlo no afecta al original."
+          }
+        >
+          {isClientWide ? "cliente" : "proyecto"}
+        </span>
+      )}
+      {isClientWide && activeKit && (
+        <button
+          type="button"
+          onClick={onPersonalize}
+          className="flex items-center gap-1 px-2 py-1 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+          title="Crea una copia editable de este kit, scoped a este proyecto. El original no se modifica."
+        >
+          <Pencil className="h-3 w-3" />
+          Personalizar para este proyecto
+        </button>
+      )}
+    </div>
+  );
+}
+
 // VariantsStrip: barra horizontal con TODAS las orientaciones del master,
 // incluyendo la que está abierta en el editor (marcada con border primary).
 // Click cambia la orientación activa SIN navegar. La PRINCIPAL (MIN id)
@@ -2872,22 +3289,17 @@ function AiAdaptModal({
     }
   }, [target.id, instructions, referenceUrl]);
 
-  // Pipeline al abrir el modal:
-  //   1. Capture + upload del master (capturePhase: pending → done).
-  //   2. Cuando capture termina (con o sin URL), llamamos al agente.
-  // Si el productor aprieta "Regenerar" después, se reusa el referenceUrl
-  // cacheado — no re-capturamos a menos que el target cambie.
+  // Captura + upload del master ocurre en background al abrir el modal —
+  // el productor puede ir escribiendo instructions mientras tanto. La
+  // llamada al agente NO se dispara automáticamente: requiere click en
+  // "Generar" para que el productor tenga oportunidad de afinar el prompt.
+  // Si el productor genera antes de que termine el capture, igual se dispara
+  // sin imagen de referencia (la imagen llega en la próxima invocación si
+  // captura terminó para entonces).
   useEffect(() => {
     captureAndUpload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [master.id]);
-
-  useEffect(() => {
-    if (capturePhase === "done") {
-      callAgent();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [capturePhase]);
 
   // ¿La orientación target está linkeada al master? Determina si la modal
   // ofrece la elección "solo este formato vs. también al master" o si va
@@ -2952,14 +3364,32 @@ function AiAdaptModal({
             />
           </div>
 
-          {capturePhase === "pending" && (
-            <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin text-violet-400" />
-              <span>Preparando referencia visual del master…</span>
-            </div>
+          {/* Capture/upload del master ocurre en background. Hint inline
+              discreto debajo del textarea para que el productor sepa que
+              la referencia visual se está preparando, sin bloquear la UI. */}
+          {!proposal && !loading && (
+            <p className="text-[10px] text-muted-foreground/80 flex items-center gap-1.5">
+              {capturePhase === "pending" ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin text-violet-400" />
+                  Preparando referencia visual del master en segundo plano…
+                </>
+              ) : referenceUrl ? (
+                <>
+                  <Check className="h-3 w-3 text-emerald-400" />
+                  Referencia visual lista. Pulsa Generar para pedirle al
+                  Banner Designer una propuesta.
+                </>
+              ) : (
+                <span>
+                  Pulsa Generar para pedirle al Banner Designer una
+                  propuesta (sin imagen de referencia).
+                </span>
+              )}
+            </p>
           )}
 
-          {capturePhase === "done" && loading && (
+          {loading && (
             <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin text-violet-400" />
               <span>
@@ -3071,18 +3501,23 @@ function AiAdaptModal({
               Cancelar
             </Button>
             <Button
-              variant="outline"
+              variant={proposal ? "outline" : "default"}
               size="sm"
               onClick={callAgent}
               disabled={loading || accepting}
               className="gap-1"
+              title={
+                proposal
+                  ? "Pide al agente otra propuesta usando las instrucciones actuales"
+                  : "Pide al Banner Designer una propuesta con las instrucciones de arriba"
+              }
             >
               {loading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Sparkles className="h-4 w-4" />
               )}
-              Regenerar
+              {proposal ? "Regenerar" : "Generar"}
             </Button>
             {proposal && targetIsLinked && (
               <Button

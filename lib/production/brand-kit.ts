@@ -61,6 +61,10 @@ export interface BrandKit {
   production_project_id: number | null;
   name: string;
   is_default: boolean;
+  // null cuando está activo. Cuando soft-deleted lleva el timestamp (ISO o
+  // Date dependiendo del transporte). En UI sirve para mostrar el badge
+  // "Eliminado" y el botón de reactivar.
+  deleted_at: string | null;
   content: BrandKitContent;
 }
 
@@ -85,6 +89,7 @@ interface ApiBrandKitRow {
   spacing_json: unknown;
   rules_text: string | null;
   is_default: number | boolean;
+  deleted_at?: string | Date | null;
 }
 
 function parseJsonField(v: unknown): unknown {
@@ -118,6 +123,12 @@ export function brandKitFromApi(row: ApiBrandKitRow): BrandKit {
     production_project_id: row.production_project_id,
     name: row.name,
     is_default: !!row.is_default,
+    deleted_at:
+      row.deleted_at == null
+        ? null
+        : typeof row.deleted_at === "string"
+          ? row.deleted_at
+          : row.deleted_at.toISOString(),
     content: {
       colors: asArray<ColorToken>(row.colors_json, "tokens"),
       fonts: typography?.fonts ?? [],

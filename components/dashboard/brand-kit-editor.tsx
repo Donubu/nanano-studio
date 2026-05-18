@@ -20,6 +20,11 @@ interface Props {
   kit: BrandKit;
   onSaved: (updatedContent: BrandKitContent, updatedName: string, isDefault: boolean) => void;
   onCancel: () => void;
+  // Oculta el checkbox "Default" del header. Default solo aplica al editor
+  // del dashboard del cliente (decide qué kit cliente-wide es la primera
+  // opción al crear templates nuevos); en producción no tiene sentido —
+  // ahí cada template referencia su kit explícitamente vía brand_kit_id.
+  hideDefaultCheckbox?: boolean;
 }
 
 function slugify(s: string) {
@@ -53,7 +58,7 @@ function deriveSlug<T extends { name: string }>(
   return uniqueName(label, others);
 }
 
-export function BrandKitEditor({ kit, onSaved, onCancel }: Props) {
+export function BrandKitEditor({ kit, onSaved, onCancel, hideDefaultCheckbox = false }: Props) {
   const [name, setName] = useState(kit.name);
   const [isDefault, setIsDefault] = useState(kit.is_default);
   const [content, setContent] = useState<BrandKitContent>(kit.content);
@@ -94,14 +99,19 @@ export function BrandKitEditor({ kit, onSaved, onCancel }: Props) {
           placeholder="Nombre del brand kit"
           className="flex-1 bg-muted border border-border/50 rounded-md px-3 py-2 text-sm font-medium"
         />
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={isDefault}
-            onChange={(e) => setIsDefault(e.target.checked)}
-          />
-          Default
-        </label>
+        {!hideDefaultCheckbox && (
+          <label
+            className="flex items-center gap-1.5 text-xs text-muted-foreground"
+            title="Si está marcado, este kit se asocia automáticamente a los templates nuevos del cliente."
+          >
+            <input
+              type="checkbox"
+              checked={isDefault}
+              onChange={(e) => setIsDefault(e.target.checked)}
+            />
+            Default
+          </label>
+        )}
         <Button variant="ghost" size="sm" onClick={onCancel} disabled={saving}>
           Cancelar
         </Button>
