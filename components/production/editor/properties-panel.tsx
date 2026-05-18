@@ -908,6 +908,91 @@ function TextProps({
           ))}
         </div>
       </Section>
+      {/* Fondo del text layer — colapsa el patrón viejo de shape+text a una
+          sola capa. Toggle "tiene fondo" + color + radius. Quitar el toggle
+          es lo mismo que limpiar backgroundColor → la capa vuelve a ser
+          un text "puro". */}
+      <Section title="Fondo">
+        <div className="flex items-center gap-2 text-xs">
+          <span className="w-12 text-muted-foreground">Fondo</span>
+          <label className="flex items-center gap-1 cursor-pointer flex-1">
+            <input
+              type="checkbox"
+              checked={layer.style.backgroundColor != null}
+              onChange={(e) =>
+                updateStyle({
+                  backgroundColor: e.target.checked
+                    ? (layer.style.backgroundColor ?? "#0F172A")
+                    : undefined,
+                  backgroundCornerRadius: e.target.checked
+                    ? (layer.style.backgroundCornerRadius ?? 0)
+                    : undefined,
+                })
+              }
+            />
+            <span className="text-muted-foreground">
+              {layer.style.backgroundColor ? "Activado" : "Sin fondo"}
+            </span>
+          </label>
+        </div>
+        {layer.style.backgroundColor != null && (
+          <>
+            <ColorRow
+              label="Color"
+              value={layer.style.backgroundColor}
+              tokens={brandKit.colors}
+              onChange={(v) => updateStyle({ backgroundColor: v })}
+            />
+            <NumberRow
+              label="Radio"
+              value={layer.style.backgroundCornerRadius ?? 0}
+              min={0}
+              onChange={(v) =>
+                updateStyle({ backgroundCornerRadius: Math.max(0, v) })
+              }
+            />
+            {/* Shortcuts: pill (radius = h/2) y círculo (radius = w/2 si la
+                caja es cuadrada, igual aplicable a no-cuadrada como aprox).
+                Setean el radius al valor exacto del shortcut. */}
+            <div className="flex items-center gap-1 pl-14">
+              <button
+                type="button"
+                onClick={() =>
+                  updateStyle({
+                    backgroundCornerRadius: Math.floor(layer.size.h / 2),
+                  })
+                }
+                className="flex-1 text-[10px] py-1 rounded border border-border/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                title="Pill: radio = altura / 2"
+              >
+                Pill
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  updateStyle({
+                    backgroundCornerRadius: Math.floor(
+                      Math.min(layer.size.w, layer.size.h) / 2,
+                    ),
+                  })
+                }
+                className="flex-1 text-[10px] py-1 rounded border border-border/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                title="Círculo: requiere caja cuadrada para que se vea redondo"
+              >
+                Círculo
+              </button>
+              <button
+                type="button"
+                onClick={() => updateStyle({ backgroundCornerRadius: 0 })}
+                className="flex-1 text-[10px] py-1 rounded border border-border/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                title="Esquinas rectas"
+              >
+                Recto
+              </button>
+            </div>
+          </>
+        )}
+      </Section>
     </>
   );
 }

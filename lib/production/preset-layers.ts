@@ -1,13 +1,14 @@
 // Constructors de capas pre-armadas que el productor inserta de un click.
-// Cada función devuelve una o más TemplateLayer listas para insertar via
-// addLayersToFrame. La idea es darle al productor "building blocks"
-// compuestos comunes en banners (botón CTA, línea divider, badge circular,
-// ribbon) sin que tenga que combinar shape + text manualmente.
+// Cada función devuelve UNA capa (o un array para casos compuestos
+// inevitables) lista para insertar.
 //
-// Si el banner se va a editar en el editor manual, las capas son siblings
-// (no agrupadas en un frame interno) — más fácil de ajustar después que
-// un grupo. El precio es que pueden separarse si el productor borra una
-// pieza accidentalmente.
+// Botón / Badge / Ribbon ahora usan UNA SOLA TextLayer con backgroundColor
+// + backgroundCornerRadius (campos nuevos del schema). Esto reemplaza el
+// patrón viejo de "shape de fondo + text encima" que era engorroso de
+// mover/editar (el productor tenía que seleccionar las 2 capas para
+// modificar como conjunto).
+//
+// Divider sigue como ShapeLayer porque no lleva texto.
 
 import {
   TemplateLayer,
@@ -22,31 +23,17 @@ function uid(): string {
   return `id_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
-// Botón / CTA: shape rect con cornerRadius alto (pill) + text encima
-// centrado. Posicionado de tal forma que el text quede idéntico a la shape
-// y el verticalAlign:middle lo centre verticalmente sin importar el tamaño
-// del texto.
-export function newButtonLayers(cx: number, cy: number): TemplateLayer[] {
+// Botón / CTA: TextLayer con backgroundColor + cornerRadius = h/2 (pill).
+// Texto centrado horizontal y vertical. Una sola capa.
+export function newButtonLayer(cx: number, cy: number): TextLayer {
   const w = 280;
   const h = 80;
-  const pos = { x: cx - w / 2, y: cy - h / 2 };
-  const size = { w, h };
-  const bg: ShapeLayer = {
-    id: uid(),
-    type: "shape",
-    name: "Botón fondo",
-    position: pos,
-    size,
-    shape: "rect",
-    fill: "#0F172A",
-    cornerRadius: h / 2,
-  };
-  const label: TextLayer = {
+  return {
     id: uid(),
     type: "text",
-    name: "Botón texto",
-    position: pos,
-    size,
+    name: "Botón",
+    position: { x: cx - w / 2, y: cy - h / 2 },
+    size: { w, h },
     content: "Comprar ahora",
     style: {
       fontFamily: "Inter, system-ui, sans-serif",
@@ -56,13 +43,14 @@ export function newButtonLayers(cx: number, cy: number): TemplateLayer[] {
       lineHeight: 1,
       align: "center",
       verticalAlign: "middle",
+      backgroundColor: "#0F172A",
+      backgroundCornerRadius: h / 2,
     },
   };
-  return [bg, label];
 }
 
-// Divider / línea: rect chato. Por default horizontal de ancho razonable.
-// El productor luego ajusta dims y rotación.
+// Divider / línea: rect chato. Se mantiene como ShapeLayer porque no
+// lleva texto (no se beneficia del colapso).
 export function newDividerLayer(cx: number, cy: number): ShapeLayer {
   const w = 480;
   const h = 4;
@@ -78,28 +66,17 @@ export function newDividerLayer(cx: number, cy: number): ShapeLayer {
   };
 }
 
-// Badge circular de descuento: ellipse + text "-50%". Tamaño tipo sello
-// pegado a una esquina. Color amarillo (highlight) con texto oscuro.
-export function newBadgeLayers(cx: number, cy: number): TemplateLayer[] {
+// Badge circular de descuento: TextLayer cuadrada con cornerRadius = w/2
+// (círculo perfecto) + backgroundColor amarillo. Una sola capa.
+export function newBadgeLayer(cx: number, cy: number): TextLayer {
   const w = 200;
   const h = 200;
-  const pos = { x: cx - w / 2, y: cy - h / 2 };
-  const size = { w, h };
-  const circle: ShapeLayer = {
-    id: uid(),
-    type: "shape",
-    name: "Badge fondo",
-    position: pos,
-    size,
-    shape: "ellipse",
-    fill: "#FACC15",
-  };
-  const label: TextLayer = {
+  return {
     id: uid(),
     type: "text",
-    name: "Badge texto",
-    position: pos,
-    size,
+    name: "Badge",
+    position: { x: cx - w / 2, y: cy - h / 2 },
+    size: { w, h },
     content: "-50%",
     style: {
       fontFamily: "Inter, system-ui, sans-serif",
@@ -109,35 +86,25 @@ export function newBadgeLayers(cx: number, cy: number): TemplateLayer[] {
       lineHeight: 1,
       align: "center",
       verticalAlign: "middle",
+      backgroundColor: "#FACC15",
+      backgroundCornerRadius: w / 2,
     },
   };
-  return [circle, label];
 }
 
-// Ribbon / cinta diagonal: rect rotado -25° tipo "cinta de oferta" sobre
-// la esquina del banner. Color rojo accent + texto blanco. El productor
-// luego mueve a la esquina deseada.
-export function newRibbonLayers(cx: number, cy: number): TemplateLayer[] {
+// Ribbon / cinta diagonal: TextLayer rotada con backgroundColor rojo.
+// Una sola capa que rota como bloque (no más shape + text que había que
+// rotar por separado).
+export function newRibbonLayer(cx: number, cy: number): TextLayer {
   const w = 360;
   const h = 64;
-  const pos = { x: cx - w / 2, y: cy - h / 2 };
-  const size = { w, h };
-  const bg: ShapeLayer = {
-    id: uid(),
-    type: "shape",
-    name: "Ribbon fondo",
-    position: pos,
-    size,
-    shape: "rect",
-    fill: "#DC2626",
-    rotation: -25,
-  };
-  const label: TextLayer = {
+  return {
     id: uid(),
     type: "text",
-    name: "Ribbon texto",
-    position: pos,
-    size,
+    name: "Ribbon",
+    position: { x: cx - w / 2, y: cy - h / 2 },
+    size: { w, h },
+    rotation: -25,
     content: "¡OFERTA!",
     style: {
       fontFamily: "Inter, system-ui, sans-serif",
@@ -148,8 +115,22 @@ export function newRibbonLayers(cx: number, cy: number): TemplateLayer[] {
       align: "center",
       verticalAlign: "middle",
       letterSpacing: 2,
+      backgroundColor: "#DC2626",
     },
-    rotation: -25,
   };
-  return [bg, label];
+}
+
+// Mantengo los nombres viejos (plurales) por compat con código que ya los
+// llama. Cada uno wrapea el nuevo singular en un array.
+//
+// TODO eventual: borrar estos wrappers y migrar las llamadas en
+// use-template-editor.ts a los singulares.
+export function newButtonLayers(cx: number, cy: number): TemplateLayer[] {
+  return [newButtonLayer(cx, cy)];
+}
+export function newBadgeLayers(cx: number, cy: number): TemplateLayer[] {
+  return [newBadgeLayer(cx, cy)];
+}
+export function newRibbonLayers(cx: number, cy: number): TemplateLayer[] {
+  return [newRibbonLayer(cx, cy)];
 }

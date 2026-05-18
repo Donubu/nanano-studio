@@ -100,6 +100,14 @@ export interface TextLayer extends BaseLayer {
     // = "top" para mantener el comportamiento histórico.
     verticalAlign?: "top" | "middle" | "bottom";
     italic?: boolean;
+    // Fondo opcional del text layer. Permite que UN solo layer represente
+    // un botón (text + pill) o un badge (text + círculo) sin necesidad de
+    // componer 2 capas. Si está set, el renderer aplica el background+radius
+    // a la misma caja del text — el texto se centra dentro vía verticalAlign
+    // y align. Para un círculo: backgroundCornerRadius = size.w/2 con caja
+    // cuadrada. Para una pill: backgroundCornerRadius = size.h/2.
+    backgroundColor?: string;
+    backgroundCornerRadius?: number;
   };
 }
 

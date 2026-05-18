@@ -243,6 +243,11 @@ function renderText(layer: TextLayer, parentMode: "free" | "stack", common: Comm
     display: "flex",
     flexDirection: "column",
     justifyContent,
+    // Fondo opcional del text layer — colapsa el patrón shape+text a una
+    // sola capa para botones/badges/ribbons. backgroundCornerRadius=size.h/2
+    // hace una pill; =size.w/2 con caja cuadrada hace un círculo.
+    background: style.backgroundColor,
+    borderRadius: style.backgroundCornerRadius,
   };
   // Smart text: el render busca el font-size más grande que entre en la caja.
   if (isFontSizeRange(style.fontSize)) {

@@ -78,6 +78,9 @@ const textStyleSchema = z.object({
   align: z.enum(["left", "center", "right"]).optional(),
   verticalAlign: z.enum(["top", "middle", "bottom"]).optional(),
   italic: z.boolean().optional(),
+  // Fondo opcional del text layer (botones/badges en una sola capa).
+  backgroundColor: cssColorSchema.optional(),
+  backgroundCornerRadius: z.number().int().min(0).max(2000).optional(),
 });
 
 const textLayerSchema = baseLayerSchema.extend({

@@ -882,48 +882,60 @@ esquinas.
 
 El editor del cliente tiene botones rápidos para insertar estos compuestos.
 Cuando generes/adaptes banners, usá las **mismas composiciones** para que el
-productor pueda editarlos con la misma UI sin sorpresas. Cada patrón = capas
-siblings (no agrupadas en frame), en el orden de z indicado.
+productor pueda editarlos con la misma UI sin sorpresas.
 
-**Botón / CTA** — pill clickeable:
-1. `ShapeLayer` rect con `cornerRadius = size.h / 2` (forma pill). Fill
-   sólido del color principal del kit (`{color.primary}` o similar).
-2. `TextLayer` con `position` y `size` IDÉNTICOS al shape, `align: "center"`,
-   `verticalAlign: "middle"`. Color que contraste con el fondo.
+**Clave del schema**: `TextLayer.style` ahora soporta `backgroundColor` y
+`backgroundCornerRadius`. Eso permite que un botón/badge/ribbon sea **una
+sola capa** (text con fondo nativo) en vez de un combo `shape` + `text`
+encima. **Prefiere SIEMPRE la capa única** — es más fácil de mover, copiar,
+animar y entender en el árbol.
+
+**Botón / CTA** — pill clickeable, **una sola TextLayer**:
+- `backgroundColor`: color principal del kit (`{color.primary}`).
+- `backgroundCornerRadius`: `size.h / 2` (pill perfecto).
+- `align: "center"`, `verticalAlign: "middle"`, fontWeight ≥ 700.
+- `color` que contraste con el fondo.
 
 Ejemplo conciso:
 ```json
-{ "id":"cta-bg","type":"shape","position":{"x":760,"y":820},"size":{"w":400,"h":120},
-  "shape":"rect","fill":"{color.primary}","cornerRadius":60 },
-{ "id":"cta","type":"text","position":{"x":760,"y":820},"size":{"w":400,"h":120},
-  "content":"Comprar","style":{"fontFamily":"{font.body}","fontSize":36,
-  "color":"{color.neutral-light}","align":"center","verticalAlign":"middle","fontWeight":700} }
+{ "id":"cta","type":"text","position":{"x":760,"y":820},
+  "size":{"w":400,"h":120},"content":"Comprar",
+  "style":{"fontFamily":"{font.body}","fontSize":36,
+    "color":"{color.neutral-light}","align":"center","verticalAlign":"middle",
+    "fontWeight":700,"backgroundColor":"{color.primary}","backgroundCornerRadius":60} }
 ```
 
-**Línea / Divider** — separador:
-- Una sola `ShapeLayer` rect con altura 2-8px, ancho razonable.
-  `cornerRadius` igual a la altura para que las puntas no queden cortantes.
+**Línea / Divider** — separador: `ShapeLayer` rect chato (no lleva texto,
+no aplica el patrón colapsado). Altura 2-8px, `cornerRadius` igual a la
+altura para que las puntas no queden cortantes.
 
-**Badge circular** — sello de descuento:
-1. `ShapeLayer` ellipse con `size` cuadrado (ej. 200×200). Fill color de
-   acento (típico amarillo `{color.secondary}` o rojo).
-2. `TextLayer` con position+size idénticos, fontSize grande, `align:center`,
-   `verticalAlign:middle`. Color que contraste.
+**Badge circular** — sello de descuento, **una sola TextLayer**:
+- `size` cuadrado (ej. `{w:200,h:200}`).
+- `backgroundColor`: color de acento (`{color.secondary}` o similar).
+- `backgroundCornerRadius`: `size.w / 2` (círculo perfecto).
+- `align: "center"`, `verticalAlign: "middle"`, fontWeight 900.
+- `content` corto y grande ("-50%", "NUEVO", "!").
 
-**Ribbon / cinta diagonal** — pinning de oferta en esquina:
-1. `ShapeLayer` rect con `rotation: -25` (o +25 para opuesto). Fill rojo
-   accent.
-2. `TextLayer` con misma position+size+rotation, texto centrado en mayúsculas
-   con `letterSpacing` 2-4 para look de cinta impresa.
+**Ribbon / cinta diagonal** — pinning de esquina, **una sola TextLayer**:
+- `backgroundColor`: rojo accent.
+- `backgroundCornerRadius`: 0 (esquinas rectas — es una cinta).
+- `rotation: -25` (o +25 para opuesto).
+- `letterSpacing` 2-4 para look de cinta impresa, mayúsculas.
+- `align: "center"`, `verticalAlign: "middle"`.
 
-**Reglas clave** para todos los compuestos:
-- Las dos capas siempre tienen `position` y `size` idénticos. El renderer
-  asegura que el texto se centra exactamente sobre la shape.
-- `name` de las capas debe describir su rol: `"cta-bg"` / `"cta"`,
-  `"badge-bg"` / `"badge"`, etc. Sufijar con `-bg` la capa de shape ayuda
-  al editor humano a entender la composición.
-- **NUNCA** uses 3+ capas para un compuesto simple. Si necesitás eso (ej.
-  botón con icono), considerá si vale la pena vs solo texto.
+**Reglas clave**:
+- **Una sola capa** cuando el patrón es "fondo coloreado + texto encima".
+  Esto colapsa shape+text que antes eran 2 layers. **NUNCA emitas más el
+  patrón viejo** (shape de fondo + text con position/size idénticos
+  encima) — el editor lo deja al productor pero el agente debe generar
+  siempre el patrón nuevo.
+- Para compuestos donde texto y fondo SÍ tienen tamaños distintos (ej.
+  precio dentro de una shape ancha con varios elementos), seguí usando
+  layers separadas. La regla es: si la shape tiene EXACTAMENTE las mismas
+  dims que el texto encima, colapsalas en un solo TextLayer con
+  `backgroundColor`.
+- `name` descriptivo: `"cta"`, `"badge"`, `"price"`, `"ribbon"`. Sin
+  sufijos `-bg` porque ya no hay 2 capas que distinguir.
 
 ### 8.7 Smart text para headlines
 
