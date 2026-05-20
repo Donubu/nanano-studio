@@ -9,6 +9,7 @@ import { useCanvasContext } from "../canvas-context";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import type { CanvasGenerationConfig } from "../canvas-workspace";
 import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { getVideoCapabilities, reconcileVideoSettings } from "../lib/video-capabilities";
 
 type ParamsData = ParamsTextNodeData | ParamsImageNodeData | ParamsVideoNodeData;
 
@@ -74,7 +75,16 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
             onChange={(e) => {
               const modelId = e.target.value ? Number(e.target.value) : undefined;
               const model = modelId ? availableModels.find((m) => m.id === modelId) : selectedModel;
-              update({ modelId, modelName: model?.display_name } as Partial<ParamsData>);
+              const patch: Partial<ParamsData> = { modelId, modelName: model?.display_name } as Partial<ParamsData>;
+              if (type === "params-video") {
+                const caps = getVideoCapabilities(model);
+                const v = nodeData as ParamsVideoNodeData;
+                Object.assign(patch, reconcileVideoSettings(
+                  { duration: v.duration, aspectRatio: v.aspectRatio, resolution: v.resolution },
+                  caps,
+                ));
+              }
+              update(patch);
             }}
             className="w-full h-7 rounded border border-input bg-background px-2 text-[11px]"
           >
@@ -165,51 +175,57 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
         )}
 
         {/* Video params */}
-        {type === "params-video" && (
-          <>
-            <div className="space-y-1">
-              <label className="text-[10px] text-muted-foreground">Duración</label>
-              <div className="flex gap-1">
-                {[4, 6, 8, 10, 15].map((d) => (
-                  <button key={d} onClick={() => update({ duration: d })}
-                    className={`flex-1 py-1 text-[10px] rounded border transition-colors ${
-                      (nodeData as ParamsVideoNodeData).duration === d
-                        ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent"
-                    }`}>{d}s</button>
-                ))}
+        {type === "params-video" && (() => {
+          const v = nodeData as ParamsVideoNodeData;
+          const caps = getVideoCapabilities(selectedModel);
+          return (
+            <>
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Duración</label>
+                <div className="flex gap-1 flex-wrap">
+                  {caps.durations.map((d) => (
+                    <button key={d} onClick={() => update({ duration: d })}
+                      className={`flex-1 py-1 text-[10px] rounded border transition-colors ${
+                        v.duration === d
+                          ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent"
+                      }`}>{d}s</button>
+                  ))}
+                </div>
               </div>
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] text-muted-foreground">Aspect Ratio</label>
-              <div className="flex gap-1">
-                {["16:9", "9:16", "1:1"].map((ar) => (
-                  <button key={ar} onClick={() => update({ aspectRatio: ar })}
-                    className={`flex-1 py-1 text-[10px] rounded border transition-colors ${
-                      (nodeData as ParamsVideoNodeData).aspectRatio === ar
-                        ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent"
-                    }`}>{ar}</button>
-                ))}
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Aspect Ratio</label>
+                <div className="flex gap-1 flex-wrap">
+                  {caps.aspectRatios.map((ar) => (
+                    <button key={ar} onClick={() => update({ aspectRatio: ar })}
+                      className={`flex-1 py-1 text-[10px] rounded border transition-colors ${
+                        v.aspectRatio === ar
+                          ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent"
+                      }`}>{ar}</button>
+                  ))}
+                </div>
               </div>
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] text-muted-foreground">Resolution</label>
-              <div className="flex gap-1">
-                {["480p", "720p", "1080p"].map((res) => (
-                  <button key={res} onClick={() => update({ resolution: res })}
-                    className={`flex-1 py-1 text-[10px] rounded border transition-colors ${
-                      (nodeData as ParamsVideoNodeData).resolution === res
-                        ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent"
-                    }`}>{res}</button>
-                ))}
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Resolution</label>
+                <div className="flex gap-1 flex-wrap">
+                  {caps.resolutions.map((res) => (
+                    <button key={res} onClick={() => update({ resolution: res })}
+                      className={`flex-1 py-1 text-[10px] rounded border transition-colors ${
+                        v.resolution === res
+                          ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent"
+                      }`}>{res}</button>
+                  ))}
+                </div>
               </div>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <input type="checkbox" checked={(nodeData as ParamsVideoNodeData).audioEnabled}
-                onChange={(e) => update({ audioEnabled: e.target.checked })} className="rounded" />
-              <label className="text-[10px]">Audio</label>
-            </div>
-          </>
-        )}
+              {caps.supportsAudio && (
+                <div className="flex items-center gap-1.5">
+                  <input type="checkbox" checked={v.audioEnabled}
+                    onChange={(e) => update({ audioEnabled: e.target.checked })} className="rounded" />
+                  <label className="text-[10px]">Audio</label>
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {selectedModel && (
           <p className="text-[9px] text-muted-foreground">

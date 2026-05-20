@@ -5,6 +5,7 @@ import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { generateVideo, isVideoConfigured, VideoGenerationConfig, VideoInput, VideoGenerationProgress } from "@/lib/google-ai-video";
 import { generateXaiVideo, isXaiVideoConfigured, XaiVideoConfig, validateXaiVideoConfig } from "@/lib/xai-video";
 import { generateKlingVideo, isKlingConfigured, KlingVideoConfig, validateKlingVideoConfig, KlingImageInput } from "@/lib/kling-video";
+import { generateOpenRouterVideo, isOpenRouterConfigured, OpenRouterVideoConfig, validateOpenRouterVideoConfig, OpenRouterImageInputs } from "@/lib/openrouter-video";
 import { uploadVideoToS3, generateVideoFileName, isS3Configured, uploadToS3, generateFileName } from "@/lib/s3";
 import { generateConversationTitle, Labels } from "@/lib/google-ai";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
@@ -257,6 +258,25 @@ export async function POST(
           // Determine provider
           const isXaiProvider = effectiveBackend === 'xai';
           const isKlingProvider = effectiveBackend === 'kling' || effectiveModelId.includes('kling-v3-omni') || effectiveModelId === 'kling-v2-6';
+          const isOpenRouterProvider = effectiveBackend === 'openrouter';
+
+          // Per-user gate for OpenRouter (paid out-of-pocket). Defense-in-depth:
+          // generation-config GET already hides these models for non-flagged
+          // users, but a hand-crafted request could still target one.
+          if (isOpenRouterProvider && session.user.role !== "admin") {
+            const [userRows] = await pool.execute<RowDataPacket[]>(
+              "SELECT can_use_openrouter FROM users WHERE id = ?",
+              [session.user.id]
+            );
+            const allowed = userRows.length > 0 && Boolean(userRows[0].can_use_openrouter);
+            if (!allowed) {
+              sendEvent({ type: "error", message: "Tu usuario no tiene acceso a modelos OpenRouter. Solicítalo al administrador." });
+              clearInterval(heartbeat);
+              controllerClosed = true;
+              controller.close();
+              return;
+            }
+          }
 
           // Validate that the appropriate video API is configured
           if (isKlingProvider) {
@@ -270,6 +290,14 @@ export async function POST(
           } else if (isXaiProvider) {
             if (!isXaiVideoConfigured()) {
               sendEvent({ type: "error", message: "API de xAI Video no configurada (falta XAI_API_KEY)" });
+              clearInterval(heartbeat);
+              controllerClosed = true;
+              controller.close();
+              return;
+            }
+          } else if (isOpenRouterProvider) {
+            if (!isOpenRouterConfigured()) {
+              sendEvent({ type: "error", message: "API de OpenRouter no configurada (falta OPENROUTER_API_KEY)" });
               clearInterval(heartbeat);
               controllerClosed = true;
               controller.close();
@@ -577,6 +605,73 @@ export async function POST(
             );
             generatedSeed = 0; // xAI does not support seeds
 
+          } else if (isOpenRouterProvider) {
+            // ===== OpenRouter (Seedance 2.0 / 2.0-fast) =====
+            generatedSeed = videoSettings?.seed ?? Math.floor(Math.random() * 4294967295);
+
+            const orConfig: OpenRouterVideoConfig = {
+              duration: videoSettings?.duration || conversation.video_duration || 8,
+              aspectRatio: (videoSettings?.aspectRatio || conversation.video_aspect_ratio || "16:9") as OpenRouterVideoConfig["aspectRatio"],
+              resolution: (videoSettings?.resolution || conversation.video_resolution || "720p") as OpenRouterVideoConfig["resolution"],
+              generateAudio: videoSettings?.audioEnabled !== undefined
+                ? videoSettings.audioEnabled
+                : (conversation.video_audio_enabled ?? false),
+              seed: generatedSeed,
+              negativePrompt: videoSettings?.negativePrompt || conversation.video_negative_prompt || undefined,
+            };
+
+            const validationError = validateOpenRouterVideoConfig(orConfig, effectiveModelId);
+            if (validationError) {
+              sendEvent({ type: "error", message: validationError });
+              clearInterval(heartbeat);
+              controllerClosed = true;
+              controller.close();
+              return;
+            }
+
+            // OpenRouter requires public URLs for image inputs — upload base64 to S3 first.
+            const uploadIfBase64 = async (data: string): Promise<string> => {
+              if (data.startsWith("http")) return data;
+              const base64Match = data.match(/^data:([^;]+);base64,(.+)$/);
+              if (!base64Match) return data;
+              const [, mimeType, base64Data] = base64Match;
+              const ext = mimeType.split("/")[1] || "png";
+              const fileName = generateFileName(id, ext);
+              const buffer = Buffer.from(base64Data, "base64");
+              const result = await uploadToS3(buffer, fileName, mimeType, "reference");
+              return result.url;
+            };
+
+            const orImageInputs: OpenRouterImageInputs = {};
+            const orFirstFrame = videoInputs?.firstFrame || firstFrameImage;
+            const orLastFrame = videoInputs?.lastFrame || lastFrameImage;
+            const orRefImages = referenceImages || videoInputs?.referenceImages;
+            if (orFirstFrame) orImageInputs.firstFrame = await uploadIfBase64(orFirstFrame);
+            if (orLastFrame) orImageInputs.lastFrame = await uploadIfBase64(orLastFrame);
+            if (orRefImages && orRefImages.length > 0) {
+              orImageInputs.referenceImages = await Promise.all(
+                orRefImages.map(async (ref) => ({ image: await uploadIfBase64(ref.image), type: ref.type }))
+              );
+            }
+
+            console.log(`\n========== [VIDEO GENERATION REQUEST] (OpenRouter) ==========`);
+            console.log("Model:", effectiveModelId);
+            console.log("Quality tier:", effectiveQualityTier);
+            console.log("Config:", JSON.stringify(orConfig, null, 2));
+            console.log("Input prompt:", content);
+            console.log("Has first frame:", !!orImageInputs.firstFrame);
+            console.log("Has last frame:", !!orImageInputs.lastFrame);
+            console.log("Reference images count:", orImageInputs.referenceImages?.length || 0);
+            console.log("================================================\n");
+
+            generatedVideo = await generateOpenRouterVideo(
+              effectiveModelId,
+              content,
+              orConfig,
+              onProgress,
+              orImageInputs,
+            );
+
           } else {
             // ===== Google AI (VEO) =====
             const audioEnabled = videoSettings?.audioEnabled !== undefined
@@ -712,24 +807,30 @@ export async function POST(
             generatedVideo.mimeType
           );
 
-          // Calculate estimated cost for video generation using effective model cost
-          const estimatedCost = calculateEstimatedCost(
-            {
-              cost_input_per_million: 0,
-              cost_output_per_million: 0,
-              cost_image_1k: 0,
-              cost_image_2k: 0,
-              cost_image_4k: 0,
-              cost_video_per_second: effectiveCostVideoPerSecond,
-            },
-            {
-              tokensInput: 0,
-              tokensOutput: 0,
-              imageGenerated: false,
-              imageSize: null,
-              videoSeconds: generatedVideo.duration,
-            }
-          );
+          // Calculate estimated cost. Providers with non-linear pricing
+          // (e.g. OpenRouter Seedance, where cost depends on resolution +
+          // duration via a token formula) return actualCost on GeneratedVideo
+          // and we trust it directly. Otherwise fall back to the standard
+          // cost_video_per_second * duration formula.
+          const estimatedCost = typeof generatedVideo.actualCost === "number"
+            ? generatedVideo.actualCost
+            : calculateEstimatedCost(
+                {
+                  cost_input_per_million: 0,
+                  cost_output_per_million: 0,
+                  cost_image_1k: 0,
+                  cost_image_2k: 0,
+                  cost_image_4k: 0,
+                  cost_video_per_second: effectiveCostVideoPerSecond,
+                },
+                {
+                  tokensInput: 0,
+                  tokensOutput: 0,
+                  imageGenerated: false,
+                  imageSize: null,
+                  videoSeconds: generatedVideo.duration,
+                }
+              );
 
           // Resolve aspect ratio from settings (works for both providers)
           const effectiveAspectRatio = videoSettings?.aspectRatio || conversation.video_aspect_ratio || "16:9";

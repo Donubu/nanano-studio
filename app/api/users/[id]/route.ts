@@ -41,7 +41,7 @@ export async function GET(
     const { id } = await params;
 
     const [rows] = await pool.execute<UserRow[]>(
-      "SELECT id, email, name, image, role, cargo, ai_calculator_access, can_create_projects, has_personal_space, blocked_at, deleted_at, created_at FROM users WHERE id = ?",
+      "SELECT id, email, name, image, role, cargo, ai_calculator_access, can_create_projects, can_use_openrouter, has_personal_space, blocked_at, deleted_at, created_at FROM users WHERE id = ?",
       [id]
     );
 
@@ -92,7 +92,7 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
-    const { email, name, role, cargo, ai_calculator_access, can_create_projects, has_personal_space } = body;
+    const { email, name, role, cargo, ai_calculator_access, can_create_projects, can_use_openrouter, has_personal_space } = body;
 
     // Verificar que el usuario existe
     const [existing] = await pool.execute<UserRow[]>(
@@ -130,6 +130,7 @@ export async function PUT(
         cargo = COALESCE(?, cargo),
         ai_calculator_access = COALESCE(?, ai_calculator_access),
         can_create_projects = COALESCE(?, can_create_projects),
+        can_use_openrouter = COALESCE(?, can_use_openrouter),
         has_personal_space = COALESCE(?, has_personal_space)
       WHERE id = ?`,
       [
@@ -139,6 +140,7 @@ export async function PUT(
         cargo || null,
         ai_calculator_access !== undefined ? (ai_calculator_access ? 1 : 0) : null,
         can_create_projects !== undefined ? (can_create_projects ? 1 : 0) : null,
+        can_use_openrouter !== undefined ? (can_use_openrouter ? 1 : 0) : null,
         has_personal_space !== undefined ? (has_personal_space ? 1 : 0) : null,
         id,
       ]

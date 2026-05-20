@@ -9,6 +9,7 @@ import type { Node } from "@xyflow/react";
 import type { CanvasNodeData, TextNodeData, ImageNodeData, VideoNodeData, HANDLE_IDS } from "../lib/canvas-types";
 import { HANDLE_IDS as HANDLES } from "../lib/canvas-types";
 import type { CanvasGenerationConfig, CanvasModel } from "../canvas-workspace";
+import { getVideoCapabilities, reconcileVideoSettings } from "../lib/video-capabilities";
 
 interface NodeConfigPanelProps {
   node: Node;
@@ -157,7 +158,18 @@ export function NodeConfigPanel({
                   onChange={(e) => {
                     const modelId = e.target.value ? Number(e.target.value) : undefined;
                     const model = modelId ? availableModels.find((m) => m.id === modelId) : (availableModels.find((m) => m.is_default) || availableModels[0]);
-                    onUpdateData(node.id, { modelId, modelName: model?.display_name } as Partial<CanvasNodeData>);
+                    const patch: Partial<CanvasNodeData> = { modelId, modelName: model?.display_name } as Partial<CanvasNodeData>;
+                    // For video nodes: snap duration/aspect/resolution to a valid combo for the new model.
+                    if (type === "video") {
+                      const caps = getVideoCapabilities(model);
+                      const videoData = data as VideoNodeData;
+                      const reconciled = reconcileVideoSettings(
+                        { duration: videoData.duration, aspectRatio: videoData.aspectRatio, resolution: videoData.resolution },
+                        caps,
+                      );
+                      Object.assign(patch, reconciled);
+                    }
+                    onUpdateData(node.id, patch);
                   }}
                   className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm"
                 >
@@ -182,7 +194,7 @@ export function NodeConfigPanel({
             {/* Type-specific settings */}
             {type === "text" && <TextSettings data={data as TextNodeData} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} models={availableModels} />}
             {type === "image" && <ImageSettings data={data as ImageNodeData} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} />}
-            {type === "video" && <VideoSettings data={data as VideoNodeData} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} />}
+            {type === "video" && <VideoSettings data={data as VideoNodeData} model={selectedModel} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} />}
           </>
         )}
 
@@ -398,14 +410,19 @@ function ImageSettings({ data, onUpdate }: { data: ImageNodeData; onUpdate: (u: 
   );
 }
 
-function VideoSettings({ data, onUpdate }: { data: VideoNodeData; onUpdate: (u: Partial<VideoNodeData>) => void }) {
-  // Canvas only uses Gemini (VEO) models — durations, resolutions, and aspect ratios match VEO specs
+function VideoSettings({ data, model, onUpdate }: { data: VideoNodeData; model?: CanvasModel; onUpdate: (u: Partial<VideoNodeData>) => void }) {
+  // Options come from per-model capabilities so each backend (VEO / xAI / Kling /
+  // OpenRouter Seedance) shows only the values it can actually accept.
+  const caps = getVideoCapabilities(model);
+  // VEO-specific quirk: 1080p / 4K only work at 8s.
+  const isVeo = !model?.api_backend || model.api_backend === "gemini" || model.api_backend === "vertex";
+
   return (
     <>
       <div className="space-y-1.5">
         <Label className="text-xs">Duration</Label>
         <div className="flex gap-1.5 flex-wrap">
-          {[4, 6, 8].map((d) => (
+          {caps.durations.map((d) => (
             <button
               key={d}
               onClick={() => onUpdate({ duration: d })}
@@ -423,7 +440,7 @@ function VideoSettings({ data, onUpdate }: { data: VideoNodeData; onUpdate: (u: 
       <div className="space-y-1.5">
         <Label className="text-xs">Aspect Ratio</Label>
         <div className="flex gap-1.5 flex-wrap">
-          {["16:9", "9:16"].map((ar) => (
+          {caps.aspectRatios.map((ar) => (
             <button
               key={ar}
               onClick={() => onUpdate({ aspectRatio: ar })}
@@ -440,9 +457,9 @@ function VideoSettings({ data, onUpdate }: { data: VideoNodeData; onUpdate: (u: 
       </div>
       <div className="space-y-1.5">
         <Label className="text-xs">Resolution</Label>
-        <div className="flex gap-1.5">
-          {(["720p", "1080p", "4K"] as const).map((res) => {
-            const needsDuration8 = res === "1080p" || res === "4K";
+        <div className="flex gap-1.5 flex-wrap">
+          {caps.resolutions.map((res) => {
+            const needsDuration8 = isVeo && (res === "1080p" || res === "4K");
             return (
               <button
                 key={res}
@@ -462,21 +479,23 @@ function VideoSettings({ data, onUpdate }: { data: VideoNodeData; onUpdate: (u: 
               </button>
             );
           })}
-          {data.resolution && !["720p", "1080p", "4K"].includes(data.resolution) && (
-            <p className="text-[10px] text-amber-500 mt-1">Resolución no soportada, selecciona otra</p>
+          {data.resolution && !caps.resolutions.includes(data.resolution) && (
+            <p className="text-[10px] text-amber-500 mt-1">Resolución no soportada por este modelo, selecciona otra</p>
           )}
         </div>
       </div>
-      <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          checked={data.audioEnabled}
-          onChange={(e) => onUpdate({ audioEnabled: e.target.checked })}
-          id="audio-enabled"
-          className="rounded"
-        />
-        <Label htmlFor="audio-enabled" className="text-xs">Audio habilitado</Label>
-      </div>
+      {caps.supportsAudio && (
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={data.audioEnabled}
+            onChange={(e) => onUpdate({ audioEnabled: e.target.checked })}
+            id="audio-enabled"
+            className="rounded"
+          />
+          <Label htmlFor="audio-enabled" className="text-xs">Audio habilitado</Label>
+        </div>
+      )}
     </>
   );
 }
