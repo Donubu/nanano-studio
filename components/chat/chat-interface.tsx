@@ -87,6 +87,8 @@ import {ReasoningSelector, ThinkingLevel} from "./reasoning-selector";
 import {DeploymentBanner} from "./deployment-banner";
 import {CreateProjectDialog} from "./create-project-dialog";
 import {CreditBadge} from "./credit-badge";
+import ClientProductionProjects from "./client-production-projects";
+import ClientProductionSection from "@/components/dashboard/client-production-section";
 import {ImageModelSelector} from "./image-model-selector";
 import {AudioSettings} from "./audio-settings";
 import {MusicSettings} from "./music-settings";
@@ -3471,6 +3473,11 @@ export function ChatInterface() {
                     </div>
                     )}
 
+                    {/* Producción projects (admin-only in MVP) */}
+                    {selectedClientId && session?.user?.role === "admin" && (
+                        <ClientProductionProjects clientId={selectedClientId} />
+                    )}
+
                     {/* Conversations List - Only when project is selected */}
                     {selectedProjectId && (
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -4876,6 +4883,13 @@ export function ChatInterface() {
                                                 </table>
                                             );
                                         })()}
+                                    </div>
+                                )}
+
+                                {/* Producción projects (admin-only in MVP) */}
+                                {session?.user?.role === "admin" && (
+                                    <div className="mt-8">
+                                        <ClientProductionSection clientId={selectedClientId} />
                                     </div>
                                 )}
                             </>

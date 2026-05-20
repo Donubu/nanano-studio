@@ -14,6 +14,8 @@ import { ArrowLeft, Loader2, Building2, X, UserPlus } from "lucide-react";
 import Image from "next/image";
 import { formatDateLocal } from "@/lib/utils";
 import ClientCreditsSection from "@/components/dashboard/client-credits-section";
+import ClientProductionSection from "@/components/dashboard/client-production-section";
+import ClientBrandKitsSection from "@/components/dashboard/client-brand-kits-section";
 
 interface ClientDetail {
   id: number;
@@ -50,6 +52,7 @@ export default function ClientDetailPage() {
   const [addingUser, setAddingUser] = useState(false);
   const [removingUserId, setRemovingUserId] = useState<number | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<"info" | "production" | "brand-kits">("info");
 
   const fetchClient = useCallback(async () => {
     try {
@@ -188,6 +191,50 @@ export default function ClientDetailPage() {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-border/50">
+        <button
+          type="button"
+          onClick={() => setActiveTab("info")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            activeTab === "info"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Información
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("production")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            activeTab === "production"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Producción
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("brand-kits")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            activeTab === "brand-kits"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Brand Kits
+        </button>
+      </div>
+
+      {activeTab === "production" ? (
+        <ClientProductionSection clientId={Number(clientId)} />
+      ) : activeTab === "brand-kits" ? (
+        <ClientBrandKitsSection clientId={Number(clientId)} />
+      ) : (
+        <>
+
       {/* Usuarios asignados */}
       <div className="bg-card rounded-xl border border-border/50 p-6">
         <h3 className="text-sm font-medium mb-4">Usuarios asignados</h3>
@@ -283,6 +330,8 @@ export default function ClientDetailPage() {
       </div>
 
       <ClientCreditsSection clientId={Number(clientId)} />
+        </>
+      )}
     </div>
   );
 }

@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, Loader2, Eye, Ban, RotateCcw, Zap, FolderOpen, FolderPlus, Calculator, Home } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Eye, Ban, RotateCcw, Zap, FolderOpen, FolderPlus, Calculator, Home, Sparkles } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { formatDateLocal } from "@/lib/utils";
 
@@ -33,6 +33,7 @@ interface User {
   cargo: string;
   ai_calculator_access: number;
   can_create_projects: number;
+  can_use_openrouter: number;
   has_personal_space: number;
   blocked_at: string | null;
   deleted_at: string | null;
@@ -66,6 +67,7 @@ export default function UsersPage() {
     cargo: "Sin definir",
     ai_calculator_access: false,
     can_create_projects: false,
+    can_use_openrouter: false,
     has_personal_space: false,
   });
   const [error, setError] = useState("");
@@ -94,7 +96,7 @@ export default function UsersPage() {
 
   const openCreateDialog = () => {
     setEditingUser(null);
-    setFormData({ email: "", name: "", role: "user", cargo: "Sin definir", ai_calculator_access: false, can_create_projects: false, has_personal_space: false });
+    setFormData({ email: "", name: "", role: "user", cargo: "Sin definir", ai_calculator_access: false, can_create_projects: false, can_use_openrouter: false, has_personal_space: false });
     setError("");
     setIsDialogOpen(true);
   };
@@ -108,6 +110,7 @@ export default function UsersPage() {
       cargo: user.cargo || "Sin definir",
       ai_calculator_access: !!user.ai_calculator_access,
       can_create_projects: !!user.can_create_projects,
+      can_use_openrouter: !!user.can_use_openrouter,
       has_personal_space: !!user.has_personal_space,
     });
     setError("");
@@ -511,6 +514,21 @@ export default function UsersPage() {
               <div className="flex items-center gap-3">
                 <input
                   type="checkbox"
+                  id="can_use_openrouter"
+                  checked={formData.can_use_openrouter}
+                  onChange={(e) =>
+                    setFormData({ ...formData, can_use_openrouter: e.target.checked })
+                  }
+                  className="h-4 w-4 rounded border-border/50"
+                />
+                <label htmlFor="can_use_openrouter" className="text-sm font-medium flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-amber-400" />
+                  Acceso a modelos OpenRouter (pago)
+                </label>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
                   id="has_personal_space"
                   checked={formData.has_personal_space}
                   onChange={(e) =>
@@ -641,6 +659,17 @@ export default function UsersPage() {
                     <FolderPlus className="h-3.5 w-3.5" />
                     {selectedUser.can_create_projects ? (
                       <span className="text-green-400">Activado</span>
+                    ) : (
+                      <span className="text-muted-foreground">Desactivado</span>
+                    )}
+                  </div>
+                </div>
+                <div className="bg-muted rounded-lg p-3">
+                  <div className="text-xs text-muted-foreground mb-1">OpenRouter</div>
+                  <div className="text-sm font-medium flex items-center gap-1.5">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {selectedUser.can_use_openrouter ? (
+                      <span className="text-amber-400">Activado</span>
                     ) : (
                       <span className="text-muted-foreground">Desactivado</span>
                     )}

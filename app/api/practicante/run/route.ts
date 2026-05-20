@@ -44,11 +44,13 @@ export async function POST(req: NextRequest) {
 
   // New external contract (post-ExternalApiProfile cutover): the per-user
   // profile flags are gone; behavior is set in the body of every request.
-  // Replicate the QA profile defaults: forceAgent when an agent is targeted
-  // and responseFormat=json. normalize defaults to false server-side.
+  // Replicate the QA profile defaults: forceAgent when an agent is targeted,
+  // responseFormat=json, normalize=false (mensaje llega al agente sin
+  // pre-procesamiento del orquestador).
   const payload: Record<string, unknown> = {
     message,
     dryRun: body.dryRun === true,
+    normalize: false,
   };
 
   const context: Record<string, unknown> = {

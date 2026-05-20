@@ -63,6 +63,19 @@ export async function GET(
 
     const { id } = await params;
 
+    // Per-user gate: non-admins without can_use_openrouter cannot see
+    // OpenRouter-backed models even if admin added them to the project.
+    const isAdmin = session.user.role === "admin";
+    let userCanUseOpenRouter = false;
+    if (!isAdmin) {
+      const [userRows] = await pool.execute<RowDataPacket[]>(
+        "SELECT can_use_openrouter FROM users WHERE id = ?",
+        [session.user.id]
+      );
+      userCanUseOpenRouter = userRows.length > 0 && Boolean(userRows[0].can_use_openrouter);
+    }
+    const allowOpenRouter = isAdmin || userCanUseOpenRouter;
+
     // Fetch enabled status from legacy table
     const [enabledRows] = await pool.execute<ConfigEnabledRow[]>(
       `SELECT generation_type, is_enabled FROM project_generation_config WHERE project_id = ?`,
@@ -107,8 +120,9 @@ export async function GET(
       config[type].enabled = enabledMap[type] ?? false;
     }
 
-    // Group models by type
+    // Group models by type, applying the OpenRouter per-user gate.
     for (const row of modelRows) {
+      if (!allowOpenRouter && row.model_api_backend === "openrouter") continue;
       const type = row.generation_type as GenerationType;
       config[type].models.push({
         id: row.model_id,
@@ -120,6 +134,15 @@ export async function GET(
         supports_google_search: Boolean(row.model_supports_google_search),
         api_backend: row.model_api_backend,
       });
+    }
+
+    // If filtering dropped the default model for a type, promote the first
+    // remaining model so the canvas/chat still resolves a valid default.
+    for (const type of Object.keys(config) as GenerationType[]) {
+      const models = config[type].models;
+      if (models.length > 0 && !models.some(m => m.is_default)) {
+        models[0].is_default = true;
+      }
     }
 
     return NextResponse.json(config);

@@ -202,6 +202,10 @@ export interface GeneratedVideo {
   duration: number;
   hasAudio: boolean;
   seed: number;
+  // Optional: providers that price by a non-linear formula (e.g. OpenRouter Seedance:
+  // tokens = w*h*d*24/1024) compute the cost in USD themselves and return it here.
+  // When set, the route uses this instead of cost_video_per_second * duration.
+  actualCost?: number;
 }
 
 export interface VideoGenerationProgress {
