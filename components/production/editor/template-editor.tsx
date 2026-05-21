@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TemplateDefinition, TemplateLayer, findLayer, findParent, updateLayer as updateLayerInTree } from "@/lib/production/types";
 import { BrandKit, BrandKitContent, EMPTY_KIT_CONTENT } from "@/lib/production/brand-kit";
@@ -69,6 +69,11 @@ export function TemplateEditor({
   // Estado de colapso de los paneles laterales. Por default abiertos.
   const [layersCollapsed, setLayersCollapsed] = useState(false);
   const [propsCollapsed, setPropsCollapsed] = useState(false);
+  // Top accessory (strip de variantes en producir o PreviewThumbnails en el
+  // editor del template raw) colapsable: cuando true, ocultamos su
+  // contenido y dejamos solo una banda con un botón para re-expandir. Da
+  // más alto al canvas en monitores chicos.
+  const [topAccessoryCollapsed, setTopAccessoryCollapsed] = useState(false);
   // Acordeón de la columna derecha. Default: Propiedades abierta, Variables
   // y datos colapsada — al seleccionar una capa abrimos automáticamente
   // Propiedades y cerramos Variables y datos (efecto reactivo más abajo).
@@ -407,15 +412,41 @@ export function TemplateEditor({
           {/* Cuando el caller pasa un topAccessory (ej. la strip de
               variantes en producir), reemplaza al PreviewThumbnails
               auto-generated. Así la zona arriba del canvas sirve para
-              cambiar de variante real en vez de ver previews read-only. */}
-          {topAccessory ?? (
-            <PreviewThumbnails
-              definition={editor.definition}
-              brandKit={brandKit}
-              presets={previewPresets}
-              activePreviewId={activePreviewId}
-              onSelectPreview={setActivePreviewId}
-            />
+              cambiar de variante real en vez de ver previews read-only.
+              Colapsable: el productor gana alto vertical para el canvas
+              cuando ya identificó la variante en la que trabaja. */}
+          {topAccessoryCollapsed ? (
+            <div className="flex items-center justify-center gap-1.5 px-3 py-1 border-b border-border/50 bg-card/30">
+              <button
+                type="button"
+                onClick={() => setTopAccessoryCollapsed(false)}
+                className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                title="Mostrar previews"
+              >
+                <ChevronDown className="h-3 w-3" />
+                Mostrar previews
+              </button>
+            </div>
+          ) : (
+            <div className="relative">
+              {topAccessory ?? (
+                <PreviewThumbnails
+                  definition={editor.definition}
+                  brandKit={brandKit}
+                  presets={previewPresets}
+                  activePreviewId={activePreviewId}
+                  onSelectPreview={setActivePreviewId}
+                />
+              )}
+              <button
+                type="button"
+                onClick={() => setTopAccessoryCollapsed(true)}
+                className="absolute top-1 right-1 z-10 flex items-center justify-center w-6 h-6 rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                title="Colapsar previews"
+              >
+                <ChevronUp className="h-3.5 w-3.5" />
+              </button>
+            </div>
           )}
           {topBanner}
           {previewSize && (
@@ -433,35 +464,34 @@ export function TemplateEditor({
               </button>
             </div>
           )}
-          {/* Toolbar pegado al canvas (estilo Figma/Photoshop). En preview
-              mode toda la fila queda inactiva pero visible — el productor
-              entiende qué está pasando sin perder context. */}
-          <div className={readOnlyClass}>
-            <EditorToolbar
-              onAddText={editor.addText}
-              onAddImage={editor.addImage}
-              onAddShape={editor.addShape}
-              onAddIcon={editor.addIcon}
-              onAddButton={editor.addButton}
-              onAddDivider={editor.addDivider}
-              onAddBadge={editor.addBadge}
-              onAddRibbon={editor.addRibbon}
-              saveStatus={editor.saveStatus}
-              lastSavedAt={editor.lastSavedAt}
-              onOpenProjectBrandKit={undefined}
-              onUndo={editor.undo}
-              onRedo={editor.redo}
-              canUndo={editor.canUndo}
-              canRedo={editor.canRedo}
-              showSafetyZone={showSafetyZone}
-              onToggleSafetyZone={() => setShowSafetyZone((v) => !v)}
-            />
-          </div>
-          {/* Canvas wrapper: toma flex-1 dentro de la columna central para
-              que el TimelinePanel (auto-size por contenido) tome lo que
-              necesite abajo. Cuando el timeline está colapsado solo su
-              header toma altura — el canvas se expande casi a full. */}
+          {/* Toolbar vertical pegado al borde izquierdo del canvas (estilo
+              Figma/Photoshop). Vive DENTRO de la columna central — no
+              encima — para que el ancho ganado al colapsar Capas
+              beneficie directo al canvas. En preview mode queda inactiva
+              pero visible. */}
           <div className="flex flex-1 min-h-0">
+            <div className={cn("flex", readOnlyClass)}>
+              <EditorToolbar
+                orientation="vertical"
+                onAddText={editor.addText}
+                onAddImage={editor.addImage}
+                onAddShape={editor.addShape}
+                onAddIcon={editor.addIcon}
+                onAddButton={editor.addButton}
+                onAddDivider={editor.addDivider}
+                onAddBadge={editor.addBadge}
+                onAddRibbon={editor.addRibbon}
+                saveStatus={editor.saveStatus}
+                lastSavedAt={editor.lastSavedAt}
+                onOpenProjectBrandKit={undefined}
+                onUndo={editor.undo}
+                onRedo={editor.redo}
+                canUndo={editor.canUndo}
+                canRedo={editor.canRedo}
+                showSafetyZone={showSafetyZone}
+                onToggleSafetyZone={() => setShowSafetyZone((v) => !v)}
+              />
+            </div>
             <TemplateCanvas
               definition={canvasDefinition}
               selectedId={editor.selectedId}

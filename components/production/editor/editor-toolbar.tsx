@@ -18,7 +18,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { SaveStatus } from "@/lib/production/use-template-editor";
-import { formatDateTimeLocal } from "@/lib/utils";
+import { cn, formatDateTimeLocal } from "@/lib/utils";
 
 interface Props {
   onAddText: () => void;
@@ -40,6 +40,65 @@ interface Props {
   // punteado al 5% del borde. Es un visual-aid, no afecta export.
   showSafetyZone: boolean;
   onToggleSafetyZone: () => void;
+  // Orientación de la barra. "horizontal" es la default histórica (banda
+  // arriba del canvas con labels al lado del ícono). "vertical" es un
+  // strip angosto a la izquierda del canvas con botones icon-only — pensado
+  // para liberar ancho horizontal cuando el productor trabaja en banners
+  // anchos o el viewport está achicado.
+  orientation?: "horizontal" | "vertical";
+}
+
+// Botón normalizado de la toolbar. Si label es "" o iconOnly=true, se
+// renderiza solo con ícono (útil para undo/redo y modo vertical).
+function ToolbarBtn({
+  onClick,
+  title,
+  label,
+  icon: Icon,
+  disabled,
+  active,
+  iconOnly,
+}: {
+  onClick: () => void;
+  title: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  disabled?: boolean;
+  active?: boolean;
+  iconOnly?: boolean;
+}) {
+  const isIconOnly = iconOnly || !label;
+  const activeClass = active
+    ? "border-yellow-400/60 bg-yellow-400/10 text-yellow-200"
+    : "border-border/50 hover:bg-muted text-foreground";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={cn(
+        "flex items-center rounded-md border transition-colors disabled:opacity-30 disabled:cursor-not-allowed shrink-0",
+        isIconOnly
+          ? "justify-center w-8 h-8"
+          : "gap-1.5 text-xs px-2.5 py-1.5",
+        activeClass,
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {!isIconOnly && <span>{label}</span>}
+    </button>
+  );
+}
+
+// Divisor entre grupos. En vertical es una línea horizontal entre filas;
+// en horizontal es vertical entre columnas.
+function ToolbarDivider({ vertical }: { vertical: boolean }) {
+  return (
+    <div
+      className={cn("bg-border/50 shrink-0", vertical ? "w-5 h-px my-1" : "h-5 w-px mx-1")}
+    />
+  );
 }
 
 export function EditorToolbar({
@@ -60,124 +119,48 @@ export function EditorToolbar({
   canRedo,
   showSafetyZone,
   onToggleSafetyZone,
+  orientation = "horizontal",
 }: Props) {
+  const isVertical = orientation === "vertical";
   return (
-    // flex-wrap + gap-y permite que la toolbar se acomode en 2+ filas
-    // cuando el ancho disponible se achica (ej. ventana angosta o sidebars
-    // abiertos). Antes era un single-row sin wrap que pasaba por detrás del
-    // PropertiesPanel right al achicar la ventana.
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-2 border-b border-border/50 bg-card/40">
-      <button
-        type="button"
-        onClick={onUndo}
-        disabled={!canUndo}
-        className="flex items-center justify-center w-7 h-7 rounded-md border border-border/50 hover:bg-muted transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-        title="Deshacer (⌘Z)"
-      >
-        <Undo2 className="h-3.5 w-3.5" />
-      </button>
-      <button
-        type="button"
-        onClick={onRedo}
-        disabled={!canRedo}
-        className="flex items-center justify-center w-7 h-7 rounded-md border border-border/50 hover:bg-muted transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-        title="Rehacer (⌘⇧Z)"
-      >
-        <Redo2 className="h-3.5 w-3.5" />
-      </button>
+    <div
+      className={cn(
+        "flex bg-card/40",
+        isVertical
+          ? "flex-col items-center gap-1.5 px-1.5 py-2 border-r border-border/50 h-full shrink-0"
+          : "flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-2 border-b border-border/50",
+      )}
+    >
+      <ToolbarBtn onClick={onUndo} title="Deshacer (⌘Z)" label="" icon={Undo2} disabled={!canUndo} />
+      <ToolbarBtn onClick={onRedo} title="Rehacer (⌘⇧Z)" label="" icon={Redo2} disabled={!canRedo} />
 
-      <div className="h-5 w-px bg-border/50 mx-1" />
+      <ToolbarDivider vertical={isVertical} />
 
-      <button
-        type="button"
-        onClick={onAddText}
-        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border/50 hover:bg-muted transition-colors"
-      >
-        <Type className="h-3.5 w-3.5" />
-        Texto
-      </button>
-      <button
-        type="button"
-        onClick={onAddImage}
-        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border/50 hover:bg-muted transition-colors"
-      >
-        <ImageIcon className="h-3.5 w-3.5" />
-        Imagen
-      </button>
-      <button
-        type="button"
-        onClick={onAddShape}
-        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border/50 hover:bg-muted transition-colors"
-      >
-        <Square className="h-3.5 w-3.5" />
-        Forma
-      </button>
-      <button
-        type="button"
-        onClick={onAddIcon}
-        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border/50 hover:bg-muted transition-colors"
-        title="Ícono del catálogo curado"
-      >
-        <Smile className="h-3.5 w-3.5" />
-        Ícono
-      </button>
+      <ToolbarBtn onClick={onAddText} title="Texto" label="Texto" icon={Type} iconOnly={isVertical} />
+      <ToolbarBtn onClick={onAddImage} title="Imagen" label="Imagen" icon={ImageIcon} iconOnly={isVertical} />
+      <ToolbarBtn onClick={onAddShape} title="Forma" label="Forma" icon={Square} iconOnly={isVertical} />
+      <ToolbarBtn onClick={onAddIcon} title="Ícono del catálogo curado" label="Ícono" icon={Smile} iconOnly={isVertical} />
 
-      <div className="h-5 w-px bg-border/50 mx-1" />
+      <ToolbarDivider vertical={isVertical} />
 
       {/* Presets compuestos. Cada uno inserta múltiples capas relacionadas
           (button = shape + text, badge = ellipse + text, etc.) en una
           sola acción undo-able. */}
-      <button
-        type="button"
-        onClick={onAddButton}
-        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border/50 hover:bg-muted transition-colors"
-        title="Botón CTA (pill + texto)"
-      >
-        <MousePointerClick className="h-3.5 w-3.5" />
-        Botón
-      </button>
-      <button
-        type="button"
-        onClick={onAddDivider}
-        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border/50 hover:bg-muted transition-colors"
-        title="Línea divisoria horizontal"
-      >
-        <Minus className="h-3.5 w-3.5" />
-        Línea
-      </button>
-      <button
-        type="button"
-        onClick={onAddBadge}
-        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border/50 hover:bg-muted transition-colors"
-        title="Badge circular de descuento"
-      >
-        <BadgePercent className="h-3.5 w-3.5" />
-        Badge
-      </button>
-      <button
-        type="button"
-        onClick={onAddRibbon}
-        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border/50 hover:bg-muted transition-colors"
-        title="Ribbon diagonal tipo cinta de oferta"
-      >
-        <Tag className="h-3.5 w-3.5" />
-        Ribbon
-      </button>
+      <ToolbarBtn onClick={onAddButton} title="Botón CTA (pill + texto)" label="Botón" icon={MousePointerClick} iconOnly={isVertical} />
+      <ToolbarBtn onClick={onAddDivider} title="Línea divisoria horizontal" label="Línea" icon={Minus} iconOnly={isVertical} />
+      <ToolbarBtn onClick={onAddBadge} title="Badge circular de descuento" label="Badge" icon={BadgePercent} iconOnly={isVertical} />
+      <ToolbarBtn onClick={onAddRibbon} title="Ribbon diagonal tipo cinta de oferta" label="Ribbon" icon={Tag} iconOnly={isVertical} />
 
-      <div className="flex-1" />
+      {/* Spacer: empuja safety/brand/save al final. En vertical es altura,
+          en horizontal es ancho. */}
+      <div className={isVertical ? "flex-1 w-0" : "flex-1"} />
 
       {/* Zona segura. Tooltip explica el concepto porque no es obvio sin
           contexto (especialmente para productores nuevos). El borde
           amarillo del botón cuando está activo refuerza la asociación
           con el color del overlay en el canvas. */}
-      <button
-        type="button"
+      <ToolbarBtn
         onClick={onToggleSafetyZone}
-        className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors ${
-          showSafetyZone
-            ? "border-yellow-400/60 bg-yellow-400/10 text-yellow-200"
-            : "border-border/50 hover:bg-muted text-muted-foreground hover:text-foreground"
-        }`}
         title={
           "Zona segura: marca un margen del 5% al borde del banner. " +
           "Mantén textos y logos dentro del rectángulo punteado para " +
@@ -185,24 +168,23 @@ export function EditorToolbar({
           "(stories, perfiles, miniaturas). No afecta la exportación, " +
           "es solo una guía visual."
         }
-      >
-        <ShieldCheck className="h-3.5 w-3.5" />
-        Zona segura
-      </button>
+        label="Zona segura"
+        icon={ShieldCheck}
+        active={showSafetyZone}
+        iconOnly={isVertical}
+      />
 
       {onOpenProjectBrandKit && (
-        <button
-          type="button"
+        <ToolbarBtn
           onClick={onOpenProjectBrandKit}
-          className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border/50 hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
           title="Tokens custom solo para este proyecto"
-        >
-          <Palette className="h-3.5 w-3.5" />
-          Brand kit del proyecto
-        </button>
+          label="Brand kit del proyecto"
+          icon={Palette}
+          iconOnly={isVertical}
+        />
       )}
 
-      <SaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} />
+      <SaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} compact={isVertical} />
     </div>
   );
 }
@@ -210,9 +192,14 @@ export function EditorToolbar({
 function SaveIndicator({
   status,
   lastSavedAt,
+  compact = false,
 }: {
   status: SaveStatus;
   lastSavedAt: Date | null;
+  // Modo compacto: solo ícono + tooltip. Lo usa la versión vertical de la
+  // toolbar donde no entra texto. Para "dirty" devuelve un punto naranja
+  // pequeño en vez del texto "Cambios sin guardar".
+  compact?: boolean;
 }) {
   // whitespace-nowrap en todos los estados — la toolbar ahora usa flex-wrap,
   // pero el indicador en sí no debe romper su texto interno (que es lo que
@@ -221,21 +208,29 @@ function SaveIndicator({
   // tooltip nativo con la fecha completa.
   if (status === "saving") {
     return (
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap" title="Guardando…">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        Guardando…
+        {!compact && "Guardando…"}
       </div>
     );
   }
   if (status === "error") {
     return (
-      <div className="flex items-center gap-1.5 text-xs text-red-400 whitespace-nowrap">
+      <div className="flex items-center gap-1.5 text-xs text-red-400 whitespace-nowrap" title="Error al guardar">
         <AlertCircle className="h-3.5 w-3.5" />
-        Error al guardar
+        {!compact && "Error al guardar"}
       </div>
     );
   }
   if (status === "dirty") {
+    if (compact) {
+      return (
+        <div
+          className="w-2 h-2 rounded-full bg-orange-400/80"
+          title="Cambios sin guardar"
+        />
+      );
+    }
     return (
       <div className="text-xs text-muted-foreground whitespace-nowrap">
         Cambios sin guardar
