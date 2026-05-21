@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Loader2, Plus, Layers, Trash2, Rocket } from "lucide-react";
@@ -15,6 +15,8 @@ import {
   CANONICAL_SIZES,
 } from "@/lib/production/layout-templates";
 import { TemplateDefinition } from "@/lib/production/types";
+import { BrandKitContent, EMPTY_KIT_CONTENT, brandKitFromApi } from "@/lib/production/brand-kit";
+import { AdaptationRenderer } from "@/components/production/render/adaptation-renderer";
 
 // Master arranca siempre en 16:9 (1920×1080) cuando es Blank. Si el productor
 // elige un layout template, la dimensión sale del template (horizontal por
@@ -32,6 +34,12 @@ interface Template {
   base_width: number;
   base_height: number;
   thumbnail_url: string | null;
+  // brand_kit_id resuelve a un BrandKitContent del map cargado para el
+  // proyecto. null = preview con kit vacío (colores caen al default).
+  brand_kit_id: number | null;
+  // Definición parseada del master. null si el JSON estaba corrupto en DB —
+  // en ese caso el card cae al ícono.
+  definition: TemplateDefinition | null;
   status: "draft" | "published" | "archived";
   version: number;
   created_at: string;
@@ -43,6 +51,9 @@ interface Template {
 
 interface Props {
   productionProjectId: number;
+  // clientId del proyecto. Necesario para cargar los brand kits accesibles
+  // (cliente-wide + project-scoped) y resolver el preview de cada card.
+  clientId: number;
 }
 
 // Etiqueta legible para la orientación de un template, así el usuario sabe
@@ -55,26 +66,47 @@ function orientationLabel(w: number, h: number): string {
   return "Mixto";
 }
 
-export default function ProductionTemplatesList({ productionProjectId }: Props) {
+export default function ProductionTemplatesList({ productionProjectId, clientId }: Props) {
   const router = useRouter();
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [showPicker, setShowPicker] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  // Map brand_kit_id → BrandKitContent. Cargado en paralelo con templates;
+  // mientras carga, los previews caen a EMPTY_KIT_CONTENT.
+  const [brandKitMap, setBrandKitMap] = useState<Map<number, BrandKitContent>>(new Map());
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const tplRes = await fetch(
-        `/api/production/templates?production_project_id=${productionProjectId}`
-      );
+      const [tplRes, kitRes] = await Promise.all([
+        fetch(`/api/production/templates?production_project_id=${productionProjectId}`),
+        fetch(`/api/production/brand-kits?client_id=${clientId}&production_project_id=${productionProjectId}`),
+      ]);
       if (tplRes.ok) setTemplates(await tplRes.json());
+      if (kitRes.ok) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rawKits: any[] = await kitRes.json();
+        const map = new Map<number, BrandKitContent>();
+        for (const raw of rawKits) {
+          try {
+            // brandKitFromApi parsea los *_json a tokens normalizados; el row
+            // crudo es laxo (mismo patrón usado en la página producir).
+            const kit = brandKitFromApi(raw);
+            map.set(kit.id, kit.content);
+          } catch (e) {
+            // Un kit corrupto no debe tumbar el listado entero.
+            console.warn("Brand kit malformed, skipping:", e);
+          }
+        }
+        setBrandKitMap(map);
+      }
     } catch (err) {
       console.error("Error obteniendo templates:", err);
     } finally {
       setLoading(false);
     }
-  }, [productionProjectId]);
+  }, [productionProjectId, clientId]);
 
   useEffect(() => {
     fetchAll();
@@ -270,6 +302,7 @@ export default function ProductionTemplatesList({ productionProjectId }: Props) 
               router={router}
               deleting={deletingId === t.id}
               onDelete={() => handleDelete(t.id)}
+              brandKit={(t.brand_kit_id != null && brandKitMap.get(t.brand_kit_id)) || EMPTY_KIT_CONTENT}
             />
           ))}
         </div>
@@ -283,11 +316,13 @@ function TemplateCard({
   router,
   deleting,
   onDelete,
+  brandKit,
 }: {
   template: Template;
   router: ReturnType<typeof useRouter>;
   deleting: boolean;
   onDelete: () => void;
+  brandKit: BrandKitContent;
 }) {
   return (
     <div className="relative bg-muted/50 rounded-lg p-3 transition-colors group flex flex-col gap-2">
@@ -298,9 +333,17 @@ function TemplateCard({
           maxHeight: 200,
         }}
       >
+        {/* Orden de fallback:
+            1. thumbnail_url persistido (camino rápido — JPG cacheado por CDN,
+               generado por el editor al guardar la principal del design).
+            2. Render inline del definition para templates legacy que aún no
+               tienen thumbnail. El primer save del editor los migra.
+            3. Ícono Layers como último recurso. */}
         {t.thumbnail_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={t.thumbnail_url} alt={t.name} className="w-full h-full object-contain" />
+        ) : t.definition ? (
+          <MasterPreview definition={t.definition} brandKit={brandKit} />
         ) : (
           <Layers className="h-8 w-8 text-muted-foreground/50" />
         )}
@@ -353,6 +396,68 @@ function TemplateCard({
         <Rocket className="h-3.5 w-3.5" />
         Producir
       </Button>
+    </div>
+  );
+}
+
+// Renderiza el master inline dentro del card. Estrategia:
+//   - Reutilizamos AdaptationRenderer con fit_mode="contain", lo cual mete
+//     el master en una caja arbitraria preservando aspect ratio.
+//   - Como el contenedor padre tiene aspect-ratio = master, la caja real
+//     coincide con la del master; usamos un ResizeObserver para conocer las
+//     dimensiones renderizadas y pasárselas al renderer (no podemos
+//     pre-computar pixel size porque depende del ancho de columna del grid).
+//   - Pointer-events disabled: los layers no deben interceptar clicks del
+//     botón "Producir" o del delete.
+function MasterPreview({ definition, brandKit }: { definition: TemplateDefinition; brandKit: BrandKitContent }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<{ w: number; h: number } | null>(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      // Evita re-render infinito por sub-pixel jitter.
+      setBox((cur) => {
+        if (cur && Math.abs(cur.w - width) < 0.5 && Math.abs(cur.h - height) < 0.5) return cur;
+        return { w: width, h: height };
+      });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Memoizamos el "adaptation" para evitar nuevas instancias en cada render
+  // que disparen trabajo innecesario en el renderer.
+  const adaptation = useMemo(
+    () =>
+      box
+        ? {
+            width: Math.max(1, Math.round(box.w)),
+            height: Math.max(1, Math.round(box.h)),
+            fit_mode: "contain" as const,
+            overrides_json: null,
+          }
+        : null,
+    [box]
+  );
+
+  return (
+    <div
+      ref={containerRef}
+      className="w-full h-full pointer-events-none"
+      style={{ position: "relative" }}
+    >
+      {adaptation && (
+        <AdaptationRenderer
+          adaptation={adaptation}
+          master={definition}
+          brandKit={brandKit}
+        />
+      )}
     </div>
   );
 }

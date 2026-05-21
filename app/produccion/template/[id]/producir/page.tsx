@@ -20,6 +20,7 @@ import {
   Package,
   Pencil,
   Plus,
+  RefreshCw,
   Rocket,
   Sparkles,
   Trash2,
@@ -242,6 +243,26 @@ export default function ProducirPage() {
   const [adaptationsLoaded, setAdaptationsLoaded] = useState(false);
   const [adaptationCount, setAdaptationCount] = useState(0);
   const [adaptationsLoading, setAdaptationsLoading] = useState(false);
+
+  // Job de generación de thumbnail del master. Se setea desde handleSaveMaster
+  // cuando el productor edita la orientación principal y se persiste OK; un
+  // useEffect monta el render off-screen, captura con html-to-image, sube a
+  // GCS y hace PUT del thumbnail_url al master template. Best-effort: si
+  // falla, el editor sigue funcionando — el listado simplemente cae al
+  // render inline mientras tanto.
+  const [thumbnailJob, setThumbnailJob] = useState<{
+    def: TemplateDefinition;
+    nativeW: number;
+    nativeH: number;
+    targetTemplateId: number;
+  } | null>(null);
+  const thumbnailCaptureRef = useRef<HTMLDivElement | null>(null);
+  // Auto-gen del thumbnail solo en el primer save de un master sin imagen.
+  // Una vez disparado en la sesión, los siguientes saves no regeneran; el
+  // productor decide cuándo refrescarlo via el botón "Rehacer preview".
+  // Evita que cada save dispare un upload nuevo (con autosave debounced de
+  // 1s eso significaba un blob a S3 cada vez que dejabas de tipear).
+  const autoThumbnailFiredRef = useRef(false);
   // Filtros del módulo adaptaciones. Set vacío significa "todos" — más
   // simple para el toggle (un click agrega/quita un id del set). Search
   // matchea contra custom_name + preset_name. onlyCustomized filtra a
@@ -689,6 +710,9 @@ export default function ProducirPage() {
   // correspondiente. Si la orientación es la base, el server propaga el
   // cambio a las orientaciones linked (definition reflowed). Después
   // refrescamos las orientaciones para que el strip muestre lo nuevo.
+  // Cuando lo guardado es la principal (master del design), encolamos
+  // también la regeneración del thumbnail_url para que el listado de
+  // /produccion/proyecto/[id] muestre el preview cacheado.
   const handleSaveMaster = useCallback(
     async (def: TemplateDefinition) => {
       if (!activeOrientationId) return;
@@ -709,16 +733,134 @@ export default function ProducirPage() {
       // Refrescamos todas las orientaciones — la base puede haber empujado
       // cambios a las linked. Si solo se editó una orientación linked /
       // distinta, solo esa cambia.
+      // IMPORTANTE: no leemos `orientations` del closure ni lo agregamos a
+      // las deps de este useCallback. Si lo hiciéramos, el handler cambia
+      // identidad tras cada setOrientations, lo que invalida flushSave del
+      // editor y dispara el autosave infinitamente (dirtyRef no se limpia
+      // post-save). Resolvemos la principal solo con nextList; si el refresh
+      // falla, saltamos thumbnail (graceful skip; el siguiente save lo cubre).
       const refresh = await fetch(
         `/api/production/templates/${templateId}/orientations`
       );
       if (refresh.ok) {
-        const list: Orientation[] = await refresh.json();
-        setOrientations(list);
+        const nextList: Orientation[] = await refresh.json();
+        setOrientations(nextList);
+        if (nextList.length > 0) {
+          const principal = nextList.reduce(
+            (min, o) => (o.id < min.id ? o : min),
+            nextList[0],
+          );
+          // Auto-gen thumbnail solo si:
+          //   1. Se editó la principal (no una variant).
+          //   2. La principal todavía no tiene thumbnail (primera vez).
+          //   3. No lo disparamos antes en esta sesión (anti-doble-fire por
+          //      autosave entre saves).
+          if (
+            activeOrientationId === principal.id &&
+            !principal.thumbnail_url &&
+            !autoThumbnailFiredRef.current
+          ) {
+            autoThumbnailFiredRef.current = true;
+            setThumbnailJob({
+              def,
+              nativeW: principal.base_width,
+              nativeH: principal.base_height,
+              targetTemplateId: principal.id,
+            });
+          }
+        }
       }
     },
     [activeOrientationId, templateId]
   );
+
+  // Manual: el productor pide explícitamente regenerar el thumbnail. Útil
+  // tras cambios visuales importantes (colores, layout, copy hero) que el
+  // listado debería reflejar. Captura el master ACTUAL (no `definition` del
+  // editor — esa es la orientación activa, podría ser una variant).
+  const handleRegenerateThumbnail = useCallback(() => {
+    if (!principalOrientation || !principalOrientation.definition) return;
+    setThumbnailJob({
+      def: principalOrientation.definition,
+      nativeW: principalOrientation.base_width,
+      nativeH: principalOrientation.base_height,
+      targetTemplateId: principalOrientation.id,
+    });
+  }, [principalOrientation]);
+
+  // Captura el master recién guardado, lo sube a GCS y PUT thumbnail_url al
+  // template principal. Trigger: thumbnailJob !== null. Best-effort —
+  // failures se loggean pero no rompen el editor. El render off-screen vive
+  // al final del JSX gated por thumbnailJob.
+  useEffect(() => {
+    if (!thumbnailJob) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        // requestAnimationFrame + setTimeout asegura que React montó el
+        // OrientationMiniPreview off-screen Y el browser hizo paint antes
+        // de capturar.
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => setTimeout(resolve, 80)),
+        );
+        if (cancelled) return;
+        const node = thumbnailCaptureRef.current;
+        if (!node) return;
+        const blob = await captureNodeToJpeg(node);
+        const dataUri: string = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error("FileReader falló"));
+          reader.readAsDataURL(blob);
+        });
+        if (cancelled) return;
+        const up = await fetch("/api/production/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageData: dataUri, clientId: clientId ?? undefined }),
+        });
+        if (!up.ok) {
+          console.warn("Thumbnail upload falló:", up.status);
+          return;
+        }
+        const upBody = await up.json();
+        if (typeof upBody.url !== "string") return;
+        if (cancelled) return;
+        const put = await fetch(
+          `/api/production/templates/${thumbnailJob.targetTemplateId}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ thumbnail_url: upBody.url }),
+          },
+        );
+        if (!put.ok) {
+          console.warn("PUT thumbnail_url falló:", put.status);
+          return;
+        }
+        // Optimistic local update: la principal ahora tiene thumbnail. Sin
+        // esto, el siguiente save vuelve a ver thumbnail_url=null y, si el
+        // autoThumbnailFiredRef se resetara (no lo hace, pero defensive),
+        // re-dispararía. Además mantiene consistencia con la DB sin un
+        // refetch extra.
+        const newUrl = upBody.url;
+        const targetId = thumbnailJob.targetTemplateId;
+        setOrientations((cur) =>
+          cur.map((o) =>
+            o.id === targetId ? { ...o, thumbnail_url: newUrl } : o,
+          ),
+        );
+      } catch (e) {
+        console.warn("Thumbnail generation falló:", (e as Error).message);
+      } finally {
+        if (!cancelled) setThumbnailJob(null);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [thumbnailJob, clientId]);
 
   // Save de una adaptación: PATCH overrides_json con manual_layout.
   const handleSaveAdapt = useCallback(
@@ -1416,6 +1558,22 @@ export default function ProducirPage() {
           <Button
             variant="ghost"
             size="sm"
+            onClick={handleRegenerateThumbnail}
+            disabled={!principalOrientation?.definition || thumbnailJob !== null}
+            className="gap-1.5 text-muted-foreground"
+            title="Regenera la imagen miniatura que muestra el listado del proyecto. Útil tras cambios visuales importantes."
+          >
+            {thumbnailJob ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            {thumbnailJob ? "Generando..." : "Rehacer preview"}
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => router.push(`/produccion/template/${template.id}`)}
             className="gap-1.5 text-muted-foreground"
             title="Editor del master en pantalla completa (sin grid de adaptaciones)"
@@ -1938,6 +2096,47 @@ export default function ProducirPage() {
         />
       )}
 
+      {/* Render off-screen del master para generar el thumbnail persistido
+          (lo dispara handleSaveMaster vía thumbnailJob). Capamos el lado
+          largo a 800px porque el listado lo muestra a <200px alto, y un
+          JPG de 2520×1080 es desperdicio de ancho de banda y bytes en S3. */}
+      {thumbnailJob && (() => {
+        const THUMB_MAX_SIDE = 800;
+        const scale = Math.min(
+          1,
+          THUMB_MAX_SIDE / Math.max(thumbnailJob.nativeW, thumbnailJob.nativeH),
+        );
+        return (
+          <div
+            aria-hidden
+            style={{
+              position: "fixed",
+              left: "-99999px",
+              top: 0,
+              pointerEvents: "none",
+              opacity: 0,
+            }}
+          >
+            <div
+              ref={thumbnailCaptureRef}
+              style={{
+                width: thumbnailJob.nativeW * scale,
+                height: thumbnailJob.nativeH * scale,
+                overflow: "hidden",
+              }}
+            >
+              <OrientationMiniPreview
+                definition={thumbnailJob.def}
+                brandKit={brandKitContent}
+                nativeW={thumbnailJob.nativeW}
+                nativeH={thumbnailJob.nativeH}
+                scale={scale}
+              />
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Container oculto para renderizar adaptaciones a tamaño nativo durante
           export. Vive fuera del flujo visual; las dimensiones reales del
           renderer escapan por overflow. */}
@@ -2101,32 +2300,12 @@ function AdaptationCard({
           </button>
         </div>
       )}
-      {/* Title bar: nombre + dims arriba, siempre visible. */}
+      {/* Title bar: nombre + dims arriba, siempre visible. El badge del
+          source (#N) ahora cuelga en la esquina inf-der del preview, no
+          en el título — consistente con el VariantsStrip y deja el título
+          más limpio. */}
       <div className="px-3 pt-2 pb-1.5 flex items-center justify-between gap-2 min-w-0">
         <div className={cn("flex items-center gap-1.5 min-w-0 flex-1", hasManualOverride && "pl-20")}>
-          {/* Badge del source: identifica de qué orientación del master
-              hereda esta adaptación. Mismo número/color que el badge en
-              el VariantsStrip. */}
-          {sourceBadgeNumber != null && (() => {
-            const badge = orientationBadgeColors(sourceBadgeNumber);
-            const sourceName = sourceOrientation
-              ? sourceOrientation.id === principalId
-                ? "master"
-                : sourceOrientation.name
-              : "—";
-            return (
-              <div
-                className={cn(
-                  "shrink-0 h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-sm ring-2",
-                  badge.bg,
-                  badge.ring,
-                )}
-                title={`Hereda del ${sourceName} #${sourceBadgeNumber}`}
-              >
-                {sourceBadgeNumber}
-              </div>
-            );
-          })()}
           <p className="text-sm font-medium truncate min-w-0">{label}</p>
         </div>
         <span className="text-[10px] text-muted-foreground shrink-0 font-mono">
@@ -2169,6 +2348,33 @@ function AdaptationCard({
             dataRow={dataRow}
           />
         </button>
+
+        {/* Badge del source en la esquina inf-der del banner area. Mismo
+            número/color que el badge del VariantsStrip — el productor ve
+            de un vistazo de qué orientación hereda esta adaptación.
+            z-20 para quedar sobre el preview pero debajo del overlay hover
+            (z-30+ implícito por orden de pintado). pointer-events-none para
+            que no robe clicks del botón "click para editar". */}
+        {sourceBadgeNumber != null && (() => {
+          const badge = orientationBadgeColors(sourceBadgeNumber);
+          const sourceName = sourceOrientation
+            ? sourceOrientation.id === principalId
+              ? "master"
+              : sourceOrientation.name
+            : "—";
+          return (
+            <div
+              className={cn(
+                "absolute bottom-1.5 right-1.5 z-20 h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-md ring-2 pointer-events-none",
+                badge.bg,
+                badge.ring,
+              )}
+              title={`Hereda del ${sourceName} #${sourceBadgeNumber}`}
+            >
+              {sourceBadgeNumber}
+            </div>
+          );
+        })()}
 
         {/* Overlay sobre el banner: badges + canal + controles. Por defecto
             oculto, fade-in al hover. Cuando la card está siendo editada los
@@ -3175,23 +3381,43 @@ function VariantsStrip({
                   : `${displayName} #${num ?? "?"} · ${m.base_width}×${m.base_height} — click para abrir`
               }
             >
-              <div
-                className={cn(
-                  "relative rounded shadow-sm transition-colors overflow-hidden",
-                  isCurrent
-                    ? "border-2 border-primary ring-2 ring-primary/30"
-                    : "border border-border/50 hover:border-foreground/40"
-                )}
-                style={{ width: cssW, height: cssH }}
-              >
+              {/* Wrapper relativo del tamaño exacto del preview: el badge
+                  va acá como sibling para poder colgar afuera (-bottom/-right
+                  con overflow visible). Antes vivía dentro del recuadro
+                  bordeado, que tiene overflow-hidden para clipear el mini
+                  render, y eso impedía empujarlo más allá de la esquina. */}
+              <div className="relative" style={{ width: cssW, height: cssH }}>
+                <div
+                  className={cn(
+                    "relative rounded shadow-sm transition-colors overflow-hidden w-full h-full",
+                    isCurrent
+                      ? "border-2 border-primary ring-2 ring-primary/30"
+                      : "border border-border/50 hover:border-foreground/40"
+                  )}
+                >
+                  {/* Mini-preview real: renderizamos la definition de la
+                      orientación a escala. El productor ve el contenido
+                      actual (logo / textos / shapes) en miniatura, no un
+                      placeholder. */}
+                  {m.definition ? (
+                    <OrientationMiniPreview
+                      definition={m.definition}
+                      brandKit={brandKit}
+                      nativeW={m.base_width}
+                      nativeH={m.base_height}
+                      scale={thumbScale}
+                    />
+                  ) : null}
+                </div>
                 {/* Badge numérico: identifica visualmente la orientación.
                     El mismo número (y color) aparece en cada AdaptationCard
-                    cuyo source es esta orientación. Posicionado overlay en
-                    la esquina sup-izq para no tapar contenido del centro. */}
+                    cuyo source es esta orientación. Cuelga fuera del
+                    recuadro en la esquina inf-der como un notification
+                    badge — no tapa el contenido del mini-preview. */}
                 {badge && num != null && (
                   <div
                     className={cn(
-                      "absolute top-1 left-1 z-10 h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-md ring-2",
+                      "absolute -bottom-1.5 -right-1.5 z-10 h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-md ring-2",
                       badge.bg,
                       badge.ring,
                     )}
@@ -3200,19 +3426,6 @@ function VariantsStrip({
                     {num}
                   </div>
                 )}
-                {/* Mini-preview real: renderizamos la definition de la
-                    orientación a escala. El productor ve el contenido
-                    actual (logo / textos / shapes) en miniatura, no un
-                    placeholder. */}
-                {m.definition ? (
-                  <OrientationMiniPreview
-                    definition={m.definition}
-                    brandKit={brandKit}
-                    nativeW={m.base_width}
-                    nativeH={m.base_height}
-                    scale={thumbScale}
-                  />
-                ) : null}
               </div>
               <span
                 className={cn(
