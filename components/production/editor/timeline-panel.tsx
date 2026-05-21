@@ -247,17 +247,21 @@ export function TimelinePanel(props: TimelinePanelProps) {
 
   const header = (
     <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border/50 bg-card/60 shrink-0">
+      {/* Botón colapsar/expandir: incluye el chevron Y el texto "Animación"
+          para que todo el rótulo sea clickeable (no solo la flecha). El
+          hover en cualquier parte del texto/chevron se propaga al mismo
+          background, y el cursor es pointer sobre toda el área. */}
       <button
         type="button"
         onClick={onToggleCollapsed}
-        className="text-muted-foreground hover:text-foreground p-1 rounded"
+        className="flex items-center gap-1.5 px-1.5 py-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors -ml-1.5"
         title={collapsed ? "Expandir timeline" : "Colapsar timeline"}
       >
         {collapsed ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        <span className="text-xs font-semibold uppercase tracking-wider">
+          Animación
+        </span>
       </button>
-      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        Animación
-      </span>
       {animation ? (
         <>
           <div className="h-4 w-px bg-border/50 mx-1" />
