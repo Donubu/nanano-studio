@@ -78,11 +78,32 @@ function shadowKind(layer: TemplateLayer): "box" | "text" {
   return "box";
 }
 
+// Compone el `transform` CSS combinando rotation + scale. Scale por eje
+// gana sobre el uniforme si está set; los defaults (1) se omiten para
+// mantener el transform string corto.
+function transformCss(layer: TemplateLayer): string | undefined {
+  const parts: string[] = [];
+  if (layer.rotation) parts.push(`rotate(${layer.rotation}deg)`);
+  const sx = layer.scaleX ?? layer.scale ?? 1;
+  const sy = layer.scaleY ?? layer.scale ?? 1;
+  if (sx !== 1 || sy !== 1) {
+    parts.push(sx === sy ? `scale(${sx})` : `scale(${sx}, ${sy})`);
+  }
+  return parts.length > 0 ? parts.join(" ") : undefined;
+}
+
+function filterCss(layer: TemplateLayer): string | undefined {
+  if (layer.blur && layer.blur > 0) return `blur(${layer.blur}px)`;
+  return undefined;
+}
+
 function baseLayerStyle(layer: TemplateLayer, parentMode: "free" | "stack"): CSSProperties {
   // El shadow se aplica como boxShadow por default — el caso de text-shadow
   // se sobreescribe en renderText cuando aplica.
   const shadow = shadowCss(layer.shadow);
   const useBoxShadow = shadow && shadowKind(layer) === "box";
+  const transform = transformCss(layer);
+  const filter = filterCss(layer);
   if (parentMode === "stack") {
     // Position is determined by the parent's flex layout. We keep width/height
     // as the layer's stored size; align "stretch" on the cross-axis is handled
@@ -93,7 +114,8 @@ function baseLayerStyle(layer: TemplateLayer, parentMode: "free" | "stack"): CSS
       height: layer.size.h,
       flexShrink: 0,
       opacity: layer.opacity ?? 1,
-      transform: layer.rotation ? `rotate(${layer.rotation}deg)` : undefined,
+      transform,
+      filter,
       display: layer.visible === false ? "none" : undefined,
       boxSizing: "border-box",
       boxShadow: useBoxShadow ? shadow : undefined,
@@ -106,7 +128,8 @@ function baseLayerStyle(layer: TemplateLayer, parentMode: "free" | "stack"): CSS
     width: layer.size.w,
     height: layer.size.h,
     opacity: layer.opacity ?? 1,
-    transform: layer.rotation ? `rotate(${layer.rotation}deg)` : undefined,
+    transform,
+    filter,
     display: layer.visible === false ? "none" : undefined,
     boxSizing: "border-box",
     boxShadow: useBoxShadow ? shadow : undefined,

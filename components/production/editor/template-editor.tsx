@@ -7,12 +7,15 @@ import { TemplateDefinition, TemplateLayer, findLayer, findParent } from "@/lib/
 import { BrandKit, BrandKitContent, EMPTY_KIT_CONTENT } from "@/lib/production/brand-kit";
 import { DataRow } from "@/lib/production/variables";
 import { useTemplateEditor } from "@/lib/production/use-template-editor";
+import { useTimeline } from "@/lib/production/use-timeline";
+import { applyAnimationAtTime } from "@/lib/production/animation";
 import { TemplateCanvas } from "./template-canvas";
 import { LayersPanel } from "./layers-panel";
 import { PropertiesPanel } from "./properties-panel";
 import { EditorToolbar } from "./editor-toolbar";
 import { PreviewThumbnails, ThumbnailPreset } from "./preview-thumbnails";
 import { LayerContextMenu, LayerContextMenuPosition } from "./layer-context-menu";
+import { TimelinePanel } from "./timeline-panel";
 
 interface Props {
   initial: TemplateDefinition;
@@ -72,6 +75,24 @@ export function TemplateEditor({
     baseHeight,
     onSave,
   });
+
+  // Timeline state. Vive arriba del TimelinePanel pero también arriba del
+  // canvas, porque el canvas renderea el snapshot animado en tiempo de
+  // playhead. La AnimationConfig misma vive en editor.definition.animation
+  // — el hook solo gestiona currentTime / isPlaying / colapso.
+  const timeline = useTimeline({
+    duration: editor.definition.animation?.duration,
+    loop: editor.definition.animation?.loop,
+  });
+
+  // Snapshot del árbol en el instante actual del playhead. Cuando
+  // currentTime es 0, applyAnimationAtTime devuelve la def original
+  // (misma referencia), así que no rompemos memos del renderer mientras
+  // el productor edita sin animación activa.
+  const canvasDefinition = useMemo(
+    () => applyAnimationAtTime(editor.definition, timeline.currentTime),
+    [editor.definition, timeline.currentTime],
+  );
 
   const previewPresets: ThumbnailPreset[] = useMemo(
     () => [
@@ -347,17 +368,37 @@ export function TemplateEditor({
               onToggleSafetyZone={() => setShowSafetyZone((v) => !v)}
             />
           </div>
-          <TemplateCanvas
+          {/* Canvas wrapper: toma flex-1 dentro de la columna central para
+              que el TimelinePanel (auto-size por contenido) tome lo que
+              necesite abajo. Cuando el timeline está colapsado solo su
+              header toma altura — el canvas se expande casi a full. */}
+          <div className="flex flex-1 min-h-0">
+            <TemplateCanvas
+              definition={canvasDefinition}
+              selectedId={editor.selectedId}
+              selectedIds={editor.selectedIds}
+              onSelect={editor.select}
+              onUpdateBounds={editor.updateBounds}
+              previewSize={previewSize}
+              brandKit={brandKit}
+              dataRow={dataRow}
+              onLayerContextMenu={openContextMenu}
+              showSafetyZone={showSafetyZone}
+            />
+          </div>
+          <TimelinePanel
             definition={editor.definition}
-            selectedId={editor.selectedId}
-            selectedIds={editor.selectedIds}
-            onSelect={editor.select}
-            onUpdateBounds={editor.updateBounds}
-            previewSize={previewSize}
-            brandKit={brandKit}
-            dataRow={dataRow}
-            onLayerContextMenu={openContextMenu}
-            showSafetyZone={showSafetyZone}
+            currentTime={timeline.currentTime}
+            isPlaying={timeline.isPlaying}
+            collapsed={timeline.timelineCollapsed}
+            selectedLayerId={editor.selectedId}
+            onSeek={timeline.setCurrentTime}
+            onPlayPause={timeline.togglePlayPause}
+            onRewind={timeline.rewind}
+            onToggleCollapsed={timeline.toggleTimelineCollapsed}
+            onUpdateAnimation={(next) =>
+              editor.updateRoot((root) => ({ ...root, animation: next }))
+            }
           />
         </div>
 
