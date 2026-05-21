@@ -67,6 +67,12 @@ const baseLayerSchema = z.object({
   locked: z.boolean().optional(),
   constraints: constraintsSchema,
   shadow: shadowSchema,
+  // Transformaciones animables. scale uniforme + por eje + blur radio.
+  // Default 1 / 0 — el editor las omite cuando no afectan al render.
+  scale: z.number().min(0).max(100).optional(),
+  scaleX: z.number().min(0).max(100).optional(),
+  scaleY: z.number().min(0).max(100).optional(),
+  blur: z.number().min(0).max(200).optional(),
 });
 
 // fontSize puede ser número, token string "{scale.X}", o FontSizeRange.
@@ -204,6 +210,53 @@ const layerSchema: z.ZodType<TemplateLayer> = z.lazy(() =>
   ]),
 );
 
+// Animation timeline. Se valida acá porque vive en la root frame
+// (TemplateDefinition.animation) y el server / agente pueden recibir
+// definitions con timelines. Para detalle del modelo ver
+// lib/production/animation.ts.
+const animatablePropertySchema = z.enum([
+  "position.x",
+  "position.y",
+  "size.w",
+  "size.h",
+  "opacity",
+  "rotation",
+  "scale",
+  "scale.x",
+  "scale.y",
+  "blur",
+  "color",
+]);
+const easingPresetSchema = z.enum([
+  "linear",
+  "ease",
+  "ease-in",
+  "ease-out",
+  "ease-in-out",
+]);
+const cubicBezierEasingSchema = z.object({
+  type: z.literal("cubic-bezier"),
+  values: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+});
+const easingSchema = z.union([easingPresetSchema, cubicBezierEasingSchema]);
+const keyframeSchema = z.object({
+  // t en ms. Limitado a 5 min (300_000 ms) como sanity check.
+  t: z.number().min(0).max(300_000),
+  // number para todas las props excepto color (string).
+  value: z.union([z.number(), z.string().min(1).max(200)]),
+  easing: easingSchema,
+});
+const animationTrackSchema = z.object({
+  layerId: idSchema,
+  property: animatablePropertySchema,
+  keyframes: z.array(keyframeSchema),
+});
+const animationConfigSchema = z.object({
+  duration: z.number().min(1).max(300_000),
+  loop: z.union([z.number().int().min(1).max(100), z.literal("infinite")]),
+  tracks: z.array(animationTrackSchema),
+});
+
 // Root definition: frame con id "tpl_root" exacto y layout = free (los
 // banners se componen con posición libre por default; stack está permitido
 // pero el renderer del producir page asume free root).
@@ -228,6 +281,12 @@ const definitionSchema = z
     visible: z.boolean().optional(),
     locked: z.boolean().optional(),
     constraints: constraintsSchema,
+    scale: z.number().min(0).max(100).optional(),
+    scaleX: z.number().min(0).max(100).optional(),
+    scaleY: z.number().min(0).max(100).optional(),
+    blur: z.number().min(0).max(200).optional(),
+    shadow: shadowSchema,
+    animation: animationConfigSchema.optional(),
   })
   .strict();
 

@@ -20,6 +20,11 @@ import {
 } from "./types";
 import { reflowForPreview } from "./reflow";
 import { FitMode } from "./fit-mode";
+import {
+  AnimationConfig,
+  AnimationTrack,
+  AnimatableProperty,
+} from "./animation";
 
 export interface AdaptationOverrides {
   manual_layout?: TemplateDefinition;
@@ -115,7 +120,73 @@ export function buildInitialFromAdaptFit(
     children: master.children.map((c) =>
       scaleLayerUniform(c, fitScale, offsetX, offsetY),
     ),
+    animation: master.animation
+      ? scaleAnimationUniform(master.animation, fitScale, offsetX, offsetY)
+      : master.animation,
   };
+}
+
+// Aplica el mismo scale-uniform que scaleLayerUniform a los keyframes del
+// timeline. Diferencia con reflowAnimation (en reflow.ts): el reflow usa
+// dos factores (sx, sy) porque el aspect ratio cambia entre orientaciones;
+// acá usamos UN solo factor (fitScale) porque la idea del fit scale-based
+// es preservar el aspecto del master entero — los layers no se deforman
+// individualmente. Las posiciones suman offsetX/Y para mantener el master
+// centrado dentro del adapt.
+function scaleAnimationUniform(
+  animation: AnimationConfig,
+  scale: number,
+  offsetX: number,
+  offsetY: number,
+): AnimationConfig {
+  return {
+    ...animation,
+    tracks: animation.tracks.map((track) =>
+      scaleTrackUniform(track, track.property, scale, offsetX, offsetY),
+    ),
+  };
+}
+
+function scaleTrackUniform(
+  track: AnimationTrack,
+  property: AnimatableProperty,
+  scale: number,
+  offsetX: number,
+  offsetY: number,
+): AnimationTrack {
+  switch (property) {
+    case "position.x":
+      return {
+        ...track,
+        keyframes: track.keyframes.map((k) => ({
+          ...k,
+          value:
+            typeof k.value === "number" ? k.value * scale + offsetX : k.value,
+        })),
+      };
+    case "position.y":
+      return {
+        ...track,
+        keyframes: track.keyframes.map((k) => ({
+          ...k,
+          value:
+            typeof k.value === "number" ? k.value * scale + offsetY : k.value,
+        })),
+      };
+    case "size.w":
+    case "size.h":
+    case "blur":
+      return {
+        ...track,
+        keyframes: track.keyframes.map((k) => ({
+          ...k,
+          value: typeof k.value === "number" ? k.value * scale : k.value,
+        })),
+      };
+    default:
+      // opacity, scale, scale.x/y, rotation, color → adimensionales, sin cambio.
+      return track;
+  }
 }
 
 function scaleLayerUniform(

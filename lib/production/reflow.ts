@@ -12,6 +12,11 @@ import {
   ConstraintV,
 } from "./types";
 import { effectiveConstraints } from "./smart-constraints";
+import {
+  AnimationConfig,
+  AnimationTrack,
+  AnimatableProperty,
+} from "./animation";
 
 const MIN_SIZE = 8;
 
@@ -23,6 +28,68 @@ export function reflowForPreview(
     ...root,
     size: previewSize,
     children: root.children.map((c) => reflowChild(c, root.size, previewSize)),
+    // Si hay timeline, los keyframes de propiedades con unidad de
+    // píxel (position.x/y, size.w/h, blur) se reescalan proporcional al
+    // cambio del root. opacity, scale, rotation y color son adimensionales
+    // y pasan inalterados. Mismo principio que el reflow de constraints
+    // sobre los layers — el productor anima en el master y la animación
+    // se propaga a variantes/adapts sin volver a tocarse.
+    animation: root.animation
+      ? reflowAnimation(root.animation, root.size, previewSize)
+      : root.animation,
+  };
+}
+
+export function reflowAnimation(
+  animation: AnimationConfig,
+  origSize: { w: number; h: number },
+  newSize: { w: number; h: number },
+): AnimationConfig {
+  if (origSize.w <= 0 || origSize.h <= 0) return animation;
+  const sx = newSize.w / origSize.w;
+  const sy = newSize.h / origSize.h;
+  // Para blur usamos el promedio de los dos factores (la idea es "tamaño
+  // visual" — no hay una dimensión natural para blur). Es una aproximación;
+  // si el productor necesita blur exacto en una orientación, lo ajusta a
+  // mano. Lo mismo aplica al scale-uniform del adapt fit en overrides.ts.
+  const sblur = (sx + sy) / 2;
+  return {
+    ...animation,
+    tracks: animation.tracks.map((track) =>
+      scaleTrack(track, track.property, sx, sy, sblur),
+    ),
+  };
+}
+
+function scaleTrack(
+  track: AnimationTrack,
+  property: AnimatableProperty,
+  sx: number,
+  sy: number,
+  sblur: number,
+): AnimationTrack {
+  let factor: number | null = null;
+  switch (property) {
+    case "position.x":
+    case "size.w":
+      factor = sx;
+      break;
+    case "position.y":
+    case "size.h":
+      factor = sy;
+      break;
+    case "blur":
+      factor = sblur;
+      break;
+  }
+  if (factor === null) return track;
+  const f = factor;
+  return {
+    ...track,
+    keyframes: track.keyframes.map((k) => ({
+      ...k,
+      value: typeof k.value === "number" ? k.value * f : k.value,
+    })),
   };
 }
 
