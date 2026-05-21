@@ -1001,14 +1001,14 @@ export default function ProducirPage() {
   // (esto se invoca desde la card al hacer hover, fuera del flujo de editar).
   // La adaptación vuelve a derivar automáticamente del master cercano.
   const handleResetAdaptationOverride = useCallback(
-    async (adaptationId: number) => {
-      if (designId == null) return;
+    async (adaptationId: number): Promise<boolean> => {
+      if (designId == null) return false;
       if (
         !confirm(
           "¿Quitar el ajuste manual? La pieza volverá a derivar automáticamente del master.",
         )
       ) {
-        return;
+        return false;
       }
       const res = await fetch(
         `/api/production/designs/${designId}/adaptations/${adaptationId}`,
@@ -1021,13 +1021,14 @@ export default function ProducirPage() {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         alert(body?.error || `No se pudo quitar el ajuste (HTTP ${res.status})`);
-        return;
+        return false;
       }
       setAdaptations((cur) =>
         cur.map((a) =>
           a.id === adaptationId ? { ...a, overrides_json: null } : a,
         ),
       );
+      return true;
     },
     [designId],
   );
@@ -1761,7 +1762,11 @@ export default function ProducirPage() {
                    debajo de los PreviewThumbnails de la adaptación. Antes
                    estaba arriba de toda la sección — al moverla acá queda
                    pegada al canvas que está modificando, sin desconectar
-                   el aviso del trabajo. Dos acciones:
+                   el aviso del trabajo. Tres acciones:
+                     - Re-linkear: SOLO visible si la adapt YA es independiente
+                       (tiene manual_layout). Quita el ajuste manual y la
+                       devuelve a derivar del master. Cierra el modo edit
+                       porque ya no hay manual_layout que editar.
                      - Cancelar: revierte los auto-saves al snapshot original.
                      - Listo: deja los cambios y vuelve al master. */
                 topBanner={
@@ -1780,6 +1785,29 @@ export default function ProducirPage() {
                         master ni en otras adaptaciones.
                       </p>
                     </div>
+                    {parseOverrides(editingAdaptation.overrides_json).manual_layout && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          // handleResetAdaptationOverride retorna true solo
+                          // si el productor confirmó Y el PATCH al server
+                          // tuvo éxito. En esos casos cerramos el modo edit
+                          // — ya no hay manual_layout que editar.
+                          const ok = await handleResetAdaptationOverride(
+                            editingAdaptation.id,
+                          );
+                          if (ok) {
+                            editSnapshotRef.current = null;
+                            setEditingId(null);
+                          }
+                        }}
+                        className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded bg-white/15 hover:bg-white/25 border border-white/30 transition-colors font-medium"
+                        title="Quita el ajuste manual y vuelve a depender del master (los cambios se pierden)"
+                      >
+                        <Link2 className="h-3.5 w-3.5" />
+                        Volver a linkear
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={handleCancelEditAdaptation}
@@ -2749,6 +2777,11 @@ function MinimalAdaptationCard({
   // pero no se descuadran. La medida va debajo del preview en typo mono.
   const TARGET_H = 140;
   const TARGET_W = 480;
+  // "Independiente": la adaptación tiene manual_layout en overrides_json,
+  // ya no recibe cambios del master automáticamente. Mismo significado que
+  // el badge emerald de la vista detallada — acá lo mostramos en chico
+  // junto a la medida para no romper la limpieza visual.
+  const hasManualOverride = !!parseOverrides(adaptation.overrides_json).manual_layout;
   return (
     <div className="flex flex-col items-center gap-1 shrink-0">
       <button
@@ -2769,9 +2802,19 @@ function MinimalAdaptationCard({
           dataRow={dataRow}
         />
       </button>
-      <span className="text-[10px] text-muted-foreground font-mono">
-        {adaptation.width}×{adaptation.height}
-      </span>
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] text-muted-foreground font-mono">
+          {adaptation.width}×{adaptation.height}
+        </span>
+        {hasManualOverride && (
+          <span
+            className="inline-flex items-center p-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+            title="Independiente — esta pieza no recibe cambios del master automáticamente"
+          >
+            <Unlink className="h-2.5 w-2.5" />
+          </span>
+        )}
+      </div>
     </div>
   );
 }
