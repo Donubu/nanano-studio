@@ -33,9 +33,20 @@ export function inferConstraints(
   layer: TemplateLayer,
   parent: { size: { w: number; h: number } },
 ): Constraints {
+  const hRaw = inferAxis(layer.position.x, layer.size.w, parent.size.w);
+  const vRaw = inferAxis(layer.position.y, layer.size.h, parent.size.h);
+  // inferAxis usa terminología horizontal (left/right) para ambos ejes.
+  // En el eje V los edges se llaman top/bottom; sin este mapeo, el cast
+  // `as ConstraintV` mentía: a runtime quedaba "left" como valor de v, y
+  // applyAxisV en reflow.ts no tiene case para "left" → caía a undefined
+  // y rompía con "Cannot read properties of undefined (reading 'pos')".
+  const vMapped: ConstraintV =
+    vRaw === "left" ? "top" :
+    vRaw === "right" ? "bottom" :
+    vRaw as ConstraintV;
   return {
-    h: inferAxis(layer.position.x, layer.size.w, parent.size.w) as ConstraintH,
-    v: inferAxis(layer.position.y, layer.size.h, parent.size.h) as ConstraintV,
+    h: hRaw as ConstraintH,
+    v: vMapped,
   };
 }
 

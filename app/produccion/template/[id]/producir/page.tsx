@@ -2335,7 +2335,7 @@ function AdaptationCard({
         <button
           type="button"
           onClick={onEdit}
-          className="flex items-end justify-center w-full h-full hover:bg-background/60 transition-colors"
+          className="flex items-center justify-center w-full h-full hover:bg-background/60 transition-colors"
           style={{ minHeight: TARGET_H + 16 }}
           title={isEditing ? "Esta adaptación está siendo editada" : "Click para editar esta adaptación"}
         >

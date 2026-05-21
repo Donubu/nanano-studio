@@ -87,6 +87,13 @@ function applyAxis(
       const factor = origParent > 0 ? newParent / origParent : 1;
       return { pos: pos * factor, size: Math.max(MIN_SIZE, size * factor) };
     }
+    default: {
+      // Defensive: si llega un valor que TS no esperaba (data legacy,
+      // import externo malformado), tratamos como "left" en vez de
+      // retornar undefined y crashear más arriba con un mensaje opaco.
+      console.warn("[reflow] applyAxis constraint desconocido, usando 'left':", c);
+      return { pos, size };
+    }
   }
 }
 
@@ -117,6 +124,11 @@ function applyAxisV(
     case "scale": {
       const factor = origParent > 0 ? newParent / origParent : 1;
       return { pos: pos * factor, size: Math.max(MIN_SIZE, size * factor) };
+    }
+    default: {
+      // Mismo razonamiento que applyAxis: fallback a "top" en vez de crashear.
+      console.warn("[reflow] applyAxisV constraint desconocido, usando 'top':", c);
+      return { pos, size };
     }
   }
 }
