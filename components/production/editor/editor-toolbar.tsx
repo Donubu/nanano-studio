@@ -62,7 +62,11 @@ export function EditorToolbar({
   onToggleSafetyZone,
 }: Props) {
   return (
-    <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50 bg-card/40">
+    // flex-wrap + gap-y permite que la toolbar se acomode en 2+ filas
+    // cuando el ancho disponible se achica (ej. ventana angosta o sidebars
+    // abiertos). Antes era un single-row sin wrap que pasaba por detrás del
+    // PropertiesPanel right al achicar la ventana.
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-2 border-b border-border/50 bg-card/40">
       <button
         type="button"
         onClick={onUndo}
@@ -210,9 +214,14 @@ function SaveIndicator({
   status: SaveStatus;
   lastSavedAt: Date | null;
 }) {
+  // whitespace-nowrap en todos los estados — la toolbar ahora usa flex-wrap,
+  // pero el indicador en sí no debe romper su texto interno (que es lo que
+  // hacía que "Guardado <fecha-hora>" rompiera en 2 líneas y empujara el
+  // área de edición). Para el estado "saved" colapsamos a solo el ícono +
+  // tooltip nativo con la fecha completa.
   if (status === "saving") {
     return (
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
         Guardando…
       </div>
@@ -220,20 +229,26 @@ function SaveIndicator({
   }
   if (status === "error") {
     return (
-      <div className="flex items-center gap-1.5 text-xs text-red-400">
+      <div className="flex items-center gap-1.5 text-xs text-red-400 whitespace-nowrap">
         <AlertCircle className="h-3.5 w-3.5" />
         Error al guardar
       </div>
     );
   }
   if (status === "dirty") {
-    return <div className="text-xs text-muted-foreground">Cambios sin guardar</div>;
+    return (
+      <div className="text-xs text-muted-foreground whitespace-nowrap">
+        Cambios sin guardar
+      </div>
+    );
   }
   if (status === "saved" && lastSavedAt) {
     return (
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <div
+        className="flex items-center text-xs text-muted-foreground whitespace-nowrap"
+        title={`Guardado ${formatDateTimeLocal(lastSavedAt.toISOString())}`}
+      >
         <Check className="h-3.5 w-3.5 text-green-500" />
-        Guardado {formatDateTimeLocal(lastSavedAt.toISOString())}
       </div>
     );
   }

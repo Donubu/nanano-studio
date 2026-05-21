@@ -54,6 +54,24 @@ import {
 } from "@/lib/production/brand-kit";
 import { cn } from "@/lib/utils";
 import { ClientImagePicker } from "@/components/production/editor/client-image-picker";
+import { GOOGLE_FONTS } from "@/lib/production/google-fonts";
+
+// Pesos numéricos → nombres legibles. CSS acepta los keywords pero el motor
+// de fuentes mapea cada uno a un weight numérico estándar. Mostramos siempre
+// los 9 niveles para que el productor encuentre el que quiere; algunas
+// fuentes no traen todos los pesos pero el browser hace fallback al más
+// cercano (font-style: normal).
+const FONT_WEIGHT_OPTIONS: { value: number; label: string }[] = [
+  { value: 100, label: "Ultralight" },
+  { value: 200, label: "Extralight" },
+  { value: 300, label: "Light" },
+  { value: 400, label: "Regular" },
+  { value: 500, label: "Medium" },
+  { value: 600, label: "Semibold" },
+  { value: 700, label: "Bold" },
+  { value: 800, label: "Extrabold" },
+  { value: 900, label: "Black" },
+];
 
 interface Props {
   definition: TemplateDefinition;
@@ -989,8 +1007,9 @@ function ShadowSection({
   const s = layer.shadow;
   return (
     <Section title="Sombra">
+      {/* Label "Sombra" oculto — el título de la sección + el texto del
+          checkbox ("Activada/Sin sombra") ya alcanzan. */}
       <div className="flex items-center gap-2 text-xs">
-        <span className="w-12 text-muted-foreground">Sombra</span>
         <label className="flex items-center gap-1 cursor-pointer flex-1">
           <input
             type="checkbox"
@@ -1056,6 +1075,95 @@ function ShadowSection({
   );
 }
 
+// Select de fuente. Lista las GOOGLE_FONTS curadas + tokens del brand kit;
+// si el productor necesita una que no está, "Otra…" abre un input libre
+// para tipear CSS font-family (ej. "Helvetica Neue, Arial, sans-serif").
+// Tokens del brand kit se muestran arriba con prefijo "{font.x}" para que
+// se distingan de las families literales.
+function FontFamilySelect({
+  value,
+  brandKit,
+  onChange,
+}: {
+  value: string;
+  brandKit: BrandKitContent;
+  onChange: (v: string) => void;
+}) {
+  const fontTokens = brandKit.fonts ?? [];
+  const googleFamilies = GOOGLE_FONTS.map((f) => f.family);
+  // Detectamos si el value actual es un token, una google font conocida, o
+  // un literal custom. Si es custom (no calza con nada), mostramos modo
+  // input libre. El productor cambia entre modos vía la opción "Otra…".
+  const tokenRef = parseRef(value);
+  const isToken = tokenRef?.kind === "font";
+  const matchesGoogle = googleFamilies.some(
+    (f) => value === f || value.startsWith(`${f},`),
+  );
+  const [customMode, setCustomMode] = useState(
+    !isToken && !matchesGoogle && value !== "",
+  );
+  if (customMode) {
+    return (
+      <div className="flex items-center gap-2 text-xs">
+        <span className="w-12 text-muted-foreground">Fuente</span>
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Inter, system-ui, sans-serif"
+          className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-xs"
+          autoFocus
+        />
+        <button
+          type="button"
+          onClick={() => setCustomMode(false)}
+          className="text-[10px] text-muted-foreground hover:text-foreground underline"
+          title="Volver al listado"
+        >
+          Volver
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="w-12 text-muted-foreground">Fuente</span>
+      <select
+        value={value}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === "__custom__") {
+            setCustomMode(true);
+            return;
+          }
+          onChange(v);
+        }}
+        className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-xs"
+        style={{ fontFamily: matchesGoogle ? value : undefined }}
+      >
+        <option value="">— Default —</option>
+        {fontTokens.length > 0 && (
+          <optgroup label="Brand kit">
+            {fontTokens.map((t) => (
+              <option key={t.name} value={makeRef("font", t.name)}>
+                {t.label} ({t.fontFamily})
+              </option>
+            ))}
+          </optgroup>
+        )}
+        <optgroup label="Google Fonts">
+          {googleFamilies.map((family) => (
+            <option key={family} value={family}>
+              {family}
+            </option>
+          ))}
+        </optgroup>
+        <option value="__custom__">Otra…</option>
+      </select>
+    </div>
+  );
+}
+
 function TextProps({
   layer,
   onUpdate,
@@ -1084,12 +1192,9 @@ function TextProps({
         />
       </Section>
       <Section title="Tipografía">
-        <TokenTextRow
-          label="Fuente"
+        <FontFamilySelect
           value={layer.style.fontFamily ?? ""}
-          tokens={brandKit.fonts}
-          refKind="font"
-          placeholder="Inter, system-ui, sans-serif"
+          brandKit={brandKit}
           onChange={(v) => updateStyle({ fontFamily: v || undefined })}
         />
         <FontSizeRow
@@ -1097,14 +1202,25 @@ function TextProps({
           scales={brandKit.scales}
           onChange={(v) => updateStyle({ fontSize: v })}
         />
-        <NumberRow
-          label="Peso"
-          value={Number(layer.style.fontWeight ?? 400)}
-          min={100}
-          max={900}
-          step={100}
-          onChange={(v) => updateStyle({ fontWeight: v })}
-        />
+        {/* Estilo (antes "Peso") con nombres legibles en vez del 100-900
+            numérico. El value persistido sigue siendo numérico — solo el
+            input cambia. */}
+        <div className="flex items-center gap-2 text-xs">
+          <span className="w-12 text-muted-foreground">Estilo</span>
+          <select
+            value={Number(layer.style.fontWeight ?? 400)}
+            onChange={(e) =>
+              updateStyle({ fontWeight: Number(e.target.value) })
+            }
+            className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-xs"
+          >
+            {FONT_WEIGHT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
         <ColorRow
           label="Color"
           value={layer.style.color}
@@ -1169,9 +1285,9 @@ function TextProps({
           outline. Tres controles independientes; cada uno default "off" para
           no aplicar cambios visuales en capas existentes. */}
       <Section title="Efectos">
-        {/* Decoración: chips simples ninguna / underline / strike */}
+        {/* Decoración: chips simples ninguna / underline / strike. Label
+            oculto — los keywords del control son auto-explicativos. */}
         <div className="flex items-center gap-1 text-[10px]">
-          <span className="w-12 text-muted-foreground">Decoración</span>
           {(
             [
               { v: "none",         label: "Ninguna" },
@@ -1194,9 +1310,9 @@ function TextProps({
             </button>
           ))}
         </div>
-        {/* Mayúsculas/minúsculas */}
+        {/* Mayúsculas/minúsculas. Label oculto — los samples Aa/AA/aa/Aa.
+            comunican el comportamiento. */}
         <div className="flex items-center gap-1 text-[10px]">
-          <span className="w-12 text-muted-foreground">Case</span>
           {(
             [
               { v: "none",       label: "Aa" },
@@ -1231,9 +1347,10 @@ function TextProps({
         </div>
         {/* Outline (text stroke). Toggle "tiene contorno" + color + width.
             width=0 equivale a sin outline; usamos null vs presente para
-            distinguir el toggle off vs un width=0 explícito. */}
+            distinguir el toggle off vs un width=0 explícito.
+            Label oculto — el texto "Activado/Sin contorno" del checkbox ya
+            comunica qué es. */}
         <div className="flex items-center gap-2 text-xs">
-          <span className="w-12 text-muted-foreground">Contorno</span>
           <label className="flex items-center gap-1 cursor-pointer flex-1">
             <input
               type="checkbox"
@@ -1286,8 +1403,9 @@ function TextProps({
           es lo mismo que limpiar backgroundColor → la capa vuelve a ser
           un text "puro". */}
       <Section title="Fondo">
+        {/* Label "Fondo" oculto — el título de la sección + el texto del
+            checkbox ("Activado/Sin fondo") ya alcanzan. */}
         <div className="flex items-center gap-2 text-xs">
-          <span className="w-12 text-muted-foreground">Fondo</span>
           <label className="flex items-center gap-1 cursor-pointer flex-1">
             <input
               type="checkbox"

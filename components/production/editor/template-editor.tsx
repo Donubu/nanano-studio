@@ -27,6 +27,11 @@ interface Props {
   // Custom node rendered above the canvas en lugar del PreviewThumbnails
   // default. Lo usa producir para mostrar variantes reales del master.
   topAccessory?: React.ReactNode;
+  // Banner opcional que se renderiza dentro del editor, después del
+  // topAccessory/PreviewThumbnails y antes del toolbar/canvas. Pensado para
+  // avisos contextuales (ej. "Editando pieza independiente") que deben vivir
+  // visualmente dentro del editor en vez de afuera de la sección.
+  topBanner?: React.ReactNode;
   // Custom node renderizado en la columna derecha, abajo del PropertiesPanel.
   // Lo usa producir para meter la sección de Variables / Dataset cerca del
   // contexto del editor.
@@ -49,6 +54,7 @@ export function TemplateEditor({
   allBrandKits = [],
   onBrandKitsChange,
   topAccessory,
+  topBanner,
   rightAccessory,
   dataRow,
 }: Props) {
@@ -269,7 +275,10 @@ export function TemplateEditor({
             </button>
           </div>
         ) : (
-          <div className={readOnlyClass}>
+          // h-full + flex propaga el alto al LayersPanel (que es h-full
+          // flex-col internamente). Sin esto el aside queda sin altura y
+          // muestra solo lo que cabe en el contenido natural.
+          <div className={cn("flex h-full min-h-0", readOnlyClass)}>
             <LayersPanel
               definition={editor.definition}
               selectedId={editor.selectedId}
@@ -298,6 +307,7 @@ export function TemplateEditor({
               onSelectPreview={setActivePreviewId}
             />
           )}
+          {topBanner}
           {previewSize && (
             <div className="flex items-center justify-center gap-2 px-3 py-1.5 text-xs bg-blue-500/10 text-blue-300 border-b border-blue-500/20">
               <span>

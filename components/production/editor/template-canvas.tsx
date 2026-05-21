@@ -403,7 +403,21 @@ export function TemplateCanvas({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
+      // Fondo entramado tipo "lienzo": patrón checkered translúcido sobre el
+      // gris base. Diferencia visualmente el área de edición del header,
+      // sidebar de capas y panel de propiedades (todos bg-card / bg-card/40).
+      // Los gradientes se mezclan con el background-color del bg-muted/30,
+      // así que el patrón queda sutil y no compite con el contenido.
       className="flex-1 min-w-0 min-h-0 bg-muted/30 overflow-hidden flex items-center justify-center select-none"
+      style={{
+        backgroundImage:
+          "linear-gradient(45deg, rgba(255,255,255,0.035) 25%, transparent 25%), " +
+          "linear-gradient(-45deg, rgba(255,255,255,0.035) 25%, transparent 25%), " +
+          "linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.035) 75%), " +
+          "linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.035) 75%)",
+        backgroundSize: "20px 20px",
+        backgroundPosition: "0 0, 0 10px, 10px -10px, 10px 0",
+      }}
     >
       {containerSize.w > 0 && (
         <div style={{ width: scaledW, height: scaledH, position: "relative" }}>

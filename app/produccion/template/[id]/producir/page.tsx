@@ -18,6 +18,8 @@ import {
   Link2,
   Loader2,
   Package,
+  LayoutGrid,
+  LayoutList,
   Pencil,
   Plus,
   RefreshCw,
@@ -49,7 +51,10 @@ import {
 } from "@/lib/production/types";
 import { TemplateEditor } from "@/components/production/editor/template-editor";
 import { ProjectBrandKitModal } from "@/components/production/editor/project-brand-kit-modal";
-import { deriveManualLayoutFromMaster } from "@/lib/production/overrides";
+import {
+  buildInitialFromAdaptFit,
+  deriveManualLayoutFromMaster,
+} from "@/lib/production/overrides";
 import {
   BrandKit,
   BrandKitContent,
@@ -272,6 +277,14 @@ export default function ProducirPage() {
   const [filterChannels, setFilterChannels] = useState<Set<string>>(new Set());
   const [filterSearch, setFilterSearch] = useState("");
   const [filterOnlyCustomized, setFilterOnlyCustomized] = useState(false);
+  // Modo de vista del grid de adaptaciones:
+  //   "clean"    → grid plano, solo preview + dims, sin filtros / canales /
+  //                badges / botones (default — el productor se concentra
+  //                en las piezas).
+  //   "detailed" → vista completa con filtros, agrupado por canal, source
+  //                badges, fit mode, descarga individual, etc.
+  // No persiste; cada entrada a la página arranca en clean.
+  const [adaptationsView, setAdaptationsView] = useState<"clean" | "detailed">("clean");
   const [loading, setLoading] = useState(true);
   const [showPicker, setShowPicker] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -696,15 +709,47 @@ export default function ProducirPage() {
   const adaptInitialDefinition: TemplateDefinition | null = useMemo(() => {
     if (!editingAdaptation) return null;
     const overrides = parseOverrides(editingAdaptation.overrides_json);
-    if (overrides.manual_layout) return overrides.manual_layout;
+    if (overrides.manual_layout) {
+      // El canvas del editor se dimensiona desde definition.size (no del prop
+      // baseWidth/baseHeight). Si el manual_layout persistido tiene size
+      // distinto al adapt actual, reflowamos al size correcto antes de
+      // montar el editor — sino el canvas abre con dimensiones del master
+      // (1080×1080) cuando el adapt es 300×250 y el productor ve solo una
+      // tajada.
+      const ml = overrides.manual_layout;
+      if (
+        ml.size?.w === editingAdaptation.width &&
+        ml.size?.h === editingAdaptation.height
+      ) {
+        return ml;
+      }
+      return reflowForPreview(ml, {
+        w: editingAdaptation.width,
+        h: editingAdaptation.height,
+      });
+    }
     const source = resolveSource(editingAdaptation, orientations);
-    const sourceDef = source?.definition ?? definition;
-    return deriveManualLayoutFromMaster(
+    // CRÍTICO: el fallback NUNCA debe ser `definition` (la activa del editor
+    // del master) — eso causaba el bug "edito 300x250 desde el master
+    // horizontal y heredo del horizontal en vez del cuadrado más cercano".
+    const sourceDef =
+      resolveEffectiveDefinition(source, orientations) ??
+      principalOrientation?.definition ??
+      null;
+    if (!sourceDef) return null;
+    // El initial del editor debe coincidir visualmente con el preview de la
+    // card. La card usa scale-uniform cuando fit_mode != "responsive" y
+    // reflow cuando es "responsive". Si usábamos reflow para todos los
+    // casos, los smart-constraints inferidos (center/left/right) no
+    // reescalaban sizes y producían layers gigantes en downscale grandes
+    // (cuadrado 1080 → 300×250).
+    return buildInitialFromAdaptFit(
       sourceDef,
       editingAdaptation.width,
       editingAdaptation.height,
+      editingAdaptation.fit_mode,
     );
-  }, [editingAdaptation, orientations, definition]);
+  }, [editingAdaptation, orientations, principalOrientation]);
 
   // Save de la orientación activa: PUT al endpoint del template
   // correspondiente. Si la orientación es la base, el server propaga el
@@ -892,6 +937,12 @@ export default function ProducirPage() {
   // Entra al modo edición de una adaptación: snapshot del overrides_json
   // actual (para poder cancelar después) + scroll del editor al viewport
   // para que el productor entienda que la pieza está abierta arriba.
+  // También alineamos activeOrientationId al source resuelto. Eso garantiza
+  // que `definition` (el state local derivado de activeOrientation) calce
+  // con la herencia esperada — si el TemplateEditor llegase a leer fallback
+  // de `definition`, ya quedó apuntando al source correcto. Sin esto, editar
+  // 300x250 desde el master horizontal heredaba del horizontal en vez del
+  // cuadrado más cercano.
   const handleEditAdaptation = useCallback((adaptationId: number) => {
     const adapt = adaptations.find((a) => a.id === adaptationId);
     editSnapshotRef.current = adapt?.overrides_json ?? null;
@@ -1527,6 +1578,40 @@ export default function ProducirPage() {
     );
   }
 
+  // VariantsStrip compartido entre el editor del master y el del adapt. Los
+  // previews superiores muestran SIEMPRE la misma barra (master numerado +
+  // variantes), independiente de qué se esté editando. Antes el editor del
+  // adapt no recibía topAccessory y caía al PreviewThumbnails default
+  // (1:1/9:16/16:9), lo que confundía al productor.
+  //
+  // onSwitch en modo edit-adapt: salir del modo edit y cambiar de orientación
+  // en un solo click. El snapshot se descarta porque el productor está
+  // navegando explícitamente fuera de la adaptación.
+  const variantsStripNode = (
+    <VariantsStrip
+      orientations={orientations}
+      activeOrientationId={editingId != null ? null : activeOrientationId}
+      brandKit={brandKitContent}
+      orientationNumberById={orientationNumberById}
+      onSwitch={(id) => {
+        if (editingId != null) {
+          editSnapshotRef.current = null;
+          setEditingId(null);
+        }
+        setActiveOrientationId(id);
+      }}
+      onAdd={() => setShowAddVariant(true)}
+      onDelete={handleDeleteOrientation}
+      onDifferentiate={handleDifferentiate}
+      onRelinkToMaster={(id) => {
+        if (principalOrientation) {
+          handleRelinkTo(id, principalOrientation.id);
+        }
+      }}
+      onAiAdapt={(id) => setAiAdaptTargetId(id)}
+    />
+  );
+
   return (
     <div className="flex flex-col min-h-screen bg-background">
       <header className="border-b border-border/50 bg-card/40 shrink-0">
@@ -1614,54 +1699,7 @@ export default function ProducirPage() {
             />
           )}
 
-          {/* Huincha de edición independiente. Visible cuando se está
-              editando una adaptación (no el master). Color sólido alto
-              contraste para que el productor entienda que no está editando
-              el master. Dos acciones:
-                - "Cancelar": revierte los cambios auto-guardados al estado
-                  original (snapshot al entrar) y vuelve al master.
-                - "Listo": deja los cambios persistidos y vuelve al master.
-              El auto-save del editor sigue corriendo en background. */}
-          {editingId != null && editingAdaptation && (
-            <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-500 text-white border-b border-amber-600">
-              <AlertTriangle className="h-4 w-4 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium leading-tight">
-                  Editando pieza independiente ·{" "}
-                  {editingAdaptation.custom_name ||
-                    editingAdaptation.preset_name ||
-                    `${editingAdaptation.width}×${editingAdaptation.height}`}{" "}
-                  ({editingAdaptation.width}×{editingAdaptation.height})
-                </p>
-                <p className="text-[11px] text-amber-50/90 leading-tight mt-0.5">
-                  Los cambios solo se reflejan en esta pieza, no en el master
-                  ni en otras adaptaciones.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={handleCancelEditAdaptation}
-                className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded bg-white/15 hover:bg-white/25 border border-white/30 transition-colors font-medium"
-                title="Descarta los cambios y vuelve al master"
-              >
-                <X className="h-3.5 w-3.5" />
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingId(null);
-                  editSnapshotRef.current = null;
-                }}
-                className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded bg-white text-amber-700 hover:bg-amber-50 transition-colors font-medium"
-                title="Guarda los cambios y vuelve al master"
-              >
-                <Check className="h-3.5 w-3.5" />
-                Listo
-              </button>
-            </div>
-          )}
-          <div className="h-[70vh] min-h-[480px] relative">
+          <div className="h-[90vh] min-h-[640px] relative">
             {editingId == null && activeOrientation ? (
               <TemplateEditor
                 // key incluye la orientación: al cambiar de orientación se
@@ -1681,24 +1719,7 @@ export default function ProducirPage() {
                     fetchBrandKits(clientId, template.production_project_id);
                 }}
                 dataRow={previewRow}
-                topAccessory={
-                  <VariantsStrip
-                    orientations={orientations}
-                    activeOrientationId={activeOrientationId}
-                    brandKit={brandKitContent}
-                    orientationNumberById={orientationNumberById}
-                    onSwitch={(id) => setActiveOrientationId(id)}
-                    onAdd={() => setShowAddVariant(true)}
-                    onDelete={handleDeleteOrientation}
-                    onDifferentiate={handleDifferentiate}
-                    onRelinkToMaster={(id) => {
-                      if (principalOrientation) {
-                        handleRelinkTo(id, principalOrientation.id);
-                      }
-                    }}
-                    onAiAdapt={(id) => setAiAdaptTargetId(id)}
-                  />
-                }
+                topAccessory={variantsStripNode}
                 rightAccessory={
                   <DatasetPanel
                     detectedVariables={detectedVariables}
@@ -1716,7 +1737,13 @@ export default function ProducirPage() {
               />
             ) : editingAdaptation && adaptInitialDefinition ? (
               <TemplateEditor
-                key={`adapt-${editingId}`}
+                /* key incluye source.id para forzar remount cuando cambia
+                   la orientación de herencia. Sin esto, si orientations se
+                   refrescaba mid-edit (ej. autosave del master propagó el
+                   reflow a las linked variants), el state interno del editor
+                   del adapt quedaba con el initial viejo — useTemplateEditor
+                   solo lee initial en el primer mount. */
+                key={`adapt-${editingId}-src-${resolveSource(editingAdaptation, orientations)?.id ?? "none"}`}
                 initial={adaptInitialDefinition}
                 baseWidth={editingAdaptation.width}
                 baseHeight={editingAdaptation.height}
@@ -1729,6 +1756,53 @@ export default function ProducirPage() {
                   if (clientId)
                     fetchBrandKits(clientId, template.production_project_id);
                 }}
+                topAccessory={variantsStripNode}
+                /* Huincha de edición independiente. Vive dentro del editor,
+                   debajo de los PreviewThumbnails de la adaptación. Antes
+                   estaba arriba de toda la sección — al moverla acá queda
+                   pegada al canvas que está modificando, sin desconectar
+                   el aviso del trabajo. Dos acciones:
+                     - Cancelar: revierte los auto-saves al snapshot original.
+                     - Listo: deja los cambios y vuelve al master. */
+                topBanner={
+                  <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-500 text-black border-b border-amber-600">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium leading-tight">
+                        Editando pieza independiente ·{" "}
+                        {editingAdaptation.custom_name ||
+                          editingAdaptation.preset_name ||
+                          `${editingAdaptation.width}×${editingAdaptation.height}`}{" "}
+                        ({editingAdaptation.width}×{editingAdaptation.height})
+                      </p>
+                      <p className="text-[11px] text-black/70 leading-tight mt-0.5">
+                        Los cambios solo se reflejan en esta pieza, no en el
+                        master ni en otras adaptaciones.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCancelEditAdaptation}
+                      className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded bg-white/15 hover:bg-white/25 border border-white/30 transition-colors font-medium"
+                      title="Descarta los cambios y vuelve al master"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingId(null);
+                        editSnapshotRef.current = null;
+                      }}
+                      className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded bg-white text-amber-700 hover:bg-amber-50 transition-colors font-medium"
+                      title="Guarda los cambios y vuelve al master"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      Listo
+                    </button>
+                  </div>
+                }
               />
             ) : null}
 
@@ -1764,6 +1838,38 @@ export default function ProducirPage() {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              {adaptationsLoaded && adaptations.length > 0 && (
+                <div className="flex items-center rounded-md border border-border/50 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setAdaptationsView("clean")}
+                    className={cn(
+                      "px-2 py-1 text-xs transition-colors flex items-center gap-1",
+                      adaptationsView === "clean"
+                        ? "bg-foreground/10 text-foreground"
+                        : "text-muted-foreground hover:bg-muted",
+                    )}
+                    title="Vista limpia: solo preview + dimensiones, sin filtros ni canales"
+                  >
+                    <LayoutGrid className="h-3.5 w-3.5" />
+                    Limpio
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAdaptationsView("detailed")}
+                    className={cn(
+                      "px-2 py-1 text-xs transition-colors flex items-center gap-1 border-l border-border/50",
+                      adaptationsView === "detailed"
+                        ? "bg-foreground/10 text-foreground"
+                        : "text-muted-foreground hover:bg-muted",
+                    )}
+                    title="Vista detallada: filtros, canales, source badges, controles por pieza"
+                  >
+                    <LayoutList className="h-3.5 w-3.5" />
+                    Detallado
+                  </button>
+                </div>
+              )}
               {adaptationsLoaded && adaptations.length > 0 && (
                 <Button
                   size="sm"
@@ -1827,6 +1933,53 @@ export default function ProducirPage() {
               </Button>
             </div>
           ) : (
+            adaptationsView === "clean" ? (
+              <>
+                {/* Vista limpia: layout masonry-flex. Cada preview adopta su
+                    aspect ratio natural, todas las piezas comparten la misma
+                    altura (TARGET_H) y se empaquetan en filas como una pared
+                    de imágenes. Sin filtros, sin canales, sin badges, sin
+                    cajas — solo preview + medida abajo. Click → edita.
+                    Orden propio (cuadrados → verticales → horizontales) que
+                    agrupa visualmente formas parecidas. Dentro del bucket
+                    horizontal, sort secundario por aspect ratio (w/h) asc:
+                    los más cuadraditos primero, los banners ultra chatos
+                    (10:1, 8:1) al final — esos quedan capeados por el
+                    TARGET_W del preview y tienen menos alto efectivo, así
+                    que mandarlos al final evita huecos verticales en las
+                    filas anteriores. */}
+                <div className="flex flex-wrap items-start gap-3">
+                  {groupAdaptationsByChannel(adaptations)
+                    .flatMap((g) => g.items)
+                    .sort((a, b) => {
+                      const order = { square: 0, vertical: 1, horizontal: 2 };
+                      const oa = adaptationOrientation(a);
+                      const ob = adaptationOrientation(b);
+                      if (order[oa] !== order[ob]) return order[oa] - order[ob];
+                      // Secundario: aspect ratio ascendente. En horizontales
+                      // los más chatos quedan al final; en verticales/cuadrados
+                      // no cambia la altura visual pero da un gradiente
+                      // estético de ancho dentro del bucket.
+                      return (a.width / a.height) - (b.width / b.height);
+                    })
+                    .map((a) => {
+                      const sourceOrientation = resolveSource(a, orientations);
+                      const sourceDef = sourceOrientation?.definition ?? definition;
+                      return (
+                        <MinimalAdaptationCard
+                          key={a.id}
+                          adaptation={a}
+                          definition={sourceDef}
+                          brandKit={brandKitContent}
+                          dataRow={previewRow}
+                          isEditing={editingId === a.id}
+                          onEdit={() => handleEditAdaptation(a.id)}
+                        />
+                      );
+                    })}
+                </div>
+              </>
+            ) : (
             <>
               {/* Filtros: visible solo cuando hay 2+ adaptaciones porque con
                   1 sola no sirve filtrar. Compacto, 2 filas: source chips +
@@ -1967,6 +2120,8 @@ export default function ProducirPage() {
                 </div>
               ) : (
             <div className="space-y-5">
+              {/* Vista detallada: agrupado por canal, con todos los controles
+                  por pieza (source, fit, descarga, delete, manual indicator). */}
               {groupAdaptationsByChannel(filteredAdaptations).map((group) => (
                 <div key={group.channel}>
                   <h4 className="text-xs uppercase tracking-wider text-muted-foreground mb-2">
@@ -2022,6 +2177,7 @@ export default function ProducirPage() {
             </div>
               )}
             </>
+            )
           )}
         </section>
       </main>
@@ -2563,6 +2719,59 @@ function AdaptationCard({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Versión "limpia" de AdaptationCard: literalmente preview + medida y nada
+// más. Sin caja, sin borde, sin título, sin canal, sin source picker. El
+// productor ve el mosaico de piezas como si fuera una galería de imágenes.
+// Click sobre el preview → entra a editar esa pieza. Cuando está siendo
+// editada se marca con un ring sutil sobre el propio preview.
+function MinimalAdaptationCard({
+  adaptation,
+  definition,
+  brandKit,
+  dataRow,
+  isEditing,
+  onEdit,
+}: {
+  adaptation: Adaptation;
+  definition: TemplateDefinition;
+  brandKit: BrandKitContent;
+  dataRow?: DataRow | null;
+  isEditing: boolean;
+  onEdit: () => void;
+}) {
+  // Altura compartida → todas las piezas se alinean horizontalmente como
+  // una pared. El ancho es libre (targetW alto) para que cada preview tome
+  // su aspect ratio natural; banners ultra anchos (10:1+) quedan capeados
+  // pero no se descuadran. La medida va debajo del preview en typo mono.
+  const TARGET_H = 140;
+  const TARGET_W = 480;
+  return (
+    <div className="flex flex-col items-center gap-1 shrink-0">
+      <button
+        type="button"
+        onClick={onEdit}
+        title={isEditing ? "Esta adaptación está siendo editada" : "Click para editar esta adaptación"}
+        className={cn(
+          "transition-shadow rounded-sm",
+          isEditing && "ring-2 ring-primary/60 ring-offset-2 ring-offset-background",
+        )}
+      >
+        <AdaptationPreview
+          adaptation={adaptation}
+          definition={definition}
+          brandKit={brandKit}
+          targetH={TARGET_H}
+          targetW={TARGET_W}
+          dataRow={dataRow}
+        />
+      </button>
+      <span className="text-[10px] text-muted-foreground font-mono">
+        {adaptation.width}×{adaptation.height}
+      </span>
     </div>
   );
 }
@@ -4488,4 +4697,31 @@ function resolveSource(
     if (pinned) return pinned;
   }
   return pickClosestOrientation(orientations, adaptation.width, adaptation.height);
+}
+
+// Devuelve la TemplateDefinition efectiva de una orientación. Si la
+// orientación tiene definition propia (cached), gana. Si no, camina la
+// cadena linked_to_template_id hasta encontrar una definition válida y la
+// reflowea al tamaño nativo de esta orientación, replicando lo que el
+// server hace al persistir orientaciones linked. Sirve para que el editor
+// de adaptaciones nunca caiga al fallback "definition de la activeOrientation
+// del editor", que era la causa del bug "edito 300x250 desde el master
+// horizontal y heredo del horizontal en vez del cuadrado más cercano".
+// Guard de ciclos: cada paso valida que el parent no apunte a la misma
+// orientación (auto-link) y limita la profundidad por seguridad.
+function resolveEffectiveDefinition(
+  o: Orientation | null,
+  orientations: Orientation[],
+  depth: number = 0,
+): TemplateDefinition | null {
+  if (!o || depth > 8) return null;
+  if (o.definition) return o.definition;
+  if (o.linked_to_template_id == null || o.linked_to_template_id === o.id) {
+    return null;
+  }
+  const parent = orientations.find((x) => x.id === o.linked_to_template_id);
+  if (!parent) return null;
+  const parentDef = resolveEffectiveDefinition(parent, orientations, depth + 1);
+  if (!parentDef) return null;
+  return reflowForPreview(parentDef, { w: o.base_width, h: o.base_height });
 }

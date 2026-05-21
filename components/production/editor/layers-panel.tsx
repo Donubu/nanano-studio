@@ -158,9 +158,14 @@ export function LayersPanel({
     setDropHint(null);
   };
 
+  // h-full + flex column para ocupar el alto del editor entero (igual
+  // que el PropertiesPanel del lado derecho). Header shrink-0, contenido
+  // scrolleable adentro. Antes el aside no fijaba alto y se cortaba a la
+  // altura de su contenido natural — quedaba "flotante" arriba sin usar
+  // el espacio disponible.
   return (
-    <aside className="w-56 shrink-0 border-r border-border/50 bg-card/40 overflow-y-auto">
-      <div className="p-3 border-b border-border/50 flex items-center justify-between">
+    <aside className="w-56 shrink-0 border-r border-border/50 bg-card/40 h-full flex flex-col min-h-0">
+      <div className="p-3 border-b border-border/50 flex items-center justify-between shrink-0">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Capas
         </h3>
@@ -175,7 +180,7 @@ export function LayersPanel({
           </button>
         )}
       </div>
-      <div className="p-1">
+      <div className="p-1 flex-1 min-h-0 overflow-y-auto">
         {/* Root entry */}
         <button
           type="button"
