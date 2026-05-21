@@ -376,11 +376,30 @@ export function TimelinePanel(props: TimelinePanelProps) {
   ) => {
     if (!animation || duration <= 0) return;
     // Solo si el click cae en zona "vacía" (no en un diamante existente).
+    // event.target puede ser el <span> visual del diamante o el <button>;
+    // el button tiene data-kf="true" y closest() lo encuentra desde ambos.
     const target = e.target as HTMLElement;
-    if (target.dataset.kf === "true") return;
+    if (target.closest('[data-kf="true"]')) return;
     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
     const xWithin = e.clientX - rect.left;
     const t = Math.round((xWithin / rect.width) * duration);
+    // Snap a keyframe existente: si el click cae dentro de SNAP_PX de un
+    // kf, seleccionamos ese kf en vez de crear uno nuevo. Cubre el caso
+    // borde del hit target del diamante (justo afuera del 22x22).
+    const SNAP_PX = 10;
+    const pxPerMs = rect.width / duration;
+    const nearestKf = track.keyframes.find(
+      (k) => Math.abs((k.t - t) * pxPerMs) <= SNAP_PX,
+    );
+    if (nearestKf) {
+      setSelectedKf({
+        layerId: track.layerId,
+        property: track.property,
+        t: nearestKf.t,
+      });
+      onSeek(nearestKf.t);
+      return;
+    }
     const layer = findLayerById(definition, track.layerId);
     const baseValue = getBaseValueForProperty(layer, track.property);
     onUpdateAnimation(
@@ -640,13 +659,27 @@ export function TimelinePanel(props: TimelinePanelProps) {
           onAdd={(layerId, property) => {
             const layer = findLayerById(definition, layerId);
             const baseValue = getBaseValueForProperty(layer, property);
-            onUpdateAnimation(
-              addKeyframe(animation, layerId, property, {
-                t: currentTime,
-                value: baseValue,
-                easing: "linear",
-              }),
-            );
+            // Sembramos DOS keyframes (inicio y final del timeline) en vez
+            // de uno solo. Razón: con un keyframe la propiedad queda
+            // constante y el productor no entiende qué hacer — no ve nada
+            // animarse. Con dos kfs del mismo valor, ve la metáfora
+            // "from-to" inmediatamente y solo tiene que editar el value
+            // del segundo. Auto-seleccionamos el segundo y movemos el
+            // playhead al final, así el editor de value/easing aparece
+            // automáticamente y cualquier cambio se refleja en el canvas.
+            const cfg1 = addKeyframe(animation, layerId, property, {
+              t: 0,
+              value: baseValue,
+              easing: "linear",
+            });
+            const cfg2 = addKeyframe(cfg1, layerId, property, {
+              t: animation.duration,
+              value: baseValue,
+              easing: "linear",
+            });
+            onUpdateAnimation(cfg2);
+            setSelectedKf({ layerId, property, t: animation.duration });
+            onSeek(animation.duration);
             setAddingTrack(false);
           }}
         />
@@ -747,6 +780,10 @@ function KeyframeDiamond({
   onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void;
 }) {
   const percent = duration > 0 ? (kf.t / duration) * 100 : 0;
+  // Hit target: 22x22 invisible (toma casi todo el alto del row de 28px).
+  // El diamante visual sigue siendo 10x10 rotado, centrado adentro. Esto
+  // ayuda al productor que hace click "cerca" del diamante y antes caía
+  // sobre el row libre (creando otro kf accidentalmente).
   return (
     <button
       type="button"
@@ -756,18 +793,30 @@ function KeyframeDiamond({
         position: "absolute",
         left: `${percent}%`,
         top: "50%",
-        transform: "translate(-50%, -50%) rotate(45deg)",
-        width: 10,
-        height: 10,
+        transform: "translate(-50%, -50%)",
+        width: 22,
+        height: 22,
+        background: "transparent",
+        border: "none",
+        padding: 0,
       }}
-      className={cn(
-        "border transition-colors rounded-sm cursor-grab active:cursor-grabbing",
-        isSelected
-          ? "bg-primary border-primary ring-2 ring-primary/30"
-          : "bg-foreground border-foreground/80 hover:bg-primary hover:border-primary",
-      )}
+      className="flex items-center justify-center cursor-grab active:cursor-grabbing"
       title={`Keyframe @ ${formatTime(kf.t)} = ${kf.value} (easing: ${typeof kf.easing === "string" ? kf.easing : "cubic-bezier"})`}
-    />
+    >
+      <span
+        className={cn(
+          "block border transition-colors rounded-sm pointer-events-none",
+          isSelected
+            ? "bg-primary border-primary ring-2 ring-primary/30"
+            : "bg-foreground border-foreground/80 group-hover:bg-primary",
+        )}
+        style={{
+          width: 10,
+          height: 10,
+          transform: "rotate(45deg)",
+        }}
+      />
+    </button>
   );
 }
 
