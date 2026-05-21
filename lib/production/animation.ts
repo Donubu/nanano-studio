@@ -311,7 +311,10 @@ function cloneLayerShallow(layer: TemplateLayer): TemplateLayer {
   return base;
 }
 
-function getBaseValue(
+// Lee el valor "base" (no animado) de una propiedad animable directamente
+// del layer. Útil para el editor cuando necesita inicializar un keyframe
+// con el valor actual del layer.
+export function getBaseValue(
   layer: TemplateLayer,
   property: AnimatableProperty,
 ): number | string {

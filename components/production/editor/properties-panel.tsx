@@ -52,7 +52,65 @@ import {
   makeRef,
   ColorToken,
 } from "@/lib/production/brand-kit";
+import type { AnimatableProperty } from "@/lib/production/animation";
 import { cn } from "@/lib/utils";
+
+// Diamante chiquito (10×10 rotado) que indica "esta propiedad está animada
+// en el timeline". Hace match visual con los diamantes del TimelinePanel
+// para que el productor encuentre la conexión de un vistazo. Usa el color
+// primary, mismo que el keyframe seleccionado en la timeline.
+function AnimatedDot({ label }: { label?: string }) {
+  return (
+    <span
+      aria-label={label ?? "Animado en timeline"}
+      title={label ?? "Animado en timeline"}
+      className="inline-block bg-primary border border-primary"
+      style={{
+        width: 7,
+        height: 7,
+        transform: "rotate(45deg)",
+        borderRadius: 1,
+        marginRight: 2,
+      }}
+    />
+  );
+}
+
+// Conjunto de propiedades animables del layer con tracks activos. Se
+// computa desde definition.animation y se pasa hacia abajo para que las
+// filas pongan su AnimatedDot.
+export type AnimatedPropertySet = Set<AnimatableProperty>;
+const EMPTY_ANIMATED_SET: AnimatedPropertySet = new Set();
+
+function getAnimatedProperties(
+  definition: TemplateDefinition,
+  layerId: string | undefined,
+): AnimatedPropertySet {
+  if (!layerId || !definition.animation) return EMPTY_ANIMATED_SET;
+  const out = new Set<AnimatableProperty>();
+  for (const tr of definition.animation.tracks) {
+    if (tr.layerId === layerId && tr.keyframes.length > 0) {
+      out.add(tr.property);
+    }
+  }
+  return out;
+}
+
+// Labels human-readable de propiedades animables. Coincide con el listado
+// del TimelinePanel para consistencia.
+const ANIMATED_PROP_LABELS: Record<AnimatableProperty, string> = {
+  "position.x": "Posición X",
+  "position.y": "Posición Y",
+  "size.w": "Ancho",
+  "size.h": "Alto",
+  opacity: "Opacidad",
+  rotation: "Rotación",
+  scale: "Escala",
+  "scale.x": "Escala X",
+  "scale.y": "Escala Y",
+  blur: "Blur",
+  color: "Color",
+};
 import { ClientImagePicker } from "@/components/production/editor/client-image-picker";
 import { GOOGLE_FONTS } from "@/lib/production/google-fonts";
 
@@ -111,6 +169,7 @@ function NumberRow({
   min,
   max,
   step,
+  animated,
 }: {
   label: string;
   value: number;
@@ -118,10 +177,16 @@ function NumberRow({
   min?: number;
   max?: number;
   step?: number;
+  // Cuando true, dibuja un diamante chiquito al lado del label indicando
+  // que esta propiedad tiene un track en el timeline para el layer actual.
+  animated?: boolean;
 }) {
   return (
     <label className="flex items-center gap-2 text-xs">
-      <span className="w-12 text-muted-foreground">{label}</span>
+      <span className="w-12 text-muted-foreground flex items-center gap-1">
+        {animated && <AnimatedDot label={`${label} animado`} />}
+        {label}
+      </span>
       <input
         type="number"
         value={value}
@@ -475,11 +540,13 @@ function FillRow({
   value,
   onChange,
   tokens,
+  animated,
 }: {
   label: string;
   value: string;
   onChange: (s: string) => void;
   tokens?: ColorToken[];
+  animated?: boolean;
 }) {
   const parsed = parseGradient(value);
   const mode: "solid" | "linear" | "radial" = parsed?.kind ?? "solid";
@@ -505,7 +572,10 @@ function FillRow({
   return (
     <div className="space-y-1">
       <div className="flex items-center gap-1 text-[10px]">
-        <span className="w-12 text-muted-foreground">{label}</span>
+        <span className="w-12 text-muted-foreground flex items-center gap-1">
+          {animated && <AnimatedDot label={`${label} animado`} />}
+          {label}
+        </span>
         {(["solid", "linear", "radial"] as const).map((m) => (
           <button
             key={m}
@@ -578,11 +648,13 @@ function ColorRow({
   value,
   onChange,
   tokens,
+  animated,
 }: {
   label: string;
   value: string;
   onChange: (s: string) => void;
   tokens?: ColorToken[];
+  animated?: boolean;
 }) {
   const ref = parseRef(value);
   const refToken = ref && ref.kind === "color" ? tokens?.find((t) => t.name === ref.name) : null;
@@ -592,7 +664,10 @@ function ColorRow({
   return (
     <div className="space-y-1">
       <div className="flex items-center gap-2 text-xs">
-        <span className="w-12 text-muted-foreground">{label}</span>
+        <span className="w-12 text-muted-foreground flex items-center gap-1">
+          {animated && <AnimatedDot label={`${label} animado`} />}
+          {label}
+        </span>
         {isRef ? (
           <div className="flex-1 flex items-center gap-1 bg-muted border border-border/50 rounded px-2 py-1">
             <div
@@ -706,6 +781,10 @@ export function PropertiesPanel({
   // Multi-select activo cuando hay 2+ ids. Cuando lo es, reemplazamos el
   // contenido per-layer por el panel de align/distribute.
   const isMultiSelect = !!selectedIds && selectedIds.length > 1;
+  // Propiedades animadas del layer seleccionado. Re-computa cuando cambia
+  // la animation o el layer. Se pasa hacia abajo para que las rows
+  // muestren su AnimatedDot.
+  const animatedProps = getAnimatedProperties(definition, selectedLayer?.id);
 
   return (
     <aside
@@ -761,6 +840,7 @@ export function PropertiesPanel({
             onUpdate={onUpdateLayer}
             brandKit={brandKit}
             clientId={clientId}
+            animatedProps={animatedProps}
           />
         )}
       </div>
@@ -907,12 +987,28 @@ function LayerProps({
   onUpdate,
   brandKit,
   clientId,
+  animatedProps,
 }: {
   layer: TemplateLayer;
   onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
   brandKit: BrandKitContent;
   clientId: number | null;
+  animatedProps: AnimatedPropertySet;
 }) {
+  // Propiedades animadas que NO tienen UI propia en el panel (opacity,
+  // rotation, scale, scale.x, scale.y, blur). Las listamos arriba como
+  // chip para que el productor las pueda ver/borrar desde la timeline
+  // aunque no las pueda editar acá. position.x/y, size.w/h y color sí
+  // tienen UI propia y se indican con diamantes inline.
+  const animatedWithoutUi: AnimatableProperty[] = [
+    "opacity",
+    "rotation",
+    "scale",
+    "scale.x",
+    "scale.y",
+    "blur",
+  ].filter((p) => animatedProps.has(p as AnimatableProperty)) as AnimatableProperty[];
+
   return (
     <>
       <Section title="Nombre">
@@ -923,10 +1019,28 @@ function LayerProps({
         />
       </Section>
 
+      {animatedWithoutUi.length > 0 && (
+        <Section title="Animadas (timeline)">
+          <div className="flex flex-wrap gap-1.5">
+            {animatedWithoutUi.map((p) => (
+              <span
+                key={p}
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-primary/10 border border-primary/30 text-[10px] text-foreground"
+                title="Editable desde la timeline (selecciona un keyframe)"
+              >
+                <AnimatedDot label={`${ANIMATED_PROP_LABELS[p]} animado`} />
+                {ANIMATED_PROP_LABELS[p]}
+              </span>
+            ))}
+          </div>
+        </Section>
+      )}
+
       <Section title="Posición y tamaño">
         <NumberRow
           label="X"
           value={Math.round(layer.position.x)}
+          animated={animatedProps.has("position.x")}
           onChange={(v) =>
             onUpdate(layer.id, (l) => ({ ...l, position: { ...l.position, x: v } }))
           }
@@ -934,6 +1048,7 @@ function LayerProps({
         <NumberRow
           label="Y"
           value={Math.round(layer.position.y)}
+          animated={animatedProps.has("position.y")}
           onChange={(v) =>
             onUpdate(layer.id, (l) => ({ ...l, position: { ...l.position, y: v } }))
           }
@@ -942,6 +1057,7 @@ function LayerProps({
           label="Ancho"
           value={Math.round(layer.size.w)}
           min={1}
+          animated={animatedProps.has("size.w")}
           onChange={(v) =>
             onUpdate(layer.id, (l) => ({ ...l, size: { ...l.size, w: Math.max(1, v) } }))
           }
@@ -950,6 +1066,7 @@ function LayerProps({
           label="Alto"
           value={Math.round(layer.size.h)}
           min={1}
+          animated={animatedProps.has("size.h")}
           onChange={(v) =>
             onUpdate(layer.id, (l) => ({ ...l, size: { ...l.size, h: Math.max(1, v) } }))
           }
@@ -964,7 +1081,7 @@ function LayerProps({
       />
 
       {layer.type === "text" && (
-        <TextProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} />
+        <TextProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} animatedProps={animatedProps} />
       )}
       {layer.type === "image" && (
         <ImageProps
@@ -975,10 +1092,10 @@ function LayerProps({
         />
       )}
       {layer.type === "shape" && (
-        <ShapeProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} />
+        <ShapeProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} animatedProps={animatedProps} />
       )}
       {layer.type === "icon" && (
-        <IconProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} />
+        <IconProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} animatedProps={animatedProps} />
       )}
       {layer.type === "frame" && (
         <FrameProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} />
@@ -1168,10 +1285,12 @@ function TextProps({
   layer,
   onUpdate,
   brandKit,
+  animatedProps,
 }: {
   layer: TextLayer;
   onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
   brandKit: BrandKitContent;
+  animatedProps: AnimatedPropertySet;
 }) {
   const updateStyle = (s: Partial<TextLayer["style"]>) =>
     onUpdate(layer.id, (l) =>
@@ -1225,6 +1344,7 @@ function TextProps({
           label="Color"
           value={layer.style.color}
           tokens={brandKit.colors}
+          animated={animatedProps.has("color")}
           onChange={(v) => updateStyle({ color: v })}
         />
         {/* Alineación horizontal — text-align. Iconos lucide propios de texto
@@ -1689,10 +1809,12 @@ function ShapeProps({
   layer,
   onUpdate,
   brandKit,
+  animatedProps,
 }: {
   layer: ShapeLayer;
   onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
   brandKit: BrandKitContent;
+  animatedProps: AnimatedPropertySet;
 }) {
   return (
     <Section title="Forma">
@@ -1718,6 +1840,7 @@ function ShapeProps({
         label="Relleno"
         value={layer.fill}
         tokens={brandKit.colors}
+        animated={animatedProps.has("color")}
         onChange={(v) =>
           onUpdate(layer.id, (l) => (l.type === "shape" ? { ...l, fill: v } : l))
         }
@@ -1804,10 +1927,12 @@ function IconProps({
   layer,
   onUpdate,
   brandKit,
+  animatedProps,
 }: {
   layer: IconLayer;
   onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
   brandKit: BrandKitContent;
+  animatedProps: AnimatedPropertySet;
 }) {
   const [activeCategory, setActiveCategory] = useState<IconCategory>(() => {
     const found = ICON_CATALOG.find((i) => i.name === layer.iconName);
@@ -1869,6 +1994,7 @@ function IconProps({
         label="Color"
         value={layer.color}
         tokens={brandKit.colors}
+        animated={animatedProps.has("color")}
         onChange={(v) =>
           onUpdate(layer.id, (l) => (l.type === "icon" ? { ...l, color: v } : l))
         }

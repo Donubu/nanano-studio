@@ -21,7 +21,7 @@
 //   - Click en keyframe → seleccionar (visual; valor se edita después).
 //   - "Agregar track" → menú: elegir layer + propiedad.
 
-import { useCallback, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -36,18 +36,19 @@ import { cn } from "@/lib/utils";
 import type {
   TemplateDefinition,
   TemplateLayer,
-  FrameLayer,
 } from "@/lib/production/types";
 import {
   AnimatableProperty,
   AnimationConfig,
   AnimationTrack,
+  Easing,
+  EasingPreset,
   Keyframe,
   addKeyframe,
   moveKeyframe,
   newAnimationConfig,
   removeKeyframe,
-  removeTracksForLayer,
+  updateKeyframe,
 } from "@/lib/production/animation";
 
 // ---------- Constantes ----------
@@ -200,6 +201,14 @@ export function TimelinePanel(props: TimelinePanelProps) {
   const tracks = animation?.tracks ?? [];
 
   const [addingTrack, setAddingTrack] = useState(false);
+  // Identidad del keyframe seleccionado para editar value/easing. Se llena
+  // al hacer click (no drag) en un diamante. El popover de edición se
+  // renderea dentro del KeyframeDiamond cuando coincide con esta key.
+  const [selectedKf, setSelectedKf] = useState<{
+    layerId: string;
+    property: AnimatableProperty;
+    t: number;
+  } | null>(null);
   // Drag state para keyframes. Guarda el (trackKey, kfIndex, startT,
   // pointerStartX) y el callback resuelve el nuevo t cuando se mueve.
   const dragRef = useRef<{
@@ -210,6 +219,29 @@ export function TimelinePanel(props: TimelinePanelProps) {
     pxPerMs: number;
   } | null>(null);
   const tracksAreaRef = useRef<HTMLDivElement | null>(null);
+
+  // ESC limpia la selección — convención de la app para popovers/modales.
+  useEffect(() => {
+    if (!selectedKf) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedKf(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedKf]);
+
+  // Keyframe resuelto desde el estado de selección. Si la animation no
+  // existe o el keyframe referenciado fue borrado, devuelve null y el
+  // editor no se renderiza — eso hace que el cleanup de selectedKf sea
+  // innecesario (la state stale no afecta nada visible).
+  const selectedKfResolved = useMemo(() => {
+    if (!animation || !selectedKf) return null;
+    const tr = animation.tracks.find(
+      (t) => t.layerId === selectedKf.layerId && t.property === selectedKf.property,
+    );
+    const kf = tr?.keyframes.find((k) => k.t === selectedKf.t) ?? null;
+    return kf && tr ? { track: tr, kf } : null;
+  }, [animation, selectedKf]);
 
   // ---------- Header bar (siempre visible, colapsado o no) ----------
 
@@ -395,10 +427,16 @@ export function TimelinePanel(props: TimelinePanelProps) {
     };
     e.currentTarget.setPointerCapture(e.pointerId);
     let lastNewT = kf.t;
+    let hasDragged = false;
+    const DRAG_THRESHOLD_PX = 4;
     const onMove = (ev: PointerEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
       const deltaPx = ev.clientX - drag.pointerStartX;
+      // Umbral para distinguir click puro de drag. Sin esto, micro-jitter del
+      // pointer dispararía moveKeyframe y haría imposible "solo seleccionar".
+      if (!hasDragged && Math.abs(deltaPx) < DRAG_THRESHOLD_PX) return;
+      hasDragged = true;
       const deltaMs = deltaPx / drag.pxPerMs;
       const newT = Math.max(0, Math.min(duration, Math.round(drag.fromT + deltaMs)));
       if (newT === lastNewT) return;
@@ -408,14 +446,37 @@ export function TimelinePanel(props: TimelinePanelProps) {
       );
       // Aprovechamos para actualizar el fromT para el siguiente delta —
       // sino, después de mover y volver a mover usaríamos el fromT viejo
-      // (que ya no existe).
+      // (que ya no existe). Y si había un keyframe seleccionado en el fromT
+      // original, lo seguimos a su nuevo t para que el popover no quede
+      // huérfano durante el drag.
       dragRef.current = { ...drag, fromT: newT, pointerStartX: ev.clientX };
+      setSelectedKf((prev) =>
+        prev &&
+        prev.layerId === drag.layerId &&
+        prev.property === drag.property &&
+        prev.t === drag.fromT
+          ? { ...prev, t: newT }
+          : prev,
+      );
       onSeek(newT);
     };
     const onUp = () => {
+      const wasClick = !hasDragged;
       dragRef.current = null;
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      if (wasClick) {
+        // Click sin drag → seleccionar (o deseleccionar si ya estaba).
+        setSelectedKf((prev) =>
+          prev &&
+          prev.layerId === track.layerId &&
+          prev.property === track.property &&
+          prev.t === kf.t
+            ? null
+            : { layerId: track.layerId, property: track.property, t: kf.t },
+        );
+        onSeek(kf.t);
+      }
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -440,6 +501,55 @@ export function TimelinePanel(props: TimelinePanelProps) {
   return (
     <div className="border-t border-border/50 bg-card/40 flex flex-col min-h-0">
       {header}
+
+      {/* Editor del keyframe seleccionado. Aparece como franja docked debajo
+          del header. Se prefiere a un popover flotante porque la tracks area
+          tiene overflow scroll y queremos que el editor sea robusto a
+          scrolls y a tracks rows pequeñas. El key incluye la identidad del
+          keyframe para que cambiar de selección remonte el componente y
+          reset-ee el valueDraft local sin needs de useEffect. */}
+      {selectedKfResolved && animation && (
+        <KeyframeEditor
+          key={`${selectedKfResolved.track.layerId}-${selectedKfResolved.track.property}-${selectedKfResolved.kf.t}`}
+          track={selectedKfResolved.track}
+          kf={selectedKfResolved.kf}
+          definition={definition}
+          onClose={() => setSelectedKf(null)}
+          onChangeValue={(value) => {
+            onUpdateAnimation(
+              updateKeyframe(
+                animation,
+                selectedKfResolved.track.layerId,
+                selectedKfResolved.track.property,
+                selectedKfResolved.kf.t,
+                { value },
+              ),
+            );
+          }}
+          onChangeEasing={(easing) => {
+            onUpdateAnimation(
+              updateKeyframe(
+                animation,
+                selectedKfResolved.track.layerId,
+                selectedKfResolved.track.property,
+                selectedKfResolved.kf.t,
+                { easing },
+              ),
+            );
+          }}
+          onDelete={() => {
+            onUpdateAnimation(
+              removeKeyframe(
+                animation,
+                selectedKfResolved.track.layerId,
+                selectedKfResolved.track.property,
+                selectedKfResolved.kf.t,
+              ),
+            );
+            setSelectedKf(null);
+          }}
+        />
+      )}
 
       {/* Time ruler. Scrubbable: pointerdown + drag setea el currentTime. */}
       <div className="flex shrink-0 border-b border-border/50">
@@ -474,13 +584,20 @@ export function TimelinePanel(props: TimelinePanelProps) {
           </div>
         ) : (
           <div ref={tracksAreaRef} className="relative">
-            {tracks.map((track, idx) => (
+            {tracks.map((track) => (
               <TrackRow
                 key={`${track.layerId}-${track.property}`}
                 track={track}
                 definition={definition}
                 duration={duration}
                 selectedLayerId={selectedLayerId}
+                selectedKfT={
+                  selectedKf &&
+                  selectedKf.layerId === track.layerId &&
+                  selectedKf.property === track.property
+                    ? selectedKf.t
+                    : null
+                }
                 onRowClick={(e) => handleTracksClick(e, track)}
                 onKfPointerDown={(e, kf) => handleKfPointerDown(e, track, kf)}
                 onRemoveTrack={() => {
@@ -541,6 +658,7 @@ function TrackRow({
   definition,
   duration,
   selectedLayerId,
+  selectedKfT,
   onRowClick,
   onKfPointerDown,
   onRemoveTrack,
@@ -549,6 +667,7 @@ function TrackRow({
   definition: TemplateDefinition;
   duration: number;
   selectedLayerId: string | null;
+  selectedKfT: number | null;
   onRowClick: (e: React.MouseEvent<HTMLDivElement>) => void;
   onKfPointerDown: (e: React.PointerEvent<HTMLButtonElement>, kf: Keyframe) => void;
   onRemoveTrack: () => void;
@@ -601,6 +720,7 @@ function TrackRow({
             key={kf.t}
             kf={kf}
             duration={duration}
+            isSelected={selectedKfT === kf.t}
             onPointerDown={(e) => onKfPointerDown(e, kf)}
           />
         ))}
@@ -614,10 +734,12 @@ function TrackRow({
 function KeyframeDiamond({
   kf,
   duration,
+  isSelected,
   onPointerDown,
 }: {
   kf: Keyframe;
   duration: number;
+  isSelected: boolean;
   onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void;
 }) {
   const percent = duration > 0 ? (kf.t / duration) * 100 : 0;
@@ -634,7 +756,12 @@ function KeyframeDiamond({
         width: 10,
         height: 10,
       }}
-      className="bg-foreground border border-foreground/80 hover:bg-primary hover:border-primary transition-colors rounded-sm cursor-grab active:cursor-grabbing"
+      className={cn(
+        "border transition-colors rounded-sm cursor-grab active:cursor-grabbing",
+        isSelected
+          ? "bg-primary border-primary ring-2 ring-primary/30"
+          : "bg-foreground border-foreground/80 hover:bg-primary hover:border-primary",
+      )}
       title={`Keyframe @ ${formatTime(kf.t)} = ${kf.value} (easing: ${typeof kf.easing === "string" ? kf.easing : "cubic-bezier"})`}
     />
   );
@@ -671,6 +798,194 @@ function renderTimeRuler(durationMs: number) {
       })}
     </>
   );
+}
+
+// ---------- KeyframeEditor ----------
+//
+// Franja docked debajo del header de la timeline. Aparece cuando hay un
+// keyframe seleccionado. Permite editar value y easing del keyframe sin
+// moverlo en el tiempo (eso se hace dragueando el diamante).
+
+const EASING_PRESETS: { value: EasingPreset; label: string }[] = [
+  { value: "linear", label: "Linear" },
+  { value: "ease", label: "Ease" },
+  { value: "ease-in", label: "Ease in" },
+  { value: "ease-out", label: "Ease out" },
+  { value: "ease-in-out", label: "Ease in-out" },
+];
+
+// Heurística: ¿la propiedad usa un input numérico o de color? Solo "color"
+// usa string en este modelo (ver AnimatableProperty).
+function isColorProperty(p: AnimatableProperty): boolean {
+  return p === "color";
+}
+
+// Step apropiado para el input numérico según la propiedad. opacity/scale
+// usan 0.01 (rango ~0-1), rotation usa 1deg, position/size usan 1px.
+function numericStep(p: AnimatableProperty): number {
+  if (p === "opacity" || p === "scale" || p === "scale.x" || p === "scale.y") return 0.01;
+  return 1;
+}
+
+function KeyframeEditor({
+  track,
+  kf,
+  definition,
+  onClose,
+  onChangeValue,
+  onChangeEasing,
+  onDelete,
+}: {
+  track: AnimationTrack;
+  kf: Keyframe;
+  definition: TemplateDefinition;
+  onClose: () => void;
+  onChangeValue: (value: number | string) => void;
+  onChangeEasing: (easing: Easing) => void;
+  onDelete: () => void;
+}) {
+  const layer = findLayerById(definition, track.layerId);
+  const propLabel = PROPERTY_LABELS[track.property];
+  const isColor = isColorProperty(track.property);
+  // Para el easing usamos el preset si existe; cubic-bezier custom se
+  // muestra como "custom" sin permitir editar (no hay UI todavía).
+  const easingValue =
+    typeof kf.easing === "string" ? kf.easing : "custom";
+
+  // Buffer local para el input de value — evita re-render del editor
+  // entero por cada keystroke. Se aplica onBlur o Enter. El caller pasa un
+  // `key` con la identidad del keyframe, así que cambiar de selección o
+  // borrar/recrear remonta el componente y reinicia este state sin
+  // necesidad de useEffect.
+  const [valueDraft, setValueDraft] = useState<string>(String(kf.value));
+
+  const commitValue = () => {
+    if (isColor) {
+      // Para color aceptamos cualquier string CSS válido. La validación
+      // formal sucede en interpolateColor; valores inválidos no rompen,
+      // solo no interpolan.
+      if (valueDraft !== kf.value) onChangeValue(valueDraft);
+      return;
+    }
+    const n = Number(valueDraft);
+    if (!Number.isFinite(n)) {
+      setValueDraft(String(kf.value));
+      return;
+    }
+    if (n !== kf.value) onChangeValue(n);
+  };
+
+  return (
+    <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border/50 bg-foreground/[0.04] shrink-0">
+      <span className="text-[11px] text-muted-foreground">
+        Keyframe @ <span className="font-mono text-foreground">{formatTime(kf.t)}</span>
+      </span>
+      <span className="text-[11px] text-muted-foreground truncate max-w-[160px]" title={`${layer?.name || track.layerId} · ${propLabel}`}>
+        · {layer?.name || track.layerId} · <span className="text-foreground/80">{propLabel}</span>
+      </span>
+      <div className="h-4 w-px bg-border/50 mx-1" />
+      <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
+        Valor
+        {isColor ? (
+          <>
+            <input
+              type="color"
+              value={normalizeHexForInput(valueDraft) ?? "#000000"}
+              onChange={(e) => {
+                setValueDraft(e.target.value);
+                onChangeValue(e.target.value);
+              }}
+              className="w-7 h-6 bg-transparent border border-border/50 rounded cursor-pointer"
+              title="Color del keyframe"
+            />
+            <input
+              type="text"
+              value={valueDraft}
+              onChange={(e) => setValueDraft(e.target.value)}
+              onBlur={commitValue}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                if (e.key === "Escape") {
+                  setValueDraft(String(kf.value));
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              className="w-24 bg-muted border border-border/50 rounded px-1.5 py-0.5 text-xs font-mono"
+              placeholder="#000000"
+            />
+          </>
+        ) : (
+          <input
+            type="number"
+            step={numericStep(track.property)}
+            value={valueDraft}
+            onChange={(e) => setValueDraft(e.target.value)}
+            onBlur={commitValue}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              if (e.key === "Escape") {
+                setValueDraft(String(kf.value));
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            className="w-20 bg-muted border border-border/50 rounded px-1.5 py-0.5 text-xs font-mono tabular-nums"
+          />
+        )}
+      </label>
+      <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
+        Easing
+        <select
+          value={easingValue}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "custom") return; // no-op, custom solo lectura
+            onChangeEasing(v as EasingPreset);
+          }}
+          className="bg-muted border border-border/50 rounded px-1 py-0.5 text-xs"
+          title="Curva de interpolación HACIA el siguiente keyframe"
+        >
+          {EASING_PRESETS.map((p) => (
+            <option key={p.value} value={p.value}>
+              {p.label}
+            </option>
+          ))}
+          {easingValue === "custom" && (
+            <option value="custom">Custom (cubic-bezier)</option>
+          )}
+        </select>
+      </label>
+      <div className="flex-1" />
+      <button
+        type="button"
+        onClick={onDelete}
+        className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-border/50 hover:bg-red-500/20 hover:border-red-500/40 text-muted-foreground hover:text-red-300"
+        title="Eliminar este keyframe"
+      >
+        <Trash2 className="h-3 w-3" />
+        Borrar
+      </button>
+      <button
+        type="button"
+        onClick={onClose}
+        className="text-muted-foreground hover:text-foreground p-1 rounded"
+        title="Cerrar editor (Esc)"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+// El input type=color requiere formato #RRGGBB; tokens del brand kit o
+// rgba() no son válidos. Devolvemos null para que el caller use un fallback
+// y el productor pueda igual editar el texto.
+function normalizeHexForInput(s: string): string | null {
+  if (/^#[0-9a-f]{6}$/i.test(s)) return s.toLowerCase();
+  if (/^#[0-9a-f]{3}$/i.test(s)) {
+    const r = s[1], g = s[2], b = s[3];
+    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+  }
+  return null;
 }
 
 // ---------- AddTrackModal ----------

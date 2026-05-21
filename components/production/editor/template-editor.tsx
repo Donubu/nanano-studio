@@ -3,12 +3,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { TemplateDefinition, TemplateLayer, findLayer, findParent } from "@/lib/production/types";
+import { TemplateDefinition, TemplateLayer, findLayer, findParent, updateLayer as updateLayerInTree } from "@/lib/production/types";
 import { BrandKit, BrandKitContent, EMPTY_KIT_CONTENT } from "@/lib/production/brand-kit";
 import { DataRow } from "@/lib/production/variables";
 import { useTemplateEditor } from "@/lib/production/use-template-editor";
 import { useTimeline } from "@/lib/production/use-timeline";
-import { applyAnimationAtTime } from "@/lib/production/animation";
+import {
+  AnimatableProperty,
+  applyAnimationAtTime,
+  getBaseValue,
+  updateKeyframe,
+} from "@/lib/production/animation";
 import { TemplateCanvas } from "./template-canvas";
 import { LayersPanel } from "./layers-panel";
 import { PropertiesPanel } from "./properties-panel";
@@ -92,6 +97,90 @@ export function TemplateEditor({
   const canvasDefinition = useMemo(
     () => applyAnimationAtTime(editor.definition, timeline.currentTime),
     [editor.definition, timeline.currentTime],
+  );
+
+  // Tolerancia para "playhead está sobre un keyframe": 16ms ≈ 1 frame a
+  // 60fps. Después de clickear o draguear un keyframe, currentTime queda
+  // exactamente en su t, así que esta tolerancia solo absorbe scrubs
+  // imprecisos del ruler.
+  const KEYFRAME_HIT_TOLERANCE_MS = 16;
+
+  // Auto-keyframe: cuando el productor edita una propiedad animable de un
+  // layer que tiene un track activo Y el playhead está sobre uno de los
+  // keyframes de ese track, la mutación va al keyframe (updateKeyframe vía
+  // addKeyframe upsert) en lugar del valor base del layer. Esto replica el
+  // comportamiento de After Effects / Cape para edit-on-keyframe.
+  //
+  // Si el playhead NO está sobre un keyframe, o la propiedad no está
+  // animada, la mutación cae al path normal (editor.updateLayer). No
+  // creamos keyframes nuevos automáticamente — eso evita generar ruido si
+  // el productor scrubea y edita sin querer.
+  const updateLayerAutoKf = useCallback(
+    (id: string, layerMutator: (layer: TemplateLayer) => TemplateLayer) => {
+      const cur = findLayer(editor.definition, id);
+      if (!cur) {
+        editor.updateLayer(id, layerMutator);
+        return;
+      }
+      const anim = editor.definition.animation;
+      if (!anim || anim.tracks.length === 0) {
+        editor.updateLayer(id, layerMutator);
+        return;
+      }
+      // Tracks de este layer indexados por propiedad.
+      const tracksByProp = new Map<AnimatableProperty, true>();
+      const propsOnKeyframe = new Map<AnimatableProperty, number>();
+      const t = timeline.currentTime;
+      for (const tr of anim.tracks) {
+        if (tr.layerId !== id) continue;
+        tracksByProp.set(tr.property, true);
+        // ¿Hay un keyframe en este track dentro de la tolerancia?
+        const hit = tr.keyframes.find(
+          (k) => Math.abs(k.t - t) <= KEYFRAME_HIT_TOLERANCE_MS,
+        );
+        if (hit) propsOnKeyframe.set(tr.property, hit.t);
+      }
+      if (propsOnKeyframe.size === 0) {
+        // No estamos sobre un keyframe → comportamiento normal.
+        editor.updateLayer(id, layerMutator);
+        return;
+      }
+      // Corremos el mutator para calcular el siguiente layer y diff por
+      // propiedad. Solo las animables que cayeron sobre un keyframe se
+      // redirigen al timeline; las demás (incluyendo otras animables que
+      // NO están en hit-zone) van al valor base.
+      const next = layerMutator(cur);
+      const kfChanges: { property: AnimatableProperty; t: number; value: number | string }[] = [];
+      for (const [property, kfT] of propsOnKeyframe) {
+        const oldVal = getBaseValue(cur, property);
+        const newVal = getBaseValue(next, property);
+        if (oldVal !== newVal) {
+          kfChanges.push({ property, t: kfT, value: newVal });
+        }
+      }
+      if (kfChanges.length === 0) {
+        // El mutator cambió cosas, pero ninguna de las animadas sobre un
+        // keyframe. Path normal.
+        editor.updateLayer(id, layerMutator);
+        return;
+      }
+      // Mutación atómica: aplicamos el layer mutator (mantiene la base en
+      // sync) Y actualizamos los keyframes en el mismo updateRoot para que
+      // sea una sola entrada en el undo stack. Usamos updateKeyframe (no
+      // addKeyframe) para preservar el easing existente del keyframe.
+      editor.updateRoot((root) => {
+        const updatedRoot = updateLayerInTree(root, id, layerMutator);
+        let nextAnim = updatedRoot.animation ?? root.animation;
+        if (!nextAnim) return updatedRoot;
+        for (const ch of kfChanges) {
+          nextAnim = updateKeyframe(nextAnim, id, ch.property, ch.t, {
+            value: ch.value,
+          });
+        }
+        return { ...updatedRoot, animation: nextAnim };
+      });
+    },
+    [editor, timeline.currentTime],
   );
 
   const previewPresets: ThumbnailPreset[] = useMemo(
@@ -453,7 +542,7 @@ export function TemplateEditor({
                 selectedIds={editor.selectedIds}
                 onAlign={editor.alignSelected}
                 onDistribute={editor.distributeSelected}
-                onUpdateLayer={editor.updateLayer}
+                onUpdateLayer={updateLayerAutoKf}
                 onUpdateRoot={editor.updateRoot}
                 brandKit={brandKit}
                 clientId={clientId ?? null}
