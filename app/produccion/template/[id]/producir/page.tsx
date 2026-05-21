@@ -12,6 +12,7 @@ import {
   Check,
   CheckSquare,
   ChevronDown,
+  Code,
   Database,
   Download,
   FileSpreadsheet,
@@ -36,6 +37,7 @@ import {
   downloadBlob,
   sanitizeFilename,
 } from "@/lib/production/export";
+import { buildHtml5Zip } from "@/lib/production/html5-export";
 import { AdaptationRenderer } from "@/components/production/render/adaptation-renderer";
 import {
   extractVariables,
@@ -1102,6 +1104,10 @@ export default function ProducirPage() {
   const captureResolverRef = useRef<((blob: Blob | null) => void) | null>(null);
   const renderRef = useRef<HTMLDivElement | null>(null);
   const [singleDownloadingId, setSingleDownloadingId] = useState<number | null>(null);
+  // ID de la adaptación cuyo ZIP HTML5 se está generando. Independiente del
+  // JPG porque el flujo NO usa el captureResolverRef (no necesita renderear
+  // off-screen — la serialización a HTML es pura).
+  const [singleDownloadingHtml5Id, setSingleDownloadingHtml5Id] = useState<number | null>(null);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
 
   // --- Dataset / variables ---
@@ -1181,6 +1187,34 @@ export default function ProducirPage() {
       }
     } finally {
       setSingleDownloadingId(null);
+    }
+  };
+
+  const handleDownloadSingleHtml5 = async (a: Adaptation) => {
+    if (!template) return;
+    // Resolución del master igual que en el flow JPG: source_template_id si
+    // está pinned, sino auto-pick por aspect. AdaptationRenderer internamente
+    // decide entre manual_layout (override) y reflow desde el master.
+    const src = resolveSource(a, orientations);
+    const srcDef = src?.definition ?? definition;
+    setSingleDownloadingHtml5Id(a.id);
+    try {
+      const blob = await buildHtml5Zip({
+        adaptation: a,
+        master: srcDef,
+        brandKit: brandKitContent,
+        dataRow: previewRow,
+        title: `${template.name} ${a.width}x${a.height}`,
+      });
+      const suffix = previewRow ? `_fila${(selectedRowIdx ?? 0) + 1}` : "";
+      const name = filenameFor(a)
+        .replace(/\.jpg$/, `${suffix}_html5.zip`);
+      downloadBlob(blob, name);
+    } catch (err) {
+      console.error("HTML5 export failed:", err);
+      alert("No se pudo generar el ZIP HTML5. Revisa la consola para más detalles.");
+    } finally {
+      setSingleDownloadingHtml5Id(null);
     }
   };
 
@@ -2193,7 +2227,9 @@ export default function ProducirPage() {
                           onSourceChange={(srcId) => handleSourceChange(a.id, srcId)}
                           onResetOverride={() => handleResetAdaptationOverride(a.id)}
                           onDownload={() => handleDownloadSingle(a)}
+                          onDownloadHtml5={() => handleDownloadSingleHtml5(a)}
                           downloading={singleDownloadingId === a.id}
+                          downloadingHtml5={singleDownloadingHtml5Id === a.id}
                           batchInProgress={!!batchProgress}
                           deleting={deletingId === a.id}
                         />
@@ -2372,7 +2408,9 @@ function AdaptationCard({
   onSourceChange,
   onResetOverride,
   onDownload,
+  onDownloadHtml5,
   downloading,
+  downloadingHtml5,
   batchInProgress,
   deleting,
 }: {
@@ -2403,7 +2441,9 @@ function AdaptationCard({
   // adaptación tiene manual_layout.
   onResetOverride: () => void;
   onDownload: () => void;
+  onDownloadHtml5: () => void;
   downloading: boolean;
+  downloadingHtml5: boolean;
   batchInProgress: boolean;
   deleting: boolean;
 }) {
@@ -2733,9 +2773,9 @@ function AdaptationCard({
             <button
               type="button"
               onClick={onDownload}
-              disabled={downloading || batchInProgress}
+              disabled={downloading || downloadingHtml5 || batchInProgress}
               className="text-[11px] px-2 py-1 rounded border border-border/50 hover:bg-muted hover:border-foreground/30 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Descargar como JPG"
+              title="Descargar como JPG estático"
             >
               {downloading ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -2743,6 +2783,20 @@ function AdaptationCard({
                 <Download className="h-3 w-3" />
               )}
               JPG
+            </button>
+            <button
+              type="button"
+              onClick={onDownloadHtml5}
+              disabled={downloading || downloadingHtml5 || batchInProgress}
+              className="text-[11px] px-2 py-1 rounded border border-border/50 hover:bg-muted hover:border-foreground/30 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Descargar como ZIP HTML5 (compatible GDN/IAB) con animaciones WAAPI"
+            >
+              {downloadingHtml5 ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Code className="h-3 w-3" />
+              )}
+              HTML5
             </button>
           </div>
         </div>
