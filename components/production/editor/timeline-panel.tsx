@@ -440,7 +440,13 @@ export function TimelinePanel(props: TimelinePanelProps) {
     e.stopPropagation();
     const tracksRect = tracksAreaRef.current?.getBoundingClientRect();
     if (!tracksRect) return;
-    const pxPerMs = tracksRect.width / duration;
+    // El tracksArea incluye la columna del label (LEFT_LABEL_W). Los
+    // keyframes viven solo en el área de la derecha; el porcentaje
+    // visual del diamante también es relativo a esa zona. Si usamos el
+    // ancho completo, pxPerMs queda sub-estimado y el kf se queda muy
+    // atrás del cursor al arrastrar.
+    const keyframesAreaWidth = Math.max(1, tracksRect.width - LEFT_LABEL_W);
+    const pxPerMs = keyframesAreaWidth / duration;
     dragRef.current = {
       layerId: track.layerId,
       property: track.property,
@@ -522,7 +528,11 @@ export function TimelinePanel(props: TimelinePanelProps) {
   const playheadPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
-    <div className="border-t border-border/50 bg-card/40 flex flex-col min-h-0">
+    // min-h-[280px]: el panel necesita altura propia para que ni el ruler ni
+    // el último track queden pegados al borde inferior del viewport. Sin
+    // esto, con pocas tracks el panel colapsa a ~80px y el scroll
+    // horizontal/vertical interno se traga la última fila visible.
+    <div className="border-t border-border/50 bg-card/40 flex flex-col min-h-[280px]">
       {header}
 
       {/* Editor del keyframe seleccionado. Aparece como franja docked debajo
@@ -598,8 +608,10 @@ export function TimelinePanel(props: TimelinePanelProps) {
         </div>
       </div>
 
-      {/* Tracks */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      {/* Tracks. pb-6 dentro del scroll: deja respiro abajo para que el
+          último track no quede pegado al borde y la scrollbar interna no
+          tape los diamantes de la última fila al hacer scroll. */}
+      <div className="flex-1 overflow-y-auto min-h-0 pb-6">
         {tracks.length === 0 ? (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">
             No hay tracks. Click en{" "}
