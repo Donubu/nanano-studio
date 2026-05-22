@@ -132,11 +132,11 @@ log "Stopping old slot (${ACTIVE})..."
 $COMPOSE stop puerto_studio_${ACTIVE}
 
 # ---- Rolling worker restart ----
-WORKERS=$(docker ps --format '{{.Names}}' | grep "puerto_worker_" | sort || true)
+# Source of truth: services declared in compose (ignores orphan containers).
+WORKERS=$($COMPOSE config --services 2>/dev/null | grep "^worker_" | sort || true)
 if [ -n "$WORKERS" ]; then
   log "Rolling restart of workers (reusing already-built image)..."
-  for WORKER in $WORKERS; do
-    WORKER_SERVICE=$(echo "$WORKER" | sed 's/puerto_//')
+  for WORKER_SERVICE in $WORKERS; do
     log "  Restarting ${WORKER_SERVICE}..."
     $COMPOSE up -d --no-build --no-deps "$WORKER_SERVICE"
     # Wait for worker to be ready
