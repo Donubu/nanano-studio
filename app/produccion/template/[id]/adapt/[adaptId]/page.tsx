@@ -272,6 +272,7 @@ export default function AdaptationEditorPage() {
           initial={initialDefinition}
           baseWidth={adaptation.width}
           baseHeight={adaptation.height}
+          templateId={template.id}
           onSave={handleSaveOverride}
           brandKit={brandKitContent}
           clientId={clientId}

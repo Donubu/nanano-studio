@@ -1744,6 +1744,7 @@ export default function ProducirPage() {
                 initial={definition}
                 baseWidth={activeOrientation.base_width}
                 baseHeight={activeOrientation.base_height}
+                templateId={activeOrientation.id}
                 onSave={handleSaveMaster}
                 brandKit={brandKitContent}
                 clientId={clientId}

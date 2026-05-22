@@ -30,6 +30,10 @@ interface Props {
   brandKit?: BrandKitContent;
   clientId?: number | null;
   projectId?: number;
+  // ID del template activo. Lo necesita el TimelinePanel para invocar al
+  // agente IA de animación (POST /api/production/templates/[id]/ai/animate).
+  // Si no se pasa, la opción IA del picker queda deshabilitada.
+  templateId?: number;
   allBrandKits?: BrandKit[];
   onBrandKitsChange?: () => void;
   // Custom node rendered above the canvas en lugar del PreviewThumbnails
@@ -59,6 +63,7 @@ export function TemplateEditor({
   brandKit = EMPTY_KIT_CONTENT,
   clientId,
   projectId,
+  templateId,
   allBrandKits = [],
   onBrandKitsChange,
   topAccessory,
@@ -507,6 +512,7 @@ export function TemplateEditor({
           </div>
           <TimelinePanel
             definition={editor.definition}
+            templateId={templateId}
             currentTime={timeline.currentTime}
             isPlaying={timeline.isPlaying}
             collapsed={timeline.timelineCollapsed}

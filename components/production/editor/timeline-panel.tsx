@@ -182,6 +182,10 @@ export interface TimelinePanelProps {
   // Mutación del timeline. El caller hace onUpdateRoot que persiste la def
   // entera con la nueva animation.
   onUpdateAnimation: (next: AnimationConfig | undefined) => void;
+  // ID del template activo. Necesario para invocar al agente IA
+  // (POST /api/production/templates/[id]/ai/animate). Si no se pasa, la
+  // opción "Animar con IA" del picker queda deshabilitada con tooltip.
+  templateId?: number;
 }
 
 // ---------- Component ----------
@@ -198,6 +202,7 @@ export function TimelinePanel(props: TimelinePanelProps) {
     onRewind,
     onToggleCollapsed,
     onUpdateAnimation,
+    templateId,
   } = props;
 
   const animation = definition.animation;
@@ -374,8 +379,10 @@ export function TimelinePanel(props: TimelinePanelProps) {
           <div className="flex-1" />
           <CreateTimelinePicker
             definition={definition}
+            templateId={templateId}
             onCreateEmpty={() => onUpdateAnimation(newAnimationConfig())}
             onApplyPreset={(p) => onUpdateAnimation(p.build(definition))}
+            onApplyAi={(animation) => onUpdateAnimation(animation)}
           />
         </>
       )}
@@ -1199,14 +1206,19 @@ function AddTrackModal({
 
 function CreateTimelinePicker({
   definition,
+  templateId,
   onCreateEmpty,
   onApplyPreset,
+  onApplyAi,
 }: {
   definition: TemplateDefinition;
+  templateId?: number;
   onCreateEmpty: () => void;
   onApplyPreset: (preset: AnimationPreset) => void;
+  onApplyAi: (animation: AnimationConfig) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Cerrar al clickear fuera. Listener a nivel document — más simple que
@@ -1271,6 +1283,30 @@ function CreateTimelinePicker({
           <button
             type="button"
             onClick={() => {
+              if (templateId == null) return;
+              setOpen(false);
+              setAiOpen(true);
+            }}
+            disabled={templateId == null}
+            title={
+              templateId == null
+                ? "templateId no disponible — IA solo aplica con un template guardado"
+                : "Generar animación con el agente Banner Designer"
+            }
+            className="w-full text-left px-2 py-1.5 rounded hover:bg-muted text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Sparkles className="h-3 w-3 text-primary" />
+            <span className="flex-1">
+              <span className="font-medium">Animar con IA</span>
+              <span className="block text-[10px] text-muted-foreground/80 leading-tight">
+                Banner Designer decide qué y cómo animar
+              </span>
+            </span>
+          </button>
+          <div className="h-px bg-border/50 my-1" />
+          <button
+            type="button"
+            onClick={() => {
               onCreateEmpty();
               setOpen(false);
             }}
@@ -1280,6 +1316,186 @@ function CreateTimelinePicker({
           </button>
         </div>
       )}
+      {aiOpen && templateId != null && (
+        <AiAnimateModal
+          templateId={templateId}
+          onClose={() => setAiOpen(false)}
+          onApply={(animation) => {
+            onApplyAi(animation);
+            setAiOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------- AiAnimateModal ----------
+//
+// Modal que aparece al elegir "Animar con IA". Pide intent + complexity
+// + duration hint, dispara POST /api/production/templates/[id]/ai/animate,
+// y al recibir la respuesta aplica directamente (con rationale visible en
+// un banner momentáneo). El productor puede deshacer vía undo si no le
+// gusta — toda la mutación entra en una sola entrada del history stack.
+
+function AiAnimateModal({
+  templateId,
+  onClose,
+  onApply,
+}: {
+  templateId: number;
+  onClose: () => void;
+  onApply: (animation: AnimationConfig) => void;
+}) {
+  const [intent, setIntent] = useState("");
+  const [complexity, setComplexity] = useState<"subtle" | "balanced" | "energetic">("balanced");
+  const [durationHint, setDurationHint] = useState<string>("");
+  const [instructions, setInstructions] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async () => {
+    setError(null);
+    setSubmitting(true);
+    try {
+      const body: Record<string, unknown> = { intent: intent.trim(), complexity };
+      if (durationHint.trim()) {
+        const n = Number(durationHint);
+        if (Number.isFinite(n) && n > 0) body.durationHintMs = Math.round(n * 1000);
+      }
+      if (instructions.trim()) body.instructions = instructions.trim();
+      const res = await fetch(
+        `/api/production/templates/${templateId}/ai/animate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data?.error || `Error ${res.status}`);
+        setSubmitting(false);
+        return;
+      }
+      // Aplicar directamente. El rationale se podría mostrar en un toast,
+      // pero para MVP solo lo logueamos a console — el productor verá la
+      // animación al instante y puede deshacer si no le gusta.
+      console.info("[ai/animate] rationale:", data.rationale);
+      console.info("[ai/animate] cost:", data.tokenUsage?.estimatedCost);
+      onApply(data.animation);
+    } catch (e) {
+      setError((e as Error).message);
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-card border border-border rounded-lg p-4 w-[480px] max-w-full space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold flex items-center gap-1.5">
+            <Sparkles className="h-4 w-4 text-primary" />
+            Animar con IA
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-muted-foreground hover:text-foreground p-1"
+            disabled={submitting}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="text-[11px] text-muted-foreground leading-tight">
+          El agente Banner Designer decide qué capas animar, con qué propiedades
+          y easing. Podés deshacer si no te convence el resultado.
+        </p>
+        <label className="block text-xs">
+          <span className="text-muted-foreground">Intent</span>
+          <textarea
+            value={intent}
+            onChange={(e) => setIntent(e.target.value)}
+            rows={3}
+            placeholder="Ej: entrance suave + latido en el CTA"
+            disabled={submitting}
+            className="w-full bg-muted border border-border/50 rounded px-2 py-1.5 text-sm mt-1"
+          />
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block text-xs">
+            <span className="text-muted-foreground">Complejidad</span>
+            <select
+              value={complexity}
+              onChange={(e) => setComplexity(e.target.value as typeof complexity)}
+              disabled={submitting}
+              className="w-full bg-muted border border-border/50 rounded px-2 py-1.5 text-sm mt-1"
+            >
+              <option value="subtle">Sutil</option>
+              <option value="balanced">Balanced</option>
+              <option value="energetic">Energético</option>
+            </select>
+          </label>
+          <label className="block text-xs">
+            <span className="text-muted-foreground">Duración (seg, opt.)</span>
+            <input
+              type="number"
+              step={0.1}
+              min={0.5}
+              max={60}
+              value={durationHint}
+              onChange={(e) => setDurationHint(e.target.value)}
+              placeholder="auto"
+              disabled={submitting}
+              className="w-full bg-muted border border-border/50 rounded px-2 py-1.5 text-sm mt-1"
+            />
+          </label>
+        </div>
+        <label className="block text-xs">
+          <span className="text-muted-foreground">Instrucciones específicas (opt.)</span>
+          <input
+            type="text"
+            value={instructions}
+            onChange={(e) => setInstructions(e.target.value)}
+            placeholder="Ej: no animes el logo"
+            disabled={submitting}
+            className="w-full bg-muted border border-border/50 rounded px-2 py-1.5 text-sm mt-1"
+          />
+        </label>
+        {error && (
+          <div className="text-[11px] text-red-400 bg-red-500/10 border border-red-500/30 rounded px-2 py-1.5">
+            {error}
+          </div>
+        )}
+        <div className="flex justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            className="text-xs px-3 py-1.5 rounded border border-border/50 hover:bg-muted disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={submitting || intent.trim().length === 0}
+            className="text-xs px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+          >
+            {submitting ? (
+              <>
+                <span className="inline-block w-3 h-3 border-2 border-primary-foreground/40 border-t-primary-foreground rounded-full animate-spin" />
+                Generando…
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-3 w-3" />
+                Generar
+              </>
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

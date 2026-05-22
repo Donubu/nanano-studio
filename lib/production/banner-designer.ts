@@ -14,12 +14,15 @@
 
 import {
   TemplateDefinition,
+  TemplateLayer,
 } from "./types";
 import {
   validateTemplateDefinition,
+  validateAnimationConfig,
   ValidationErr,
 } from "./template-schema";
 import { BrandKitContent } from "./brand-kit";
+import type { AnimationConfig } from "./animation";
 
 export const BANNER_DESIGNER_AGENT_NAME = "Banner Designer";
 
@@ -68,6 +71,44 @@ export interface AdaptOrientationInput {
   // ve y las usa como referencia visual junto al JSON del master. Útil porque
   // un layout puede entenderse mejor visualmente que leyendo coordenadas.
   referenceFiles?: AgentReferenceFile[];
+}
+
+// Input para ANIMATE_TEMPLATE: el agente recibe un template existente y
+// devuelve un AnimationConfig que se asigna al campo .animation del root.
+// No modifica el árbol de capas — solo emite la timeline. Spec completa
+// del agente en BANNERS-ANIMATION-IA.md (apéndice al system prompt).
+export interface AnimateTemplateInput {
+  template: TemplateDefinition;
+  templateDims: { w: number; h: number };
+  brandKit: BrandKitForAgent;
+  intent: string;
+  // "subtle" | "balanced" (default) | "energetic". Guía la densidad de la
+  // animación que el agente decide.
+  complexity?: "subtle" | "balanced" | "energetic";
+  // Hint del productor en ms. El agente debería respetar ±20%. Si no
+  // viene, decide solo según complexity.
+  durationHintMs?: number;
+  // Si el template ya tiene una animación previa, se pasa al agente como
+  // contexto — útil para "rediseñá esto sin perder la coherencia con lo
+  // que ya hay" o "agregale un detalle al CTA". null = arrancar de cero.
+  existingAnimation?: AnimationConfig | null;
+  instructions?: string;
+  userEmail: string;
+}
+
+// Output específico para ANIMATE_TEMPLATE: animation + rationale. No
+// devuelve definition (el árbol queda sin tocar — el caller fusiona la
+// animation en su lado).
+export interface AnimateInvocationResult {
+  ok: true;
+  animation: AnimationConfig;
+  rationale: string;
+  conversationId?: string;
+  tokenUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    estimatedCost?: number;
+  };
 }
 
 // Input para GENERATE_FROM_REFERENCE: el productor sube imágenes de banners
@@ -232,6 +273,7 @@ async function callPracticante(payload: {
 function parseAgentResponse(raw: string): {
   definition?: unknown;
   variants?: unknown;
+  animation?: unknown;
   rationale?: string;
   error?: string;
 } {
@@ -249,6 +291,7 @@ function parseAgentResponse(raw: string): {
     return {
       definition: obj.definition,
       variants: obj.variants,
+      animation: obj.animation,
       rationale: typeof obj.rationale === "string" ? obj.rationale : undefined,
     };
   } catch (e) {
@@ -338,6 +381,146 @@ export async function runAdaptOrientation(
     error: `Tras retry: ${retryValidation.error}`,
     conversationId: retryResponse.conversationId ?? response.conversationId,
     tokenUsage: combineTokenUsage(response.tokenUsage, retryResponse.tokenUsage),
+  };
+}
+
+// Operación ANIMATE_TEMPLATE. Mismo patrón que runAdaptOrientation: llama
+// al agente, valida la respuesta contra el schema de AnimationConfig +
+// que los layerId referenciados existan en el template, reintenta 1 vez
+// si falla la validación. NO modifica el template — solo devuelve la
+// animation que el caller asigna a definition.animation.
+export async function runAnimateTemplate(
+  input: AnimateTemplateInput,
+): Promise<AnimateInvocationResult | AgentInvocationError> {
+  const complexity = input.complexity ?? "balanced";
+  const message =
+    `Animá este banner con sensación "${input.intent}" ` +
+    `(complexity: ${complexity}${input.durationHintMs ? `, duración ~${input.durationHintMs}ms` : ""}).`;
+  const context = {
+    operation: "ANIMATE_TEMPLATE" as const,
+    template: input.template,
+    template_dims: input.templateDims,
+    brand_kit: input.brandKit,
+    intent: input.intent,
+    complexity,
+    duration_hint_ms: input.durationHintMs ?? null,
+    existing_animation: input.existingAnimation ?? null,
+    instructions: input.instructions ?? null,
+  };
+  const promptSuffix = JSON.stringify(context);
+
+  // Set de layerIds del template para validar que el agente no inventa.
+  // Pre-computado una vez fuera del closure de retry.
+  const knownLayerIds = collectLayerIds(input.template);
+
+  let response: PracticanteRunResponse;
+  try {
+    response = await callPracticante({
+      message,
+      promptSuffix,
+      agentName: BANNER_DESIGNER_AGENT_NAME,
+      userEmail: input.userEmail,
+    });
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+
+  const validation = validateAnimationAgentResponse(response, knownLayerIds);
+  if (validation.ok) {
+    return {
+      ok: true,
+      animation: validation.animation,
+      rationale: validation.rationale,
+      conversationId: response.conversationId,
+      tokenUsage: response.tokenUsage,
+    };
+  }
+
+  // Retry una vez con el error específico. Mismo conversationId para que
+  // el agente vea el contexto y solo corrija lo que falló.
+  const retryMessage = `Tu respuesta anterior falló validación: ${validation.error}. Corrige solo ese error y devuelve el JSON completo nuevamente.`;
+  let retryResponse: PracticanteRunResponse;
+  try {
+    retryResponse = await callPracticante({
+      message: retryMessage,
+      promptSuffix,
+      agentName: BANNER_DESIGNER_AGENT_NAME,
+      existingConversationId: response.conversationId,
+      userEmail: input.userEmail,
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      error: `Retry falló: ${(e as Error).message}`,
+      conversationId: response.conversationId,
+      tokenUsage: response.tokenUsage,
+    };
+  }
+
+  const retryValidation = validateAnimationAgentResponse(retryResponse, knownLayerIds);
+  if (retryValidation.ok) {
+    return {
+      ok: true,
+      animation: retryValidation.animation,
+      rationale: retryValidation.rationale,
+      conversationId: retryResponse.conversationId ?? response.conversationId,
+      tokenUsage: combineTokenUsage(response.tokenUsage, retryResponse.tokenUsage),
+    };
+  }
+
+  return {
+    ok: false,
+    error: `Tras retry: ${retryValidation.error}`,
+    conversationId: retryResponse.conversationId ?? response.conversationId,
+    tokenUsage: combineTokenUsage(response.tokenUsage, retryResponse.tokenUsage),
+  };
+}
+
+function collectLayerIds(root: TemplateDefinition): Set<string> {
+  const out = new Set<string>();
+  function walk(l: TemplateLayer) {
+    out.add(l.id);
+    if (l.type === "frame") for (const c of l.children) walk(c);
+  }
+  walk(root);
+  return out;
+}
+
+type AnimationValidated =
+  | { ok: true; animation: AnimationConfig; rationale: string }
+  | (ValidationErr & { rationale?: string });
+
+function validateAnimationAgentResponse(
+  response: PracticanteRunResponse,
+  knownLayerIds: Set<string>,
+): AnimationValidated {
+  if (response.parseError) {
+    return {
+      ok: false,
+      error: `Practicante reportó parseError: ${response.parseError}`,
+    };
+  }
+  if (response.warnings && response.warnings.length > 0) {
+    console.warn("[banner-designer/animate] warnings:", response.warnings);
+  }
+  if (!response.response) {
+    return { ok: false, error: "Practicante no devolvió texto de respuesta" };
+  }
+  const parsed = parseAgentResponse(response.response);
+  if (parsed.error || !parsed.animation) {
+    return {
+      ok: false,
+      error: parsed.error || "La respuesta no contiene 'animation'",
+    };
+  }
+  const v = validateAnimationConfig(parsed.animation, knownLayerIds);
+  if (!v.ok) {
+    return { ok: false, error: v.error };
+  }
+  return {
+    ok: true,
+    animation: v.animation,
+    rationale: parsed.rationale ?? "",
   };
 }
 

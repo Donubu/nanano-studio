@@ -13,6 +13,7 @@
 
 import { z } from "zod";
 import { TemplateDefinition, TemplateLayer } from "./types";
+import type { AnimationConfig } from "./animation";
 import { ICON_NAMES } from "./icon-catalog";
 
 // IDs: alfanuméricos + - + _. No permitimos espacios ni caracteres raros
@@ -256,6 +257,45 @@ const animationConfigSchema = z.object({
   loop: z.union([z.number().int().min(1).max(100), z.literal("infinite")]),
   tracks: z.array(animationTrackSchema),
 });
+
+// Resultado dedicado para validateAnimationConfig — separado de
+// ValidationResult de TemplateDefinition porque el value es de otro tipo.
+export type AnimationValidationResult =
+  | { ok: true; animation: AnimationConfig }
+  | { ok: false; error: string };
+
+// Validador standalone para el AnimationConfig devuelto por el agente
+// ANIMATE_TEMPLATE. Se exporta porque el endpoint /api/production/templates/
+// [id]/ai/animate parsea la respuesta del agente y necesita validar antes
+// de aplicarla al template. Adicionalmente chequea que cada track haga
+// referencia a un layerId existente en el template — sin esto el agente
+// puede devolver tracks "huérfanos" que crashean al renderizar.
+export function validateAnimationConfig(
+  input: unknown,
+  knownLayerIds?: Set<string>,
+): AnimationValidationResult {
+  const parsed = animationConfigSchema.safeParse(input);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    const path = first.path.length > 0 ? first.path.join(".") : "(root)";
+    return {
+      ok: false,
+      error: `Schema inválido en ${path}: ${first.message}`,
+    };
+  }
+  const cfg = parsed.data as unknown as AnimationConfig;
+  if (knownLayerIds) {
+    for (const tr of cfg.tracks) {
+      if (!knownLayerIds.has(tr.layerId)) {
+        return {
+          ok: false,
+          error: `Track referencia layerId "${tr.layerId}" que no existe en el template`,
+        };
+      }
+    }
+  }
+  return { ok: true, animation: cfg };
+}
 
 // Root definition: frame con id "tpl_root" exacto y layout = free (los
 // banners se componen con posición libre por default; stack está permitido
