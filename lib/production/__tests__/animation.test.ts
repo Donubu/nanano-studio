@@ -16,7 +16,7 @@ import {
 } from "../animation";
 import { reflowAnimation, reflowForPreview } from "../reflow";
 import { buildInitialFromAdaptFit } from "../overrides";
-import type { TemplateDefinition } from "../types";
+import type { TemplateDefinition, TemplateLayer } from "../types";
 
 // Helper para armar un track rápido. easing default = linear.
 function trackOf(
@@ -249,11 +249,37 @@ describe("addKeyframe / removeKeyframe / moveKeyframe", () => {
   });
 });
 
-describe("reflowAnimation", () => {
+describe("reflowAnimation (delta-anchor)", () => {
+  // Helper para construir un root con UN layer "logo" en (x,y) y tamaño (w,h).
+  // Sin constraints: por default los smart-constraints inferidos respetan la
+  // posición original (la mayoría de tests usan layers centrados, etc.).
+  const makeRoot = (
+    rootW: number,
+    rootH: number,
+    layer: { x: number; y: number; w: number; h: number },
+  ): TemplateDefinition => ({
+    id: "tpl_root",
+    type: "frame",
+    position: { x: 0, y: 0 },
+    size: { w: rootW, h: rootH },
+    layout: { mode: "free" },
+    children: [
+      {
+        id: "logo",
+        type: "shape",
+        shape: "rect",
+        fill: "#000",
+        position: { x: layer.x, y: layer.y },
+        size: { w: layer.w, h: layer.h },
+      },
+    ],
+  });
+
   const baseCfg: AnimationConfig = {
     duration: 1000,
     loop: 1,
     tracks: [
+      // position.x: layer base = 100. kfs en 100 y 500 → delta 0 y +400.
       trackOf("logo", "position.x", { t: 0, value: 100 }, { t: 1000, value: 500 }),
       trackOf("logo", "position.y", { t: 0, value: 200 }),
       trackOf("logo", "size.w", { t: 0, value: 300 }),
@@ -266,40 +292,83 @@ describe("reflowAnimation", () => {
     ],
   };
 
-  it("reescala position.x y size.w con sx", () => {
-    const out = reflowAnimation(baseCfg, { w: 1000, h: 1000 }, { w: 500, h: 1000 });
+  // Helper: makeRoot + animation. reflowForPreview solo propaga la
+  // animation si el root la tiene, así que la attach acá para evitar
+  // boilerplate en cada test.
+  const makeRootWithAnim = (
+    rootW: number,
+    rootH: number,
+    layer: { x: number; y: number; w: number; h: number },
+    anim: AnimationConfig = baseCfg,
+  ): TemplateDefinition => ({
+    ...makeRoot(rootW, rootH, layer),
+    animation: anim,
+  });
+
+  it("re-ancla position.x al newBase: kf que coincidía con el base sigue coincidiendo", () => {
+    const orig = makeRootWithAnim(1000, 1000, { x: 100, y: 200, w: 300, h: 80 });
+    const newRoot = reflowForPreview(orig, { w: 500, h: 1000 });
+    const newLayer = newRoot.children[0] as TemplateLayer;
+    const out = newRoot.animation!;
     const posX = out.tracks.find((t) => t.property === "position.x")!;
-    expect(posX.keyframes[0].value).toBe(50);  // 100 * 0.5
-    expect(posX.keyframes[1].value).toBe(250); // 500 * 0.5
-    const sizeW = out.tracks.find((t) => t.property === "size.w")!;
-    expect(sizeW.keyframes[0].value).toBe(150); // 300 * 0.5
+    // El primer kf (value=100) coincidía con el base original (100), así
+    // que el reflow lo deja coincidiendo con el newBase del layer reflowed.
+    expect(posX.keyframes[0].value).toBe(newLayer.position.x);
+    // El segundo kf (value=500, delta=+400) queda en newBase + 400*sx = newBase + 200.
+    expect(posX.keyframes[1].value).toBe(newLayer.position.x + 400 * 0.5);
   });
 
-  it("reescala position.y y size.h con sy", () => {
-    const out = reflowAnimation(baseCfg, { w: 1000, h: 1000 }, { w: 1000, h: 500 });
+  it("re-ancla position.y al newBase con sy", () => {
+    const orig = makeRootWithAnim(1000, 1000, { x: 100, y: 200, w: 300, h: 80 });
+    const newRoot = reflowForPreview(orig, { w: 1000, h: 500 });
+    const newLayer = newRoot.children[0] as TemplateLayer;
+    const out = newRoot.animation!;
     const posY = out.tracks.find((t) => t.property === "position.y")!;
-    expect(posY.keyframes[0].value).toBe(100); // 200 * 0.5
-    const sizeH = out.tracks.find((t) => t.property === "size.h")!;
-    expect(sizeH.keyframes[0].value).toBe(40); // 80 * 0.5
+    // kf value=200 coincidía con base.y=200 → sigue coincidiendo con newBase.y.
+    expect(posY.keyframes[0].value).toBe(newLayer.position.y);
   });
 
-  it("escala blur con el promedio de sx y sy", () => {
-    const out = reflowAnimation(baseCfg, { w: 1000, h: 1000 }, { w: 500, h: 500 });
+  it("re-ancla size.w al newBase con sx", () => {
+    const orig = makeRootWithAnim(1000, 1000, { x: 100, y: 200, w: 300, h: 80 });
+    const newRoot = reflowForPreview(orig, { w: 500, h: 1000 });
+    const newLayer = newRoot.children[0] as TemplateLayer;
+    const out = newRoot.animation!;
+    const sizeW = out.tracks.find((t) => t.property === "size.w")!;
+    // kf value=300 coincidía con base.w=300 → sigue coincidiendo con newBase.w.
+    expect(sizeW.keyframes[0].value).toBe(newLayer.size.w);
+  });
+
+  it("escala blur con el promedio de sx y sy (sin anchor: blur no es relativo a posición)", () => {
+    const orig = makeRootWithAnim(1000, 1000, { x: 100, y: 200, w: 300, h: 80 });
+    const newRoot = reflowForPreview(orig, { w: 500, h: 500 });
+    const out = newRoot.animation!;
     const blur = out.tracks.find((t) => t.property === "blur")!;
     expect(blur.keyframes[0].value).toBe(5); // 10 * 0.5
   });
 
   it("NO toca opacity, rotation, scale, color", () => {
-    const out = reflowAnimation(baseCfg, { w: 1000, h: 1000 }, { w: 200, h: 200 });
+    const orig = makeRootWithAnim(1000, 1000, { x: 100, y: 200, w: 300, h: 80 });
+    const newRoot = reflowForPreview(orig, { w: 200, h: 200 });
+    const out = newRoot.animation!;
     expect(out.tracks.find((t) => t.property === "opacity")!.keyframes[0].value).toBe(0);
     expect(out.tracks.find((t) => t.property === "rotation")!.keyframes[0].value).toBe(45);
     expect(out.tracks.find((t) => t.property === "scale")!.keyframes[0].value).toBe(1.5);
     expect(out.tracks.find((t) => t.property === "color")!.keyframes[0].value).toBe("#ff0000");
   });
+
+  it("track de un layer que ya no existe cae al escalado proporcional (fallback)", () => {
+    const orig = makeRoot(1000, 1000, { x: 100, y: 200, w: 300, h: 80 });
+    const newRoot: TemplateDefinition = { ...orig, size: { w: 500, h: 1000 }, children: [] };
+    const out = reflowAnimation(baseCfg, orig, newRoot);
+    const posX = out.tracks.find((t) => t.property === "position.x")!;
+    // Sin layer en el árbol nuevo: cae al proporcional viejo.
+    expect(posX.keyframes[0].value).toBe(50);  // 100 * 0.5
+    expect(posX.keyframes[1].value).toBe(250); // 500 * 0.5
+  });
 });
 
 describe("reflowForPreview con animation", () => {
-  it("propaga el reflow de keyframes junto con el layout", () => {
+  it("propaga el reflow de keyframes junto con el layout (fallback proporcional sin layer)", () => {
     const def: TemplateDefinition = {
       id: "tpl_root",
       type: "frame",
@@ -315,7 +384,8 @@ describe("reflowForPreview con animation", () => {
     };
     const out = reflowForPreview(def, { w: 500, h: 1000 });
     expect(out.size).toEqual({ w: 500, h: 1000 });
-    expect(out.animation?.tracks[0].keyframes[0].value).toBe(100); // 200 * 0.5
+    // Sin layer "logo" en el árbol, cae al fallback proporcional: 200 * 0.5.
+    expect(out.animation?.tracks[0].keyframes[0].value).toBe(100);
   });
 });
 
