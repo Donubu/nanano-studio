@@ -209,6 +209,17 @@ export function TimelinePanel(props: TimelinePanelProps) {
     property: AnimatableProperty;
     t: number;
   } | null>(null);
+  // Ref siempre apunta al animation actual. Lo usa el onMove del drag:
+  // el closure de pointerdown captura `animation` al momento de iniciar
+  // el drag, pero después de cada onUpdateAnimation el padre re-renderea
+  // con el animation nuevo. Sin el ref, la segunda iteración del move
+  // llamaría a moveKeyframe sobre el animation viejo (donde el kf todavía
+  // está en su t original), no encontraría el kf en el nuevo t y haría
+  // revert. Resultado: el drag "no funcionaba" más allá del primer frame.
+  const animationRef = useRef(animation);
+  useEffect(() => {
+    animationRef.current = animation;
+  }, [animation]);
   // Drag state para keyframes. Guarda el (trackKey, kfIndex, startT,
   // pointerStartX) y el callback resuelve el nuevo t cuando se mueve.
   const dragRef = useRef<{
@@ -470,20 +481,26 @@ export function TimelinePanel(props: TimelinePanelProps) {
       const newT = Math.max(0, Math.min(duration, Math.round(drag.fromT + deltaMs)));
       if (newT === lastNewT) return;
       lastNewT = newT;
+      // Leer el animation actual del ref, no del closure: tras la primera
+      // iteración onUpdateAnimation cambió el estado y el animation viejo
+      // ya no tiene el kf en drag.fromT (que ahora vive en el nuevo t).
+      const currentAnim = animationRef.current;
+      if (!currentAnim) return;
       onUpdateAnimation(
-        moveKeyframe(animation, drag.layerId, drag.property, drag.fromT, newT),
+        moveKeyframe(currentAnim, drag.layerId, drag.property, drag.fromT, newT),
       );
       // Aprovechamos para actualizar el fromT para el siguiente delta —
       // sino, después de mover y volver a mover usaríamos el fromT viejo
       // (que ya no existe). Y si había un keyframe seleccionado en el fromT
       // original, lo seguimos a su nuevo t para que el popover no quede
       // huérfano durante el drag.
+      const prevFromT = drag.fromT;
       dragRef.current = { ...drag, fromT: newT, pointerStartX: ev.clientX };
       setSelectedKf((prev) =>
         prev &&
         prev.layerId === drag.layerId &&
         prev.property === drag.property &&
-        prev.t === drag.fromT
+        prev.t === prevFromT
           ? { ...prev, t: newT }
           : prev,
       );
