@@ -209,17 +209,6 @@ export function TimelinePanel(props: TimelinePanelProps) {
     property: AnimatableProperty;
     t: number;
   } | null>(null);
-  // Ref siempre apunta al animation actual. Lo usa el onMove del drag:
-  // el closure de pointerdown captura `animation` al momento de iniciar
-  // el drag, pero después de cada onUpdateAnimation el padre re-renderea
-  // con el animation nuevo. Sin el ref, la segunda iteración del move
-  // llamaría a moveKeyframe sobre el animation viejo (donde el kf todavía
-  // está en su t original), no encontraría el kf en el nuevo t y haría
-  // revert. Resultado: el drag "no funcionaba" más allá del primer frame.
-  const animationRef = useRef(animation);
-  useEffect(() => {
-    animationRef.current = animation;
-  }, [animation]);
   // Drag state para keyframes. Guarda el (trackKey, kfIndex, startT,
   // pointerStartX) y el callback resuelve el nuevo t cuando se mueve.
   const dragRef = useRef<{
@@ -232,14 +221,33 @@ export function TimelinePanel(props: TimelinePanelProps) {
   const tracksAreaRef = useRef<HTMLDivElement | null>(null);
 
   // ESC limpia la selección — convención de la app para popovers/modales.
+  // Backspace/Delete sobre kf seleccionado borra el keyframe. Ignoramos
+  // las teclas si el foco está en un input/textarea (el productor está
+  // tipeando, no editando la timeline).
   useEffect(() => {
-    if (!selectedKf) return;
+    if (!selectedKf || !animation) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelectedKf(null);
+      const target = e.target as HTMLElement | null;
+      const isTextField =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+      if (e.key === "Escape") {
+        setSelectedKf(null);
+        return;
+      }
+      if (!isTextField && (e.key === "Backspace" || e.key === "Delete")) {
+        e.preventDefault();
+        onUpdateAnimation(
+          removeKeyframe(animation, selectedKf.layerId, selectedKf.property, selectedKf.t),
+        );
+        setSelectedKf(null);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedKf]);
+  }, [selectedKf, animation, onUpdateAnimation]);
 
   // Keyframe resuelto desde el estado de selección. Si la animation no
   // existe o el keyframe referenciado fue borrado, devuelve null y el
@@ -469,6 +477,12 @@ export function TimelinePanel(props: TimelinePanelProps) {
     let lastNewT = kf.t;
     let hasDragged = false;
     const DRAG_THRESHOLD_PX = 4;
+    // currentAnim local: se actualiza inmediatamente con cada moveKeyframe.
+    // Necesario porque dos onMove consecutivos pueden caer entre frames
+    // (sin que React re-renderee y actualice props), así que el `animation`
+    // del closure quedaría stale entre llamadas. Mantener el estado local
+    // evita tanto el stale-closure como las race conditions de useEffect.
+    let currentAnim: AnimationConfig = animation;
     const onMove = (ev: PointerEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
@@ -481,14 +495,9 @@ export function TimelinePanel(props: TimelinePanelProps) {
       const newT = Math.max(0, Math.min(duration, Math.round(drag.fromT + deltaMs)));
       if (newT === lastNewT) return;
       lastNewT = newT;
-      // Leer el animation actual del ref, no del closure: tras la primera
-      // iteración onUpdateAnimation cambió el estado y el animation viejo
-      // ya no tiene el kf en drag.fromT (que ahora vive en el nuevo t).
-      const currentAnim = animationRef.current;
-      if (!currentAnim) return;
-      onUpdateAnimation(
-        moveKeyframe(currentAnim, drag.layerId, drag.property, drag.fromT, newT),
-      );
+      const next = moveKeyframe(currentAnim, drag.layerId, drag.property, drag.fromT, newT);
+      currentAnim = next;
+      onUpdateAnimation(next);
       // Aprovechamos para actualizar el fromT para el siguiente delta —
       // sino, después de mover y volver a mover usaríamos el fromT viejo
       // (que ya no existe). Y si había un keyframe seleccionado en el fromT
@@ -512,15 +521,14 @@ export function TimelinePanel(props: TimelinePanelProps) {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       if (wasClick) {
-        // Click sin drag → seleccionar (o deseleccionar si ya estaba).
-        setSelectedKf((prev) =>
-          prev &&
-          prev.layerId === track.layerId &&
-          prev.property === track.property &&
-          prev.t === kf.t
-            ? null
-            : { layerId: track.layerId, property: track.property, t: kf.t },
-        );
+        // Click sin drag → seleccionar el kf SIEMPRE (idempotente). Antes
+        // toggleaba deselect cuando ya estaba seleccionado, lo que causaba
+        // flicker al intentar drag desde un kf ya activo: pointerdown +
+        // up rapidísimo sin movimiento (drag aún no había superado el
+        // threshold) deselectionaba el kf, el editor desaparecía, layout
+        // shifteaba y el siguiente movimiento del mouse caía en otra zona.
+        // Para deseleccionar ahora se usa ESC o el botón X del editor.
+        setSelectedKf({ layerId: track.layerId, property: track.property, t: kf.t });
         onSeek(kf.t);
       }
     };
@@ -552,20 +560,24 @@ export function TimelinePanel(props: TimelinePanelProps) {
     <div className="border-t border-border/50 bg-card/40 flex flex-col min-h-[200px]">
       {header}
 
-      {/* Editor del keyframe seleccionado. Aparece como franja docked debajo
-          del header. Se prefiere a un popover flotante porque la tracks area
-          tiene overflow scroll y queremos que el editor sea robusto a
-          scrolls y a tracks rows pequeñas. El key incluye la identidad del
-          keyframe para que cambiar de selección remonte el componente y
-          reset-ee el valueDraft local sin needs de useEffect. */}
-      {selectedKfResolved && animation && (
+      {/* Editor del keyframe seleccionado. Siempre reservamos la franja
+          (incluso sin selección) para que aparecer/desaparecer no shift-ee
+          el layout — sin esto, al hacer click en un kf y empezar a
+          arrastrar, la barra emergente movía las tracks rows hacia abajo y
+          el cursor quedaba sobre otra zona, percibido como "el drag se
+          cancela". Cuando no hay selección, mostramos un hint chico. */}
+      {animation && (
         <KeyframeEditor
-          key={`${selectedKfResolved.track.layerId}-${selectedKfResolved.track.property}-${selectedKfResolved.kf.t}`}
-          track={selectedKfResolved.track}
-          kf={selectedKfResolved.kf}
+          key={
+            selectedKfResolved
+              ? `${selectedKfResolved.track.layerId}-${selectedKfResolved.track.property}-${selectedKfResolved.kf.t}`
+              : "empty"
+          }
+          selectedKfResolved={selectedKfResolved}
           definition={definition}
           onClose={() => setSelectedKf(null)}
           onChangeValue={(value) => {
+            if (!selectedKfResolved) return;
             onUpdateAnimation(
               updateKeyframe(
                 animation,
@@ -577,6 +589,7 @@ export function TimelinePanel(props: TimelinePanelProps) {
             );
           }}
           onChangeEasing={(easing) => {
+            if (!selectedKfResolved) return;
             onUpdateAnimation(
               updateKeyframe(
                 animation,
@@ -588,6 +601,7 @@ export function TimelinePanel(props: TimelinePanelProps) {
             );
           }}
           onDelete={() => {
+            if (!selectedKfResolved) return;
             onUpdateAnimation(
               removeKeyframe(
                 animation,
@@ -910,22 +924,45 @@ function numericStep(p: AnimatableProperty): number {
 }
 
 function KeyframeEditor({
-  track,
-  kf,
+  selectedKfResolved,
   definition,
   onClose,
   onChangeValue,
   onChangeEasing,
   onDelete,
 }: {
-  track: AnimationTrack;
-  kf: Keyframe;
+  // null = no hay kf seleccionado. Renderea un placeholder con hint para
+  // mantener el alto del slot estable (sin layout shift al seleccionar).
+  selectedKfResolved: { track: AnimationTrack; kf: Keyframe } | null;
   definition: TemplateDefinition;
   onClose: () => void;
   onChangeValue: (value: number | string) => void;
   onChangeEasing: (easing: Easing) => void;
   onDelete: () => void;
 }) {
+  // Buffer local para el input de value — evita re-render del editor
+  // entero por cada keystroke. Se aplica onBlur o Enter. El caller pasa un
+  // `key` con la identidad del keyframe (incluido "empty" para el
+  // placeholder), así que cambiar de selección o borrar/recrear remonta
+  // el componente y reinicia este state sin necesidad de useEffect.
+  // Hook tiene que ir ANTES del early return placeholder por rules-of-hooks.
+  const [valueDraft, setValueDraft] = useState<string>(
+    selectedKfResolved ? String(selectedKfResolved.kf.value) : "",
+  );
+
+  // Placeholder cuando no hay selección. Misma altura que el editor real
+  // para no shift-ear el resto del panel cuando aparece/desaparece la
+  // selección. h-[34px] empata el alto natural de la versión con inputs.
+  if (!selectedKfResolved) {
+    return (
+      <div className="flex items-center px-3 h-[34px] border-b border-border/50 bg-foreground/[0.02] shrink-0">
+        <span className="text-[11px] text-muted-foreground/70">
+          Click en un keyframe para editar value y easing
+        </span>
+      </div>
+    );
+  }
+  const { track, kf } = selectedKfResolved;
   const layer = findLayerById(definition, track.layerId);
   const propLabel = PROPERTY_LABELS[track.property];
   const isColor = isColorProperty(track.property);
@@ -933,13 +970,6 @@ function KeyframeEditor({
   // muestra como "custom" sin permitir editar (no hay UI todavía).
   const easingValue =
     typeof kf.easing === "string" ? kf.easing : "custom";
-
-  // Buffer local para el input de value — evita re-render del editor
-  // entero por cada keystroke. Se aplica onBlur o Enter. El caller pasa un
-  // `key` con la identidad del keyframe, así que cambiar de selección o
-  // borrar/recrear remonta el componente y reinicia este state sin
-  // necesidad de useEffect.
-  const [valueDraft, setValueDraft] = useState<string>(String(kf.value));
 
   const commitValue = () => {
     if (isColor) {
