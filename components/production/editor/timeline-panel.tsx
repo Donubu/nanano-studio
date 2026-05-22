@@ -50,6 +50,11 @@ import {
   removeKeyframe,
   updateKeyframe,
 } from "@/lib/production/animation";
+import {
+  ANIMATION_PRESETS,
+  type AnimationPreset,
+} from "@/lib/production/animation-presets";
+import { Sparkles } from "lucide-react";
 
 // ---------- Constantes ----------
 
@@ -367,14 +372,11 @@ export function TimelinePanel(props: TimelinePanelProps) {
       ) : (
         <>
           <div className="flex-1" />
-          <button
-            type="button"
-            onClick={() => onUpdateAnimation(newAnimationConfig())}
-            className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-border/50 hover:bg-muted text-muted-foreground hover:text-foreground"
-            title="Crear un timeline vacío para esta orientación"
-          >
-            <Plus className="h-3 w-3" /> Crear timeline
-          </button>
+          <CreateTimelinePicker
+            definition={definition}
+            onCreateEmpty={() => onUpdateAnimation(newAnimationConfig())}
+            onApplyPreset={(p) => onUpdateAnimation(p.build(definition))}
+          />
         </>
       )}
     </div>
@@ -1185,6 +1187,99 @@ function AddTrackModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------- CreateTimelinePicker ----------
+//
+// Split-button mostrado cuando no hay animation. Click en "Crear timeline"
+// abre un menú con los animation presets + "Empezar vacío". Cubre el caso
+// "el productor solo quiere algo que se anime" con un click.
+
+function CreateTimelinePicker({
+  definition,
+  onCreateEmpty,
+  onApplyPreset,
+}: {
+  definition: TemplateDefinition;
+  onCreateEmpty: () => void;
+  onApplyPreset: (preset: AnimationPreset) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Cerrar al clickear fuera. Listener a nivel document — más simple que
+  // calcular focus loss y maneja bien outside-clicks en componentes hijos.
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      if (containerRef.current.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-border/50 hover:bg-muted text-muted-foreground hover:text-foreground"
+        title="Crear un timeline con un preset o vacío"
+      >
+        <Sparkles className="h-3 w-3" /> Crear timeline
+        <ChevronDown className="h-3 w-3 opacity-60" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-20 w-64 bg-card border border-border/50 rounded-md shadow-lg p-1 max-h-[60vh] overflow-y-auto">
+          <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Plantillas de animación
+          </div>
+          {ANIMATION_PRESETS.map((p) => {
+            // Preview rápido: cuántos tracks generaría este preset sobre
+            // el master actual. Da una pista al productor de qué tan
+            // "denso" es el preset antes de aplicarlo.
+            const tracksCount = p.build(definition).tracks.length;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => {
+                  onApplyPreset(p);
+                  setOpen(false);
+                }}
+                className="w-full text-left px-2 py-1.5 rounded hover:bg-muted text-xs flex items-start gap-2 group"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium">{p.label}</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      · {tracksCount} {tracksCount === 1 ? "track" : "tracks"}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-muted-foreground/80 leading-tight mt-0.5">
+                    {p.description}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+          <div className="h-px bg-border/50 my-1" />
+          <button
+            type="button"
+            onClick={() => {
+              onCreateEmpty();
+              setOpen(false);
+            }}
+            className="w-full text-left px-2 py-1.5 rounded hover:bg-muted text-xs flex items-center gap-1.5 text-muted-foreground"
+          >
+            <Plus className="h-3 w-3" /> Empezar vacío
+          </button>
+        </div>
+      )}
     </div>
   );
 }
