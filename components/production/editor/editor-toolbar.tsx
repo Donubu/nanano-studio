@@ -127,7 +127,11 @@ export function EditorToolbar({
       className={cn(
         "flex bg-card/40",
         isVertical
-          ? "flex-col items-center gap-1.5 px-1.5 py-2 border-r border-border/50 h-full shrink-0"
+          // overflow-y-auto: cuando el alto del inner-row se reduce (por
+          // ej. al expandirse el TimelinePanel), los íconos del toolbar
+          // que no entren scrollean dentro de la propia columna en vez
+          // de bleed visualmente hacia abajo y caer sobre el timeline.
+          ? "flex-col items-center gap-1.5 px-1.5 py-2 border-r border-border/50 h-full shrink-0 overflow-y-auto"
           : "flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-2 border-b border-border/50",
       )}
     >

@@ -528,11 +528,11 @@ export function TimelinePanel(props: TimelinePanelProps) {
   const playheadPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
-    // min-h-[280px]: el panel necesita altura propia para que ni el ruler ni
-    // el último track queden pegados al borde inferior del viewport. Sin
-    // esto, con pocas tracks el panel colapsa a ~80px y el scroll
-    // horizontal/vertical interno se traga la última fila visible.
-    <div className="border-t border-border/50 bg-card/40 flex flex-col min-h-[280px]">
+    // min-h-[200px]: respiro suficiente para header + ruler + 2-3 tracks
+    // sin colapsar el panel. Bajado desde 280px porque competía con el
+    // alto que necesita la toolbar vertical del canvas (que ahora tiene
+    // overflow-y-auto, así que en el peor caso scrollea adentro).
+    <div className="border-t border-border/50 bg-card/40 flex flex-col min-h-[200px]">
       {header}
 
       {/* Editor del keyframe seleccionado. Aparece como franja docked debajo
