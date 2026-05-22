@@ -12,14 +12,18 @@ import {
   Check,
   CheckSquare,
   ChevronDown,
+  Code,
   Database,
   Download,
   FileSpreadsheet,
   Link2,
   Loader2,
   Package,
+  LayoutGrid,
+  LayoutList,
   Pencil,
   Plus,
+  RefreshCw,
   Rocket,
   Sparkles,
   Trash2,
@@ -33,6 +37,7 @@ import {
   downloadBlob,
   sanitizeFilename,
 } from "@/lib/production/export";
+import { buildHtml5Zip } from "@/lib/production/html5-export";
 import { AdaptationRenderer } from "@/components/production/render/adaptation-renderer";
 import {
   extractVariables,
@@ -48,7 +53,10 @@ import {
 } from "@/lib/production/types";
 import { TemplateEditor } from "@/components/production/editor/template-editor";
 import { ProjectBrandKitModal } from "@/components/production/editor/project-brand-kit-modal";
-import { deriveManualLayoutFromMaster } from "@/lib/production/overrides";
+import {
+  buildInitialFromAdaptFit,
+  deriveManualLayoutFromMaster,
+} from "@/lib/production/overrides";
 import {
   BrandKit,
   BrandKitContent,
@@ -242,6 +250,26 @@ export default function ProducirPage() {
   const [adaptationsLoaded, setAdaptationsLoaded] = useState(false);
   const [adaptationCount, setAdaptationCount] = useState(0);
   const [adaptationsLoading, setAdaptationsLoading] = useState(false);
+
+  // Job de generación de thumbnail del master. Se setea desde handleSaveMaster
+  // cuando el productor edita la orientación principal y se persiste OK; un
+  // useEffect monta el render off-screen, captura con html-to-image, sube a
+  // GCS y hace PUT del thumbnail_url al master template. Best-effort: si
+  // falla, el editor sigue funcionando — el listado simplemente cae al
+  // render inline mientras tanto.
+  const [thumbnailJob, setThumbnailJob] = useState<{
+    def: TemplateDefinition;
+    nativeW: number;
+    nativeH: number;
+    targetTemplateId: number;
+  } | null>(null);
+  const thumbnailCaptureRef = useRef<HTMLDivElement | null>(null);
+  // Auto-gen del thumbnail solo en el primer save de un master sin imagen.
+  // Una vez disparado en la sesión, los siguientes saves no regeneran; el
+  // productor decide cuándo refrescarlo via el botón "Rehacer preview".
+  // Evita que cada save dispare un upload nuevo (con autosave debounced de
+  // 1s eso significaba un blob a S3 cada vez que dejabas de tipear).
+  const autoThumbnailFiredRef = useRef(false);
   // Filtros del módulo adaptaciones. Set vacío significa "todos" — más
   // simple para el toggle (un click agrega/quita un id del set). Search
   // matchea contra custom_name + preset_name. onlyCustomized filtra a
@@ -251,6 +279,14 @@ export default function ProducirPage() {
   const [filterChannels, setFilterChannels] = useState<Set<string>>(new Set());
   const [filterSearch, setFilterSearch] = useState("");
   const [filterOnlyCustomized, setFilterOnlyCustomized] = useState(false);
+  // Modo de vista del grid de adaptaciones:
+  //   "clean"    → grid plano, solo preview + dims, sin filtros / canales /
+  //                badges / botones (default — el productor se concentra
+  //                en las piezas).
+  //   "detailed" → vista completa con filtros, agrupado por canal, source
+  //                badges, fit mode, descarga individual, etc.
+  // No persiste; cada entrada a la página arranca en clean.
+  const [adaptationsView, setAdaptationsView] = useState<"clean" | "detailed">("clean");
   const [loading, setLoading] = useState(true);
   const [showPicker, setShowPicker] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -675,20 +711,55 @@ export default function ProducirPage() {
   const adaptInitialDefinition: TemplateDefinition | null = useMemo(() => {
     if (!editingAdaptation) return null;
     const overrides = parseOverrides(editingAdaptation.overrides_json);
-    if (overrides.manual_layout) return overrides.manual_layout;
+    if (overrides.manual_layout) {
+      // El canvas del editor se dimensiona desde definition.size (no del prop
+      // baseWidth/baseHeight). Si el manual_layout persistido tiene size
+      // distinto al adapt actual, reflowamos al size correcto antes de
+      // montar el editor — sino el canvas abre con dimensiones del master
+      // (1080×1080) cuando el adapt es 300×250 y el productor ve solo una
+      // tajada.
+      const ml = overrides.manual_layout;
+      if (
+        ml.size?.w === editingAdaptation.width &&
+        ml.size?.h === editingAdaptation.height
+      ) {
+        return ml;
+      }
+      return reflowForPreview(ml, {
+        w: editingAdaptation.width,
+        h: editingAdaptation.height,
+      });
+    }
     const source = resolveSource(editingAdaptation, orientations);
-    const sourceDef = source?.definition ?? definition;
-    return deriveManualLayoutFromMaster(
+    // CRÍTICO: el fallback NUNCA debe ser `definition` (la activa del editor
+    // del master) — eso causaba el bug "edito 300x250 desde el master
+    // horizontal y heredo del horizontal en vez del cuadrado más cercano".
+    const sourceDef =
+      resolveEffectiveDefinition(source, orientations) ??
+      principalOrientation?.definition ??
+      null;
+    if (!sourceDef) return null;
+    // El initial del editor debe coincidir visualmente con el preview de la
+    // card. La card usa scale-uniform cuando fit_mode != "responsive" y
+    // reflow cuando es "responsive". Si usábamos reflow para todos los
+    // casos, los smart-constraints inferidos (center/left/right) no
+    // reescalaban sizes y producían layers gigantes en downscale grandes
+    // (cuadrado 1080 → 300×250).
+    return buildInitialFromAdaptFit(
       sourceDef,
       editingAdaptation.width,
       editingAdaptation.height,
+      editingAdaptation.fit_mode,
     );
-  }, [editingAdaptation, orientations, definition]);
+  }, [editingAdaptation, orientations, principalOrientation]);
 
   // Save de la orientación activa: PUT al endpoint del template
   // correspondiente. Si la orientación es la base, el server propaga el
   // cambio a las orientaciones linked (definition reflowed). Después
   // refrescamos las orientaciones para que el strip muestre lo nuevo.
+  // Cuando lo guardado es la principal (master del design), encolamos
+  // también la regeneración del thumbnail_url para que el listado de
+  // /produccion/proyecto/[id] muestre el preview cacheado.
   const handleSaveMaster = useCallback(
     async (def: TemplateDefinition) => {
       if (!activeOrientationId) return;
@@ -709,16 +780,134 @@ export default function ProducirPage() {
       // Refrescamos todas las orientaciones — la base puede haber empujado
       // cambios a las linked. Si solo se editó una orientación linked /
       // distinta, solo esa cambia.
+      // IMPORTANTE: no leemos `orientations` del closure ni lo agregamos a
+      // las deps de este useCallback. Si lo hiciéramos, el handler cambia
+      // identidad tras cada setOrientations, lo que invalida flushSave del
+      // editor y dispara el autosave infinitamente (dirtyRef no se limpia
+      // post-save). Resolvemos la principal solo con nextList; si el refresh
+      // falla, saltamos thumbnail (graceful skip; el siguiente save lo cubre).
       const refresh = await fetch(
         `/api/production/templates/${templateId}/orientations`
       );
       if (refresh.ok) {
-        const list: Orientation[] = await refresh.json();
-        setOrientations(list);
+        const nextList: Orientation[] = await refresh.json();
+        setOrientations(nextList);
+        if (nextList.length > 0) {
+          const principal = nextList.reduce(
+            (min, o) => (o.id < min.id ? o : min),
+            nextList[0],
+          );
+          // Auto-gen thumbnail solo si:
+          //   1. Se editó la principal (no una variant).
+          //   2. La principal todavía no tiene thumbnail (primera vez).
+          //   3. No lo disparamos antes en esta sesión (anti-doble-fire por
+          //      autosave entre saves).
+          if (
+            activeOrientationId === principal.id &&
+            !principal.thumbnail_url &&
+            !autoThumbnailFiredRef.current
+          ) {
+            autoThumbnailFiredRef.current = true;
+            setThumbnailJob({
+              def,
+              nativeW: principal.base_width,
+              nativeH: principal.base_height,
+              targetTemplateId: principal.id,
+            });
+          }
+        }
       }
     },
     [activeOrientationId, templateId]
   );
+
+  // Manual: el productor pide explícitamente regenerar el thumbnail. Útil
+  // tras cambios visuales importantes (colores, layout, copy hero) que el
+  // listado debería reflejar. Captura el master ACTUAL (no `definition` del
+  // editor — esa es la orientación activa, podría ser una variant).
+  const handleRegenerateThumbnail = useCallback(() => {
+    if (!principalOrientation || !principalOrientation.definition) return;
+    setThumbnailJob({
+      def: principalOrientation.definition,
+      nativeW: principalOrientation.base_width,
+      nativeH: principalOrientation.base_height,
+      targetTemplateId: principalOrientation.id,
+    });
+  }, [principalOrientation]);
+
+  // Captura el master recién guardado, lo sube a GCS y PUT thumbnail_url al
+  // template principal. Trigger: thumbnailJob !== null. Best-effort —
+  // failures se loggean pero no rompen el editor. El render off-screen vive
+  // al final del JSX gated por thumbnailJob.
+  useEffect(() => {
+    if (!thumbnailJob) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        // requestAnimationFrame + setTimeout asegura que React montó el
+        // OrientationMiniPreview off-screen Y el browser hizo paint antes
+        // de capturar.
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => setTimeout(resolve, 80)),
+        );
+        if (cancelled) return;
+        const node = thumbnailCaptureRef.current;
+        if (!node) return;
+        const blob = await captureNodeToJpeg(node);
+        const dataUri: string = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error("FileReader falló"));
+          reader.readAsDataURL(blob);
+        });
+        if (cancelled) return;
+        const up = await fetch("/api/production/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageData: dataUri, clientId: clientId ?? undefined }),
+        });
+        if (!up.ok) {
+          console.warn("Thumbnail upload falló:", up.status);
+          return;
+        }
+        const upBody = await up.json();
+        if (typeof upBody.url !== "string") return;
+        if (cancelled) return;
+        const put = await fetch(
+          `/api/production/templates/${thumbnailJob.targetTemplateId}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ thumbnail_url: upBody.url }),
+          },
+        );
+        if (!put.ok) {
+          console.warn("PUT thumbnail_url falló:", put.status);
+          return;
+        }
+        // Optimistic local update: la principal ahora tiene thumbnail. Sin
+        // esto, el siguiente save vuelve a ver thumbnail_url=null y, si el
+        // autoThumbnailFiredRef se resetara (no lo hace, pero defensive),
+        // re-dispararía. Además mantiene consistencia con la DB sin un
+        // refetch extra.
+        const newUrl = upBody.url;
+        const targetId = thumbnailJob.targetTemplateId;
+        setOrientations((cur) =>
+          cur.map((o) =>
+            o.id === targetId ? { ...o, thumbnail_url: newUrl } : o,
+          ),
+        );
+      } catch (e) {
+        console.warn("Thumbnail generation falló:", (e as Error).message);
+      } finally {
+        if (!cancelled) setThumbnailJob(null);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [thumbnailJob, clientId]);
 
   // Save de una adaptación: PATCH overrides_json con manual_layout.
   const handleSaveAdapt = useCallback(
@@ -750,6 +939,12 @@ export default function ProducirPage() {
   // Entra al modo edición de una adaptación: snapshot del overrides_json
   // actual (para poder cancelar después) + scroll del editor al viewport
   // para que el productor entienda que la pieza está abierta arriba.
+  // También alineamos activeOrientationId al source resuelto. Eso garantiza
+  // que `definition` (el state local derivado de activeOrientation) calce
+  // con la herencia esperada — si el TemplateEditor llegase a leer fallback
+  // de `definition`, ya quedó apuntando al source correcto. Sin esto, editar
+  // 300x250 desde el master horizontal heredaba del horizontal en vez del
+  // cuadrado más cercano.
   const handleEditAdaptation = useCallback((adaptationId: number) => {
     const adapt = adaptations.find((a) => a.id === adaptationId);
     editSnapshotRef.current = adapt?.overrides_json ?? null;
@@ -808,14 +1003,14 @@ export default function ProducirPage() {
   // (esto se invoca desde la card al hacer hover, fuera del flujo de editar).
   // La adaptación vuelve a derivar automáticamente del master cercano.
   const handleResetAdaptationOverride = useCallback(
-    async (adaptationId: number) => {
-      if (designId == null) return;
+    async (adaptationId: number): Promise<boolean> => {
+      if (designId == null) return false;
       if (
         !confirm(
           "¿Quitar el ajuste manual? La pieza volverá a derivar automáticamente del master.",
         )
       ) {
-        return;
+        return false;
       }
       const res = await fetch(
         `/api/production/designs/${designId}/adaptations/${adaptationId}`,
@@ -828,13 +1023,14 @@ export default function ProducirPage() {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         alert(body?.error || `No se pudo quitar el ajuste (HTTP ${res.status})`);
-        return;
+        return false;
       }
       setAdaptations((cur) =>
         cur.map((a) =>
           a.id === adaptationId ? { ...a, overrides_json: null } : a,
         ),
       );
+      return true;
     },
     [designId],
   );
@@ -908,6 +1104,10 @@ export default function ProducirPage() {
   const captureResolverRef = useRef<((blob: Blob | null) => void) | null>(null);
   const renderRef = useRef<HTMLDivElement | null>(null);
   const [singleDownloadingId, setSingleDownloadingId] = useState<number | null>(null);
+  // ID de la adaptación cuyo ZIP HTML5 se está generando. Independiente del
+  // JPG porque el flujo NO usa el captureResolverRef (no necesita renderear
+  // off-screen — la serialización a HTML es pura).
+  const [singleDownloadingHtml5Id, setSingleDownloadingHtml5Id] = useState<number | null>(null);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
 
   // --- Dataset / variables ---
@@ -987,6 +1187,34 @@ export default function ProducirPage() {
       }
     } finally {
       setSingleDownloadingId(null);
+    }
+  };
+
+  const handleDownloadSingleHtml5 = async (a: Adaptation) => {
+    if (!template) return;
+    // Resolución del master igual que en el flow JPG: source_template_id si
+    // está pinned, sino auto-pick por aspect. AdaptationRenderer internamente
+    // decide entre manual_layout (override) y reflow desde el master.
+    const src = resolveSource(a, orientations);
+    const srcDef = src?.definition ?? definition;
+    setSingleDownloadingHtml5Id(a.id);
+    try {
+      const blob = await buildHtml5Zip({
+        adaptation: a,
+        master: srcDef,
+        brandKit: brandKitContent,
+        dataRow: previewRow,
+        title: `${template.name} ${a.width}x${a.height}`,
+      });
+      const suffix = previewRow ? `_fila${(selectedRowIdx ?? 0) + 1}` : "";
+      const name = filenameFor(a)
+        .replace(/\.jpg$/, `${suffix}_html5.zip`);
+      downloadBlob(blob, name);
+    } catch (err) {
+      console.error("HTML5 export failed:", err);
+      alert("No se pudo generar el ZIP HTML5. Revisa la consola para más detalles.");
+    } finally {
+      setSingleDownloadingHtml5Id(null);
     }
   };
 
@@ -1385,6 +1613,40 @@ export default function ProducirPage() {
     );
   }
 
+  // VariantsStrip compartido entre el editor del master y el del adapt. Los
+  // previews superiores muestran SIEMPRE la misma barra (master numerado +
+  // variantes), independiente de qué se esté editando. Antes el editor del
+  // adapt no recibía topAccessory y caía al PreviewThumbnails default
+  // (1:1/9:16/16:9), lo que confundía al productor.
+  //
+  // onSwitch en modo edit-adapt: salir del modo edit y cambiar de orientación
+  // en un solo click. El snapshot se descarta porque el productor está
+  // navegando explícitamente fuera de la adaptación.
+  const variantsStripNode = (
+    <VariantsStrip
+      orientations={orientations}
+      activeOrientationId={editingId != null ? null : activeOrientationId}
+      brandKit={brandKitContent}
+      orientationNumberById={orientationNumberById}
+      onSwitch={(id) => {
+        if (editingId != null) {
+          editSnapshotRef.current = null;
+          setEditingId(null);
+        }
+        setActiveOrientationId(id);
+      }}
+      onAdd={() => setShowAddVariant(true)}
+      onDelete={handleDeleteOrientation}
+      onDifferentiate={handleDifferentiate}
+      onRelinkToMaster={(id) => {
+        if (principalOrientation) {
+          handleRelinkTo(id, principalOrientation.id);
+        }
+      }}
+      onAiAdapt={(id) => setAiAdaptTargetId(id)}
+    />
+  );
+
   return (
     <div className="flex flex-col min-h-screen bg-background">
       <header className="border-b border-border/50 bg-card/40 shrink-0">
@@ -1412,6 +1674,22 @@ export default function ProducirPage() {
           </div>
 
           <div className="flex-1" />
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleRegenerateThumbnail}
+            disabled={!principalOrientation?.definition || thumbnailJob !== null}
+            className="gap-1.5 text-muted-foreground"
+            title="Regenera la imagen miniatura que muestra el listado del proyecto. Útil tras cambios visuales importantes."
+          >
+            {thumbnailJob ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            {thumbnailJob ? "Generando..." : "Rehacer preview"}
+          </Button>
 
           <Button
             variant="ghost"
@@ -1456,54 +1734,7 @@ export default function ProducirPage() {
             />
           )}
 
-          {/* Huincha de edición independiente. Visible cuando se está
-              editando una adaptación (no el master). Color sólido alto
-              contraste para que el productor entienda que no está editando
-              el master. Dos acciones:
-                - "Cancelar": revierte los cambios auto-guardados al estado
-                  original (snapshot al entrar) y vuelve al master.
-                - "Listo": deja los cambios persistidos y vuelve al master.
-              El auto-save del editor sigue corriendo en background. */}
-          {editingId != null && editingAdaptation && (
-            <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-500 text-white border-b border-amber-600">
-              <AlertTriangle className="h-4 w-4 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium leading-tight">
-                  Editando pieza independiente ·{" "}
-                  {editingAdaptation.custom_name ||
-                    editingAdaptation.preset_name ||
-                    `${editingAdaptation.width}×${editingAdaptation.height}`}{" "}
-                  ({editingAdaptation.width}×{editingAdaptation.height})
-                </p>
-                <p className="text-[11px] text-amber-50/90 leading-tight mt-0.5">
-                  Los cambios solo se reflejan en esta pieza, no en el master
-                  ni en otras adaptaciones.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={handleCancelEditAdaptation}
-                className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded bg-white/15 hover:bg-white/25 border border-white/30 transition-colors font-medium"
-                title="Descarta los cambios y vuelve al master"
-              >
-                <X className="h-3.5 w-3.5" />
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingId(null);
-                  editSnapshotRef.current = null;
-                }}
-                className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded bg-white text-amber-700 hover:bg-amber-50 transition-colors font-medium"
-                title="Guarda los cambios y vuelve al master"
-              >
-                <Check className="h-3.5 w-3.5" />
-                Listo
-              </button>
-            </div>
-          )}
-          <div className="h-[70vh] min-h-[480px] relative">
+          <div className="h-[90vh] min-h-[640px] relative">
             {editingId == null && activeOrientation ? (
               <TemplateEditor
                 // key incluye la orientación: al cambiar de orientación se
@@ -1513,6 +1744,7 @@ export default function ProducirPage() {
                 initial={definition}
                 baseWidth={activeOrientation.base_width}
                 baseHeight={activeOrientation.base_height}
+                templateId={activeOrientation.id}
                 onSave={handleSaveMaster}
                 brandKit={brandKitContent}
                 clientId={clientId}
@@ -1523,24 +1755,7 @@ export default function ProducirPage() {
                     fetchBrandKits(clientId, template.production_project_id);
                 }}
                 dataRow={previewRow}
-                topAccessory={
-                  <VariantsStrip
-                    orientations={orientations}
-                    activeOrientationId={activeOrientationId}
-                    brandKit={brandKitContent}
-                    orientationNumberById={orientationNumberById}
-                    onSwitch={(id) => setActiveOrientationId(id)}
-                    onAdd={() => setShowAddVariant(true)}
-                    onDelete={handleDeleteOrientation}
-                    onDifferentiate={handleDifferentiate}
-                    onRelinkToMaster={(id) => {
-                      if (principalOrientation) {
-                        handleRelinkTo(id, principalOrientation.id);
-                      }
-                    }}
-                    onAiAdapt={(id) => setAiAdaptTargetId(id)}
-                  />
-                }
+                topAccessory={variantsStripNode}
                 rightAccessory={
                   <DatasetPanel
                     detectedVariables={detectedVariables}
@@ -1558,7 +1773,13 @@ export default function ProducirPage() {
               />
             ) : editingAdaptation && adaptInitialDefinition ? (
               <TemplateEditor
-                key={`adapt-${editingId}`}
+                /* key incluye source.id para forzar remount cuando cambia
+                   la orientación de herencia. Sin esto, si orientations se
+                   refrescaba mid-edit (ej. autosave del master propagó el
+                   reflow a las linked variants), el state interno del editor
+                   del adapt quedaba con el initial viejo — useTemplateEditor
+                   solo lee initial en el primer mount. */
+                key={`adapt-${editingId}-src-${resolveSource(editingAdaptation, orientations)?.id ?? "none"}`}
                 initial={adaptInitialDefinition}
                 baseWidth={editingAdaptation.width}
                 baseHeight={editingAdaptation.height}
@@ -1571,6 +1792,80 @@ export default function ProducirPage() {
                   if (clientId)
                     fetchBrandKits(clientId, template.production_project_id);
                 }}
+                topAccessory={variantsStripNode}
+                /* Huincha de edición independiente. Vive dentro del editor,
+                   debajo de los PreviewThumbnails de la adaptación. Antes
+                   estaba arriba de toda la sección — al moverla acá queda
+                   pegada al canvas que está modificando, sin desconectar
+                   el aviso del trabajo. Tres acciones:
+                     - Re-linkear: SOLO visible si la adapt YA es independiente
+                       (tiene manual_layout). Quita el ajuste manual y la
+                       devuelve a derivar del master. Cierra el modo edit
+                       porque ya no hay manual_layout que editar.
+                     - Cancelar: revierte los auto-saves al snapshot original.
+                     - Listo: deja los cambios y vuelve al master. */
+                topBanner={
+                  <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-500 text-black border-b border-amber-600">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium leading-tight">
+                        Editando pieza independiente ·{" "}
+                        {editingAdaptation.custom_name ||
+                          editingAdaptation.preset_name ||
+                          `${editingAdaptation.width}×${editingAdaptation.height}`}{" "}
+                        ({editingAdaptation.width}×{editingAdaptation.height})
+                      </p>
+                      <p className="text-[11px] text-black/70 leading-tight mt-0.5">
+                        Los cambios solo se reflejan en esta pieza, no en el
+                        master ni en otras adaptaciones.
+                      </p>
+                    </div>
+                    {parseOverrides(editingAdaptation.overrides_json).manual_layout && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          // handleResetAdaptationOverride retorna true solo
+                          // si el productor confirmó Y el PATCH al server
+                          // tuvo éxito. En esos casos cerramos el modo edit
+                          // — ya no hay manual_layout que editar.
+                          const ok = await handleResetAdaptationOverride(
+                            editingAdaptation.id,
+                          );
+                          if (ok) {
+                            editSnapshotRef.current = null;
+                            setEditingId(null);
+                          }
+                        }}
+                        className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded bg-white/15 hover:bg-white/25 border border-white/30 transition-colors font-medium"
+                        title="Quita el ajuste manual y vuelve a depender del master (los cambios se pierden)"
+                      >
+                        <Link2 className="h-3.5 w-3.5" />
+                        Volver a linkear
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleCancelEditAdaptation}
+                      className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded bg-white/15 hover:bg-white/25 border border-white/30 transition-colors font-medium"
+                      title="Descarta los cambios y vuelve al master"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingId(null);
+                        editSnapshotRef.current = null;
+                      }}
+                      className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded bg-white text-amber-700 hover:bg-amber-50 transition-colors font-medium"
+                      title="Guarda los cambios y vuelve al master"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      Listo
+                    </button>
+                  </div>
+                }
               />
             ) : null}
 
@@ -1606,6 +1901,38 @@ export default function ProducirPage() {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              {adaptationsLoaded && adaptations.length > 0 && (
+                <div className="flex items-center rounded-md border border-border/50 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setAdaptationsView("clean")}
+                    className={cn(
+                      "px-2 py-1 text-xs transition-colors flex items-center gap-1",
+                      adaptationsView === "clean"
+                        ? "bg-foreground/10 text-foreground"
+                        : "text-muted-foreground hover:bg-muted",
+                    )}
+                    title="Vista limpia: solo preview + dimensiones, sin filtros ni canales"
+                  >
+                    <LayoutGrid className="h-3.5 w-3.5" />
+                    Limpio
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAdaptationsView("detailed")}
+                    className={cn(
+                      "px-2 py-1 text-xs transition-colors flex items-center gap-1 border-l border-border/50",
+                      adaptationsView === "detailed"
+                        ? "bg-foreground/10 text-foreground"
+                        : "text-muted-foreground hover:bg-muted",
+                    )}
+                    title="Vista detallada: filtros, canales, source badges, controles por pieza"
+                  >
+                    <LayoutList className="h-3.5 w-3.5" />
+                    Detallado
+                  </button>
+                </div>
+              )}
               {adaptationsLoaded && adaptations.length > 0 && (
                 <Button
                   size="sm"
@@ -1669,6 +1996,53 @@ export default function ProducirPage() {
               </Button>
             </div>
           ) : (
+            adaptationsView === "clean" ? (
+              <>
+                {/* Vista limpia: layout masonry-flex. Cada preview adopta su
+                    aspect ratio natural, todas las piezas comparten la misma
+                    altura (TARGET_H) y se empaquetan en filas como una pared
+                    de imágenes. Sin filtros, sin canales, sin badges, sin
+                    cajas — solo preview + medida abajo. Click → edita.
+                    Orden propio (cuadrados → verticales → horizontales) que
+                    agrupa visualmente formas parecidas. Dentro del bucket
+                    horizontal, sort secundario por aspect ratio (w/h) asc:
+                    los más cuadraditos primero, los banners ultra chatos
+                    (10:1, 8:1) al final — esos quedan capeados por el
+                    TARGET_W del preview y tienen menos alto efectivo, así
+                    que mandarlos al final evita huecos verticales en las
+                    filas anteriores. */}
+                <div className="flex flex-wrap items-start gap-3">
+                  {groupAdaptationsByChannel(adaptations)
+                    .flatMap((g) => g.items)
+                    .sort((a, b) => {
+                      const order = { square: 0, vertical: 1, horizontal: 2 };
+                      const oa = adaptationOrientation(a);
+                      const ob = adaptationOrientation(b);
+                      if (order[oa] !== order[ob]) return order[oa] - order[ob];
+                      // Secundario: aspect ratio ascendente. En horizontales
+                      // los más chatos quedan al final; en verticales/cuadrados
+                      // no cambia la altura visual pero da un gradiente
+                      // estético de ancho dentro del bucket.
+                      return (a.width / a.height) - (b.width / b.height);
+                    })
+                    .map((a) => {
+                      const sourceOrientation = resolveSource(a, orientations);
+                      const sourceDef = sourceOrientation?.definition ?? definition;
+                      return (
+                        <MinimalAdaptationCard
+                          key={a.id}
+                          adaptation={a}
+                          definition={sourceDef}
+                          brandKit={brandKitContent}
+                          dataRow={previewRow}
+                          isEditing={editingId === a.id}
+                          onEdit={() => handleEditAdaptation(a.id)}
+                        />
+                      );
+                    })}
+                </div>
+              </>
+            ) : (
             <>
               {/* Filtros: visible solo cuando hay 2+ adaptaciones porque con
                   1 sola no sirve filtrar. Compacto, 2 filas: source chips +
@@ -1809,6 +2183,8 @@ export default function ProducirPage() {
                 </div>
               ) : (
             <div className="space-y-5">
+              {/* Vista detallada: agrupado por canal, con todos los controles
+                  por pieza (source, fit, descarga, delete, manual indicator). */}
               {groupAdaptationsByChannel(filteredAdaptations).map((group) => (
                 <div key={group.channel}>
                   <h4 className="text-xs uppercase tracking-wider text-muted-foreground mb-2">
@@ -1852,7 +2228,9 @@ export default function ProducirPage() {
                           onSourceChange={(srcId) => handleSourceChange(a.id, srcId)}
                           onResetOverride={() => handleResetAdaptationOverride(a.id)}
                           onDownload={() => handleDownloadSingle(a)}
+                          onDownloadHtml5={() => handleDownloadSingleHtml5(a)}
                           downloading={singleDownloadingId === a.id}
+                          downloadingHtml5={singleDownloadingHtml5Id === a.id}
                           batchInProgress={!!batchProgress}
                           deleting={deletingId === a.id}
                         />
@@ -1864,6 +2242,7 @@ export default function ProducirPage() {
             </div>
               )}
             </>
+            )
           )}
         </section>
       </main>
@@ -1938,6 +2317,47 @@ export default function ProducirPage() {
         />
       )}
 
+      {/* Render off-screen del master para generar el thumbnail persistido
+          (lo dispara handleSaveMaster vía thumbnailJob). Capamos el lado
+          largo a 800px porque el listado lo muestra a <200px alto, y un
+          JPG de 2520×1080 es desperdicio de ancho de banda y bytes en S3. */}
+      {thumbnailJob && (() => {
+        const THUMB_MAX_SIDE = 800;
+        const scale = Math.min(
+          1,
+          THUMB_MAX_SIDE / Math.max(thumbnailJob.nativeW, thumbnailJob.nativeH),
+        );
+        return (
+          <div
+            aria-hidden
+            style={{
+              position: "fixed",
+              left: "-99999px",
+              top: 0,
+              pointerEvents: "none",
+              opacity: 0,
+            }}
+          >
+            <div
+              ref={thumbnailCaptureRef}
+              style={{
+                width: thumbnailJob.nativeW * scale,
+                height: thumbnailJob.nativeH * scale,
+                overflow: "hidden",
+              }}
+            >
+              <OrientationMiniPreview
+                definition={thumbnailJob.def}
+                brandKit={brandKitContent}
+                nativeW={thumbnailJob.nativeW}
+                nativeH={thumbnailJob.nativeH}
+                scale={scale}
+              />
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Container oculto para renderizar adaptaciones a tamaño nativo durante
           export. Vive fuera del flujo visual; las dimensiones reales del
           renderer escapan por overflow. */}
@@ -1989,7 +2409,9 @@ function AdaptationCard({
   onSourceChange,
   onResetOverride,
   onDownload,
+  onDownloadHtml5,
   downloading,
+  downloadingHtml5,
   batchInProgress,
   deleting,
 }: {
@@ -2020,7 +2442,9 @@ function AdaptationCard({
   // adaptación tiene manual_layout.
   onResetOverride: () => void;
   onDownload: () => void;
+  onDownloadHtml5: () => void;
   downloading: boolean;
+  downloadingHtml5: boolean;
   batchInProgress: boolean;
   deleting: boolean;
 }) {
@@ -2101,32 +2525,12 @@ function AdaptationCard({
           </button>
         </div>
       )}
-      {/* Title bar: nombre + dims arriba, siempre visible. */}
+      {/* Title bar: nombre + dims arriba, siempre visible. El badge del
+          source (#N) ahora cuelga en la esquina inf-der del preview, no
+          en el título — consistente con el VariantsStrip y deja el título
+          más limpio. */}
       <div className="px-3 pt-2 pb-1.5 flex items-center justify-between gap-2 min-w-0">
         <div className={cn("flex items-center gap-1.5 min-w-0 flex-1", hasManualOverride && "pl-20")}>
-          {/* Badge del source: identifica de qué orientación del master
-              hereda esta adaptación. Mismo número/color que el badge en
-              el VariantsStrip. */}
-          {sourceBadgeNumber != null && (() => {
-            const badge = orientationBadgeColors(sourceBadgeNumber);
-            const sourceName = sourceOrientation
-              ? sourceOrientation.id === principalId
-                ? "master"
-                : sourceOrientation.name
-              : "—";
-            return (
-              <div
-                className={cn(
-                  "shrink-0 h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-sm ring-2",
-                  badge.bg,
-                  badge.ring,
-                )}
-                title={`Hereda del ${sourceName} #${sourceBadgeNumber}`}
-              >
-                {sourceBadgeNumber}
-              </div>
-            );
-          })()}
           <p className="text-sm font-medium truncate min-w-0">{label}</p>
         </div>
         <span className="text-[10px] text-muted-foreground shrink-0 font-mono">
@@ -2156,7 +2560,7 @@ function AdaptationCard({
         <button
           type="button"
           onClick={onEdit}
-          className="flex items-end justify-center w-full h-full hover:bg-background/60 transition-colors"
+          className="flex items-center justify-center w-full h-full hover:bg-background/60 transition-colors"
           style={{ minHeight: TARGET_H + 16 }}
           title={isEditing ? "Esta adaptación está siendo editada" : "Click para editar esta adaptación"}
         >
@@ -2169,6 +2573,33 @@ function AdaptationCard({
             dataRow={dataRow}
           />
         </button>
+
+        {/* Badge del source en la esquina inf-der del banner area. Mismo
+            número/color que el badge del VariantsStrip — el productor ve
+            de un vistazo de qué orientación hereda esta adaptación.
+            z-20 para quedar sobre el preview pero debajo del overlay hover
+            (z-30+ implícito por orden de pintado). pointer-events-none para
+            que no robe clicks del botón "click para editar". */}
+        {sourceBadgeNumber != null && (() => {
+          const badge = orientationBadgeColors(sourceBadgeNumber);
+          const sourceName = sourceOrientation
+            ? sourceOrientation.id === principalId
+              ? "master"
+              : sourceOrientation.name
+            : "—";
+          return (
+            <div
+              className={cn(
+                "absolute bottom-1.5 right-1.5 z-20 h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-md ring-2 pointer-events-none",
+                badge.bg,
+                badge.ring,
+              )}
+              title={`Hereda del ${sourceName} #${sourceBadgeNumber}`}
+            >
+              {sourceBadgeNumber}
+            </div>
+          );
+        })()}
 
         {/* Overlay sobre el banner: badges + canal + controles. Por defecto
             oculto, fade-in al hover. Cuando la card está siendo editada los
@@ -2343,9 +2774,9 @@ function AdaptationCard({
             <button
               type="button"
               onClick={onDownload}
-              disabled={downloading || batchInProgress}
+              disabled={downloading || downloadingHtml5 || batchInProgress}
               className="text-[11px] px-2 py-1 rounded border border-border/50 hover:bg-muted hover:border-foreground/30 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Descargar como JPG"
+              title="Descargar como JPG estático"
             >
               {downloading ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -2354,8 +2785,90 @@ function AdaptationCard({
               )}
               JPG
             </button>
+            <button
+              type="button"
+              onClick={onDownloadHtml5}
+              disabled={downloading || downloadingHtml5 || batchInProgress}
+              className="text-[11px] px-2 py-1 rounded border border-border/50 hover:bg-muted hover:border-foreground/30 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Descargar como ZIP HTML5 (compatible GDN/IAB) con animaciones WAAPI"
+            >
+              {downloadingHtml5 ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Code className="h-3 w-3" />
+              )}
+              HTML5
+            </button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Versión "limpia" de AdaptationCard: literalmente preview + medida y nada
+// más. Sin caja, sin borde, sin título, sin canal, sin source picker. El
+// productor ve el mosaico de piezas como si fuera una galería de imágenes.
+// Click sobre el preview → entra a editar esa pieza. Cuando está siendo
+// editada se marca con un ring sutil sobre el propio preview.
+function MinimalAdaptationCard({
+  adaptation,
+  definition,
+  brandKit,
+  dataRow,
+  isEditing,
+  onEdit,
+}: {
+  adaptation: Adaptation;
+  definition: TemplateDefinition;
+  brandKit: BrandKitContent;
+  dataRow?: DataRow | null;
+  isEditing: boolean;
+  onEdit: () => void;
+}) {
+  // Altura compartida → todas las piezas se alinean horizontalmente como
+  // una pared. El ancho es libre (targetW alto) para que cada preview tome
+  // su aspect ratio natural; banners ultra anchos (10:1+) quedan capeados
+  // pero no se descuadran. La medida va debajo del preview en typo mono.
+  const TARGET_H = 140;
+  const TARGET_W = 480;
+  // "Independiente": la adaptación tiene manual_layout en overrides_json,
+  // ya no recibe cambios del master automáticamente. Mismo significado que
+  // el badge emerald de la vista detallada — acá lo mostramos en chico
+  // junto a la medida para no romper la limpieza visual.
+  const hasManualOverride = !!parseOverrides(adaptation.overrides_json).manual_layout;
+  return (
+    <div className="flex flex-col items-center gap-1 shrink-0">
+      <button
+        type="button"
+        onClick={onEdit}
+        title={isEditing ? "Esta adaptación está siendo editada" : "Click para editar esta adaptación"}
+        className={cn(
+          "transition-shadow rounded-sm",
+          isEditing && "ring-2 ring-primary/60 ring-offset-2 ring-offset-background",
+        )}
+      >
+        <AdaptationPreview
+          adaptation={adaptation}
+          definition={definition}
+          brandKit={brandKit}
+          targetH={TARGET_H}
+          targetW={TARGET_W}
+          dataRow={dataRow}
+        />
+      </button>
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] text-muted-foreground font-mono">
+          {adaptation.width}×{adaptation.height}
+        </span>
+        {hasManualOverride && (
+          <span
+            className="inline-flex items-center p-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+            title="Independiente — esta pieza no recibe cambios del master automáticamente"
+          >
+            <Unlink className="h-2.5 w-2.5" />
+          </span>
+        )}
       </div>
     </div>
   );
@@ -3175,23 +3688,43 @@ function VariantsStrip({
                   : `${displayName} #${num ?? "?"} · ${m.base_width}×${m.base_height} — click para abrir`
               }
             >
-              <div
-                className={cn(
-                  "relative rounded shadow-sm transition-colors overflow-hidden",
-                  isCurrent
-                    ? "border-2 border-primary ring-2 ring-primary/30"
-                    : "border border-border/50 hover:border-foreground/40"
-                )}
-                style={{ width: cssW, height: cssH }}
-              >
+              {/* Wrapper relativo del tamaño exacto del preview: el badge
+                  va acá como sibling para poder colgar afuera (-bottom/-right
+                  con overflow visible). Antes vivía dentro del recuadro
+                  bordeado, que tiene overflow-hidden para clipear el mini
+                  render, y eso impedía empujarlo más allá de la esquina. */}
+              <div className="relative" style={{ width: cssW, height: cssH }}>
+                <div
+                  className={cn(
+                    "relative rounded shadow-sm transition-colors overflow-hidden w-full h-full",
+                    isCurrent
+                      ? "border-2 border-primary ring-2 ring-primary/30"
+                      : "border border-border/50 hover:border-foreground/40"
+                  )}
+                >
+                  {/* Mini-preview real: renderizamos la definition de la
+                      orientación a escala. El productor ve el contenido
+                      actual (logo / textos / shapes) en miniatura, no un
+                      placeholder. */}
+                  {m.definition ? (
+                    <OrientationMiniPreview
+                      definition={m.definition}
+                      brandKit={brandKit}
+                      nativeW={m.base_width}
+                      nativeH={m.base_height}
+                      scale={thumbScale}
+                    />
+                  ) : null}
+                </div>
                 {/* Badge numérico: identifica visualmente la orientación.
                     El mismo número (y color) aparece en cada AdaptationCard
-                    cuyo source es esta orientación. Posicionado overlay en
-                    la esquina sup-izq para no tapar contenido del centro. */}
+                    cuyo source es esta orientación. Cuelga fuera del
+                    recuadro en la esquina inf-der como un notification
+                    badge — no tapa el contenido del mini-preview. */}
                 {badge && num != null && (
                   <div
                     className={cn(
-                      "absolute top-1 left-1 z-10 h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-md ring-2",
+                      "absolute -bottom-1.5 -right-1.5 z-10 h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-md ring-2",
                       badge.bg,
                       badge.ring,
                     )}
@@ -3200,19 +3733,6 @@ function VariantsStrip({
                     {num}
                   </div>
                 )}
-                {/* Mini-preview real: renderizamos la definition de la
-                    orientación a escala. El productor ve el contenido
-                    actual (logo / textos / shapes) en miniatura, no un
-                    placeholder. */}
-                {m.definition ? (
-                  <OrientationMiniPreview
-                    definition={m.definition}
-                    brandKit={brandKit}
-                    nativeW={m.base_width}
-                    nativeH={m.base_height}
-                    scale={thumbScale}
-                  />
-                ) : null}
               </div>
               <span
                 className={cn(
@@ -4275,4 +4795,31 @@ function resolveSource(
     if (pinned) return pinned;
   }
   return pickClosestOrientation(orientations, adaptation.width, adaptation.height);
+}
+
+// Devuelve la TemplateDefinition efectiva de una orientación. Si la
+// orientación tiene definition propia (cached), gana. Si no, camina la
+// cadena linked_to_template_id hasta encontrar una definition válida y la
+// reflowea al tamaño nativo de esta orientación, replicando lo que el
+// server hace al persistir orientaciones linked. Sirve para que el editor
+// de adaptaciones nunca caiga al fallback "definition de la activeOrientation
+// del editor", que era la causa del bug "edito 300x250 desde el master
+// horizontal y heredo del horizontal en vez del cuadrado más cercano".
+// Guard de ciclos: cada paso valida que el parent no apunte a la misma
+// orientación (auto-link) y limita la profundidad por seguridad.
+function resolveEffectiveDefinition(
+  o: Orientation | null,
+  orientations: Orientation[],
+  depth: number = 0,
+): TemplateDefinition | null {
+  if (!o || depth > 8) return null;
+  if (o.definition) return o.definition;
+  if (o.linked_to_template_id == null || o.linked_to_template_id === o.id) {
+    return null;
+  }
+  const parent = orientations.find((x) => x.id === o.linked_to_template_id);
+  if (!parent) return null;
+  const parentDef = resolveEffectiveDefinition(parent, orientations, depth + 1);
+  if (!parentDef) return null;
+  return reflowForPreview(parentDef, { w: o.base_width, h: o.base_height });
 }

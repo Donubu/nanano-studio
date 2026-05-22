@@ -3,6 +3,8 @@
 // Slice 2A scope: free-position layers only. Auto-layout (stack), constraints,
 // brand tokens, and variables come in later slices.
 
+import type { AnimationConfig } from "./animation";
+
 export type LayerType = "frame" | "text" | "image" | "shape" | "icon";
 
 export type ConstraintH = "left" | "right" | "center" | "stretch" | "scale";
@@ -38,6 +40,16 @@ export interface BaseLayer {
   locked?: boolean;
   constraints?: Constraints;
   shadow?: DropShadow;
+  // Transformaciones extra que el motor de animación puede animar. Default
+  // 1 / 0 — no afectan el render cuando no se setean ni hay tracks que los
+  // animen. Se aplican como CSS transform/filter por encima de position +
+  // size: scale es uniforme; scaleX/Y por eje (si están set, ganan sobre
+  // scale); blur es radio en px (filter: blur(Npx)). Ver lib/production/
+  // animation.ts para el detalle del modelo de tracks.
+  scale?: number;
+  scaleX?: number;
+  scaleY?: number;
+  blur?: number;
 }
 
 export type StackAlign = "start" | "center" | "end" | "stretch";
@@ -81,6 +93,11 @@ export interface FrameLayer extends BaseLayer {
   layout: LayoutConfig;
   cornerRadius?: number;
   children: TemplateLayer[];
+  // Solo aplica al ROOT frame (TemplateDefinition). Nested frames no se
+  // animan a este nivel — sus children sí pueden tener tracks. TS no
+  // distingue root vs nested; la validación es responsabilidad del editor
+  // y del zod schema (template-schema.ts).
+  animation?: AnimationConfig;
 }
 
 // Auto-fit text size: el renderer mide la caja del texto y elige el font-size

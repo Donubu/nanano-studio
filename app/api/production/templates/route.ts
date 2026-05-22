@@ -20,6 +20,10 @@ interface TemplateRow extends RowDataPacket {
   description: string | null;
   base_width: number;
   base_height: number;
+  // definition_json viene como LONGTEXT (string serializado). El listado lo
+  // necesita para renderizar el preview del master en cada card sin tener
+  // que hacer N+1 fetches al endpoint del template individual.
+  definition_json: string | null;
   thumbnail_url: string | null;
   brand_kit_id: number | null;
   status: "draft" | "published" | "archived";
@@ -70,7 +74,8 @@ export async function GET(request: NextRequest) {
     const [rows] = await pool.execute<TemplateRow[]>(
       `SELECT pt.id, pt.production_project_id, pt.design_id, pt.linked_to_template_id,
               pt.name, pt.description, pt.base_width, pt.base_height,
-              pt.thumbnail_url, pt.brand_kit_id, pt.status, pt.version,
+              pt.definition_json, pt.thumbnail_url, pt.brand_kit_id,
+              pt.status, pt.version,
               pt.created_by, pt.created_at, pt.updated_at,
               d.name AS design_name,
               -- adaptation_count: las adaptaciones cuelgan del design (no de un
@@ -101,7 +106,26 @@ export async function GET(request: NextRequest) {
       [projectId]
     );
 
-    return NextResponse.json(rows);
+    // Parse definition_json server-side (same convention used by the
+     // single-template GET): the list card needs the parsed master to render
+     // an inline preview, parsing per card on the client would be O(n) JSON.parse.
+    const enriched = rows.map((r) => {
+      let definition: unknown = null;
+      if (r.definition_json) {
+        try {
+          definition = JSON.parse(r.definition_json);
+        } catch {
+          definition = null;
+        }
+      }
+      // We drop the raw string to keep payload smaller and avoid sending two
+      // representations of the same data.
+      const { definition_json: _omit, ...rest } = r;
+      void _omit;
+      return { ...rest, definition };
+    });
+
+    return NextResponse.json(enriched);
   } catch (error) {
     console.error("Error listando production_templates:", error);
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });

@@ -239,7 +239,7 @@ export default function ProductionProjectPage() {
           <p className="text-sm text-muted-foreground -mt-4">{project.description}</p>
         )}
 
-        <ProductionTemplatesList productionProjectId={Number(projectId)} />
+        <ProductionTemplatesList productionProjectId={Number(projectId)} clientId={project.client_id} />
       </main>
     </div>
   );
