@@ -45,7 +45,7 @@ services:
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
       - NODE_ENV=production
-      - NODE_OPTIONS=--max-old-space-size=3072
+      - NODE_OPTIONS=--max-old-space-size=2048
       - PORT=3000
       - APP_MODE=web
       - REDIS_URL=redis://redis:6379
@@ -74,7 +74,7 @@ services:
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
       - NODE_ENV=production
-      - NODE_OPTIONS=--max-old-space-size=3072
+      - NODE_OPTIONS=--max-old-space-size=2048
       - PORT=3000
       - APP_MODE=web
       - REDIS_URL=redis://redis:6379
@@ -157,30 +157,6 @@ services:
       - REDIS_URL=redis://redis:6379
       - WORKER_CONCURRENCY=3
       - WORKER_NAME=worker_3
-    stop_grace_period: 120s
-    deploy:
-      resources:
-        limits:
-          memory: 4096m
-    depends_on:
-      - redis
-
-  worker_4:
-    build: .
-    container_name: puerto_worker_4
-    restart: unless-stopped
-    env_file:
-      - .env.production
-    volumes:
-      - ./credentials.json:/run/secrets/credentials.json:ro
-    environment:
-      - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
-      - NODE_ENV=production
-      - NODE_OPTIONS=--max-old-space-size=3072
-      - APP_MODE=worker
-      - REDIS_URL=redis://redis:6379
-      - WORKER_CONCURRENCY=3
-      - WORKER_NAME=worker_4
     stop_grace_period: 120s
     deploy:
       resources:
