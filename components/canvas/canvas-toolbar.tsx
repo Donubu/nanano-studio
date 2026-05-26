@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ImageIcon, Video, MessageSquare, Play, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2 } from "lucide-react";
+import { ImageIcon, Video, MessageSquare, Play, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CanvasNodeType, ExecutionProgress } from "./lib/canvas-types";
 
@@ -18,6 +18,7 @@ interface CanvasToolbarProps {
   nodeCount: number;
   canvasMode: "pan" | "select";
   onCanvasModeChange: (mode: "pan" | "select") => void;
+  onOpenHistory: () => void;
 }
 
 const nodeOptions: { type: CanvasNodeType; icon: typeof MessageSquare; label: string; isAI: boolean }[] = [
@@ -52,6 +53,7 @@ export function CanvasToolbar({
   nodeCount,
   canvasMode,
   onCanvasModeChange,
+  onOpenHistory,
 }: CanvasToolbarProps) {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
 
@@ -225,6 +227,19 @@ export function CanvasToolbar({
         >
           {isAllLocked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
           {isAllLocked ? "Bloqueado" : "Bloquear"}
+        </Button>
+
+        <div className="w-px h-5 bg-border" />
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onOpenHistory}
+          className="gap-1.5 text-xs"
+          title="Papelera y snapshots del canvas"
+        >
+          <History className="h-3.5 w-3.5" />
+          Historial
         </Button>
       </div>
     </div>

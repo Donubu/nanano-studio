@@ -40,7 +40,8 @@ import { NodeConfigPanel } from "./panels/node-config-panel";
 import { PracticanteConfigPanel } from "./panels/practicante-config-panel";
 import { ScriptConfigPanel } from "./panels/script-config-panel";
 import { DryRunPanel } from "./panels/dryrun-panel";
-import { useAutoSave } from "./hooks/use-auto-save";
+import { HistoryPanel } from "./panels/history-panel";
+import { useAutoSave, type WipeProtectionInfo } from "./hooks/use-auto-save";
 import { useCanvasExecution } from "./hooks/use-canvas-execution";
 import { useUndoRedo } from "./hooks/use-undo-redo";
 import { isValidConnection, wouldCreateCycle, getCompatibleTargetTypes, getCompatibleSourceTypes } from "./lib/connection-rules";
@@ -110,6 +111,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [canvasMode, setCanvasMode] = useState<"pan" | "select">("pan");
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // Undo/redo
   const { takeSnapshot, undo, redo } = useUndoRedo(nodes, edges, setNodes, setEdges);
@@ -249,9 +251,33 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     }
   }, [realConversationId, projectId, generationConfig, onConversationCreated]);
 
+  // Carga el canvas desde el servidor — reutilizable tras un restore.
+  // Bloquea el autosave (isLoaded=false) durante el GET para no sobreescribir.
+  const loadCanvas = useCallback(async (convId: number, resetSelection = true) => {
+    setIsLoaded(false);
+    if (resetSelection) setSelectedNodeId(null);
+    try {
+      const res = await fetch(`/api/conversations/${convId}/canvas`);
+      if (res.ok) {
+        const data = await res.json();
+        const loadedNodes: Node[] = data.nodes || [];
+        const loadedEdges: Edge[] = data.edges || [];
+        setNodes(loadedNodes);
+        setEdges(loadedEdges);
+        const maxId = loadedNodes.reduce((max: number, n: Node) => {
+          const num = parseInt(n.id.replace("node-", ""), 10);
+          return isNaN(num) ? max : Math.max(max, num);
+        }, 0);
+        nodeIdCounter.current = maxId;
+      }
+    } catch (err) {
+      console.error("Error loading canvas:", err);
+    } finally {
+      setIsLoaded(true);
+    }
+  }, [setNodes, setEdges]);
+
   // Load canvas state when the active conversation changes.
-  // Reset local state first (with isLoaded=false so autosave doesn't write
-  // stale nodes/edges into the newly-selected conversation).
   useEffect(() => {
     setIsLoaded(false);
     setNodes([]);
@@ -263,29 +289,8 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       setIsLoaded(true);
       return;
     }
-    async function loadCanvas() {
-      try {
-        const res = await fetch(`/api/conversations/${realConversationId}/canvas`);
-        if (res.ok) {
-          const data = await res.json();
-          const loadedNodes: Node[] = data.nodes || [];
-          const loadedEdges: Edge[] = data.edges || [];
-          setNodes(loadedNodes);
-          setEdges(loadedEdges);
-          const maxId = loadedNodes.reduce((max: number, n: Node) => {
-            const num = parseInt(n.id.replace("node-", ""), 10);
-            return isNaN(num) ? max : Math.max(max, num);
-          }, 0);
-          nodeIdCounter.current = maxId;
-        }
-      } catch (err) {
-        console.error("Error loading canvas:", err);
-      } finally {
-        setIsLoaded(true);
-      }
-    }
-    loadCanvas();
-  }, [realConversationId, setNodes, setEdges]);
+    loadCanvas(realConversationId);
+  }, [realConversationId, setNodes, setEdges, loadCanvas]);
 
   // Restore viewport from localStorage
   const defaultViewport = useMemo(() => {
@@ -298,12 +303,36 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   }, [realConversationId]);
 
   // Auto-save
-  const { saveStatus } = useAutoSave({
+  const handleWipeBlocked = useCallback(
+    (info: WipeProtectionInfo, retry: () => Promise<void>) => {
+      const msg =
+        `Este cambio eliminaría ${info.wouldSoftDelete} nodos del canvas ` +
+        `(quedaban ${info.currentAlive}, llegarían ${info.incomingCount}). ` +
+        `Los nodos eliminados quedarán en la papelera y podrás restaurarlos. ` +
+        `¿Confirmas el cambio?`;
+      if (typeof window !== "undefined" && window.confirm(msg)) {
+        retry();
+      } else if (realConversationId) {
+        // Usuario canceló — recargamos para deshacer el cambio local.
+        loadCanvas(realConversationId, false);
+      }
+    },
+    [loadCanvas, realConversationId]
+  );
+
+  const { saveStatus, invalidateLastSaved } = useAutoSave({
     conversationId: realConversationId,
     nodes,
     edges,
     enabled: isLoaded,
+    onWipeBlocked: handleWipeBlocked,
   });
+
+  const handleCanvasRestored = useCallback(() => {
+    if (!realConversationId) return;
+    invalidateLastSaved();
+    loadCanvas(realConversationId, false);
+  }, [realConversationId, loadCanvas, invalidateLastSaved]);
 
   // Collaboration
   const { data: session } = useSession();
@@ -787,6 +816,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
               nodeCount={nodes.length}
               canvasMode={canvasMode}
               onCanvasModeChange={setCanvasMode}
+              onOpenHistory={() => setHistoryOpen(true)}
             />
           </Panel>
           <Panel position="top-right">
@@ -882,6 +912,16 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
             updateNodeData(selectedNode.id, { dryRunResponse: undefined } as Record<string, unknown>);
           }} />
         )}
+
+      {/* History / Trash panel */}
+      {realConversationId > 0 && (
+        <HistoryPanel
+          conversationId={realConversationId}
+          isOpen={historyOpen}
+          onClose={() => setHistoryOpen(false)}
+          onCanvasRestored={handleCanvasRestored}
+        />
+      )}
     </div>
     </CanvasProvider>
   );
