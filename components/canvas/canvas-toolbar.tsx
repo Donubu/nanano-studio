@@ -14,7 +14,7 @@ interface CanvasToolbarProps {
   isExecuting: boolean;
   isAllLocked: boolean;
   executionProgress: ExecutionProgress | null;
-  saveStatus: "idle" | "saving" | "saved" | "error";
+  saveStatus?: "idle" | "saving" | "saved" | "error";
   nodeCount: number;
   canvasMode: "pan" | "select";
   onCanvasModeChange: (mode: "pan" | "select") => void;
@@ -49,7 +49,7 @@ export function CanvasToolbar({
   isExecuting,
   isAllLocked,
   executionProgress,
-  saveStatus,
+  saveStatus = "idle",
   nodeCount,
   canvasMode,
   onCanvasModeChange,

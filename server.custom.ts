@@ -39,6 +39,11 @@ app.prepare().then(() => {
 
   const canvasNsp = io.of("/canvas");
 
+  // Expone el namespace globalmente para que las API routes (mismo proceso)
+  // puedan emitir eventos a los clientes tras persistir cambios.
+  // Ver lib/canvas-socket.ts para el acceso tipado.
+  (globalThis as unknown as { __canvasIo?: typeof canvasNsp }).__canvasIo = canvasNsp;
+
   // Auth: use handshake auth data passed from client (session info)
   canvasNsp.use((socket, next) => {
     const auth = socket.handshake.auth || {};
