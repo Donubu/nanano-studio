@@ -41,7 +41,7 @@ import { PracticanteConfigPanel } from "./panels/practicante-config-panel";
 import { ScriptConfigPanel } from "./panels/script-config-panel";
 import { DryRunPanel } from "./panels/dryrun-panel";
 import { HistoryPanel } from "./panels/history-panel";
-import { useAutoSave, type WipeProtectionInfo } from "./hooks/use-auto-save";
+import { useCanvasPersist } from "./hooks/use-canvas-persist";
 import { useCanvasExecution } from "./hooks/use-canvas-execution";
 import { useUndoRedo } from "./hooks/use-undo-redo";
 import { isValidConnection, wouldCreateCycle, getCompatibleTargetTypes, getCompatibleSourceTypes } from "./lib/connection-rules";
@@ -123,6 +123,17 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     emitNodeRemove: (nodeId: string) => void;
   }>({ emitNodeMove: () => {}, emitEdgeRemove: () => {}, emitNodeRemove: () => {} });
 
+  // Persist ref para invocar desde callbacks declarados antes del hook.
+  const persistRef = useRef<{
+    moveNode: (id: string, x: number, y: number) => void;
+    deleteNodes: (ids: string[]) => Promise<void>;
+    deleteEdges: (ids: string[]) => Promise<void>;
+  }>({
+    moveNode: () => {},
+    deleteNodes: async () => {},
+    deleteEdges: async () => {},
+  });
+
   // Wrap onNodesChange/onEdgesChange to take snapshots
   const onNodesChange = useCallback((changes: Parameters<typeof onNodesChangeBase>[0]) => {
     // Cascade-remove: when a script or scene is deleted, also remove all its
@@ -169,19 +180,36 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       if (change.type === "remove") allRemovedIds.add(change.id);
     }
     if (allRemovedIds.size > 0) {
+      // Calcula los edges huérfanos antes del filter para persistir el delete.
+      const orphanEdgeIds: string[] = [];
+      for (const e of edges) {
+        if (allRemovedIds.has(e.source) || allRemovedIds.has(e.target)) {
+          orphanEdgeIds.push(e.id);
+        }
+      }
       setEdges((eds) =>
         eds.filter((e) => !allRemovedIds.has(e.source) && !allRemovedIds.has(e.target))
       );
+      // El DELETE de nodos en el backend ya soft-deletea los edges incidentes,
+      // pero igual mandamos el delete explícito por si los edges existieran sin
+      // un nodo removido (caso teórico de desincronización).
+      if (orphanEdgeIds.length > 0) persistRef.current.deleteEdges(orphanEdgeIds);
     }
 
-    // Broadcast changes to other users
+    // Persistencia granular + broadcast a otros usuarios.
+    const removedNodeIds: string[] = [];
     for (const change of expandedChanges) {
       if (change.type === "position" && change.position && !change.dragging) {
+        persistRef.current.moveNode(change.id, change.position.x, change.position.y);
         collabRef.current.emitNodeMove(change.id, change.position.x, change.position.y);
       }
       if (change.type === "remove") {
+        removedNodeIds.push(change.id);
         collabRef.current.emitNodeRemove(change.id);
       }
+    }
+    if (removedNodeIds.length > 0) {
+      persistRef.current.deleteNodes(removedNodeIds);
     }
   }, [onNodesChangeBase, takeSnapshot, nodes, edges, setEdges]);
 
@@ -190,11 +218,15 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     if (hasMeaningful) takeSnapshot();
     onEdgesChangeBase(changes);
 
-    // Broadcast edge removals
+    const removedEdgeIds: string[] = [];
     for (const change of changes) {
       if (change.type === "remove") {
+        removedEdgeIds.push(change.id);
         collabRef.current.emitEdgeRemove?.(change.id);
       }
+    }
+    if (removedEdgeIds.length > 0) {
+      persistRef.current.deleteEdges(removedEdgeIds);
     }
   }, [onEdgesChangeBase, takeSnapshot]);
   const [realConversationId, setRealConversationId] = useState(conversationId);
@@ -302,37 +334,15 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     return { x: 0, y: 0, zoom: 1 };
   }, [realConversationId]);
 
-  // Auto-save
-  const handleWipeBlocked = useCallback(
-    (info: WipeProtectionInfo, retry: () => Promise<void>) => {
-      const msg =
-        `Este cambio eliminaría ${info.wouldSoftDelete} nodos del canvas ` +
-        `(quedaban ${info.currentAlive}, llegarían ${info.incomingCount}). ` +
-        `Los nodos eliminados quedarán en la papelera y podrás restaurarlos. ` +
-        `¿Confirmas el cambio?`;
-      if (typeof window !== "undefined" && window.confirm(msg)) {
-        retry();
-      } else if (realConversationId) {
-        // Usuario canceló — recargamos para deshacer el cambio local.
-        loadCanvas(realConversationId, false);
-      }
-    },
-    [loadCanvas, realConversationId]
-  );
-
-  const { saveStatus, invalidateLastSaved } = useAutoSave({
-    conversationId: realConversationId,
-    nodes,
-    edges,
-    enabled: isLoaded,
-    onWipeBlocked: handleWipeBlocked,
-  });
+  // Persistencia granular: cada acción del usuario (add, move-stop, update,
+  // delete, connect, disconnect) se persiste inmediatamente vía endpoints
+  // granulares. Reemplaza el auto-save bulk que era destructivo en multi-user.
+  const persist = useCanvasPersist(realConversationId || null);
 
   const handleCanvasRestored = useCallback(() => {
     if (!realConversationId) return;
-    invalidateLastSaved();
     loadCanvas(realConversationId, false);
-  }, [realConversationId, loadCanvas, invalidateLastSaved]);
+  }, [realConversationId, loadCanvas]);
 
   // Collaboration
   const { data: session } = useSession();
@@ -356,6 +366,11 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   collabRef.current.emitEdgeRemove = collab.emitEdgeRemove;
   collabRef.current.emitNodeRemove = collab.emitNodeRemove;
   if (emitNodeDataRef) emitNodeDataRef.current = collab.emitNodeData;
+
+  // Idem para persist (mismo patrón: callbacks declarados arriba usan el ref).
+  persistRef.current.moveNode = persist.moveNode;
+  persistRef.current.deleteNodes = persist.deleteNodes;
+  persistRef.current.deleteEdges = persist.deleteEdges;
 
   // Handle remote canvas changes from other users
   useEffect(() => {
@@ -423,9 +438,10 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       const id = `e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       const newEdge: Edge = { ...connection, id, animated: false };
       setEdges((eds) => addEdge(newEdge, eds));
+      persist.createEdge(newEdge);
       collab.emitEdgeAdd(newEdge as unknown as Record<string, unknown>);
     },
-    [nodes, edges, setEdges, takeSnapshot, collab.emitEdgeAdd]
+    [nodes, edges, setEdges, takeSnapshot, persist, collab.emitEdgeAdd]
   );
 
   const closeDropMenu = useCallback(() => {
@@ -475,33 +491,42 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       };
       setNodes((nds) => [...nds, newNode]);
       setSelectedNodeId(id);
+      persist.saveNode(newNode);
       collab.emitNodeAdd(newNode as unknown as Record<string, unknown>);
     },
-    [setNodes, ensureConversation, takeSnapshot, screenToFlowPosition, collab.emitNodeAdd]
+    [setNodes, ensureConversation, takeSnapshot, screenToFlowPosition, persist, collab.emitNodeAdd]
   );
 
-  // Update node data
+  // Update node data — persiste el nodo completo tras el merge (UPSERT
+  // en backend). Se invoca el persist con el state ya merged para evitar
+  // leer del nodes en clausura (que puede estar desactualizado).
   const updateNodeData = useCallback(
     (nodeId: string, updates: Partial<CanvasNodeData>) => {
-      setNodes((nds) =>
-        nds.map((n) =>
-          n.id === nodeId ? { ...n, data: { ...n.data, ...updates } } : n
-        )
-      );
+      let mergedNode: Node | null = null;
+      setNodes((nds) => {
+        return nds.map((n) => {
+          if (n.id !== nodeId) return n;
+          const next = { ...n, data: { ...n.data, ...updates } };
+          mergedNode = next;
+          return next;
+        });
+      });
+      if (mergedNode) persist.saveNode(mergedNode);
       collab.emitNodeData(nodeId, updates as Record<string, unknown>);
     },
-    [setNodes]
+    [setNodes, persist]
   );
 
-  // Delete node
+  // Delete node — el backend soft-deletea también los edges incidentes.
   const deleteNode = useCallback(
     (nodeId: string) => {
       setNodes((nds) => nds.filter((n) => n.id !== nodeId));
       setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
       if (selectedNodeId === nodeId) setSelectedNodeId(null);
+      persist.deleteNodes([nodeId]);
       collab.emitNodeRemove(nodeId);
     },
-    [setNodes, setEdges, selectedNodeId]
+    [setNodes, setEdges, selectedNodeId, persist]
   );
 
   // --- Drop-on-empty: create node from dangling connection ---
@@ -584,18 +609,21 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
         data,
       };
       setNodes((nds) => [...nds, newNode]);
+      persist.saveNode(newNode);
 
       const { start } = pending;
-      const edge = start.handleType === "source"
-        ? { source: start.nodeId, sourceHandle: start.handleId, target: newId, targetHandle: option.handle }
-        : { source: newId, sourceHandle: option.handle, target: start.nodeId, targetHandle: start.handleId };
+      const edgeId = `e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const edge: Edge = start.handleType === "source"
+        ? { id: edgeId, source: start.nodeId, sourceHandle: start.handleId, target: newId, targetHandle: option.handle }
+        : { id: edgeId, source: newId, sourceHandle: option.handle, target: start.nodeId, targetHandle: start.handleId };
 
       setEdges((eds) => addEdge(edge, eds));
+      persist.createEdge(edge);
       setSelectedNodeId(newId);
       pendingDropRef.current = null;
       setDropMenu(null);
     },
-    [ensureConversation, setNodes, setEdges, takeSnapshot]
+    [ensureConversation, setNodes, setEdges, takeSnapshot, persist]
   );
 
   // (closeDropMenu moved earlier, before onPaneClick)
@@ -661,11 +689,13 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
         return { ...n, position: pos };
       })
     );
-    // Broadcast new positions so collaborators see the reorder live
+    // Persiste y broadcastea cada nueva posición.
+    // persist.moveNode batchea internamente todos los movimientos en un PATCH.
     for (const [nodeId, pos] of positions.entries()) {
+      persist.moveNode(nodeId, pos.x, pos.y);
       collab.emitNodeMove(nodeId, pos.x, pos.y);
     }
-  }, [nodes, edges, setNodes, takeSnapshot, collab.emitNodeMove]);
+  }, [nodes, edges, setNodes, takeSnapshot, persist, collab.emitNodeMove]);
 
   // Lock/unlock all nodes
   const isAllLocked = nodes.length > 0 && nodes.every((n) => (n.data as Record<string, unknown>).locked === true);
@@ -673,10 +703,17 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   const lockAllNodes = useCallback(() => {
     const newLocked = !isAllLocked;
     takeSnapshot();
-    setNodes((nds) =>
-      nds.map((n) => ({ ...n, data: { ...n.data, locked: newLocked } }))
-    );
-  }, [isAllLocked, setNodes, takeSnapshot]);
+    let updatedNodes: Node[] = [];
+    setNodes((nds) => {
+      updatedNodes = nds.map((n) => ({ ...n, data: { ...n.data, locked: newLocked } }));
+      return updatedNodes;
+    });
+    // Persiste por nodo. Con muchos nodos esto dispara N fetches; en una
+    // iteración futura conviene un endpoint batch para esto.
+    for (const node of updatedNodes) {
+      persist.saveNode(node);
+    }
+  }, [isAllLocked, setNodes, takeSnapshot, persist]);
 
   // Save viewport to localStorage on move
   const onMoveEnd = useCallback(
@@ -812,7 +849,6 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
               isExecuting={isExecuting}
               isAllLocked={isAllLocked}
               executionProgress={executionProgress}
-              saveStatus={saveStatus}
               nodeCount={nodes.length}
               canvasMode={canvasMode}
               onCanvasModeChange={setCanvasMode}
