@@ -64,6 +64,28 @@ function updateNodeStatus(
   );
 }
 
+/**
+ * Strip the fields that live in dedicated `canvas_nodes` columns, leaving only
+ * what belongs in the JSON `config` column. Mirrors the destructuring the
+ * POST /canvas/nodes endpoint does, so a PATCH that writes `config` round-trips
+ * identically through the canvas GET reconstruction.
+ */
+function toNodeConfig(data: Record<string, unknown>): Record<string, unknown> {
+  const {
+    label: _label,
+    status: _status,
+    outputMessageId: _outputMessageId,
+    outputUrl: _outputUrl,
+    outputText: _outputText,
+    errorMessage: _errorMessage,
+    type: _type,
+    ...config
+  } = data;
+  void _label; void _status; void _outputMessageId; void _outputUrl;
+  void _outputText; void _errorMessage; void _type;
+  return config;
+}
+
 /** Max history entries per node to prevent unbounded growth */
 const MAX_HISTORY = 20;
 
@@ -555,7 +577,8 @@ export function useCanvasExecution({
             (liveNode as Node).data = { ...liveNode.data, ...completedData };
           }
 
-          // Persist core fields via PATCH; the rest of the config is saved by autosave.
+          // Persist columnas dedicadas + `config` (incluye outputHistory, files,
+          // tokensUsed, etc.) para que todo sobreviva al refresh.
           await fetch(`/api/conversations/${conversationId}/canvas/nodes`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
@@ -566,6 +589,7 @@ export function useCanvasExecution({
                 output_text: practicanteData.dryRun ? null : cleanResponse,
                 output_url: null,
                 output_message_id: null,
+                config: toNodeConfig({ ...practicanteData, ...completedData }),
               },
             }),
           }).catch(() => {});
@@ -677,7 +701,9 @@ export function useCanvasExecution({
           (liveNode as Node).data = { ...liveNode.data, ...completedData };
         }
 
-        // Persist to DB
+        // Persist to DB. Además de las columnas dedicadas, guardamos `config`
+        // (data del nodo sin los campos base) para que el outputHistory
+        // sobreviva al refresh — antes dependía de un autosave que ya no existe.
         await fetch(`/api/conversations/${conversationId}/canvas/nodes`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -688,6 +714,7 @@ export function useCanvasExecution({
               output_url: result.outputUrl || null,
               output_text: result.outputText || null,
               output_message_id: result.messageId || null,
+              config: toNodeConfig({ ...nodeData, ...completedData }),
             },
           }),
         });

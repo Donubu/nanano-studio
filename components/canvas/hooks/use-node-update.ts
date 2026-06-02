@@ -1,24 +1,23 @@
 "use client";
 
 import { useCallback } from "react";
-import { useReactFlow } from "@xyflow/react";
 import { useCanvasContext } from "../canvas-context";
 
 /**
- * Hook that updates node data locally AND broadcasts the change to collaborators.
- * Use this instead of raw useReactFlow().updateNodeData() in node components.
+ * Hook que usan los componentes de nodo para editar su data. A diferencia del
+ * `useReactFlow().updateNodeData` crudo, esto: (1) actualiza el state local,
+ * (2) PERSISTE el cambio en la BD (UPSERT con debounce) y (3) lo emite a los
+ * colaboradores. Sin la persistencia, las ediciones hechas dentro del nodo
+ * (imágenes de galería, texto estático, notas, labels) se perdían al refrescar.
  */
 export function useNodeUpdate() {
-  const { updateNodeData: rfUpdate } = useReactFlow();
-  const { emitNodeData } = useCanvasContext();
+  const { persistNodeData } = useCanvasContext();
 
   const updateNodeData = useCallback(
     (nodeId: string, data: Record<string, unknown>) => {
-      rfUpdate(nodeId, data);
-      console.log("[useNodeUpdate] emitting node:data", nodeId, Object.keys(data));
-      emitNodeData(nodeId, data);
+      persistNodeData(nodeId, data);
     },
-    [rfUpdate, emitNodeData]
+    [persistNodeData]
   );
 
   return { updateNodeData };
