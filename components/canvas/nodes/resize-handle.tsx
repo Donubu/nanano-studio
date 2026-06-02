@@ -87,3 +87,35 @@ export function nodeSizeClass(
     ? "w-full h-full overflow-hidden flex flex-col"
     : defaults;
 }
+
+/**
+ * Parse an aspect-ratio string like "16:9" / "9:16" / "1:1" into numeric
+ * width/height parts. Falls back to 1:1 for anything unparseable.
+ */
+export function parseAspectRatio(ratio: string | undefined): { w: number; h: number } {
+  if (ratio) {
+    const m = ratio.match(/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/);
+    if (m) {
+      const w = parseFloat(m[1]);
+      const h = parseFloat(m[2]);
+      if (w > 0 && h > 0) return { w, h };
+    }
+  }
+  return { w: 1, h: 1 };
+}
+
+/**
+ * Standard display box (in px) for an unresized media node, derived from its
+ * aspect ratio. The longest side equals `maxSide`, so image/video nodes keep a
+ * consistent, modest size regardless of the generated media's native
+ * resolution — instead of ballooning to fit a tall portrait. Once the user
+ * resizes the node manually, this is ignored (the node fills its wrapper).
+ */
+export function standardMediaSize(
+  ratio: string | undefined,
+  maxSide = 220
+): { width: number; height: number } {
+  const { w, h } = parseAspectRatio(ratio);
+  if (w >= h) return { width: maxSide, height: Math.round((maxSide * h) / w) };
+  return { width: Math.round((maxSide * w) / h), height: maxSide };
+}

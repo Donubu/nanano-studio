@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ImageIcon, Video, MessageSquare, Play, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CanvasNodeType, ExecutionProgress } from "./lib/canvas-types";
@@ -15,6 +15,7 @@ interface CanvasToolbarProps {
   isAllLocked: boolean;
   executionProgress: ExecutionProgress | null;
   saveStatus?: "idle" | "saving" | "saved" | "error";
+  lastSavedAt?: number | null;
   nodeCount: number;
   canvasMode: "pan" | "select";
   onCanvasModeChange: (mode: "pan" | "select") => void;
@@ -50,6 +51,7 @@ export function CanvasToolbar({
   isAllLocked,
   executionProgress,
   saveStatus = "idle",
+  lastSavedAt = null,
   nodeCount,
   canvasMode,
   onCanvasModeChange,
@@ -160,31 +162,7 @@ export function CanvasToolbar({
         <div className="w-px h-5 bg-border" />
 
         {/* Save status */}
-        <div className="flex items-center gap-1 text-xs text-muted-foreground px-1">
-          {saveStatus === "saving" && (
-            <>
-              <Loader2 className="h-3 w-3 animate-spin" />
-              <span>Guardando...</span>
-            </>
-          )}
-          {saveStatus === "saved" && (
-            <>
-              <Check className="h-3 w-3 text-green-500" />
-              <span>Guardado</span>
-            </>
-          )}
-          {saveStatus === "error" && (
-            <>
-              <AlertCircle className="h-3 w-3 text-red-500" />
-              <span>Error</span>
-            </>
-          )}
-          {saveStatus === "idle" && (
-            <>
-              <Save className="h-3 w-3" />
-            </>
-          )}
-        </div>
+        <SaveStatus saveStatus={saveStatus} lastSavedAt={lastSavedAt} />
       </div>
 
       {/* Secondary toolbar: Reorder, Clone, Lock All */}
@@ -242,6 +220,58 @@ export function CanvasToolbar({
           Historial
         </Button>
       </div>
+    </div>
+  );
+}
+
+function formatRelativeSaved(ts: number): string {
+  const secs = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (secs < 5) return "recién";
+  if (secs < 60) return `hace ${secs}s`;
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `hace ${mins} min`;
+  const hours = Math.round(mins / 60);
+  return `hace ${hours} h`;
+}
+
+function SaveStatus({
+  saveStatus,
+  lastSavedAt,
+}: {
+  saveStatus: "idle" | "saving" | "saved" | "error";
+  lastSavedAt: number | null;
+}) {
+  // Re-render periódico para refrescar el "hace Xs" mientras está en reposo.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (saveStatus === "saving") return;
+    const t = setInterval(() => setTick((n) => n + 1), 10000);
+    return () => clearInterval(t);
+  }, [saveStatus, lastSavedAt]);
+
+  return (
+    <div className="flex items-center gap-1 text-xs text-muted-foreground px-1" title="Estado de guardado del canvas">
+      {saveStatus === "saving" ? (
+        <>
+          <Loader2 className="h-3 w-3 animate-spin" />
+          <span>Guardando...</span>
+        </>
+      ) : saveStatus === "error" ? (
+        <>
+          <AlertCircle className="h-3 w-3 text-red-500" />
+          <span>Error al guardar</span>
+        </>
+      ) : lastSavedAt ? (
+        <>
+          <Check className="h-3 w-3 text-green-500" />
+          <span>Guardado {formatRelativeSaved(lastSavedAt)}</span>
+        </>
+      ) : (
+        <>
+          <Save className="h-3 w-3" />
+          <span>Sin cambios</span>
+        </>
+      )}
     </div>
   );
 }

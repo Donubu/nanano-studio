@@ -9,7 +9,7 @@ import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useUpstreamPromptLabel } from "../hooks/use-upstream-prompt-label";
 import { useCanvasContext } from "../canvas-context";
-import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { ResizeHandle, nodeSizeClass, standardMediaSize } from "./resize-handle";
 import { MediaViewerModal, type MediaViewerEntry } from "./media-viewer-modal";
 
 const statusColors: Record<string, string> = {
@@ -64,6 +64,9 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
   const displayUrl = nodeData.outputUrl;
   const isViewingLatest = effectiveIndex === totalOutputs - 1;
   const isResized = width != null || height != null;
+  // Caja de tamaño estándar según la relación de aspecto (16:9, 9:16, 1:1...),
+  // para que los nodos no crezcan desproporcionadamente al recibir la imagen.
+  const stdSize = standardMediaSize(nodeData.aspectRatio);
 
   const [viewerOpen, setViewerOpen] = useState(false);
   const viewerEntries: MediaViewerEntry[] = history
@@ -112,14 +115,17 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
 
         {displayUrl ? (
           <div className={`mt-1 space-y-1 ${isResized ? "flex-1 min-h-0 flex flex-col" : ""}`}>
-            <div className={`rounded-md overflow-hidden bg-muted/50 relative ${isResized ? "flex-1 min-h-0" : ""}`}>
+            <div
+              className={`rounded-md overflow-hidden bg-muted/50 relative ${isResized ? "flex-1 min-h-0" : "mx-auto"}`}
+              style={isResized ? undefined : { width: stdSize.width, height: stdSize.height }}
+            >
               <img
                 src={displayUrl}
                 alt="Generated"
                 className={
                   isResized
                     ? "w-full h-full object-contain rounded-md"
-                    : "max-w-full max-h-[28vh] mx-auto object-contain rounded-md"
+                    : "w-full h-full object-cover rounded-md"
                 }
               />
               {!isViewingLatest && effectiveIndex >= 0 && (

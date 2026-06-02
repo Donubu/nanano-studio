@@ -126,10 +126,12 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   // Persist ref para invocar desde callbacks declarados antes del hook.
   const persistRef = useRef<{
     moveNode: (id: string, x: number, y: number) => void;
+    resizeNode: (id: string, width: number, height: number) => void;
     deleteNodes: (ids: string[]) => Promise<void>;
     deleteEdges: (ids: string[]) => Promise<void>;
   }>({
     moveNode: () => {},
+    resizeNode: () => {},
     deleteNodes: async () => {},
     deleteEdges: async () => {},
   });
@@ -202,6 +204,11 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       if (change.type === "position" && change.position && !change.dragging) {
         persistRef.current.moveNode(change.id, change.position.x, change.position.y);
         collabRef.current.emitNodeMove(change.id, change.position.x, change.position.y);
+      }
+      // Resize manual terminado (resizing === false). Las mediciones automáticas
+      // del montaje no traen `resizing`, así que no se persisten por error.
+      if (change.type === "dimensions" && change.resizing === false && change.dimensions) {
+        persistRef.current.resizeNode(change.id, change.dimensions.width, change.dimensions.height);
       }
       if (change.type === "remove") {
         removedNodeIds.push(change.id);
@@ -369,6 +376,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
 
   // Idem para persist (mismo patrón: callbacks declarados arriba usan el ref).
   persistRef.current.moveNode = persist.moveNode;
+  persistRef.current.resizeNode = persist.resizeNode;
   persistRef.current.deleteNodes = persist.deleteNodes;
   persistRef.current.deleteEdges = persist.deleteEdges;
 
@@ -511,10 +519,10 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
           return next;
         });
       });
-      if (mergedNode) persist.saveNode(mergedNode);
+      if (mergedNode) persist.saveNodeData(mergedNode);
       collab.emitNodeData(nodeId, updates as Record<string, unknown>);
     },
-    [setNodes, persist]
+    [setNodes, persist, collab.emitNodeData]
   );
 
   // Delete node — el backend soft-deletea también los edges incidentes.
@@ -804,6 +812,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
         generationConfig,
         openImagePicker: openImagePicker || (() => {}),
         emitNodeData: emitNodeDataStable,
+        persistNodeData: updateNodeData,
       }}
     >
     <div ref={canvasContainerRef} className="flex h-full w-full relative" tabIndex={-1}>
@@ -849,6 +858,8 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
               isExecuting={isExecuting}
               isAllLocked={isAllLocked}
               executionProgress={executionProgress}
+              saveStatus={persist.saveStatus}
+              lastSavedAt={persist.lastSavedAt}
               nodeCount={nodes.length}
               canvasMode={canvasMode}
               onCanvasModeChange={setCanvasMode}

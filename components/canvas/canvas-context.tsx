@@ -9,6 +9,9 @@ interface CanvasContextValue {
   generationConfig: CanvasGenerationConfig[];
   openImagePicker: (onSelect: (imageUrl: string) => void, title?: string) => void;
   emitNodeData: (nodeId: string, updates: Record<string, unknown>) => void;
+  // Update + persist node data from inside a node component. Hace el merge en
+  // el state, persiste (UPSERT con debounce) y emite a los colaboradores.
+  persistNodeData: (nodeId: string, updates: Record<string, unknown>) => void;
 }
 
 const CanvasContext = createContext<CanvasContextValue>({
@@ -17,6 +20,7 @@ const CanvasContext = createContext<CanvasContextValue>({
   generationConfig: [],
   openImagePicker: () => {},
   emitNodeData: () => {},
+  persistNodeData: () => {},
 });
 
 export const CanvasProvider = CanvasContext.Provider;
