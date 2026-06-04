@@ -474,6 +474,11 @@ export async function generateVideo(
           aspectRatio: config.aspectRatio,
           durationSeconds: config.durationSeconds,
           numberOfVideos: 1,
+          // resolution solo la soporta VEO 3+ (720p por defecto; 1080p/4K obligan a 8s,
+          // ver el bloque de "forcing" más arriba). Antes esto se construía en un
+          // `generateConfig` que nunca se pasaba a la API, así que la resolución
+          // elegida se ignoraba y todo salía en 720p.
+          ...(modelId.includes("veo-3") && { resolution: config.resolution }),
           // generateAudio solo soportado en Vertex AI (Gemini API genera audio nativamente)
           ...(isVertex && { generateAudio: config.generateAudio }),
           ...(config.negativePrompt && isVertex && { negativePrompt: config.negativePrompt }),

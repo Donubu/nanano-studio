@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { Node } from "@xyflow/react";
 import type { CanvasNodeData, CanvasNodeStatus, ExecutionProgress, ImageNodeData, TextNodeData, TextPracticanteNodeData, VideoNodeData, StaticTextNodeData, StaticImageNodeData, StaticImageGroupNodeData, OutputHistoryEntry, PracticanteFile, SceneNodeData, ParamsSceneNodeData } from "../lib/canvas-types";
-import { HANDLE_IDS } from "../lib/canvas-types";
+import { HANDLE_IDS, baseHandleId } from "../lib/canvas-types";
 import { topologicalSort, getDirectInputs } from "../lib/topological-sort";
 import type { CanvasEdge } from "../lib/canvas-types";
 import type { CanvasGenerationConfig } from "../canvas-workspace";
@@ -313,7 +313,7 @@ function resolveScriptContext(
   const visited = new Set<string>([cursor]);
   while (true) {
     const upChain = edges.find(
-      (e) => e.target === cursor && e.targetHandle === HANDLE_IDS.INPUT_SCRIPT_CHAIN
+      (e) => e.target === cursor && baseHandleId(e.targetHandle) === HANDLE_IDS.INPUT_SCRIPT_CHAIN
     );
     if (!upChain) break;
     if (visited.has(upChain.source)) break;
@@ -342,7 +342,7 @@ function resolveScriptContext(
   let rulesText: string | null = null;
   if (scriptNodeIdFound) {
     const rulesEdge = edges.find(
-      (e) => e.target === scriptNodeIdFound && e.targetHandle === HANDLE_IDS.INPUT_RULES
+      (e) => e.target === scriptNodeIdFound && baseHandleId(e.targetHandle) === HANDLE_IDS.INPUT_RULES
     );
     if (rulesEdge) {
       const rulesNode = nodes.find((n) => n.id === rulesEdge.source);
@@ -363,7 +363,7 @@ function resolveScriptContext(
   // Look up Params Escena connected to the current Scene
   let sceneParamsContent: string | null = null;
   const paramsEdge = edges.find(
-    (e) => e.target === sceneNode.id && e.targetHandle === HANDLE_IDS.INPUT_SCENE_PARAMS
+    (e) => e.target === sceneNode.id && baseHandleId(e.targetHandle) === HANDLE_IDS.INPUT_SCENE_PARAMS
   );
   if (paramsEdge) {
     const paramsNode = nodes.find((n) => n.id === paramsEdge.source);

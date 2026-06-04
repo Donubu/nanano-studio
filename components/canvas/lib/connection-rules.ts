@@ -1,6 +1,6 @@
 import type { Connection, Node } from "@xyflow/react";
 import type { CanvasNode, CanvasNodeData, CanvasEdge } from "./canvas-types";
-import { HANDLE_IDS } from "./canvas-types";
+import { HANDLE_IDS, baseHandleId } from "./canvas-types";
 
 interface ConnectionRule {
   sourceType: string;
@@ -113,54 +113,41 @@ export function isValidConnection(
   const sourceType = sourceNode.type;
   const targetType = targetNode.type;
 
+  // Input handles exist twice (left + top twin). Normalize to the base id so
+  // rules and uniqueness checks treat both as the same logical input.
+  const sourceHandle = baseHandleId(connection.sourceHandle);
+  const targetHandle = baseHandleId(connection.targetHandle);
+
   const isValid = VALID_CONNECTIONS.some(
     (rule) =>
       rule.sourceType === sourceType &&
-      rule.sourceHandle === connection.sourceHandle &&
+      rule.sourceHandle === sourceHandle &&
       rule.targetType === targetType &&
-      rule.targetHandle === connection.targetHandle
+      rule.targetHandle === targetHandle
   );
   if (!isValid) return false;
 
-  // Enforce: only 1 params node per AI node
-  if (connection.targetHandle === HANDLE_IDS.INPUT_PARAMS && edges) {
-    const alreadyHasParams = edges.some(
-      (e) => e.target === connection.target && e.targetHandle === HANDLE_IDS.INPUT_PARAMS
+  // Helper: is there already an edge into this target's logical input? Compares
+  // by base id so connecting to the top twin still counts as "already used".
+  const targetAlreadyUsed = (handleId: string) =>
+    !!edges && edges.some(
+      (e) => e.target === connection.target && baseHandleId(e.targetHandle) === handleId
     );
-    if (alreadyHasParams) return false;
-  }
+
+  // Enforce: only 1 params node per AI node
+  if (targetHandle === HANDLE_IDS.INPUT_PARAMS && targetAlreadyUsed(HANDLE_IDS.INPUT_PARAMS)) return false;
 
   // Enforce: only 1 params-scene per Scene
-  if (connection.targetHandle === HANDLE_IDS.INPUT_SCENE_PARAMS && edges) {
-    const alreadyHasSceneParams = edges.some(
-      (e) => e.target === connection.target && e.targetHandle === HANDLE_IDS.INPUT_SCENE_PARAMS
-    );
-    if (alreadyHasSceneParams) return false;
-  }
+  if (targetHandle === HANDLE_IDS.INPUT_SCENE_PARAMS && targetAlreadyUsed(HANDLE_IDS.INPUT_SCENE_PARAMS)) return false;
 
   // Enforce: only 1 visual reference per Script or Params Escena
-  if (connection.targetHandle === HANDLE_IDS.INPUT_VISUAL_REFERENCE && edges) {
-    const alreadyHasVisualRef = edges.some(
-      (e) => e.target === connection.target && e.targetHandle === HANDLE_IDS.INPUT_VISUAL_REFERENCE
-    );
-    if (alreadyHasVisualRef) return false;
-  }
+  if (targetHandle === HANDLE_IDS.INPUT_VISUAL_REFERENCE && targetAlreadyUsed(HANDLE_IDS.INPUT_VISUAL_REFERENCE)) return false;
 
   // Enforce: only 1 Params Escena reference per Script
-  if (connection.targetHandle === HANDLE_IDS.INPUT_PARAMS_SCENE_REF && edges) {
-    const alreadyHasParamsSceneRef = edges.some(
-      (e) => e.target === connection.target && e.targetHandle === HANDLE_IDS.INPUT_PARAMS_SCENE_REF
-    );
-    if (alreadyHasParamsSceneRef) return false;
-  }
+  if (targetHandle === HANDLE_IDS.INPUT_PARAMS_SCENE_REF && targetAlreadyUsed(HANDLE_IDS.INPUT_PARAMS_SCENE_REF)) return false;
 
   // Enforce: only 1 rules input per Script
-  if (connection.targetHandle === HANDLE_IDS.INPUT_RULES && edges) {
-    const alreadyHasRules = edges.some(
-      (e) => e.target === connection.target && e.targetHandle === HANDLE_IDS.INPUT_RULES
-    );
-    if (alreadyHasRules) return false;
-  }
+  if (targetHandle === HANDLE_IDS.INPUT_RULES && targetAlreadyUsed(HANDLE_IDS.INPUT_RULES)) return false;
 
   return true;
 }
@@ -176,9 +163,10 @@ export function getCompatibleTargetTypes(
   const seen = new Set<string>();
   const results: { type: string; label: string; targetHandle: string }[] = [];
   const labels: Record<string, string> = { text: "Texto", "text-practicante": "Practicante", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video", "params-scene": "Params Escena", script: "Guión", scene: "Escena" };
+  const baseSource = baseHandleId(sourceHandle);
 
   for (const rule of VALID_CONNECTIONS) {
-    if (rule.sourceType === sourceType && rule.sourceHandle === sourceHandle) {
+    if (rule.sourceType === sourceType && rule.sourceHandle === baseSource) {
       if (!seen.has(rule.targetType)) {
         seen.add(rule.targetType);
         results.push({
@@ -203,9 +191,10 @@ export function getCompatibleSourceTypes(
   const seen = new Set<string>();
   const results: { type: string; label: string; sourceHandle: string }[] = [];
   const labels: Record<string, string> = { text: "Texto", "text-practicante": "Practicante", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video", "params-scene": "Params Escena", script: "Guión", scene: "Escena" };
+  const baseTarget = baseHandleId(targetHandle);
 
   for (const rule of VALID_CONNECTIONS) {
-    if (rule.targetType === targetType && rule.targetHandle === targetHandle) {
+    if (rule.targetType === targetType && rule.targetHandle === baseTarget) {
       if (!seen.has(rule.sourceType)) {
         seen.add(rule.sourceType);
         results.push({

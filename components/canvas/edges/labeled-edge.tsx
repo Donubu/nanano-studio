@@ -7,7 +7,7 @@ import {
   getBezierPath,
   type EdgeProps,
 } from "@xyflow/react";
-import { HANDLE_IDS } from "../lib/canvas-types";
+import { HANDLE_IDS, baseHandleId } from "../lib/canvas-types";
 
 const HANDLE_LABELS: Record<string, string> = {
   [HANDLE_IDS.INPUT_PROMPT]: "PROMPT",
@@ -66,9 +66,12 @@ export const LabeledEdge = memo(function LabeledEdge({
     targetPosition,
   });
 
-  const label = targetHandleId ? HANDLE_LABELS[targetHandleId] : null;
-  const colorClass = targetHandleId ? HANDLE_COLORS[targetHandleId] : "bg-muted text-muted-foreground border-border";
-  const dualLabel = targetHandleId ? HANDLE_DUAL_LABEL[targetHandleId] : null;
+  // Normalize the top-edge twin (e.g. "input-prompt__top") to its base id so the
+  // edge still shows its label/color regardless of which side it connects to.
+  const baseTargetHandle = baseHandleId(targetHandleId);
+  const label = baseTargetHandle ? HANDLE_LABELS[baseTargetHandle] : null;
+  const colorClass = baseTargetHandle ? HANDLE_COLORS[baseTargetHandle] : "bg-muted text-muted-foreground border-border";
+  const dualLabel = baseTargetHandle ? HANDLE_DUAL_LABEL[baseTargetHandle] : null;
 
   return (
     <>

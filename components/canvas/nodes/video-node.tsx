@@ -3,7 +3,7 @@
 import { memo, useCallback, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Video, Loader2, AlertCircle, Play, ZoomIn } from "lucide-react";
-import { HANDLE_IDS, type VideoNodeData } from "../lib/canvas-types";
+import { HANDLE_IDS, topHandleId, type VideoNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
@@ -93,6 +93,18 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected, 
         className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background" style={{ top: "68%" }} title="Referencia (imagen)" />
       <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_PARAMS}
         className="!w-3 !h-3 !border-2 !border-background" style={{ top: "86%", backgroundColor: "#fc0" }} title="Parámetros" />
+
+      {/* Input handles (top twins — same logical inputs, reachable from above) */}
+      <Handle type="target" position={Position.Top} id={topHandleId(HANDLE_IDS.INPUT_PROMPT)}
+        className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background" style={{ left: "12%" }} title="Prompt (texto)" />
+      <Handle type="target" position={Position.Top} id={topHandleId(HANDLE_IDS.INPUT_FIRST_FRAME)}
+        className="!w-3 !h-3 !bg-green-500 !border-2 !border-background" style={{ left: "30%" }} title="First frame (imagen)" />
+      <Handle type="target" position={Position.Top} id={topHandleId(HANDLE_IDS.INPUT_LAST_FRAME)}
+        className="!w-3 !h-3 !bg-orange-500 !border-2 !border-background" style={{ left: "48%" }} title="Last frame (imagen)" />
+      <Handle type="target" position={Position.Top} id={topHandleId(HANDLE_IDS.INPUT_REFERENCE)}
+        className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background" style={{ left: "66%" }} title="Referencia (imagen)" />
+      <Handle type="target" position={Position.Top} id={topHandleId(HANDLE_IDS.INPUT_PARAMS)}
+        className="!w-3 !h-3 !border-2 !border-background" style={{ left: "84%", backgroundColor: "#fc0" }} title="Parámetros" />
 
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">

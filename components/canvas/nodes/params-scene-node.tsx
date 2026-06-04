@@ -11,6 +11,7 @@ import {
 import { Settings, Palette, Wand2, Loader2, AlertCircle } from "lucide-react";
 import {
   HANDLE_IDS,
+  topHandleId,
   type ParamsSceneNodeData,
   type StaticImageGroupNodeData,
   type StaticImageNodeData,
@@ -121,6 +122,16 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
         id={HANDLE_IDS.INPUT_VISUAL_REFERENCE}
         className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background"
         style={{ top: "30%" }}
+        title="Galería de referencia (para extraer estilo)"
+      />
+
+      {/* Input handle (top twin — same logical input, reachable from above) */}
+      <Handle
+        type="target"
+        position={Position.Top}
+        id={topHandleId(HANDLE_IDS.INPUT_VISUAL_REFERENCE)}
+        className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background"
+        style={{ left: "50%" }}
         title="Galería de referencia (para extraer estilo)"
       />
 
