@@ -12,6 +12,10 @@ services:
       - certbot_certs:/etc/letsencrypt:ro
     depends_on:
       - redis
+    # Reload nginx cada 6h para tomar certs renovados por certbot sin reinicio manual.
+    # nginx lee los .pem a memoria al arrancar y no los re-lee solo; sin esto, una
+    # renovación exitosa de certbot no surte efecto hasta reiniciar el contenedor.
+    command: /bin/sh -c "while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g 'daemon off;'"
 
   certbot:
     image: certbot/certbot
@@ -19,7 +23,8 @@ services:
     volumes:
       - certbot_webroot:/var/www/certbot
       - certbot_certs:/etc/letsencrypt
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do sleep 12h & wait $${!}; certbot renew --webroot -w /var/www/certbot --quiet; done'"
+    # Sin --quiet: los errores de renovación quedan visibles en `docker logs puerto_certbot`.
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do sleep 12h & wait $${!}; certbot renew --webroot -w /var/www/certbot; done'"
 
   redis:
     image: redis:7-alpine
