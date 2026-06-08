@@ -276,6 +276,27 @@ export const HANDLE_IDS = {
   INPUT_RULES: "input-rules",
 } as const;
 
+// Input handles are rendered twice: once on the left edge and once on the top
+// edge of a node, so an edge can come in from either side. The top twin carries
+// the same logical id plus this suffix so xyflow keeps a distinct DOM handle for
+// it (duplicate ids would make every edge snap to whichever renders first).
+// All connection/execution logic keys off the BASE id, so call `baseHandleId`
+// before comparing a handle id against a HANDLE_IDS constant.
+export const TOP_HANDLE_SUFFIX = "__top";
+
+/** Build the id for the top-edge twin of an input handle. */
+export function topHandleId(baseId: string): string {
+  return `${baseId}${TOP_HANDLE_SUFFIX}`;
+}
+
+/** Normalize a (possibly top-positioned) handle id to its logical base id. */
+export function baseHandleId(handleId: string | null | undefined): string | null {
+  if (!handleId) return null;
+  return handleId.endsWith(TOP_HANDLE_SUFFIX)
+    ? handleId.slice(0, -TOP_HANDLE_SUFFIX.length)
+    : handleId;
+}
+
 // --- Default configs for new nodes ---
 export function getDefaultNodeData(type: CanvasNodeType): CanvasNodeData {
   const base: BaseNodeData = {

@@ -3,7 +3,7 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Film, ImageIcon, Video, Bot } from "lucide-react";
-import { HANDLE_IDS, type SceneNodeData } from "../lib/canvas-types";
+import { HANDLE_IDS, topHandleId, type SceneNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
 import { ResizeHandle, nodeSizeClass } from "./resize-handle";
 
@@ -49,6 +49,24 @@ export const SceneNodeComponent = memo(function SceneNode({ id, data, selected, 
         id={HANDLE_IDS.INPUT_SCENE_PARAMS}
         className="!w-3 !h-3 !border-2 !border-background"
         style={{ top: "85%", backgroundColor: "#fc0" }}
+        title="Params Escena (estilo)"
+      />
+
+      {/* Input handles (top twins — same logical inputs, reachable from above) */}
+      <Handle
+        type="target"
+        position={Position.Top}
+        id={topHandleId(HANDLE_IDS.INPUT_SCRIPT_CHAIN)}
+        className="!w-3 !h-3 !bg-violet-500 !border-2 !border-background"
+        style={{ left: "30%" }}
+        title="Cadena del guion"
+      />
+      <Handle
+        type="target"
+        position={Position.Top}
+        id={topHandleId(HANDLE_IDS.INPUT_SCENE_PARAMS)}
+        className="!w-3 !h-3 !border-2 !border-background"
+        style={{ left: "70%", backgroundColor: "#fc0" }}
         title="Params Escena (estilo)"
       />
 

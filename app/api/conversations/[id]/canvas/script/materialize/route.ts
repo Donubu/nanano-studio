@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, type PoolConnection } from "mysql2/promise";
 import type { ScriptAnalysis, ScriptSceneAnalysis, SceneTargetNodeType } from "@/components/canvas/lib/canvas-types";
-import { HANDLE_IDS } from "@/components/canvas/lib/canvas-types";
+import { HANDLE_IDS, baseHandleId } from "@/components/canvas/lib/canvas-types";
 
 interface ConversationRow extends RowDataPacket {
   id: number;
@@ -291,7 +291,7 @@ export async function POST(
     let visualRefSource: string | null = visualReferenceSourceId || null;
     if (!visualRefSource) {
       const visualRefEdge = allEdges.find(
-        (e) => e.target_node_id === scriptNodeId && e.target_handle === HANDLE_IDS.INPUT_VISUAL_REFERENCE
+        (e) => e.target_node_id === scriptNodeId && baseHandleId(e.target_handle) === HANDLE_IDS.INPUT_VISUAL_REFERENCE
       );
       if (visualRefEdge) visualRefSource = visualRefEdge.source_node_id;
     }

@@ -3,7 +3,7 @@
 import { memo, useCallback, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { ImageIcon, Loader2, AlertCircle, ZoomIn } from "lucide-react";
-import { HANDLE_IDS, type ImageNodeData } from "../lib/canvas-types";
+import { HANDLE_IDS, topHandleId, type ImageNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
@@ -92,6 +92,14 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
         className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background" style={{ top: "55%" }} title="Reference image" />
       <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_PARAMS}
         className="!w-3 !h-3 !border-2 !border-background" style={{ top: "85%", backgroundColor: "#fc0" }} title="Parámetros" />
+
+      {/* Input handles (top twins — same logical inputs, reachable from above) */}
+      <Handle type="target" position={Position.Top} id={topHandleId(HANDLE_IDS.INPUT_PROMPT)}
+        className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background" style={{ left: "20%" }} title="Prompt input" />
+      <Handle type="target" position={Position.Top} id={topHandleId(HANDLE_IDS.INPUT_REFERENCE)}
+        className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background" style={{ left: "50%" }} title="Reference image" />
+      <Handle type="target" position={Position.Top} id={topHandleId(HANDLE_IDS.INPUT_PARAMS)}
+        className="!w-3 !h-3 !border-2 !border-background" style={{ left: "80%", backgroundColor: "#fc0" }} title="Parámetros" />
 
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">

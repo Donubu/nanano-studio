@@ -7,9 +7,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { Node } from "@xyflow/react";
 import type { CanvasNodeData, TextNodeData, ImageNodeData, VideoNodeData, HANDLE_IDS } from "../lib/canvas-types";
-import { HANDLE_IDS as HANDLES } from "../lib/canvas-types";
+import { HANDLE_IDS as HANDLES, baseHandleId } from "../lib/canvas-types";
 import type { CanvasGenerationConfig, CanvasModel } from "../canvas-workspace";
-import { getVideoCapabilities, reconcileVideoSettings } from "../lib/video-capabilities";
+import { getVideoCapabilities, reconcileVideoSettings, veoForcesEightSeconds } from "../lib/video-capabilities";
 
 interface NodeConfigPanelProps {
   node: Node;
@@ -59,8 +59,8 @@ export function NodeConfigPanel({
   const isGenerating = data.status === "generating";
   const isLocked = data.locked === true;
 
-  // Check if a params node is connected
-  const paramsEdge = edges.find((e) => e.target === node.id && e.targetHandle === HANDLES.INPUT_PARAMS);
+  // Check if a params node is connected (handle can come in from the left or top twin)
+  const paramsEdge = edges.find((e) => e.target === node.id && baseHandleId(e.targetHandle) === HANDLES.INPUT_PARAMS);
   const paramsNode = paramsEdge ? nodes.find((n) => n.id === paramsEdge.source) : null;
   const paramsData = paramsNode?.data as Record<string, unknown> | null;
   const hasParams = !!paramsData;
@@ -76,6 +76,14 @@ export function NodeConfigPanel({
   const selectedModel = nodeData.modelId
     ? availableModels.find((m) => m.id === nodeData.modelId)
     : availableModels.find((m) => m.is_default) || availableModels[0];
+
+  // Video nodes: detect image inputs that make the Gemini API force 8s, so the
+  // duration picker can disable 4s/6s instead of silently overriding the choice.
+  const videoInputEdges = edges.filter((e) => e.target === node.id);
+  const hasInterpolation =
+    videoInputEdges.some((e) => baseHandleId(e.targetHandle) === HANDLES.INPUT_FIRST_FRAME) &&
+    videoInputEdges.some((e) => baseHandleId(e.targetHandle) === HANDLES.INPUT_LAST_FRAME);
+  const hasReference = videoInputEdges.some((e) => baseHandleId(e.targetHandle) === HANDLES.INPUT_REFERENCE);
 
   return (
     <div className="w-[360px] h-full border-l border-border bg-background flex flex-col overflow-hidden">
@@ -194,7 +202,7 @@ export function NodeConfigPanel({
             {/* Type-specific settings */}
             {type === "text" && <TextSettings data={data as TextNodeData} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} models={availableModels} />}
             {type === "image" && <ImageSettings data={data as ImageNodeData} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} />}
-            {type === "video" && <VideoSettings data={data as VideoNodeData} model={selectedModel} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} />}
+            {type === "video" && <VideoSettings data={data as VideoNodeData} model={selectedModel} hasInterpolation={hasInterpolation} hasReference={hasReference} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} />}
           </>
         )}
 
@@ -410,32 +418,53 @@ function ImageSettings({ data, onUpdate }: { data: ImageNodeData; onUpdate: (u: 
   );
 }
 
-function VideoSettings({ data, model, onUpdate }: { data: VideoNodeData; model?: CanvasModel; onUpdate: (u: Partial<VideoNodeData>) => void }) {
+function VideoSettings({ data, model, hasInterpolation, hasReference, onUpdate }: { data: VideoNodeData; model?: CanvasModel; hasInterpolation?: boolean; hasReference?: boolean; onUpdate: (u: Partial<VideoNodeData>) => void }) {
   // Options come from per-model capabilities so each backend (VEO / xAI / Kling /
   // OpenRouter Seedance) shows only the values it can actually accept.
   const caps = getVideoCapabilities(model);
   // VEO-specific quirk: 1080p / 4K only work at 8s.
   const isVeo = !model?.api_backend || model.api_backend === "gemini" || model.api_backend === "vertex";
 
+  // VEO on the Gemini API silently forces 8s with 1080p/4K, reference images or
+  // first+last interpolation. Surface that here so 4s/6s are clearly unavailable
+  // instead of being accepted and overridden behind the user's back.
+  const forced8s = veoForcesEightSeconds(model, { resolution: data.resolution, hasInterpolation, hasReference });
+  const forced8sLabel =
+    forced8s === "resolution" ? `${data.resolution} obliga a 8s`
+    : forced8s === "interpolation" ? "first + last frame obliga a 8s"
+    : forced8s === "reference" ? "las imágenes de referencia obligan a 8s"
+    : null;
+  // When 8s is forced, show 8s as the effective selection regardless of the
+  // stored value (the backend will generate 8s anyway).
+  const effectiveDuration = forced8s ? 8 : data.duration;
+
   return (
     <>
       <div className="space-y-1.5">
         <Label className="text-xs">Duration</Label>
         <div className="flex gap-1.5 flex-wrap">
-          {caps.durations.map((d) => (
-            <button
-              key={d}
-              onClick={() => onUpdate({ duration: d })}
-              className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${
-                data.duration === d
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "border-border hover:bg-accent"
-              }`}
-            >
-              {d}s
-            </button>
-          ))}
+          {caps.durations.map((d) => {
+            const disabled = !!forced8s && d !== 8;
+            return (
+              <button
+                key={d}
+                disabled={disabled}
+                onClick={() => { if (!disabled) onUpdate({ duration: d }); }}
+                className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${
+                  effectiveDuration === d
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border hover:bg-accent"
+                } ${disabled ? "opacity-40 cursor-not-allowed hover:bg-transparent" : ""}`}
+                title={disabled && forced8sLabel ? `No disponible: ${forced8sLabel} (Veo en Gemini API)` : undefined}
+              >
+                {d}s
+              </button>
+            );
+          })}
         </div>
+        {forced8sLabel && (
+          <p className="text-[10px] text-amber-500">En Veo (Gemini API), {forced8sLabel}. 4s/6s solo en 720p sin imágenes.</p>
+        )}
       </div>
       <div className="space-y-1.5">
         <Label className="text-xs">Aspect Ratio</Label>

@@ -3,7 +3,7 @@
 import { memo, useCallback } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Loader2, AlertCircle, Bot, Paperclip, FlaskConical } from "lucide-react";
-import { HANDLE_IDS, type TextPracticanteNodeData } from "../lib/canvas-types";
+import { HANDLE_IDS, topHandleId, type TextPracticanteNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton } from "./node-status";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
@@ -73,6 +73,12 @@ export const TextPracticanteNodeComponent = memo(function TextPracticanteNode({ 
         className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background" style={{ top: "30%" }} title="Prompt (texto)" />
       <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_MEDIA}
         className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background" style={{ top: "70%" }} title="Media (imagen/video) como files[]" />
+
+      {/* Input handles (top twins — same logical inputs, reachable from above) */}
+      <Handle type="target" position={Position.Top} id={topHandleId(HANDLE_IDS.INPUT_PROMPT)}
+        className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background" style={{ left: "30%" }} title="Prompt (texto)" />
+      <Handle type="target" position={Position.Top} id={topHandleId(HANDLE_IDS.INPUT_MEDIA)}
+        className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background" style={{ left: "70%" }} title="Media (imagen/video) como files[]" />
 
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">

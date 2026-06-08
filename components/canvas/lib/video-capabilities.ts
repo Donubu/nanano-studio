@@ -113,6 +113,32 @@ export function getVideoCapabilities(model: Pick<CanvasModel, "model_id" | "api_
 }
 
 /**
+ * VEO on the Gemini API only allows 4s/6s clips at 720p without images. It
+ * silently upgrades to 8s when the resolution is 1080p/4K, when reference
+ * images are used, or when first+last frame interpolation is used. This mirrors
+ * the guard in `lib/google-ai-video.ts` (`if (!isVertex && ...) config.durationSeconds = 8`)
+ * so the UI can disable 4s/6s up front instead of letting the user pick a
+ * duration the API will override behind their back.
+ *
+ * Returns the reason 8s is forced, or null when 4s/6s are allowed.
+ * Keep this in sync with the backend guard.
+ */
+export function veoForcesEightSeconds(
+  model: Pick<CanvasModel, "model_id" | "api_backend"> | null | undefined,
+  opts: { resolution?: string; hasInterpolation?: boolean; hasReference?: boolean },
+): "resolution" | "interpolation" | "reference" | null {
+  if (!model) return null;
+  // Vertex AI has no such restriction; only the Gemini API does. An unset
+  // backend defaults to Gemini in this deployment.
+  if (model.api_backend === "vertex") return null;
+  if (model.api_backend && model.api_backend !== "gemini") return null; // xai / kling / openrouter
+  if (opts.hasReference) return "reference";
+  if (opts.hasInterpolation) return "interpolation";
+  if (opts.resolution && opts.resolution !== "720p") return "resolution";
+  return null;
+}
+
+/**
  * Given current settings and the capabilities of the active model, returns
  * an update patch with any field that needs to snap to a valid value.
  * Returns {} if everything is already valid.

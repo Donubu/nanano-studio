@@ -1,4 +1,5 @@
 import type { CanvasEdge } from "./canvas-types";
+import { baseHandleId } from "./canvas-types";
 import type { Node } from "@xyflow/react";
 
 /**
@@ -99,6 +100,8 @@ export function getDirectInputs(
     .map((e) => ({
       sourceNodeId: e.source,
       sourceHandle: e.sourceHandle || null,
-      targetHandle: e.targetHandle || null,
+      // Normalize the top-edge twin (e.g. "input-prompt__top") back to its base
+      // id so all downstream `=== HANDLE_IDS.X` comparisons keep working.
+      targetHandle: baseHandleId(e.targetHandle),
     }));
 }

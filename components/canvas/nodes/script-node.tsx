@@ -3,7 +3,7 @@
 import { Fragment, memo, useCallback, useMemo, useRef, useState } from "react";
 import { Handle, Position, useHandleConnections, useReactFlow, type NodeProps, type Edge, type Node as RFNode } from "@xyflow/react";
 import { Loader2, AlertCircle, FileText, Sparkles, Wand2, ChevronDown, ChevronRight, ImageIcon, Video, Bot, MinusCircle, ArrowUp, ArrowDown, X, Plus, Drama } from "lucide-react";
-import { HANDLE_IDS, type ScriptAnalysis, type ScriptAnalysisAlt, type ScriptNodeData, type ScriptSceneAnalysis, type SceneTargetNodeType } from "../lib/canvas-types";
+import { HANDLE_IDS, topHandleId, type ScriptAnalysis, type ScriptAnalysisAlt, type ScriptNodeData, type ScriptSceneAnalysis, type SceneTargetNodeType } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useCanvasContext } from "../canvas-context";
@@ -922,6 +922,32 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
         id={HANDLE_IDS.INPUT_PARAMS_SCENE_REF}
         className="!w-3 !h-3 !border-2 !border-background"
         style={{ top: "85%", backgroundColor: "#fc0" }}
+        title="Params Escena custom (se conecta a todas las escenas al generar)"
+      />
+
+      {/* Input handles (top twins — same logical inputs, reachable from above) */}
+      <Handle
+        type="target"
+        position={Position.Top}
+        id={topHandleId(HANDLE_IDS.INPUT_VISUAL_REFERENCE)}
+        className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background"
+        style={{ left: "30%" }}
+        title="Galería de referencia visual (alimenta a la primera escena)"
+      />
+      <Handle
+        type="target"
+        position={Position.Top}
+        id={topHandleId(HANDLE_IDS.INPUT_RULES)}
+        className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background"
+        style={{ left: "50%" }}
+        title="Reglas adicionales (texto, IA o practicante) aplicadas a todas las escenas"
+      />
+      <Handle
+        type="target"
+        position={Position.Top}
+        id={topHandleId(HANDLE_IDS.INPUT_PARAMS_SCENE_REF)}
+        className="!w-3 !h-3 !border-2 !border-background"
+        style={{ left: "70%", backgroundColor: "#fc0" }}
         title="Params Escena custom (se conecta a todas las escenas al generar)"
       />
 

@@ -3,7 +3,7 @@
 import { memo, useCallback } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Loader2, AlertCircle, Brain, Sparkles, FileText } from "lucide-react";
-import { HANDLE_IDS, type TextNodeData } from "../lib/canvas-types";
+import { HANDLE_IDS, topHandleId, type TextNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
@@ -73,6 +73,14 @@ export const TextNodeComponent = memo(function TextNode({ id, data, selected, wi
         className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background" style={{ top: "55%" }} title="Media (imagen/video)" />
       <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_PARAMS}
         className="!w-3 !h-3 !border-2 !border-background" style={{ top: "85%", backgroundColor: "#fc0" }} title="Parámetros" />
+
+      {/* Input handles (top twins — same logical inputs, reachable from above) */}
+      <Handle type="target" position={Position.Top} id={topHandleId(HANDLE_IDS.INPUT_PROMPT)}
+        className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background" style={{ left: "20%" }} title="Prompt (texto)" />
+      <Handle type="target" position={Position.Top} id={topHandleId(HANDLE_IDS.INPUT_MEDIA)}
+        className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background" style={{ left: "50%" }} title="Media (imagen/video)" />
+      <Handle type="target" position={Position.Top} id={topHandleId(HANDLE_IDS.INPUT_PARAMS)}
+        className="!w-3 !h-3 !border-2 !border-background" style={{ left: "80%", backgroundColor: "#fc0" }} title="Parámetros" />
 
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
