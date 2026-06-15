@@ -576,8 +576,15 @@ export function ChatInterface() {
         // If URL is root "/", don't auto-load from localStorage - show client selection
         if (typeof window !== 'undefined' && window.location.pathname === '/') return;
 
-        // If URL has slugs, those will be handled by the next effect
-        if (navigation.initialState?.clientSlug) return;
+        // Si la URL trae cualquier ruta (siempre incluye clientSlug en parts[0]),
+        // los effects de URL seleccionan cliente/proyecto. Leemos la URL directo:
+        // en el primer mount navigation.initialState aún es null porque los effects
+        // del hijo corren ANTES del init effect del NavigationProvider padre, así
+        // que confiar en initialState dejaba colar el restore desde localStorage y
+        // este peleaba con la URL -> el selector de proyecto oscilaba sin fin en
+        // deep-links directos (al re-entrar in-app este effect no re-corre y por eso
+        // se veía bien).
+        if (window.location.pathname.split('/').filter(Boolean).length > 0) return;
 
         const savedClient = localStorage.getItem(STORAGE_KEY_CLIENT);
         if (savedClient) {
