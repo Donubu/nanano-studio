@@ -7,10 +7,13 @@ const basePool = mysql.createPool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   waitForConnections: true,
-  // Cloud SQL permite max_connections=1030; pico histórico ~116. Subimos el
-  // límite del pool web (antes 50) para no toparlo bajo carga concurrente.
-  // Budget: blue+green (150 c/u) + 3 workers (10 c/u) = 330 << 1030.
-  connectionLimit: Number(process.env.DB_POOL_LIMIT) || 150,
+  // OJO: este límite es control de admisión, NO un techo a subir libremente.
+  // La instancia Cloud SQL es chica (~1 vCPU, buffer_pool 0.63GB). Subirlo a 150
+  // dejó correr ~90 queries a la vez sobre 1 vCPU -> thrashing -> queries de 10ms
+  // pasaron a 14s -> pool agotado -> "Queue limit reached" en todo. El pool chico
+  // PROTEGE a la instancia. El cuello real es el VOLUMEN de queries (poll del
+  // badge de créditos) y el tamaño de la instancia, no este número.
+  connectionLimit: Number(process.env.DB_POOL_LIMIT) || 50,
   queueLimit: 250,
   timezone: "-03:00", // Chile (America/Santiago)
   dateStrings: true, // Devolver fechas como strings para mejor control
