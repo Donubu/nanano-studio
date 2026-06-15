@@ -241,7 +241,9 @@ export async function GET(request: NextRequest) {
           COUNT(DISTINCT c.id) as conversation_count
         FROM messages m
         JOIN conversations c ON m.conversation_id = c.id
-        JOIN users u ON c.user_id = u.id
+        -- Atribuir cada generación a su autor real (m.user_id), no al creador de
+        -- la conversación. Fallback a c.user_id para filas legacy sin user.
+        JOIN users u ON u.id = COALESCE(m.user_id, c.user_id)
         WHERE m.role = 'model'
           ${dateFilter}
           ${projectFilter}

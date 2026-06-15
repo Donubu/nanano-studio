@@ -221,7 +221,9 @@ export async function GET(request: NextRequest) {
          ${PIECE_COUNT_SQL}
        FROM messages m
        JOIN conversations conv ON conv.id = m.conversation_id
-       JOIN users u ON u.id = conv.user_id
+       -- Atribuir al autor real de la generación (m.user_id), no al creador de la
+       -- conversación. Fallback a conv.user_id para filas legacy sin user.
+       JOIN users u ON u.id = COALESCE(m.user_id, conv.user_id)
        WHERE m.role = 'model'
          AND m.estimated_cost IS NOT NULL
          AND m.created_at >= ?

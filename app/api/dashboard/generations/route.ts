@@ -198,9 +198,10 @@ export async function GET(request: NextRequest) {
       queryParams.push(clientId);
     }
 
-    // User filter
+    // User filter — por autor real de la generación (m.user_id), no por el
+    // creador de la conversación. Fallback a c.user_id para filas legacy sin user.
     if (userId) {
-      conditions.push("c.user_id = ?");
+      conditions.push("COALESCE(m.user_id, c.user_id) = ?");
       queryParams.push(userId);
     }
 
@@ -246,7 +247,7 @@ export async function GET(request: NextRequest) {
         JOIN conversations c ON m.conversation_id = c.id
         LEFT JOIN projects p ON c.project_id = p.id
         LEFT JOIN clients cl ON p.client_id = cl.id
-        LEFT JOIN users u ON c.user_id = u.id
+        LEFT JOIN users u ON u.id = COALESCE(m.user_id, c.user_id)
         WHERE ${whereClause}
       `, queryParams),
       pool.execute<GenerationRow[]>(`
@@ -289,7 +290,7 @@ export async function GET(request: NextRequest) {
         JOIN conversations c ON m.conversation_id = c.id
         LEFT JOIN projects p ON c.project_id = p.id
         LEFT JOIN clients cl ON p.client_id = cl.id
-        LEFT JOIN users u ON c.user_id = u.id
+        LEFT JOIN users u ON u.id = COALESCE(m.user_id, c.user_id)
         LEFT JOIN models mo_msg ON m.model_id = mo_msg.id
         LEFT JOIN models mo_conv ON c.model_id = mo_conv.id
         WHERE ${whereClause}
@@ -309,7 +310,7 @@ export async function GET(request: NextRequest) {
         JOIN conversations c ON m.conversation_id = c.id
         LEFT JOIN projects p ON c.project_id = p.id
         LEFT JOIN clients cl ON p.client_id = cl.id
-        LEFT JOIN users u ON c.user_id = u.id
+        LEFT JOIN users u ON u.id = COALESCE(m.user_id, c.user_id)
         WHERE ${whereClause}
       `, queryParams),
       pool.execute<RowDataPacket[]>(
@@ -442,7 +443,7 @@ async function handleTopazGenerations(
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN projects p ON c.project_id = p.id
       LEFT JOIN clients cl ON p.client_id = cl.id
-      LEFT JOIN users u ON c.user_id = u.id
+      LEFT JOIN users u ON u.id = COALESCE(m.user_id, c.user_id)
       ${whereClause}
     `, queryParams);
 
@@ -478,7 +479,7 @@ async function handleTopazGenerations(
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN projects p ON c.project_id = p.id
       LEFT JOIN clients cl ON p.client_id = cl.id
-      LEFT JOIN users u ON c.user_id = u.id
+      LEFT JOIN users u ON u.id = COALESCE(m.user_id, c.user_id)
       ${whereClause}
       ORDER BY te.created_at DESC
       LIMIT ${Number(limit)} OFFSET ${Number(offset)}
@@ -584,7 +585,7 @@ async function handleTopazGenerations(
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN projects p ON c.project_id = p.id
       LEFT JOIN clients cl ON p.client_id = cl.id
-      LEFT JOIN users u ON c.user_id = u.id
+      LEFT JOIN users u ON u.id = COALESCE(m.user_id, c.user_id)
       ${whereClause}
     `, queryParams);
 
@@ -622,7 +623,7 @@ async function handleTopazGenerations(
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN projects p ON c.project_id = p.id
       LEFT JOIN clients cl ON p.client_id = cl.id
-      LEFT JOIN users u ON c.user_id = u.id
+      LEFT JOIN users u ON u.id = COALESCE(m.user_id, c.user_id)
       ${whereClause}
       ORDER BY tve.created_at DESC
       LIMIT ${Number(limit)} OFFSET ${Number(offset)}
@@ -723,7 +724,7 @@ async function handleAllGenerations(
     msgParams.push(clientId);
   }
   if (userId) {
-    msgConditions.push("c.user_id = ?");
+    msgConditions.push("COALESCE(m.user_id, c.user_id) = ?");
     msgParams.push(userId);
   }
   if (!includeDeleted) {
@@ -779,7 +780,7 @@ async function handleAllGenerations(
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN projects p ON c.project_id = p.id
       LEFT JOIN clients cl ON p.client_id = cl.id
-      LEFT JOIN users u ON c.user_id = u.id
+      LEFT JOIN users u ON u.id = COALESCE(m.user_id, c.user_id)
       WHERE ${msgWhereClause}
     `, msgParams),
     pool.execute<RowDataPacket[]>(`
@@ -789,7 +790,7 @@ async function handleAllGenerations(
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN projects p ON c.project_id = p.id
       LEFT JOIN clients cl ON p.client_id = cl.id
-      LEFT JOIN users u ON c.user_id = u.id
+      LEFT JOIN users u ON u.id = COALESCE(m.user_id, c.user_id)
       WHERE 1=1 ${topazWhereClause}
     `, topazParams),
     pool.execute<RowDataPacket[]>(`
@@ -799,7 +800,7 @@ async function handleAllGenerations(
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN projects p ON c.project_id = p.id
       LEFT JOIN clients cl ON p.client_id = cl.id
-      LEFT JOIN users u ON c.user_id = u.id
+      LEFT JOIN users u ON u.id = COALESCE(m.user_id, c.user_id)
       WHERE tve.status = 'completed' ${topazWhereClause}
     `, topazParams),
     pool.execute<GenerationRow[]>(`
@@ -842,7 +843,7 @@ async function handleAllGenerations(
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN projects p ON c.project_id = p.id
       LEFT JOIN clients cl ON p.client_id = cl.id
-      LEFT JOIN users u ON c.user_id = u.id
+      LEFT JOIN users u ON u.id = COALESCE(m.user_id, c.user_id)
       LEFT JOIN models mo_msg ON m.model_id = mo_msg.id
       LEFT JOIN models mo_conv ON c.model_id = mo_conv.id
       WHERE ${msgWhereClause}
@@ -878,7 +879,7 @@ async function handleAllGenerations(
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN projects p ON c.project_id = p.id
       LEFT JOIN clients cl ON p.client_id = cl.id
-      LEFT JOIN users u ON c.user_id = u.id
+      LEFT JOIN users u ON u.id = COALESCE(m.user_id, c.user_id)
       WHERE 1=1 ${topazWhereClause}
       ORDER BY te.created_at DESC
       LIMIT ${Number(fetchLimit)}
@@ -914,7 +915,7 @@ async function handleAllGenerations(
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN projects p ON c.project_id = p.id
       LEFT JOIN clients cl ON p.client_id = cl.id
-      LEFT JOIN users u ON c.user_id = u.id
+      LEFT JOIN users u ON u.id = COALESCE(m.user_id, c.user_id)
       WHERE tve.status = 'completed' ${topazWhereClause}
       ORDER BY tve.created_at DESC
       LIMIT ${Number(fetchLimit)}
@@ -1134,7 +1135,7 @@ async function handleAllGenerations(
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN projects p ON c.project_id = p.id
       LEFT JOIN clients cl ON p.client_id = cl.id
-      LEFT JOIN users u ON c.user_id = u.id
+      LEFT JOIN users u ON u.id = COALESCE(m.user_id, c.user_id)
       WHERE ${msgWhereClause}
     `, msgParams),
     pool.execute<RowDataPacket[]>(
