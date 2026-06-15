@@ -7,7 +7,10 @@ const basePool = mysql.createPool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   waitForConnections: true,
-  connectionLimit: 50,
+  // Cloud SQL permite max_connections=1030; pico histórico ~116. Subimos el
+  // límite del pool web (antes 50) para no toparlo bajo carga concurrente.
+  // Budget: blue+green (150 c/u) + 3 workers (10 c/u) = 330 << 1030.
+  connectionLimit: Number(process.env.DB_POOL_LIMIT) || 150,
   queueLimit: 250,
   timezone: "-03:00", // Chile (America/Santiago)
   dateStrings: true, // Devolver fechas como strings para mejor control
