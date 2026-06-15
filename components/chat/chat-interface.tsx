@@ -433,6 +433,19 @@ export function ChatInterface() {
     const [newConversationType, setNewConversationType] = useState<GenerationType>("text");
     const [showNewConversationModal, setShowNewConversationModal] = useState(false);
 
+    // Solo admin puede crear conversaciones de tipo "texto". Si un no-admin abre
+    // el modal con "text" preseleccionado (default o auto-select), lo movemos al
+    // primer tipo creable disponible para que el selector y el botón Crear sean
+    // coherentes con la opción oculta.
+    useEffect(() => {
+        if (!showNewConversationModal) return;
+        if (session?.user?.role === "admin" || newConversationType !== "text") return;
+        const fallback = generationConfig.find(
+            (c) => c.is_enabled && c.models.length > 0 && c.generation_type !== "text"
+        );
+        if (fallback) setNewConversationType(fallback.generation_type);
+    }, [showNewConversationModal, generationConfig, session, newConversationType]);
+
     // Image viewer modal
     const [viewingImageMessage, setViewingImageMessage] = useState<Message | null>(null);
     const [viewingImageDimensions, setViewingImageDimensions] = useState<{ width: number; height: number } | null>(null);
@@ -5451,12 +5464,17 @@ export function ChatInterface() {
                     </DialogHeader>
                     <div className="py-4">
                         <GenerationTypeSelector
-                            enabledTypes={generationConfig.map(c => ({
-                                type: c.generation_type,
-                                isEnabled: c.is_enabled && !!(
-                                    c.models.length > 0
-                                ),
-                            }))}
+                            enabledTypes={generationConfig
+                                // Solo admin puede crear conversaciones de tipo "texto".
+                                // Para el resto se oculta la opción (el selector omite
+                                // los tipos que no estén en la lista).
+                                .filter(c => session?.user?.role === "admin" || c.generation_type !== "text")
+                                .map(c => ({
+                                    type: c.generation_type,
+                                    isEnabled: c.is_enabled && !!(
+                                        c.models.length > 0
+                                    ),
+                                }))}
                             selectedType={newConversationType}
                             onSelect={setNewConversationType}
                         />
@@ -5470,7 +5488,10 @@ export function ChatInterface() {
                                 handleNewTab();
                                 setShowNewConversationModal(false);
                             }}
-                            disabled={!generationConfig.some(c => c.is_enabled && c.generation_type === newConversationType && c.models.length > 0)}
+                            disabled={
+                                (session?.user?.role !== "admin" && newConversationType === "text") ||
+                                !generationConfig.some(c => c.is_enabled && c.generation_type === newConversationType && c.models.length > 0)
+                            }
                         >
                             Crear conversación
                         </Button>
