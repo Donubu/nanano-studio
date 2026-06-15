@@ -15,9 +15,10 @@ interface CreditMeResponse {
   client_id: number;
   is_admin: boolean;
   exempt: boolean;
-  period: { year: number; month: number };
-  image: CreditStatus;
-  video: CreditStatus;
+  // null para admins/exentos: el backend corta-circuita sin correr getCreditStatus
+  period: { year: number; month: number } | null;
+  image: CreditStatus | null;
+  video: CreditStatus | null;
 }
 
 interface Props {
@@ -82,12 +83,13 @@ export function CreditBadge({ clientId, refreshKey }: Props) {
     fetchData();
   }, [fetchData, refreshKey]);
 
-  // Refrescar cuando la ventana vuelve a tomar foco y cada 30s mientras está activa.
+  // Refrescar al recuperar foco y cada 2 min mientras está activa. Los créditos
+  // cambian lento; el refetch inmediato tras generar va por `refreshKey`.
   useEffect(() => {
     if (!clientId) return;
     const onFocus = () => fetchData();
     window.addEventListener("focus", onFocus);
-    const interval = window.setInterval(fetchData, 30000);
+    const interval = window.setInterval(fetchData, 120000);
     return () => {
       window.removeEventListener("focus", onFocus);
       window.clearInterval(interval);
@@ -95,8 +97,8 @@ export function CreditBadge({ clientId, refreshKey }: Props) {
   }, [clientId, fetchData]);
 
   if (!clientId || !data) return null;
-  // Admins y exentos no necesitan el badge
-  if (data.is_admin || data.exempt) return null;
+  // Admins y exentos no necesitan el badge (backend devuelve image/video null)
+  if (data.is_admin || data.exempt || !data.image || !data.video) return null;
   // Sin política configurada en ningún tipo → nada que mostrar
   if (data.image.effective_limit === null && data.video.effective_limit === null) return null;
 

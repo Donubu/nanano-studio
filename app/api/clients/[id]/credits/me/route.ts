@@ -38,10 +38,22 @@ export async function GET(
     const userId = Number(session.user.id);
     const exempt = isAdmin ? true : await isUserExempt(clientId, userId);
 
+    // Admins y exentos no ven el badge (el cliente lo oculta), así que evitamos
+    // las ~6 queries pesadas de getCreditStatus. El badge se polea cada 90s por
+    // cada sesión abierta; correr el JOIN de messages aquí satura el pool en vano.
+    if (isAdmin || exempt) {
+      return NextResponse.json({
+        client_id: clientId,
+        is_admin: isAdmin,
+        exempt,
+        period: null,
+        image: null,
+        video: null,
+      });
+    }
+
     const period = await getCurrentPeriod();
 
-    // Aunque el usuario esté exento, devolvemos status para mostrar el consumo del cliente
-    // (útil para que el usuario sepa cómo va la marca). Esto NO bloquea generaciones.
     const [imageStatus, videoStatus] = await Promise.all([
       getCreditStatus(clientId, "image", period),
       getCreditStatus(clientId, "video", period),
