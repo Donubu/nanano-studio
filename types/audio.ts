@@ -170,6 +170,65 @@ export type AudioVoiceGender = "male" | "female" | "neutral";
 export type AudioOutputFormat = "wav" | "mp3";
 
 // =====================================
+// AUDIO TAGS (Gemini TTS — control expresivo inline)
+// =====================================
+// Los "audio tags" se insertan dentro del texto a sintetizar, ej:
+//   "[excited] ¡Tengo una gran noticia! [laughs]"
+// El modelo reconoce el keyword en inglés (entre corchetes) y ajusta la entrega
+// en ese punto. Funcionan mejor con gemini-3.1-flash-tts-preview (200+ tags),
+// con soporte parcial en los TTS 2.5. La etiqueta visible va en español; el
+// `tag` insertado se mantiene en inglés porque es lo que el modelo interpreta.
+
+export interface AudioTag {
+  tag: string;   // keyword en inglés que se inserta entre corchetes
+  label: string; // texto visible en la UI (español)
+}
+
+export interface AudioTagGroup {
+  category: string;
+  tags: AudioTag[];
+}
+
+export const GEMINI_AUDIO_TAGS: AudioTagGroup[] = [
+  {
+    category: "Emoción",
+    tags: [
+      { tag: "excited", label: "Entusiasmado" },
+      { tag: "happy", label: "Feliz" },
+      { tag: "sad", label: "Triste" },
+      { tag: "angry", label: "Enojado" },
+      { tag: "calm", label: "Tranquilo" },
+      { tag: "nervous", label: "Nervioso" },
+      { tag: "curious", label: "Curioso" },
+      { tag: "amazed", label: "Asombrado" },
+      { tag: "disappointed", label: "Decepcionado" },
+    ],
+  },
+  {
+    category: "Tono / entrega",
+    tags: [
+      { tag: "whispers", label: "Susurrando" },
+      { tag: "shouting", label: "Gritando" },
+      { tag: "sarcastic", label: "Sarcástico" },
+      { tag: "serious", label: "Serio" },
+      { tag: "dramatically", label: "Dramático" },
+      { tag: "tired", label: "Cansado" },
+    ],
+  },
+  {
+    category: "Sonidos no verbales",
+    tags: [
+      { tag: "laughs", label: "Risa" },
+      { tag: "chuckles", label: "Risita" },
+      { tag: "sighs", label: "Suspiro" },
+      { tag: "gasps", label: "Jadeo" },
+      { tag: "exhales", label: "Exhala" },
+      { tag: "clears throat", label: "Aclara la garganta" },
+    ],
+  },
+];
+
+// =====================================
 // CONFIGURACIÓN
 // =====================================
 

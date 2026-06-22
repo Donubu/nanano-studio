@@ -11,6 +11,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { VoiceSelector } from "./voice-selector";
+import { AudioTagPalette } from "./audio-tag-palette";
 import { Slider } from "@/components/ui/slider";
 import {
   AudioVoiceId,
@@ -156,6 +157,27 @@ export function TTSComposer({
   onRestoreHandled,
 }: TTSComposerProps) {
   const [text, setText] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Inserta un audio tag (ej. "[laughs] ") en la posición del cursor del textarea
+  // de una-voz. Si por algún motivo no hay ref, lo agrega al final.
+  const insertAudioTag = (snippet: string) => {
+    const ta = textareaRef.current;
+    if (!ta) {
+      setText((prev) => prev + snippet);
+      return;
+    }
+    const start = ta.selectionStart ?? text.length;
+    const end = ta.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + snippet + text.slice(end);
+    setText(next);
+    requestAnimationFrame(() => {
+      ta.focus();
+      const pos = start + snippet.length;
+      ta.selectionStart = pos;
+      ta.selectionEnd = pos;
+    });
+  };
 
   // Initialize characters and lines with proper defaults
   const [characters, setCharacters] = useState<Character[]>(() => createDefaultCharacters());
@@ -536,6 +558,7 @@ export function TTSComposer({
             ) : (
               /* Standard Textarea (Gemini or Chirp SSML mode) */
               <Textarea
+                ref={textareaRef}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 placeholder={isChirp
@@ -547,6 +570,14 @@ export function TTSComposer({
               />
             )}
           </div>
+
+          {/* Audio tags expresivos (Gemini only) */}
+          {!isChirp && (
+            <AudioTagPalette
+              onInsert={insertAudioTag}
+              disabled={disabled || isGenerating}
+            />
+          )}
         </div>
       )}
 

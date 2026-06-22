@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { Plus, Trash2, Users, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { VoiceSelector } from "./voice-selector";
+import { AudioTagPalette } from "./audio-tag-palette";
 import { AudioVoiceId, getVoiceById } from "@/types/audio";
 
 // Character definition
@@ -62,6 +64,32 @@ export function DialogueEditor({
   onCharactersChange,
   onLinesChange,
 }: DialogueEditorProps) {
+  // Refs por línea + última línea enfocada, para insertar audio tags en el
+  // cursor de la línea correcta (sticky: se mantiene tras blur).
+  const lineRefs = useRef<Map<string, HTMLTextAreaElement>>(new Map());
+  const [activeLineId, setActiveLineId] = useState<string | null>(null);
+
+  const insertAudioTag = (snippet: string) => {
+    const targetId = activeLineId ?? lines[lines.length - 1]?.id ?? null;
+    if (!targetId) return;
+    const line = lines.find((l) => l.id === targetId);
+    if (!line) return;
+    const ta = lineRefs.current.get(targetId);
+    const start = ta?.selectionStart ?? line.text.length;
+    const end = ta?.selectionEnd ?? line.text.length;
+    const next = line.text.slice(0, start) + snippet + line.text.slice(end);
+    handleLineChange(targetId, "text", next);
+    requestAnimationFrame(() => {
+      const t = lineRefs.current.get(targetId);
+      if (t) {
+        t.focus();
+        const pos = start + snippet.length;
+        t.selectionStart = pos;
+        t.selectionEnd = pos;
+      }
+    });
+  };
+
   // Character management
   const handleAddCharacter = () => {
     const newCharacter: Character = {
@@ -245,8 +273,13 @@ export function DialogueEditor({
 
                 {/* Text Input */}
                 <Textarea
+                  ref={(el) => {
+                    if (el) lineRefs.current.set(line.id, el);
+                    else lineRefs.current.delete(line.id);
+                  }}
                   value={line.text}
                   onChange={(e) => handleLineChange(line.id, "text", e.target.value)}
+                  onFocus={() => setActiveLineId(line.id)}
                   placeholder={character ? `${character.name} dice...` : "Selecciona un personaje..."}
                   disabled={disabled || !character}
                   className="min-h-[32px] h-8 py-1.5 text-sm resize-none flex-1"
@@ -290,6 +323,11 @@ export function DialogueEditor({
           <p className="text-xs text-muted-foreground text-center py-2">
             Agrega líneas de diálogo para comenzar
           </p>
+        )}
+
+        {/* Audio tags expresivos: insertan en la línea de diálogo seleccionada */}
+        {lines.length > 0 && (
+          <AudioTagPalette onInsert={insertAudioTag} disabled={disabled} />
         )}
       </div>
     </div>
