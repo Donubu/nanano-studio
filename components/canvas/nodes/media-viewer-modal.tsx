@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { TopazStudio } from "@/components/chat/topaz-studio";
 import { TopazStudioVideo } from "@/components/chat/topaz-studio-video";
+import { useCanvasContext } from "../canvas-context";
 
 export interface MediaViewerEntry {
   url: string;
@@ -89,6 +90,9 @@ export function MediaViewerModal({
   metadata,
   onClose,
 }: MediaViewerModalProps) {
+  // Lock de edición del canvas. En solo-ver el modal permite SOLO ver, marcar
+  // favorito y descargar; se ocultan Topaz Studio y la edición de tags.
+  const { canEdit } = useCanvasContext();
   const list: MediaViewerEntry[] =
     entries && entries.length > 0 ? entries : entry ? [entry] : [];
   const [index, setIndex] = useState(() =>
@@ -417,7 +421,8 @@ export function MediaViewerModal({
   const TypeIcon = current.type === "video" ? VideoIcon : ImageIcon;
 
   // ------ Topaz overlay (sits above the modal) ------
-  if (topazOpen && messageId) {
+  // Solo el editor puede abrir Topaz Studio (edita/genera nuevos assets).
+  if (topazOpen && messageId && canEdit) {
     if (current.type === "image") {
       return createPortal(
         <TopazStudio
@@ -533,7 +538,7 @@ export function MediaViewerModal({
                 </span>
               </button>
             ))}
-            {messageId != null && (
+            {messageId != null && canEdit && (
               <Button
                 variant="outline"
                 size="sm"
@@ -630,23 +635,33 @@ export function MediaViewerModal({
             </div>
           )}
 
-          {/* Tags */}
-          {messageId != null && (
+          {/* Tags — en solo-ver se muestran como chips de solo lectura. */}
+          {messageId != null && (canEdit || tags.length > 0) && (
             <div className="flex items-center gap-1.5 flex-wrap">
               <TagIcon className="h-3 w-3 text-muted-foreground shrink-0" />
-              {tags.map((t) => (
-                <button
-                  key={t.tag_id}
-                  onClick={() => handleRemoveTag(t.tag_id)}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium text-white hover:opacity-80 transition-opacity"
-                  style={{ backgroundColor: t.tag_color }}
-                  title="Click para quitar tag"
-                >
-                  {t.tag_name}
-                  <X className="h-2.5 w-2.5" />
-                </button>
-              ))}
-              {projectId != null && (
+              {tags.map((t) =>
+                canEdit ? (
+                  <button
+                    key={t.tag_id}
+                    onClick={() => handleRemoveTag(t.tag_id)}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium text-white hover:opacity-80 transition-opacity"
+                    style={{ backgroundColor: t.tag_color }}
+                    title="Click para quitar tag"
+                  >
+                    {t.tag_name}
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                ) : (
+                  <span
+                    key={t.tag_id}
+                    className="px-2 py-0.5 rounded-full text-[11px] font-medium text-white"
+                    style={{ backgroundColor: t.tag_color }}
+                  >
+                    {t.tag_name}
+                  </span>
+                )
+              )}
+              {projectId != null && canEdit && (
                 <div className="relative">
                   <button
                     onClick={() => setTagPickerOpen((v) => !v)}

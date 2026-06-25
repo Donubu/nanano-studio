@@ -23,7 +23,12 @@ export type CanvasSaveStatus = "idle" | "saving" | "saved" | "error";
  * Expone además `saveStatus` + `lastSavedAt` para el indicador visual del
  * toolbar. Errores se loggean a consola.
  */
-export function useCanvasPersist(conversationId: number | null) {
+export function useCanvasPersist(conversationId: number | null, canEdit = true) {
+  // Lock de edición. Si el usuario está en solo-ver, TODA persistencia se
+  // corta acá (chokepoint único, además del gating de UI). Vía ref para no
+  // recrear los callbacks ni arrastrar `canEdit` por todas las deps.
+  const canEditRef = useRef(canEdit);
+  canEditRef.current = canEdit;
   // Batch de movimientos: agrupa los node-drag-stop simultáneos (multi-select)
   // en un solo PATCH dentro de una ventana corta. Evita N fetches paralelos.
   const moveBatchRef = useRef<Map<string, { x: number; y: number }>>(new Map());
@@ -79,6 +84,7 @@ export function useCanvasPersist(conversationId: number | null) {
   // Movimiento de un nodo (drag-stop). Se batchea con otros movimientos
   // simultáneos en una ventana de 80ms.
   const moveNode = useCallback((id: string, x: number, y: number) => {
+    if (!canEditRef.current) return;
     moveBatchRef.current.set(id, { x, y });
     if (moveTimerRef.current) clearTimeout(moveTimerRef.current);
     moveTimerRef.current = setTimeout(() => {
@@ -114,7 +120,7 @@ export function useCanvasPersist(conversationId: number | null) {
   // UPSERT con debounce. Para ediciones de datos del nodo. El backend hace
   // INSERT ... ON DUPLICATE KEY UPDATE por (id, conversation_id).
   const saveNodeData = useCallback((node: Node) => {
-    if (!conversationId) return;
+    if (!conversationId || !canEditRef.current) return;
     saveBatchRef.current.set(node.id, node);
     setSaveStatus("saving");
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -125,7 +131,7 @@ export function useCanvasPersist(conversationId: number | null) {
 
   // UPSERT inmediato. Para `add node` y otras acciones discretas.
   const saveNode = useCallback(async (node: Node) => {
-    if (!conversationId) return;
+    if (!conversationId || !canEditRef.current) return;
     beginSave();
     try {
       const res = await fetch(`/api/conversations/${conversationId}/canvas/nodes`, {
@@ -146,7 +152,7 @@ export function useCanvasPersist(conversationId: number | null) {
   // automáticas del montaje. Sin esto, el resize vivía sólo en el state local
   // y se perdía al refrescar.
   const resizeNode = useCallback(async (id: string, width: number, height: number) => {
-    if (!conversationId) return;
+    if (!conversationId || !canEditRef.current) return;
     beginSave();
     try {
       const res = await fetch(`/api/conversations/${conversationId}/canvas/nodes`, {
@@ -164,7 +170,7 @@ export function useCanvasPersist(conversationId: number | null) {
   }, [conversationId, beginSave, endSave]);
 
   const deleteNodes = useCallback(async (nodeIds: string[]) => {
-    if (!conversationId || nodeIds.length === 0) return;
+    if (!conversationId || nodeIds.length === 0 || !canEditRef.current) return;
     // Cancela cualquier save de datos pendiente de estos nodos: si no, el
     // flush debounced reviviría (deleted_at = NULL) un nodo recién borrado.
     for (const id of nodeIds) saveBatchRef.current.delete(id);
@@ -184,7 +190,7 @@ export function useCanvasPersist(conversationId: number | null) {
   }, [conversationId, beginSave, endSave]);
 
   const createEdge = useCallback(async (edge: Edge) => {
-    if (!conversationId) return;
+    if (!conversationId || !canEditRef.current) return;
     beginSave();
     try {
       const res = await fetch(`/api/conversations/${conversationId}/canvas/edges`, {
@@ -201,7 +207,7 @@ export function useCanvasPersist(conversationId: number | null) {
   }, [conversationId, beginSave, endSave]);
 
   const deleteEdges = useCallback(async (edgeIds: string[]) => {
-    if (!conversationId || edgeIds.length === 0) return;
+    if (!conversationId || edgeIds.length === 0 || !canEditRef.current) return;
     beginSave();
     try {
       const res = await fetch(`/api/conversations/${conversationId}/canvas/edges`, {

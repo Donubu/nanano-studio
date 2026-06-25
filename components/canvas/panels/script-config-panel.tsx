@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { Node } from "@xyflow/react";
 import type { CanvasNodeData, ScriptNodeData } from "../lib/canvas-types";
 import type { CanvasGenerationConfig } from "../canvas-workspace";
+import { useCanvasContext } from "../canvas-context";
 
 interface ScriptConfigPanelProps {
   node: Node;
@@ -25,6 +26,7 @@ export function ScriptConfigPanel({
   onDelete,
   onClose,
 }: ScriptConfigPanelProps) {
+  const { canEdit } = useCanvasContext();
   const data = node.data as unknown as ScriptNodeData;
   const isLocked = data.locked === true;
 
@@ -47,32 +49,36 @@ export function ScriptConfigPanel({
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <Sparkles className="h-4 w-4 text-fuchsia-400" />
         <span className="text-sm font-medium flex-1">Configurar Guión</span>
-        <button
-          onClick={() => onUpdateData(node.id, { locked: !isLocked } as Partial<CanvasNodeData>)}
-          className={`p-1 rounded transition-colors ${
-            isLocked
-              ? "text-amber-500 bg-amber-500/10"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-          title={isLocked ? "Desbloquear nodo" : "Bloquear nodo"}
-        >
-          {isLocked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
-        </button>
-        <button
-          onClick={() => {
-            const connected = edges.some((e) => e.source === node.id || e.target === node.id);
-            const msg = connected
-              ? "Este Guión tiene escenas conectadas. Al eliminarlo se borrarán también todas las escenas y nodos aguas abajo. ¿Continuar?"
-              : "¿Eliminar el Guión?";
-            if (!window.confirm(msg)) return;
-            onDelete(node.id);
-            onClose();
-          }}
-          className="p-1 rounded text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
-          title="Eliminar Guión"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+        {canEdit && (
+          <>
+            <button
+              onClick={() => onUpdateData(node.id, { locked: !isLocked } as Partial<CanvasNodeData>)}
+              className={`p-1 rounded transition-colors ${
+                isLocked
+                  ? "text-amber-500 bg-amber-500/10"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              title={isLocked ? "Desbloquear nodo" : "Bloquear nodo"}
+            >
+              {isLocked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+            </button>
+            <button
+              onClick={() => {
+                const connected = edges.some((e) => e.source === node.id || e.target === node.id);
+                const msg = connected
+                  ? "Este Guión tiene escenas conectadas. Al eliminarlo se borrarán también todas las escenas y nodos aguas abajo. ¿Continuar?"
+                  : "¿Eliminar el Guión?";
+                if (!window.confirm(msg)) return;
+                onDelete(node.id);
+                onClose();
+              }}
+              className="p-1 rounded text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              title="Eliminar Guión"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </>
+        )}
         <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
           <X className="h-4 w-4" />
         </button>
@@ -83,8 +89,13 @@ export function ScriptConfigPanel({
           <Lock className="h-3 w-3" /> Nodo bloqueado
         </div>
       )}
+      {!canEdit && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-muted text-muted-foreground text-xs">
+          <Lock className="h-3 w-3" /> Solo lectura
+        </div>
+      )}
 
-      <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${isLocked ? "opacity-50 pointer-events-none" : ""}`}>
+      <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${isLocked ? "opacity-50 pointer-events-none" : !canEdit ? "pointer-events-none" : ""}`}>
         {/* Model selector */}
         {availableModels.length > 0 && (
           <div className="space-y-1.5">

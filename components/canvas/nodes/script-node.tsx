@@ -76,7 +76,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
   const nodeData = data as unknown as ScriptNodeData;
   const status = nodeData.status || "idle";
   const { updateNodeData } = useNodeUpdate();
-  const { conversationId } = useCanvasContext();
+  const { conversationId, canEdit } = useCanvasContext();
   const { setNodes, setEdges } = useReactFlow();
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -644,6 +644,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
           className="nodrag w-full text-xs bg-muted/30 rounded-md px-2 py-1.5 border-none outline-none resize-y min-h-[80px] max-h-[200px] placeholder:text-muted-foreground/50"
           rows={4}
         />
+        {canEdit && (
         <div className="space-y-1.5">
           <div className="flex gap-1.5">
             <button
@@ -695,6 +696,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
             </button>
           )}
         </div>
+        )}
         {!hasAnalysis && !isAnalyzing && promptPreview && (
           <p className="text-[10px] text-muted-foreground line-clamp-2">{promptPreview}</p>
         )}
@@ -845,11 +847,12 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
             <input
               type="checkbox"
               checked={!!nodeData.linkPreviousOutput}
+              disabled={!canEdit}
               onChange={(e) =>
                 updateNodeData(id, { ...nodeData, linkPreviousOutput: e.target.checked })
               }
               onKeyDown={stopProp}
-              className="mt-0.5 accent-violet-500"
+              className="mt-0.5 accent-violet-500 disabled:opacity-50"
             />
             <span>
               <span className="text-foreground/80">Encadenar salidas para continuidad visual</span>
@@ -861,23 +864,25 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
           </label>
 
           {/* Materialize button */}
-          <button
-            onClick={handleMaterialize}
-            disabled={isMaterializing || isAnalyzing || isStaging || sceneCount === 0}
-            className="nodrag w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded-md bg-violet-500/15 text-violet-400 hover:bg-violet-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {isMaterializing ? (
-              <>
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Generando escenas...
-              </>
-            ) : (
-              <>
-                <Sparkles className="h-3 w-3" />
-                Generar {sceneCount} escena{sceneCount === 1 ? "" : "s"}
-              </>
-            )}
-          </button>
+          {canEdit && (
+            <button
+              onClick={handleMaterialize}
+              disabled={isMaterializing || isAnalyzing || isStaging || sceneCount === 0}
+              className="nodrag w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded-md bg-violet-500/15 text-violet-400 hover:bg-violet-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isMaterializing ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Generando escenas...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-3 w-3" />
+                  Generar {sceneCount} escena{sceneCount === 1 ? "" : "s"}
+                </>
+              )}
+            </button>
+          )}
         </div>
       )}
 
@@ -968,6 +973,8 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
 // --- Subcomponents ---
 
 function InsertButton({ onClick, label }: { onClick: () => void; label: string }) {
+  const { canEdit } = useCanvasContext();
+  if (!canEdit) return null;
   return (
     <div className="flex items-center gap-1 group/insert">
       <div className="flex-1 h-px bg-border/30 group-hover/insert:bg-violet-500/30 transition-colors" />
@@ -1003,6 +1010,7 @@ function SceneCard({
   onMoveDown: () => void;
   onRemove: () => void;
 }) {
+  const { canEdit } = useCanvasContext();
   const targetIcon =
     scene.targetNodeType === "image" ? <ImageIcon className="h-2.5 w-2.5" /> :
     scene.targetNodeType === "video" ? <Video className="h-2.5 w-2.5" /> :
@@ -1022,7 +1030,8 @@ function SceneCard({
           value={scene.targetNodeType}
           onChange={(e) => onTargetChange(e.target.value as SceneTargetNodeType)}
           onKeyDown={stopProp}
-          className="nodrag ml-auto text-[10px] bg-background border border-border rounded px-1 py-0.5"
+          disabled={!canEdit}
+          className="nodrag ml-auto text-[10px] bg-background border border-border rounded px-1 py-0.5 disabled:opacity-60"
         >
           {targetTypeOptions.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -1030,29 +1039,33 @@ function SceneCard({
             </option>
           ))}
         </select>
-        <button
-          onClick={onMoveUp}
-          disabled={position === 0}
-          className="nodrag p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
-          title="Subir"
-        >
-          <ArrowUp className="h-2.5 w-2.5" />
-        </button>
-        <button
-          onClick={onMoveDown}
-          disabled={position === total - 1}
-          className="nodrag p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
-          title="Bajar"
-        >
-          <ArrowDown className="h-2.5 w-2.5" />
-        </button>
-        <button
-          onClick={onRemove}
-          className="nodrag p-0.5 rounded hover:bg-red-500/15 text-muted-foreground hover:text-red-400"
-          title="Eliminar escena"
-        >
-          <X className="h-2.5 w-2.5" />
-        </button>
+        {canEdit && (
+          <>
+            <button
+              onClick={onMoveUp}
+              disabled={position === 0}
+              className="nodrag p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Subir"
+            >
+              <ArrowUp className="h-2.5 w-2.5" />
+            </button>
+            <button
+              onClick={onMoveDown}
+              disabled={position === total - 1}
+              className="nodrag p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Bajar"
+            >
+              <ArrowDown className="h-2.5 w-2.5" />
+            </button>
+            <button
+              onClick={onRemove}
+              className="nodrag p-0.5 rounded hover:bg-red-500/15 text-muted-foreground hover:text-red-400"
+              title="Eliminar escena"
+            >
+              <X className="h-2.5 w-2.5" />
+            </button>
+          </>
+        )}
       </div>
       <NodeTextarea
         value={scene.text}

@@ -8,6 +8,7 @@ import { StatusIndicator, NodeDeleteButton } from "./node-status";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useUpstreamPromptLabel } from "../hooks/use-upstream-prompt-label";
+import { useCanvasContext } from "../canvas-context";
 import { ResizeHandle, nodeSizeClass } from "./resize-handle";
 
 const statusColors: Record<string, string> = {
@@ -20,8 +21,9 @@ const statusColors: Record<string, string> = {
 export const TextPracticanteNodeComponent = memo(function TextPracticanteNode({ id, data, selected, width, height }: NodeProps) {
   const nodeData = data as unknown as TextPracticanteNodeData;
   const status = nodeData.status || "idle";
-  const { updateNodeData } = useNodeUpdate();
+  const { updateNodeData, updateNodeDataLocal } = useNodeUpdate();
   const upstreamLabel = useUpstreamPromptLabel();
+  const { canEdit } = useCanvasContext();
 
   const history = nodeData.outputHistory || [];
   const totalOutputs = history.length;
@@ -34,12 +36,14 @@ export const TextPracticanteNodeComponent = memo(function TextPracticanteNode({ 
   const navigateTo = useCallback((index: number) => {
     const entry = history[index];
     if (!entry) return;
-    updateNodeData(id, {
+    // Paginar es "ver": en solo-ver se cambia el resultado mostrado localmente.
+    const apply = canEdit ? updateNodeData : updateNodeDataLocal;
+    apply(id, {
       ...nodeData,
       outputText: entry.text,
       outputMessageId: entry.messageId,
     });
-  }, [id, history, nodeData, updateNodeData]);
+  }, [id, history, nodeData, updateNodeData, updateNodeDataLocal, canEdit]);
 
   const deleteFromHistory = useCallback((index: number) => {
     const updated = history.filter((_, i) => i !== index);

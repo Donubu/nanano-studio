@@ -1,25 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ImageIcon, Video, MessageSquare, Play, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History } from "lucide-react";
+import { ImageIcon, Video, MessageSquare, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { CanvasNodeType, ExecutionProgress } from "./lib/canvas-types";
+import type { CanvasNodeType } from "./lib/canvas-types";
 
 interface CanvasToolbarProps {
   onAddNode: (type: CanvasNodeType) => void;
-  onRunAll: () => void;
   onClone: () => void;
   onLockAll: () => void;
   onReorder: () => void;
   isExecuting: boolean;
   isAllLocked: boolean;
-  executionProgress: ExecutionProgress | null;
   saveStatus?: "idle" | "saving" | "saved" | "error";
   lastSavedAt?: number | null;
   nodeCount: number;
   canvasMode: "pan" | "select";
   onCanvasModeChange: (mode: "pan" | "select") => void;
   onOpenHistory: () => void;
+  // Lock de edición: si false, el usuario está en solo-ver y se ocultan todas
+  // las herramientas de escritura, mostrando un badge con quién edita.
+  canEdit: boolean;
+  editorName?: string | null;
 }
 
 const nodeOptions: { type: CanvasNodeType; icon: typeof MessageSquare; label: string; isAI: boolean }[] = [
@@ -43,19 +45,19 @@ const paramsOptions: { type: CanvasNodeType; icon: typeof MessageSquare; label: 
 
 export function CanvasToolbar({
   onAddNode,
-  onRunAll,
   onClone,
   onLockAll,
   onReorder,
   isExecuting,
   isAllLocked,
-  executionProgress,
   saveStatus = "idle",
   lastSavedAt = null,
   nodeCount,
   canvasMode,
   onCanvasModeChange,
   onOpenHistory,
+  canEdit,
+  editorName,
 }: CanvasToolbarProps) {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
 
@@ -83,7 +85,19 @@ export function CanvasToolbar({
         </Button>
       </div>
 
-      {/* Primary toolbar: Node, Run, Save */}
+      {/* Solo-lectura: badge con quién está editando. No hay herramientas de escritura. */}
+      {!canEdit && (
+        <div className="flex items-center gap-1.5 bg-background/90 backdrop-blur-sm border border-amber-500/40 rounded-lg px-2.5 py-1.5 shadow-lg text-xs text-amber-500">
+          <Eye className="h-3.5 w-3.5" />
+          <span className="font-medium">Solo lectura</span>
+          {editorName && (
+            <span className="text-muted-foreground">· edita {editorName}</span>
+          )}
+        </div>
+      )}
+
+      {/* Primary toolbar: Node, Save — solo para el editor */}
+      {canEdit && (
       <div className="flex items-center gap-2 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-1.5 shadow-lg">
         {/* Add Node */}
         <div className="relative">
@@ -141,31 +155,13 @@ export function CanvasToolbar({
 
         <div className="w-px h-5 bg-border" />
 
-        {/* Run All */}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onRunAll}
-          disabled={isExecuting || nodeCount === 0}
-          className="gap-1.5 text-xs"
-        >
-          {isExecuting ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Play className="h-3.5 w-3.5" />
-          )}
-          {isExecuting && executionProgress
-            ? executionProgress.message || "Ejecutando..."
-            : "Run All"}
-        </Button>
-
-        <div className="w-px h-5 bg-border" />
-
         {/* Save status */}
         <SaveStatus saveStatus={saveStatus} lastSavedAt={lastSavedAt} />
       </div>
+      )}
 
-      {/* Secondary toolbar: Reorder, Clone, Lock All */}
+      {/* Secondary toolbar: Reorder, Clone, Lock All — solo para el editor */}
+      {canEdit && (
       <div className="flex items-center gap-1 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-1.5 shadow-lg">
         <Button
           variant="ghost"
@@ -220,6 +216,7 @@ export function CanvasToolbar({
           Historial
         </Button>
       </div>
+      )}
     </div>
   );
 }

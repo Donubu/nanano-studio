@@ -89,6 +89,34 @@ export function getUpstreamNodes(
 }
 
 /**
+ * Get all downstream node IDs reachable from a given node (transitive
+ * descendants), following edge direction source → target. NO incluye al
+ * propio nodo. Espejo de getUpstreamNodes; se usa para ejecutar el flujo de
+ * una raíz (su clausura de descendientes) sin tocar el resto del canvas.
+ */
+export function getDescendantNodes(
+  nodeId: string,
+  edges: CanvasEdge[]
+): string[] {
+  const descendants: string[] = [];
+  const visited = new Set<string>([nodeId]);
+  const stack = [nodeId];
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    for (const edge of edges) {
+      if (edge.source === current && !visited.has(edge.target)) {
+        visited.add(edge.target);
+        descendants.push(edge.target);
+        stack.push(edge.target);
+      }
+    }
+  }
+
+  return descendants;
+}
+
+/**
  * Get direct parent nodes and their connection info for a given node.
  */
 export function getDirectInputs(

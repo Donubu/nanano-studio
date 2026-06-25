@@ -12,6 +12,9 @@ interface CanvasContextValue {
   // Update + persist node data from inside a node component. Hace el merge en
   // el state, persiste (UPSERT con debounce) y emite a los colaboradores.
   persistNodeData: (nodeId: string, updates: Record<string, unknown>) => void;
+  // Lock de edición: false = el usuario está en solo-ver (no es el editor de la
+  // sala). Los componentes de nodo ocultan controles de escritura con esto.
+  canEdit: boolean;
 }
 
 const CanvasContext = createContext<CanvasContextValue>({
@@ -21,6 +24,7 @@ const CanvasContext = createContext<CanvasContextValue>({
   openImagePicker: () => {},
   emitNodeData: () => {},
   persistNodeData: () => {},
+  canEdit: true,
 });
 
 export const CanvasProvider = CanvasContext.Provider;

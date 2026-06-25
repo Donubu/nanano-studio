@@ -14,6 +14,8 @@ import {
   addEdge,
   BackgroundVariant,
   SelectionMode,
+  NodeToolbar,
+  Position,
   type Connection,
   type NodeTypes,
   type OnConnect,
@@ -46,8 +48,9 @@ import { useCanvasExecution } from "./hooks/use-canvas-execution";
 import { useUndoRedo } from "./hooks/use-undo-redo";
 import { isValidConnection, wouldCreateCycle, getCompatibleTargetTypes, getCompatibleSourceTypes } from "./lib/connection-rules";
 import { autoLayoutPositions } from "./lib/auto-layout";
-import { getDefaultNodeData, type CanvasNodeType, type CanvasNodeData, HANDLE_IDS } from "./lib/canvas-types";
-import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Type, Settings, Bot, Sparkles, Film } from "lucide-react";
+import { getDefaultNodeData, type CanvasNodeType, type CanvasNodeData, type CanvasEdge, HANDLE_IDS } from "./lib/canvas-types";
+import { getDescendantNodes } from "./lib/topological-sort";
+import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Type, Settings, Bot, Sparkles, Film, Play, Loader2 } from "lucide-react";
 import { CanvasProvider } from "./canvas-context";
 import { LabeledEdge } from "./edges/labeled-edge";
 import { ImagePickerModal } from "@/components/chat/image-picker-modal";
@@ -341,17 +344,8 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     return { x: 0, y: 0, zoom: 1 };
   }, [realConversationId]);
 
-  // Persistencia granular: cada acción del usuario (add, move-stop, update,
-  // delete, connect, disconnect) se persiste inmediatamente vía endpoints
-  // granulares. Reemplaza el auto-save bulk que era destructivo en multi-user.
-  const persist = useCanvasPersist(realConversationId || null);
-
-  const handleCanvasRestored = useCallback(() => {
-    if (!realConversationId) return;
-    loadCanvas(realConversationId, false);
-  }, [realConversationId, loadCanvas]);
-
-  // Collaboration
+  // Collaboration — declarado antes de la persistencia porque el lock de
+  // edición (`canEdit`) sale de acá y la persistencia se corta cuando es false.
   const { data: session } = useSession();
   const collabUser = useMemo(() => {
     if (!session?.user) return undefined;
@@ -367,6 +361,27 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     enabled: isLoaded && realConversationId > 0,
     user: collabUser,
   });
+
+  // Lock de edición: solo el primer usuario presente edita; el resto, solo-ver.
+  const canEdit = collab.canEdit;
+  // Nombre del editor actual (para el badge de solo-lectura). Solo relevante
+  // cuando NO soy el editor, así que el editor vive en remoteUsers.
+  const editorName = useMemo(() => {
+    if (collab.editorUserId == null) return null;
+    if (collab.editorUserId === collab.myUserId) return "tú";
+    return collab.remoteUsers.find((u) => u.userId === collab.editorUserId)?.name ?? null;
+  }, [collab.editorUserId, collab.myUserId, collab.remoteUsers]);
+
+  // Persistencia granular: cada acción del usuario (add, move-stop, update,
+  // delete, connect, disconnect) se persiste inmediatamente vía endpoints
+  // granulares. Reemplaza el auto-save bulk que era destructivo en multi-user.
+  // Con canEdit=false toda escritura se corta dentro del hook.
+  const persist = useCanvasPersist(realConversationId || null, canEdit);
+
+  const handleCanvasRestored = useCallback(() => {
+    if (!realConversationId) return;
+    loadCanvas(realConversationId, false);
+  }, [realConversationId, loadCanvas]);
 
   // Sync collab ref for use in callbacks declared before collab hook
   collabRef.current.emitNodeMove = collab.emitNodeMove;
@@ -427,7 +442,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   }, [setNodes, setEdges]);
 
   // Execution
-  const { executeNode, executeAll, isExecuting, executionProgress } = useCanvasExecution({
+  const { executeNode, executeFromRoot, isExecuting } = useCanvasExecution({
     conversationId: realConversationId,
     nodes,
     edges,
@@ -435,11 +450,28 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     generationConfig,
   });
 
+  // Nodos raíz (sin edges entrantes) cuya clausura de descendientes contiene al
+  // menos un nodo IA ejecutable. Cada uno muestra su propio botón "RUN ALL" que
+  // corre SOLO su flujo. Reemplaza al "Run All" global del toolbar.
+  const flowRoots = useMemo(() => {
+    const aiNodeTypes = new Set(["text", "text-practicante", "image", "video"]);
+    const hasIncoming = new Set(edges.map((e) => e.target));
+    return nodes.filter((n) => {
+      if (hasIncoming.has(n.id)) return false;
+      const closure = [n.id, ...getDescendantNodes(n.id, edges as unknown as CanvasEdge[])];
+      return closure.some((id) => {
+        const node = nodes.find((x) => x.id === id);
+        return node ? aiNodeTypes.has(node.type!) : false;
+      });
+    });
+  }, [nodes, edges]);
+
   // Connection handler with validation. We generate a short edge ID instead of
   // letting xyflow concatenate source+sourceHandle+target+targetHandle, which
   // can exceed canvas_edges.id VARCHAR(255) when handles and node IDs stack up.
   const onConnect: OnConnect = useCallback(
     (connection: Connection) => {
+      if (!canEdit) return;
       if (!isValidConnection(connection, nodes, edges)) return;
       if (wouldCreateCycle(edges, connection.source!, connection.target!)) return;
       takeSnapshot();
@@ -481,6 +513,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   // Places near toolbar (top-left area of visible canvas)
   const addNode = useCallback(
     async (type: CanvasNodeType) => {
+      if (!canEdit) return;
       await ensureConversation();
       takeSnapshot();
       nodeIdCounter.current += 1;
@@ -510,6 +543,9 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   // leer del nodes en clausura (que puede estar desactualizado).
   const updateNodeData = useCallback(
     (nodeId: string, updates: Partial<CanvasNodeData>) => {
+      // En solo-ver no se edita nada (chokepoint del context persistNodeData
+      // y de onUpdateData de los paneles de config).
+      if (!canEdit) return;
       let mergedNode: Node | null = null;
       setNodes((nds) => {
         return nds.map((n) => {
@@ -528,6 +564,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   // Delete node — el backend soft-deletea también los edges incidentes.
   const deleteNode = useCallback(
     (nodeId: string) => {
+      if (!canEdit) return;
       setNodes((nds) => nds.filter((n) => n.id !== nodeId));
       setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
       if (selectedNodeId === nodeId) setSelectedNodeId(null);
@@ -678,7 +715,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
 
   // Auto-layout: reposition every node into columns based on topological depth
   const reorderNodes = useCallback(() => {
-    if (nodes.length === 0) return;
+    if (!canEdit || nodes.length === 0) return;
     const confirmed = window.confirm(
       "¿Reordenar todos los nodos?\n\n" +
       "Se reorganizarán en formato timeline vertical (de arriba hacia abajo): " +
@@ -709,6 +746,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   const isAllLocked = nodes.length > 0 && nodes.every((n) => (n.data as Record<string, unknown>).locked === true);
 
   const lockAllNodes = useCallback(() => {
+    if (!canEdit) return;
     const newLocked = !isAllLocked;
     takeSnapshot();
     let updatedNodes: Node[] = [];
@@ -813,6 +851,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
         openImagePicker: openImagePicker || (() => {}),
         emitNodeData: emitNodeDataStable,
         persistNodeData: updateNodeData,
+        canEdit,
       }}
     >
     <div ref={canvasContainerRef} className="flex h-full w-full relative" tabIndex={-1}>
@@ -835,7 +874,10 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
           nodeTypes={nodeTypes}
           defaultViewport={defaultViewport}
           fitView={!isLoaded || nodes.length === 0}
-          deleteKeyCode={["Backspace", "Delete"]}
+          nodesDraggable={canEdit}
+          nodesConnectable={canEdit}
+          edgesReconnectable={canEdit}
+          deleteKeyCode={canEdit ? ["Backspace", "Delete"] : null}
           minZoom={0.1}
           maxZoom={2}
           edgeTypes={edgeTypes}
@@ -848,22 +890,46 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
         >
           <Background variant={BackgroundVariant.Lines} gap={24} size={1} color="var(--color-border)" className="opacity-30" />
           <Controls position="bottom-left" showInteractive={false} />
+
+          {/* Botón "RUN ALL" por nodo raíz: corre solo el flujo de esa raíz.
+              Solo para el editor (en solo-ver no se ejecuta nada). */}
+          {canEdit && flowRoots.map((root) => (
+            <NodeToolbar
+              key={`run-${root.id}`}
+              nodeId={root.id}
+              isVisible
+              position={Position.Top}
+              align="start"
+              offset={8}
+            >
+              <button
+                onClick={() => executeFromRoot(root.id)}
+                disabled={isExecuting}
+                title="Ejecutar solo este flujo (este nodo y todo lo que depende de él)"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary text-primary-foreground text-xs font-medium shadow-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isExecuting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                RUN ALL
+              </button>
+            </NodeToolbar>
+          ))}
+
           <Panel position="top-left" className="!left-12">
             <CanvasToolbar
               onAddNode={addNode}
-              onRunAll={executeAll}
               onClone={cloneCanvas}
               onLockAll={lockAllNodes}
               onReorder={reorderNodes}
               isExecuting={isExecuting}
               isAllLocked={isAllLocked}
-              executionProgress={executionProgress}
               saveStatus={persist.saveStatus}
               lastSavedAt={persist.lastSavedAt}
               nodeCount={nodes.length}
               canvasMode={canvasMode}
               onCanvasModeChange={setCanvasMode}
               onOpenHistory={() => setHistoryOpen(true)}
+              canEdit={canEdit}
+              editorName={editorName}
             />
           </Panel>
           <Panel position="top-right">

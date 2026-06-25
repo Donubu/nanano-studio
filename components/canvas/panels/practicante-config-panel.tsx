@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { Node } from "@xyflow/react";
 import type { CanvasNodeData, TextPracticanteNodeData } from "../lib/canvas-types";
+import { useCanvasContext } from "../canvas-context";
 
 interface PracticanteAgent {
   id: string;
@@ -33,6 +34,7 @@ export function PracticanteConfigPanel({
   isExecuting,
   onClose,
 }: PracticanteConfigPanelProps) {
+  const { canEdit } = useCanvasContext();
   const data = node.data as unknown as TextPracticanteNodeData;
   const isGenerating = data.status === "generating";
   const isLocked = data.locked === true;
@@ -94,25 +96,29 @@ export function PracticanteConfigPanel({
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <Bot className="h-4 w-4 text-amber-400" />
         <span className="text-sm font-medium flex-1">Configurar Practicante</span>
-        <button
-          onClick={() => onUpdateData(node.id, { locked: !isLocked } as Partial<CanvasNodeData>)}
-          className={`p-1 rounded transition-colors ${isLocked ? "text-amber-500 bg-amber-500/10" : "text-muted-foreground hover:text-foreground"}`}
-          title={isLocked ? "Desbloquear nodo" : "Bloquear nodo"}
-        >
-          {isLocked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
-        </button>
-        <button
-          onClick={() => {
-            const connected = edges.some((e) => e.source === node.id || e.target === node.id);
-            if (connected && !window.confirm("Este nodo tiene conexiones. ¿Eliminar?")) return;
-            onDelete(node.id);
-            onClose();
-          }}
-          className="p-1 rounded text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
-          title="Eliminar nodo"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+        {canEdit && (
+          <>
+            <button
+              onClick={() => onUpdateData(node.id, { locked: !isLocked } as Partial<CanvasNodeData>)}
+              className={`p-1 rounded transition-colors ${isLocked ? "text-amber-500 bg-amber-500/10" : "text-muted-foreground hover:text-foreground"}`}
+              title={isLocked ? "Desbloquear nodo" : "Bloquear nodo"}
+            >
+              {isLocked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+            </button>
+            <button
+              onClick={() => {
+                const connected = edges.some((e) => e.source === node.id || e.target === node.id);
+                if (connected && !window.confirm("Este nodo tiene conexiones. ¿Eliminar?")) return;
+                onDelete(node.id);
+                onClose();
+              }}
+              className="p-1 rounded text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              title="Eliminar nodo"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </>
+        )}
         <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
           <X className="h-4 w-4" />
         </button>
@@ -123,9 +129,14 @@ export function PracticanteConfigPanel({
           <Lock className="h-3 w-3" /> Nodo bloqueado
         </div>
       )}
+      {!canEdit && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-muted text-muted-foreground text-xs">
+          <Lock className="h-3 w-3" /> Solo lectura
+        </div>
+      )}
 
       {/* Content */}
-      <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${isLocked ? "opacity-50 pointer-events-none" : ""}`}>
+      <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${isLocked ? "opacity-50 pointer-events-none" : !canEdit ? "pointer-events-none" : ""}`}>
         {/* Prompt */}
         <div className="space-y-1.5">
           <Label className="text-xs">Prompt</Label>
@@ -292,22 +303,24 @@ export function PracticanteConfigPanel({
         )}
       </div>
 
-      {/* Footer actions */}
-      <div className="flex items-center gap-2 px-4 py-3 border-t border-border">
-        <Button
-          size="sm"
-          onClick={() => onExecute(node.id)}
-          disabled={isGenerating || isExecuting || isLocked}
-          className="flex-1 gap-1.5"
-        >
-          {isGenerating ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Play className="h-3.5 w-3.5" />
-          )}
-          {isGenerating ? "Ejecutando..." : data.dryRun ? "Analizar (dry-run)" : "Ejecutar"}
-        </Button>
-      </div>
+      {/* Footer actions — en solo-ver no se puede ejecutar */}
+      {canEdit && (
+        <div className="flex items-center gap-2 px-4 py-3 border-t border-border">
+          <Button
+            size="sm"
+            onClick={() => onExecute(node.id)}
+            disabled={isGenerating || isExecuting || isLocked}
+            className="flex-1 gap-1.5"
+          >
+            {isGenerating ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Play className="h-3.5 w-3.5" />
+            )}
+            {isGenerating ? "Ejecutando..." : data.dryRun ? "Analizar (dry-run)" : "Ejecutar"}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

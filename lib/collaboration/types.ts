@@ -33,7 +33,12 @@ export interface ClientToServerEvents {
 // Server → Client events
 export interface ServerToClientEvents {
   "auth:success": (data: { userId: number; color: string }) => void;
-  "presence:update": (data: { users: CollabUser[] }) => void;
+  // `editorUserId`: el usuario que tiene el lock de edición de la sala (el
+  // primero presente). null = sala sin editor (libre para el próximo que llegue).
+  "presence:update": (data: { users: CollabUser[]; editorUserId: number | null }) => void;
+  // Se emite cuando cambia el editor (al asignarse o al traspasarse en un
+  // disconnect). Todos los clientes recalculan su `canEdit` con esto.
+  "editor:update": (data: { editorUserId: number | null }) => void;
   "user:joined": (data: { user: CollabUser }) => void;
   "user:left": (data: { userId: number }) => void;
   "cursor:update": (data: { userId: number; x: number; y: number }) => void;

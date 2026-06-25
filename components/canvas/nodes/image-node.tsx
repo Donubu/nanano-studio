@@ -22,9 +22,9 @@ const statusColors: Record<string, string> = {
 export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, width, height }: NodeProps) {
   const nodeData = data as unknown as ImageNodeData;
   const status = nodeData.status || "idle";
-  const { updateNodeData } = useNodeUpdate();
+  const { updateNodeData, updateNodeDataLocal } = useNodeUpdate();
   const upstreamLabel = useUpstreamPromptLabel();
-  const { projectId } = useCanvasContext();
+  const { projectId, canEdit } = useCanvasContext();
 
   const history = nodeData.outputHistory || [];
   const totalOutputs = history.length;
@@ -37,12 +37,15 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
   const navigateTo = useCallback((index: number) => {
     const entry = history[index];
     if (!entry) return;
-    updateNodeData(id, {
+    // Paginar es "ver": en solo-ver se cambia el resultado mostrado de forma
+    // local (sin persistir ni broadcastear).
+    const apply = canEdit ? updateNodeData : updateNodeDataLocal;
+    apply(id, {
       ...nodeData,
       outputUrl: entry.url,
       outputMessageId: entry.messageId,
     });
-  }, [id, history, nodeData, updateNodeData]);
+  }, [id, history, nodeData, updateNodeData, updateNodeDataLocal, canEdit]);
 
   const deleteFromHistory = useCallback((index: number) => {
     const updated = history.filter((_, i) => i !== index);

@@ -35,7 +35,7 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
 }: NodeProps) {
   const nodeData = data as unknown as ParamsSceneNodeData;
   const { updateNodeData } = useNodeUpdate();
-  const { conversationId } = useCanvasContext();
+  const { conversationId, canEdit } = useCanvasContext();
   const { getNode } = useReactFlow();
 
   const visualRefConnections = useHandleConnections({
@@ -173,7 +173,7 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
           className="nodrag w-full text-xs bg-muted/30 rounded-md px-2 py-1.5 border-none outline-none resize-y min-h-[80px] max-h-[200px] placeholder:text-muted-foreground/50"
           rows={4}
         />
-        {hasGallery && (
+        {hasGallery && canEdit && (
           <button
             onClick={handleExtractStyle}
             disabled={isExtracting}

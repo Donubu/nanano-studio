@@ -14,7 +14,7 @@ import { MediaViewerModal } from "./media-viewer-modal";
 export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data, selected, width, height }: NodeProps) {
   const nodeData = data as unknown as StaticImageNodeData;
   const { updateNodeData } = useNodeUpdate();
-  const { openImagePicker, projectId } = useCanvasContext();
+  const { openImagePicker, projectId, canEdit } = useCanvasContext();
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
@@ -43,6 +43,7 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
   }, [uploadAndSetImage]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    if (!canEdit) return;
     const items = e.clipboardData?.items;
     if (!items) return;
     for (const item of items) {
@@ -54,7 +55,7 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
         break;
       }
     }
-  }, [uploadAndSetImage]);
+  }, [uploadAndSetImage, canEdit]);
 
   return (
     <div
@@ -100,22 +101,24 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
                 <ZoomIn className="h-3.5 w-3.5" />
               </button>
             </div>
-            <div className="flex gap-1">
-              <button
-                onClick={() => inputRef.current?.click()}
-                className="flex-1 py-1 text-[10px] rounded border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1 text-muted-foreground"
-              >
-                <Upload className="h-3 w-3" /> Subir
-              </button>
-              <button
-                onClick={() => openImagePicker(setImage)}
-                className="flex-1 py-1 text-[10px] rounded border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1 text-muted-foreground"
-              >
-                <FolderOpen className="h-3 w-3" /> Galería
-              </button>
-            </div>
+            {canEdit && (
+              <div className="flex gap-1">
+                <button
+                  onClick={() => inputRef.current?.click()}
+                  className="flex-1 py-1 text-[10px] rounded border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1 text-muted-foreground"
+                >
+                  <Upload className="h-3 w-3" /> Subir
+                </button>
+                <button
+                  onClick={() => openImagePicker(setImage)}
+                  className="flex-1 py-1 text-[10px] rounded border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1 text-muted-foreground"
+                >
+                  <FolderOpen className="h-3 w-3" /> Galería
+                </button>
+              </div>
+            )}
           </div>
-        ) : (
+        ) : canEdit ? (
           <div className="flex flex-col gap-1.5">
             <button
               onClick={() => inputRef.current?.click()}
@@ -131,6 +134,8 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
               <FolderOpen className="h-3.5 w-3.5" /> Seleccionar de galería
             </button>
           </div>
+        ) : (
+          <div className="py-6 text-center text-[10px] text-muted-foreground">Sin imagen</div>
         )}
         <input ref={inputRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden" />
       </div>

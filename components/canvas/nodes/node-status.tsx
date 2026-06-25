@@ -2,6 +2,7 @@
 
 import { useReactFlow, useEdges } from "@xyflow/react";
 import { Check, Loader2, AlertCircle, Trash2, Zap } from "lucide-react";
+import { useCanvasContext } from "../canvas-context";
 
 export function StatusIndicator({ status }: { status: string }) {
   switch (status) {
@@ -27,6 +28,10 @@ export function AIBadge() {
 export function NodeDeleteButton({ nodeId }: { nodeId: string }) {
   const { deleteElements } = useReactFlow();
   const edges = useEdges();
+  const { canEdit } = useCanvasContext();
+
+  // En solo-ver no se puede eliminar nodos.
+  if (!canEdit) return null;
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();

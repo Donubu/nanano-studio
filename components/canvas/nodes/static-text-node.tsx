@@ -6,11 +6,13 @@ import { Type } from "lucide-react";
 import { HANDLE_IDS, type StaticTextNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
 import { useNodeUpdate } from "../hooks/use-node-update";
+import { useCanvasContext } from "../canvas-context";
 import { ResizeHandle, nodeSizeClass } from "./resize-handle";
 
 export const StaticTextNodeComponent = memo(function StaticTextNode({ id, data, selected, width, height }: NodeProps) {
   const nodeData = data as unknown as StaticTextNodeData;
   const { updateNodeData } = useNodeUpdate();
+  const { canEdit } = useCanvasContext();
 
   // Local state mirrors the inputs so typing stays in sync with the DOM.
   // Without this, the controlled value can lag a keystroke while the update
@@ -32,16 +34,18 @@ export const StaticTextNodeComponent = memo(function StaticTextNode({ id, data, 
   }, [nodeData.content]);
 
   const handleLabelChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) return;
     const value = e.target.value;
     setLocalLabel(value);
     updateNodeData(id, { label: value });
-  }, [id, updateNodeData]);
+  }, [id, updateNodeData, canEdit]);
 
   const handleContentChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (!canEdit) return;
     const value = e.target.value;
     setLocalContent(value);
     updateNodeData(id, { content: value });
-  }, [id, updateNodeData]);
+  }, [id, updateNodeData, canEdit]);
 
   return (
     <div
@@ -52,7 +56,7 @@ export const StaticTextNodeComponent = memo(function StaticTextNode({ id, data, 
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
         <Type className="h-3.5 w-3.5 text-blue-400 shrink-0" />
-        <input value={localLabel} onChange={handleLabelChange} placeholder="Texto" className="text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate placeholder:text-muted-foreground/50" />
+        <input value={localLabel} onChange={handleLabelChange} readOnly={!canEdit} placeholder="Texto" className="text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate placeholder:text-muted-foreground/50" />
         <NodeDeleteButton nodeId={id} />
       </div>
 
@@ -61,6 +65,7 @@ export const StaticTextNodeComponent = memo(function StaticTextNode({ id, data, 
         <textarea
           value={localContent}
           onChange={handleContentChange}
+          readOnly={!canEdit}
           placeholder="Escribe texto que se usará como input..."
           className="w-full text-xs bg-transparent border-none outline-none resize-y min-h-[50px] max-h-[200px] placeholder:text-muted-foreground/50"
           rows={3}

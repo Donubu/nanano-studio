@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import type { Node } from "@xyflow/react";
 import type { CanvasNodeData, CanvasNodeStatus, ExecutionProgress, ImageNodeData, TextNodeData, TextPracticanteNodeData, VideoNodeData, StaticTextNodeData, StaticImageNodeData, StaticImageGroupNodeData, OutputHistoryEntry, PracticanteFile, SceneNodeData, ParamsSceneNodeData } from "../lib/canvas-types";
 import { HANDLE_IDS, baseHandleId } from "../lib/canvas-types";
-import { topologicalSort, getDirectInputs } from "../lib/topological-sort";
+import { topologicalSort, getDirectInputs, getDescendantNodes } from "../lib/topological-sort";
 import type { CanvasEdge } from "../lib/canvas-types";
 import type { CanvasGenerationConfig } from "../canvas-workspace";
 
@@ -855,7 +855,81 @@ export function useCanvasExecution({
     }
   }, [nodes, edges, runNode]);
 
-  return { executeNode, executeAll, isExecuting, executionProgress };
+  /**
+   * Ejecuta SOLO el flujo de una raíz: el nodo raíz y toda su clausura de
+   * descendientes, en orden topológico. No toca ningún otro nodo del canvas.
+   *
+   * El chequeo de upstream queda ACTIVO (skipUpstreamCheck=false): si un nodo
+   * aguas abajo pertenece también a otro flujo (tiene un ancestro fuera de esta
+   * clausura que no está completado), su readiness falla y se marca
+   * "Dependencias no completadas" en vez de ejecutarse con input parcial. Si ese
+   * otro ancestro ya estaba completado de una corrida previa, igual corre bien.
+   */
+  const executeFromRoot = useCallback(async (rootId: string) => {
+    const levels = topologicalSort(nodes, edges);
+    if (!levels) {
+      alert("Se detectó un ciclo en el grafo. Elimina conexiones circulares.");
+      return;
+    }
+
+    // Clausura del flujo: raíz + descendientes.
+    const subset = new Set<string>([rootId, ...getDescendantNodes(rootId, edges)]);
+
+    setIsExecuting(true);
+    abortRef.current = false;
+    currentRunIdRef.current = `run-${Date.now()}`;
+    let completed = 0;
+
+    const liveNodes = nodes.map((n) => ({ ...n, data: { ...n.data } }));
+
+    const aiNodeTypes = new Set(["text", "text-practicante", "image", "video"]);
+    const resetData: Partial<CanvasNodeData> = {
+      status: "idle",
+      outputUrl: undefined,
+      outputText: undefined,
+      outputMessageId: undefined,
+      errorMessage: undefined,
+    };
+    // Resetea SOLO los nodos IA de este flujo (no los de otros flujos).
+    for (const liveNode of liveNodes) {
+      if (subset.has(liveNode.id) && aiNodeTypes.has(liveNode.type!)) {
+        liveNode.data = { ...liveNode.data, ...resetData };
+        updateNodeStatus(setNodes, liveNode.id, resetData);
+      }
+    }
+
+    const total = liveNodes.filter((n) => subset.has(n.id) && aiNodeTypes.has(n.type!)).length;
+
+    try {
+      for (const level of levels) {
+        if (abortRef.current) break;
+
+        for (const nodeId of level) {
+          if (abortRef.current) break;
+          if (!subset.has(nodeId)) continue;
+
+          const liveNode = liveNodes.find((n) => n.id === nodeId);
+          if (!liveNode) continue;
+          if (!aiNodeTypes.has(liveNode.type!)) continue;
+
+          setExecutionProgress({
+            nodeId,
+            status: "generating",
+            message: `Ejecutando ${completed + 1}/${total}...`,
+          });
+
+          await runNode(nodeId, liveNodes, false);
+          completed++;
+        }
+      }
+    } finally {
+      currentRunIdRef.current = null;
+      setIsExecuting(false);
+      setExecutionProgress(null);
+    }
+  }, [nodes, edges, runNode]);
+
+  return { executeNode, executeAll, executeFromRoot, isExecuting, executionProgress };
 }
 
 // --- Individual execution functions ---
