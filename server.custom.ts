@@ -22,6 +22,42 @@ const handle = app.getRequestHandler();
 // In-memory presence per room
 const roomPresence = new Map<string, Map<number, { userId: number; name: string; image: string | null; color: string }>>();
 
+// Editor lock por sala: solo el primer presente edita; el resto, solo-ver.
+// OJO: esta lógica está DUPLICADA en lib/collaboration/collab-server.ts (que
+// usa producción vía server-wrapper.js). Cualquier cambio acá hay que
+// espejarlo allá. Ver docs/canvas-editor-lock.md.
+const roomEditor = new Map<string, number>();
+
+function getEditor(room: string): number | null {
+  return roomEditor.get(room) ?? null;
+}
+
+// Resuelve el editor con auto-saneo: si el guardado ya no está presente
+// (desconexión perdida / ghost por reconexión), reasigna al primer presente,
+// así nadie queda atrapado viendo un editor fantasma.
+function ensureEditor(room: string): number | null {
+  const presence = roomPresence.get(room);
+  if (!presence || presence.size === 0) {
+    roomEditor.delete(room);
+    return null;
+  }
+  const current = roomEditor.get(room);
+  if (current !== undefined && presence.has(current)) return current;
+  const first = presence.keys().next().value!;
+  roomEditor.set(room, first);
+  return first;
+}
+
+// Si el que sale tenía el lock, lo traspasa al siguiente presente. Asume que
+// `leavingUserId` ya fue removido de la presencia. Devuelve true si cambió.
+function releaseEditorIfHolder(room: string, leavingUserId: number): boolean {
+  if (roomEditor.get(room) !== leavingUserId) return false;
+  roomEditor.delete(room);
+  const next = roomPresence.get(room)?.keys().next().value;
+  if (next !== undefined) roomEditor.set(room, next);
+  return true;
+}
+
 app.prepare().then(() => {
   const httpServer = createServer((req, res) => {
     handle(req, res);
@@ -75,6 +111,10 @@ app.prepare().then(() => {
         socket.leave(prevRoom);
         roomPresence.get(prevRoom)?.delete(userId);
         socket.to(prevRoom).emit("user:left", { userId });
+        if (releaseEditorIfHolder(prevRoom, userId)) {
+          socket.to(prevRoom).emit("editor:update", { editorUserId: getEditor(prevRoom) });
+        }
+        if (roomPresence.get(prevRoom)?.size === 0) roomPresence.delete(prevRoom);
       }
 
       const room = `canvas:${conversationId}`;
@@ -84,11 +124,18 @@ app.prepare().then(() => {
       if (!roomPresence.has(room)) roomPresence.set(room, new Map());
       roomPresence.get(room)!.set(userId, { userId, name, image, color });
 
-      const users = Array.from(roomPresence.get(room)!.values());
-      socket.emit("presence:update", { users });
-      socket.to(room).emit("user:joined", { user: { userId, name, image, color } });
+      // Resuelve el editor (auto-sanea si el guardado ya no está presente).
+      const prevEditor = getEditor(room);
+      const editorUserId = ensureEditor(room);
 
-      console.log(`[Collab] ${name} joined canvas:${conversationId} (${users.length} users)`);
+      const users = Array.from(roomPresence.get(room)!.values());
+      socket.emit("presence:update", { users, editorUserId });
+      socket.to(room).emit("user:joined", { user: { userId, name, image, color } });
+      if (editorUserId !== prevEditor) {
+        socket.to(room).emit("editor:update", { editorUserId });
+      }
+
+      console.log(`[Collab] ${name} joined canvas:${conversationId} (${users.length} users, editor=${editorUserId})`);
     });
 
     // Cursor
@@ -162,7 +209,14 @@ app.prepare().then(() => {
         const room = `canvas:${socket.data.conversationId}`;
         roomPresence.get(room)?.delete(userId);
         socket.to(room).emit("user:left", { userId });
-        if (roomPresence.get(room)?.size === 0) roomPresence.delete(room);
+        // Si el que se va tenía el lock, traspasarlo al siguiente presente.
+        if (releaseEditorIfHolder(room, userId)) {
+          socket.to(room).emit("editor:update", { editorUserId: getEditor(room) });
+        }
+        if (roomPresence.get(room)?.size === 0) {
+          roomPresence.delete(room);
+          roomEditor.delete(room);
+        }
         console.log(`[Collab] ${name} left canvas:${socket.data.conversationId}`);
       }
     });

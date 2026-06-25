@@ -1,6 +1,7 @@
 "use client";
 
 import { NodeResizeControl } from "@xyflow/react";
+import { useCanvasContext } from "../canvas-context";
 
 interface ResizeHandleProps {
   /** Minimum width in px the user can shrink the node to. */
@@ -29,6 +30,9 @@ export function ResizeHandle({
   minHeight = 80,
   keepAspectRatio = false,
 }: ResizeHandleProps) {
+  const { canEdit } = useCanvasContext();
+  // En solo-ver no se puede redimensionar ningún nodo.
+  if (!canEdit) return null;
   return (
     <NodeResizeControl
       position="bottom-right"

@@ -29,12 +29,56 @@ type CollabSocket = import("socket.io").Socket<ClientToServerEvents, ServerToCli
 // In-memory presence per room (also stored in Redis if available)
 const roomPresence = new Map<string, Map<number, CollabUser>>();
 
+// Editor lock por sala: solo el primer usuario presente puede editar; el resto
+// queda en solo-ver. Si el editor se desconecta, el lock se traspasa al
+// siguiente presente (el Map de presencia preserva orden de inserción, así que
+// el "siguiente más antiguo" es el primer key restante). Estado efímero
+// in-memory: con nginx apuntando a un solo slot activo todos los clientes vivos
+// están en la misma instancia, así que el orden de llegada es consistente.
+// TODO(futuro): para enforcement server-side de las escrituras REST, espejar
+// este editor en Redis (`canvas:editor:<convId>`) y rechazar en los endpoints
+// de canvas las mutaciones de quien no sea el editor. Ver docs/canvas-editor-lock.md.
+const roomEditor = new Map<string, number>();
+
 function getRoomKey(conversationId: number): string {
   return `canvas:${conversationId}`;
 }
 
 function getPresence(room: string): CollabUser[] {
   return Array.from(roomPresence.get(room)?.values() || []);
+}
+
+function getEditor(room: string): number | null {
+  return roomEditor.get(room) ?? null;
+}
+
+// Resuelve el editor de la sala con auto-saneo: si el editor guardado ya no
+// está presente (desconexión perdida, ghost por HMR/reconexión, estado viejo
+// del proceso en dev), reasigna al primer presente. Así un usuario solo nunca
+// queda atrapado viendo un editor fantasma. Idempotente.
+function ensureEditor(room: string): number | null {
+  const presence = roomPresence.get(room);
+  if (!presence || presence.size === 0) {
+    roomEditor.delete(room);
+    return null;
+  }
+  const current = roomEditor.get(room);
+  // Solo conservamos el editor guardado si SIGUE presente.
+  if (current !== undefined && presence.has(current)) return current;
+  const first = presence.keys().next().value!;
+  roomEditor.set(room, first);
+  return first;
+}
+
+// Si el usuario que sale tenía el lock, lo libera y reasigna al siguiente
+// presente. Asume que `leavingUserId` YA fue removido de la presencia.
+// Devuelve true si el editor cambió (para emitir editor:update).
+function releaseEditorIfHolder(room: string, leavingUserId: number): boolean {
+  if (roomEditor.get(room) !== leavingUserId) return false;
+  roomEditor.delete(room);
+  const next = roomPresence.get(room)?.keys().next().value;
+  if (next !== undefined) roomEditor.set(room, next);
+  return true;
 }
 
 
@@ -107,6 +151,11 @@ export function initCollabServer(httpServer: HTTPServer): SocketIOServer | null 
           socket.leave(prevRoom);
           roomPresence.get(prevRoom)?.delete(userId);
           socket.to(prevRoom).emit("user:left", { userId });
+          // Si tenía el lock en la sala anterior, traspasarlo.
+          if (releaseEditorIfHolder(prevRoom, userId)) {
+            socket.to(prevRoom).emit("editor:update", { editorUserId: getEditor(prevRoom) });
+          }
+          if (roomPresence.get(prevRoom)?.size === 0) roomPresence.delete(prevRoom);
         }
 
         const room = getRoomKey(conversationId);
@@ -120,13 +169,23 @@ export function initCollabServer(httpServer: HTTPServer): SocketIOServer | null 
         const user: CollabUser = { userId, name, image, color };
         roomPresence.get(room)!.set(userId, user);
 
-        // Send full presence to the joining user
-        socket.emit("presence:update", { users: getPresence(room) });
+        // Resuelve el editor (auto-sanea si el guardado ya no está presente).
+        const prevEditor = getEditor(room);
+        const editorUserId = ensureEditor(room);
+
+        // Send full presence + editor actual to the joining user
+        socket.emit("presence:update", { users: getPresence(room), editorUserId });
 
         // Notify others
         socket.to(room).emit("user:joined", { user });
 
-        console.log(`[Collab] User ${name} joined canvas:${conversationId} (${getPresence(room).length} users)`);
+        // Si el editor cambió por el saneo (p.ej. el guardado era un fantasma),
+        // avisar al resto para que recalculen su canEdit.
+        if (editorUserId !== prevEditor) {
+          socket.to(room).emit("editor:update", { editorUserId });
+        }
+
+        console.log(`[Collab] User ${name} joined canvas:${conversationId} (${getPresence(room).length} users, editor=${editorUserId})`);
       });
 
       // Cursor movement
@@ -236,9 +295,16 @@ export function initCollabServer(httpServer: HTTPServer): SocketIOServer | null 
           roomPresence.get(room)?.delete(userId);
           socket.to(room).emit("user:left", { userId });
 
+          // Si el que se va tenía el lock de edición, traspasarlo al siguiente
+          // presente (o liberarlo si la sala queda vacía) y avisar al resto.
+          if (releaseEditorIfHolder(room, userId)) {
+            socket.to(room).emit("editor:update", { editorUserId: getEditor(room) });
+          }
+
           // Cleanup empty rooms
           if (roomPresence.get(room)?.size === 0) {
             roomPresence.delete(room);
+            roomEditor.delete(room);
           }
 
           console.log(`[Collab] User ${name} left canvas:${socket.data.conversationId}`);

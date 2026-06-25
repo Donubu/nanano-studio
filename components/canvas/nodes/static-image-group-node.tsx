@@ -14,7 +14,7 @@ import { MediaViewerModal, type MediaViewerEntry } from "./media-viewer-modal";
 export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode({ id, data, selected, width, height }: NodeProps) {
   const nodeData = data as unknown as StaticImageGroupNodeData;
   const { updateNodeData } = useNodeUpdate();
-  const { openImagePicker, projectId } = useCanvasContext();
+  const { openImagePicker, projectId, canEdit } = useCanvasContext();
   const inputRef = useRef<HTMLInputElement>(null);
   const images = nodeData.images || [];
   const [uploading, setUploading] = useState(false);
@@ -62,6 +62,7 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
   }, [id, nodeData, images, updateNodeData]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    if (!canEdit) return;
     const items = e.clipboardData?.items;
     if (!items) return;
     const imageFiles: File[] = [];
@@ -77,7 +78,7 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
       imageFiles.forEach((f) => dt.items.add(f));
       addImages(dt.files);
     }
-  }, [addImages]);
+  }, [addImages, canEdit]);
 
   return (
     <div
@@ -115,31 +116,35 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
                   >
                     <ZoomIn className="h-4 w-4 text-white drop-shadow" />
                   </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); removeImage(i); }}
-                    className="nodrag absolute top-0.5 right-0.5 p-0.5 rounded bg-black/50 text-white opacity-0 group-hover/img:opacity-100 transition-opacity"
-                  >
-                    <X className="h-2.5 w-2.5" />
-                  </button>
+                  {canEdit && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeImage(i); }}
+                      className="nodrag absolute top-0.5 right-0.5 p-0.5 rounded bg-black/50 text-white opacity-0 group-hover/img:opacity-100 transition-opacity"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
-            <div className="flex gap-1">
-              <button
-                onClick={() => inputRef.current?.click()}
-                className="flex-1 py-1 text-[10px] rounded border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1 text-muted-foreground"
-              >
-                <Plus className="h-3 w-3" /> Subir
-              </button>
-              <button
-                onClick={() => openImagePicker(addImageUrl, "Agregar imagen desde galería")}
-                className="flex-1 py-1 text-[10px] rounded border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1 text-muted-foreground"
-              >
-                <FolderOpen className="h-3 w-3" /> Galería
-              </button>
-            </div>
+            {canEdit && (
+              <div className="flex gap-1">
+                <button
+                  onClick={() => inputRef.current?.click()}
+                  className="flex-1 py-1 text-[10px] rounded border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1 text-muted-foreground"
+                >
+                  <Plus className="h-3 w-3" /> Subir
+                </button>
+                <button
+                  onClick={() => openImagePicker(addImageUrl, "Agregar imagen desde galería")}
+                  className="flex-1 py-1 text-[10px] rounded border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1 text-muted-foreground"
+                >
+                  <FolderOpen className="h-3 w-3" /> Galería
+                </button>
+              </div>
+            )}
           </div>
-        ) : (
+        ) : canEdit ? (
           <div className="flex flex-col gap-1.5">
             <button
               onClick={() => inputRef.current?.click()}
@@ -155,6 +160,8 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
               <FolderOpen className="h-3.5 w-3.5" /> Seleccionar de galería
             </button>
           </div>
+        ) : (
+          <div className="py-6 text-center text-[10px] text-muted-foreground">Galería vacía</div>
         )}
         <input ref={inputRef} type="file" accept="image/*" multiple onChange={handleFileSelect} className="hidden" />
       </div>

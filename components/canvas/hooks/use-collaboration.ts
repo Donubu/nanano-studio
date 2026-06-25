@@ -16,6 +16,11 @@ export interface UseCollaborationReturn {
   remoteUsers: CollabUser[];
   isConnected: boolean;
   myColor: string;
+  // Lock de edición: id del usuario que puede editar (el primero presente),
+  // mi propio id, y el derivado `canEdit`. El resto entra en solo-ver.
+  myUserId: number;
+  editorUserId: number | null;
+  canEdit: boolean;
   emitCursorMove: (x: number, y: number) => void;
   emitNodeSelect: (nodeId: string | null) => void;
   emitConnectorStart: (nodeId: string, handleId: string, handleType: "source" | "target") => void;
@@ -42,6 +47,8 @@ export function useCollaboration({
   const [isConnected, setIsConnected] = useState(false);
   const socketRef = useRef<CollabSocket | null>(null);
   const myUserIdRef = useRef<number>(0);
+  const [myUserId, setMyUserId] = useState(0);
+  const [editorUserId, setEditorUserId] = useState<number | null>(null);
   const [myColor, setMyColor] = useState("");
   const lastCursorEmitRef = useRef(0);
   const onRemoteChangeRef = useRef<((event: string, data: Record<string, unknown>) => void) | null>(null);
@@ -76,6 +83,7 @@ export function useCollaboration({
 
     socket.on("auth:success", ({ userId, color }) => {
       myUserIdRef.current = userId;
+      setMyUserId(userId);
       setMyColor(color);
     });
 
@@ -83,9 +91,17 @@ export function useCollaboration({
       setIsConnected(false);
     });
 
-    // Presence events
-    socket.on("presence:update", ({ users }) => {
+    // Presence events. Fail-open: si el server no manda editorUserId (versión
+    // sin lock o desincronización en deploy), lo tratamos como null → editable,
+    // nunca como "hay un editor que no soy yo".
+    socket.on("presence:update", ({ users, editorUserId }) => {
       setRemoteUsers(users.filter((u) => u.userId !== myUserIdRef.current));
+      setEditorUserId(editorUserId ?? null);
+    });
+
+    // Editor lock changes (assignment / handoff on disconnect)
+    socket.on("editor:update", ({ editorUserId }) => {
+      setEditorUserId(editorUserId ?? null);
     });
 
     socket.on("user:joined", ({ user }) => {
@@ -171,8 +187,13 @@ export function useCollaboration({
       socketRef.current = null;
       setRemoteUsers([]);
       setIsConnected(false);
+      setEditorUserId(null);
     };
   }, [conversationId, enabled, user?.id]);
+
+  // Puedo editar si soy el editor de la sala, o si todavía no hay editor
+  // asignado (sala sin lock / colaboración aún no conectada → editor único).
+  const canEdit = editorUserId === null || editorUserId === myUserId;
 
   // Emit helpers
   const emitCursorMove = useCallback((x: number, y: number) => {
@@ -236,6 +257,9 @@ export function useCollaboration({
     remoteUsers,
     isConnected,
     myColor,
+    myUserId,
+    editorUserId,
+    canEdit,
     emitCursorMove,
     emitNodeSelect,
     emitConnectorStart,

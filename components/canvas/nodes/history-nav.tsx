@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { ChevronLeft, ChevronRight, Download, Trash2 } from "lucide-react";
 import type { OutputHistoryEntry } from "../lib/canvas-types";
+import { useCanvasContext } from "../canvas-context";
 
 interface HistoryNavProps {
   history: OutputHistoryEntry[];
@@ -12,6 +13,7 @@ interface HistoryNavProps {
 }
 
 export function HistoryNav({ history, effectiveIndex, onNavigate, onDelete }: HistoryNavProps) {
+  const { canEdit } = useCanvasContext();
   const total = history.length;
   if (total === 0) return null;
   const isSingle = total === 1;
@@ -86,13 +88,15 @@ export function HistoryNav({ history, effectiveIndex, onNavigate, onDelete }: Hi
           </button>
         </>
       )}
-      <button
-        onClick={handleDelete}
-        className="nodrag p-1.5 rounded hover:bg-red-500/15 text-muted-foreground hover:text-red-400 transition-colors"
-        title={isSingle ? "Eliminar generación" : "Eliminar del historial"}
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
+      {canEdit && (
+        <button
+          onClick={handleDelete}
+          className="nodrag p-1.5 rounded hover:bg-red-500/15 text-muted-foreground hover:text-red-400 transition-colors"
+          title={isSingle ? "Eliminar generación" : "Eliminar del historial"}
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 }
