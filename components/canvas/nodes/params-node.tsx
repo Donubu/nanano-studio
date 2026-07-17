@@ -5,6 +5,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Settings, MessageSquare, ImageIcon, Video } from "lucide-react";
 import { HANDLE_IDS, type ParamsTextNodeData, type ParamsImageNodeData, type ParamsVideoNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
+import { NodeLabel } from "./node-label";
 import { useCanvasContext } from "../canvas-context";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import type { CanvasGenerationConfig } from "../canvas-workspace";
@@ -55,11 +56,10 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
         <Settings className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
         <Icon className={`h-3.5 w-3.5 ${config.color} shrink-0`} />
-        <input
+        <NodeLabel
           value={nodeData.label || ""}
-          onChange={(e) => update({ label: e.target.value } as Partial<ParamsData>)}
           placeholder={`Params ${config.label}`}
-          className="text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate placeholder:text-muted-foreground/50"
+          onChange={(label) => update({ label } as Partial<ParamsData>)}
         />
         <span className="text-[9px] px-1 py-0.5 rounded bg-muted text-muted-foreground shrink-0">PRESET</span>
         <NodeDeleteButton nodeId={id} />

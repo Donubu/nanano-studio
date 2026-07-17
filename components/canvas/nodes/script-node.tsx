@@ -5,6 +5,7 @@ import { Handle, Position, useHandleConnections, useReactFlow, type NodeProps, t
 import { Loader2, AlertCircle, FileText, Sparkles, Wand2, ChevronDown, ChevronRight, ImageIcon, Video, Bot, MinusCircle, ArrowUp, ArrowDown, X, Plus, Drama } from "lucide-react";
 import { HANDLE_IDS, topHandleId, type ScriptAnalysis, type ScriptAnalysisAlt, type ScriptNodeData, type ScriptSceneAnalysis, type SceneTargetNodeType } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
+import { NodeLabel } from "./node-label";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useCanvasContext } from "../canvas-context";
 import { NodeTextarea } from "./node-textarea";
@@ -614,12 +615,10 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
         <Sparkles className="h-3.5 w-3.5 text-fuchsia-400 shrink-0" />
         <AIBadge />
-        <input
+        <NodeLabel
           value={nodeData.label || ""}
-          onChange={(e) => updateNodeData(id, { ...nodeData, label: e.target.value })}
           placeholder="Guión"
-          onKeyDown={stopProp}
-          className="nodrag text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate placeholder:text-muted-foreground/50"
+          onChange={(label) => updateNodeData(id, { ...nodeData, label })}
         />
         {nodeData.modelName && (
           <span className="text-[10px] text-muted-foreground truncate max-w-[80px]">

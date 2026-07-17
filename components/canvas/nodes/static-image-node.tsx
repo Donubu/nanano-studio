@@ -5,6 +5,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { ImagePlus, Upload, FolderOpen, Loader2, ZoomIn } from "lucide-react";
 import { HANDLE_IDS, type StaticImageNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
+import { NodeLabel } from "./node-label";
 import { useCanvasContext } from "../canvas-context";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { uploadFileToS3 } from "../lib/canvas-upload";
@@ -67,7 +68,7 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
         <ImagePlus className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-        <input value={nodeData.label || ""} onChange={(e) => updateNodeData(id, { ...nodeData, imageUrl: nodeData.imageUrl, label: e.target.value })} placeholder="Imagen" className="text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate placeholder:text-muted-foreground/50" />
+        <NodeLabel value={nodeData.label || ""} placeholder="Imagen" onChange={(label) => updateNodeData(id, { ...nodeData, imageUrl: nodeData.imageUrl, label })} />
         <NodeDeleteButton nodeId={id} />
       </div>
 

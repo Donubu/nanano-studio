@@ -17,6 +17,7 @@ import {
   type StaticImageNodeData,
 } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
+import { NodeLabel } from "./node-label";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useCanvasContext } from "../canvas-context";
 import { NodeTextarea } from "./node-textarea";
@@ -139,12 +140,10 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
         <Settings className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
         <Palette className="h-3.5 w-3.5 text-yellow-400 shrink-0" />
-        <input
+        <NodeLabel
           value={nodeData.label || ""}
-          onChange={(e) => updateNodeData(id, { ...nodeData, label: e.target.value })}
-          onKeyDown={stopProp}
           placeholder="Params Escena"
-          className="nodrag text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate placeholder:text-muted-foreground/50"
+          onChange={(label) => updateNodeData(id, { ...nodeData, label })}
         />
         <span className="text-[9px] px-1 py-0.5 rounded bg-yellow-400/15 text-yellow-400 shrink-0">
           PRESET

@@ -5,6 +5,7 @@ import { type NodeProps } from "@xyflow/react";
 import { StickyNote } from "lucide-react";
 import type { NoteNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
+import { NodeLabel } from "./node-label";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useCanvasContext } from "../canvas-context";
 import { ResizeHandle, nodeSizeClass } from "./resize-handle";
@@ -27,7 +28,7 @@ export const NoteNodeComponent = memo(function NoteNode({ id, data, selected, wi
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-amber-300/30 dark:border-amber-700/30">
         <StickyNote className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-        <input value={nodeData.label || ""} onChange={(e) => updateNodeData(id, { ...nodeData, content: nodeData.content, label: e.target.value })} readOnly={!canEdit} placeholder="Nota" className="text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate text-amber-700 dark:text-amber-400 placeholder:text-amber-400/50" />
+        <NodeLabel value={nodeData.label || ""} placeholder="Nota" onChange={(label) => updateNodeData(id, { ...nodeData, content: nodeData.content, label })} className="text-amber-700 dark:text-amber-400" />
         <NodeDeleteButton nodeId={id} />
       </div>
 

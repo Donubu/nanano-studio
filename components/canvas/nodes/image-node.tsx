@@ -5,6 +5,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { ImageIcon, Loader2, AlertCircle, ZoomIn } from "lucide-react";
 import { HANDLE_IDS, topHandleId, type ImageNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
+import { NodeLabel } from "./node-label";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useUpstreamPromptLabel } from "../hooks/use-upstream-prompt-label";
@@ -108,7 +109,7 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
         <ImageIcon className="h-3.5 w-3.5 text-purple-400 shrink-0" />
         <AIBadge />
-        <input value={nodeData.label || ""} onChange={(e) => updateNodeData(id, { ...nodeData, label: e.target.value })} placeholder="Imagen" className="text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate placeholder:text-muted-foreground/50" />
+        <NodeLabel value={nodeData.label || ""} placeholder="Imagen" onChange={(label) => updateNodeData(id, { ...nodeData, label })} />
         <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
           {nodeData.modelName && <span className="truncate max-w-[80px]">{nodeData.modelName}</span>}
           <span>{nodeData.aspectRatio}</span>

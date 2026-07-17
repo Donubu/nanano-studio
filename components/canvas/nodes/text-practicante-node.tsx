@@ -5,6 +5,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Loader2, AlertCircle, Bot, Paperclip, FlaskConical } from "lucide-react";
 import { HANDLE_IDS, topHandleId, type TextPracticanteNodeData } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton } from "./node-status";
+import { NodeLabel } from "./node-label";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useUpstreamPromptLabel } from "../hooks/use-upstream-prompt-label";
@@ -88,11 +89,10 @@ export const TextPracticanteNodeComponent = memo(function TextPracticanteNode({ 
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
         <Bot className="h-3.5 w-3.5 text-amber-400 shrink-0" />
         <span className="text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-400 shrink-0">practicante</span>
-        <input
+        <NodeLabel
           value={nodeData.label || ""}
-          onChange={(e) => updateNodeData(id, { ...nodeData, label: e.target.value })}
           placeholder="Practicante"
-          className="text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none truncate placeholder:text-muted-foreground/50"
+          onChange={(label) => updateNodeData(id, { ...nodeData, label })}
         />
         <span className={`text-[9px] px-1 py-0.5 rounded shrink-0 ${
           nodeData.outputAsPrompt !== false
