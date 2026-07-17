@@ -55,6 +55,9 @@ import { CanvasProvider } from "./canvas-context";
 import { LabeledEdge } from "./edges/labeled-edge";
 import { ImagePickerModal } from "@/components/chat/image-picker-modal";
 import { useCollaboration } from "./hooks/use-collaboration";
+import { SaveTemplateModal } from "./save-template-modal";
+import { TemplatePicker } from "./template-picker";
+import { buildClipboardPayload, writeCanvasClipboard, readCanvasClipboard, remapClipboardForPaste } from "./lib/canvas-clipboard";
 import { CursorOverlay } from "./collaboration/cursor-overlay";
 import { PresenceBar } from "./collaboration/presence-bar";
 import { ConnectorGhost } from "./collaboration/connector-ghost";
@@ -115,9 +118,19 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   const [isLoaded, setIsLoaded] = useState(false);
   const [canvasMode, setCanvasMode] = useState<"pan" | "select">("pan");
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  // Toast transitorio para feedback de copy/paste de nodos.
+  const [copyToast, setCopyToast] = useState<string | null>(null);
+  const copyToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Evita reabrir el picker en cada re-render: se auto-abre una sola vez por
+  // conversación, al cargar un canvas vacío.
+  const pickerShownForConvRef = useRef<number | null>(null);
 
   // Undo/redo
   const { takeSnapshot, undo, redo } = useUndoRedo(nodes, edges, setNodes, setEdges);
+
+  const { screenToFlowPosition } = useReactFlow();
 
   // Ref for collab emitters (avoids circular dependency with hooks declared later)
   const collabRef = useRef<{
@@ -242,6 +255,15 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   const [realConversationId, setRealConversationId] = useState(conversationId);
   const nodeIdCounter = useRef(0);
   const creatingConvRef = useRef(false);
+  // Espejo síncrono de realConversationId. La persistencia lee de acá: cuando
+  // ensureConversation crea la conversación, el ref se setea ANTES del
+  // re-render, así el saveNode inmediato del primer nodo ya tiene id válido.
+  const realConversationIdRef = useRef<number | null>(conversationId || null);
+  realConversationIdRef.current = realConversationId || null;
+  // Cuando el cambio de realConversationId viene de ensureConversation (canvas
+  // creado desde este cliente), el estado en memoria ya es el correcto y NO se
+  // debe limpiar + recargar desde la BD (perdería el primer nodo agregado).
+  const skipNextLoadRef = useRef(false);
 
   // Sync conversationId from parent (when it changes after creation)
   useEffect(() => {
@@ -252,14 +274,14 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
 
   // Create conversation in DB if it doesn't exist yet
   const ensureConversation = useCallback(async (): Promise<number> => {
-    if (realConversationId) return realConversationId;
+    if (realConversationIdRef.current) return realConversationIdRef.current;
     if (creatingConvRef.current) {
-      // Wait for ongoing creation
+      // Wait for ongoing creation (vía ref: el state en clausura queda stale)
       return new Promise((resolve) => {
         const check = setInterval(() => {
-          if (realConversationId) {
+          if (realConversationIdRef.current) {
             clearInterval(check);
-            resolve(realConversationId);
+            resolve(realConversationIdRef.current);
           }
         }, 100);
       });
@@ -285,13 +307,15 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       if (!res.ok) throw new Error("Error creando conversación");
       const newConv = await res.json();
       const newId = newConv.id;
+      realConversationIdRef.current = newId;
+      skipNextLoadRef.current = true;
       setRealConversationId(newId);
       onConversationCreated?.(newId);
       return newId;
     } finally {
       creatingConvRef.current = false;
     }
-  }, [realConversationId, projectId, generationConfig, onConversationCreated]);
+  }, [projectId, generationConfig, onConversationCreated]);
 
   // Carga el canvas desde el servidor — reutilizable tras un restore.
   // Bloquea el autosave (isLoaded=false) durante el GET para no sobreescribir.
@@ -321,6 +345,13 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
 
   // Load canvas state when the active conversation changes.
   useEffect(() => {
+    // Conversación recién creada por ensureConversation: el estado en memoria
+    // (ej. el primer nodo recién agregado) ES el estado real; recargar desde
+    // la BD acá lo borraría.
+    if (skipNextLoadRef.current) {
+      skipNextLoadRef.current = false;
+      return;
+    }
     setIsLoaded(false);
     setNodes([]);
     setEdges([]);
@@ -376,12 +407,155 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   // delete, connect, disconnect) se persiste inmediatamente vía endpoints
   // granulares. Reemplaza el auto-save bulk que era destructivo en multi-user.
   // Con canEdit=false toda escritura se corta dentro del hook.
-  const persist = useCanvasPersist(realConversationId || null, canEdit);
+  const persist = useCanvasPersist(realConversationIdRef, canEdit);
 
   const handleCanvasRestored = useCallback(() => {
     if (!realConversationId) return;
     loadCanvas(realConversationId, false);
   }, [realConversationId, loadCanvas]);
+
+  // Auto-abre el picker de templates al cargar un canvas vacío (una vez por
+  // conversación; si el usuario lo cierra, puede reabrirlo desde el toolbar).
+  useEffect(() => {
+    if (!isLoaded || !canEdit) return;
+    if (pickerShownForConvRef.current === realConversationId) return;
+    pickerShownForConvRef.current = realConversationId;
+    if (nodes.length === 0) setTemplatePickerOpen(true);
+  }, [isLoaded, canEdit, realConversationId, nodes.length]);
+
+  // Inserta un template estilo snippet: funciona sobre canvas vacío o con
+  // contenido. El server inserta transaccionalmente con IDs remapeados y
+  // devuelve los nodos/edges nuevos; acá se agregan al estado en vivo y se
+  // emiten por el socket de colaboración (mismo flujo que agregar a mano).
+  const applyTemplate = useCallback(async (templateId: number) => {
+    if (!canEdit) return;
+    const convId = await ensureConversation();
+    // Ancla el template al centro del viewport visible.
+    const flowPos = screenToFlowPosition({
+      x: window.innerWidth / 2,
+      y: window.innerHeight / 2,
+    });
+    const res = await fetch(`/api/conversations/${convId}/canvas/from-template`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ templateId, position: flowPos }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.message || data?.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const insertedNodes = (data.nodes || []) as Node[];
+    const insertedEdges = (data.edges || []) as Edge[];
+    takeSnapshot();
+    setNodes((nds) => [...nds, ...insertedNodes]);
+    setEdges((eds) => [...eds, ...insertedEdges]);
+    for (const node of insertedNodes) {
+      collab.emitNodeAdd(node as unknown as Record<string, unknown>);
+    }
+    for (const edge of insertedEdges) {
+      collab.emitEdgeAdd(edge as unknown as Record<string, unknown>);
+    }
+    setTemplatePickerOpen(false);
+  }, [canEdit, ensureConversation, screenToFlowPosition, takeSnapshot, setNodes, setEdges, collab.emitNodeAdd, collab.emitEdgeAdd]);
+
+  // --- Copy/paste de nodos (Ctrl+C / Ctrl+Shift+C / Ctrl+V) ---
+
+  const showCopyToast = useCallback((msg: string) => {
+    setCopyToast(msg);
+    if (copyToastTimerRef.current) clearTimeout(copyToastTimerRef.current);
+    copyToastTimerRef.current = setTimeout(() => setCopyToast(null), 4000);
+  }, []);
+
+  useEffect(() => () => {
+    if (copyToastTimerRef.current) clearTimeout(copyToastTimerRef.current);
+  }, []);
+
+  // Copia la selección actual al clipboard del canvas (localStorage, así el
+  // paste funciona también en otro canvas u otra pestaña). Con
+  // includeDescendants se agrega la clausura de descendientes de cada nodo
+  // seleccionado (mismo criterio que RUN ALL: el flujo que depende del nodo).
+  // Copiar está permitido incluso en solo-ver; es una operación de lectura.
+  const copySelection = useCallback((includeDescendants: boolean): boolean => {
+    const selectedIds = new Set(
+      nodes.filter((n) => n.selected || n.id === selectedNodeId).map((n) => n.id)
+    );
+    if (selectedIds.size === 0) return false;
+
+    const allIds = new Set(selectedIds);
+    if (includeDescendants) {
+      for (const id of selectedIds) {
+        for (const desc of getDescendantNodes(id, edges as unknown as CanvasEdge[])) {
+          allIds.add(desc);
+        }
+      }
+    }
+
+    const toCopy = nodes.filter((n) => allIds.has(n.id));
+    const payload = buildClipboardPayload(toCopy, edges);
+    writeCanvasClipboard(payload);
+
+    const n = payload.nodes.length;
+    const m = payload.edges.length;
+    if (includeDescendants) {
+      showCopyToast(
+        `Flujo copiado: ${n} nodo${n === 1 ? "" : "s"} y ${m} conexi${m === 1 ? "ón" : "ones"} · Ctrl+V para pegar`
+      );
+    } else {
+      // Si el nodo tiene flujo aguas abajo que NO se copió, sugiere el atajo.
+      const hasDownstream = edges.some((e) => allIds.has(e.source) && !allIds.has(e.target));
+      showCopyToast(
+        `${n} nodo${n === 1 ? "" : "s"} copiado${n === 1 ? "" : "s"} · Ctrl+V para pegar` +
+        (hasDownstream ? " · Ctrl+Shift+C copia también todo el flujo que depende del nodo" : "")
+      );
+    }
+    return true;
+  }, [nodes, edges, selectedNodeId, showCopyToast]);
+
+  // Pega el clipboard del canvas: IDs remapeados (sin colisiones), anclado al
+  // centro del viewport con un jitter para que pastes repetidos no queden
+  // exactamente encima. Mismo flujo de persistencia/colaboración que agregar
+  // nodos a mano.
+  const pasteClipboard = useCallback(async () => {
+    if (!canEdit) return;
+    const payload = readCanvasClipboard();
+    if (!payload) return;
+    await ensureConversation();
+    const center = screenToFlowPosition({
+      x: window.innerWidth / 2,
+      y: window.innerHeight / 2,
+    });
+    const anchor = {
+      x: center.x + Math.random() * 40 - 20,
+      y: center.y + Math.random() * 40 - 20,
+    };
+    const { nodes: pastedNodes, edges: pastedEdges } = remapClipboardForPaste(payload, anchor);
+    takeSnapshot();
+    // Los pegados quedan como única selección (selected: true viene del remap).
+    setNodes((nds) => [
+      ...nds.map((node) => (node.selected ? { ...node, selected: false } : node)),
+      ...pastedNodes,
+    ]);
+    setEdges((eds) => [...eds, ...pastedEdges]);
+    for (const node of pastedNodes) {
+      persist.saveNode(node);
+      collab.emitNodeAdd(node as unknown as Record<string, unknown>);
+    }
+    for (const edge of pastedEdges) {
+      persist.createEdge(edge);
+      collab.emitEdgeAdd(edge as unknown as Record<string, unknown>);
+    }
+    const n = pastedNodes.length;
+    showCopyToast(`${n} nodo${n === 1 ? "" : "s"} pegado${n === 1 ? "" : "s"}`);
+  }, [canEdit, ensureConversation, screenToFlowPosition, takeSnapshot, setNodes, setEdges, persist, collab.emitNodeAdd, collab.emitEdgeAdd, showCopyToast]);
+
+  // Ref para el handler de teclado (declarado en un effect con otras deps).
+  const copyPasteRef = useRef<{ copy: (withDescendants: boolean) => boolean; paste: () => void }>({
+    copy: () => false,
+    paste: () => {},
+  });
+  copyPasteRef.current.copy = copySelection;
+  copyPasteRef.current.paste = pasteClipboard;
 
   // Sync collab ref for use in callbacks declared before collab hook
   collabRef.current.emitNodeMove = collab.emitNodeMove;
@@ -506,8 +680,6 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     }
     closeDropMenu();
   }, [closeDropMenu, collab.emitNodeSelect]);
-
-  const { screenToFlowPosition } = useReactFlow();
 
   // Add node (ensures conversation exists first)
   // Places near toolbar (top-left area of visible canvas)
@@ -811,6 +983,36 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       }
     };
 
+    // Copy/paste de nodos. BUBBLE y saltando campos editables para no pisar
+    // el copy/paste nativo de texto. Ctrl+C copia la selección, Ctrl+Shift+C
+    // agrega los descendientes, Ctrl+V pega. Lee vía ref para no re-registrar
+    // el listener en cada cambio de nodes/edges.
+    const handleCopyPaste = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key !== "c" && key !== "v") return;
+
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest("input, textarea, select, [contenteditable='true']")) {
+        return; // copy/paste nativo dentro de campos de texto
+      }
+
+      if (key === "c") {
+        // Si hay texto seleccionado en la página, respeta el copy nativo.
+        if (window.getSelection()?.toString()) return;
+        if (copyPasteRef.current.copy(e.shiftKey)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      } else {
+        if (e.shiftKey) return;
+        if (!readCanvasClipboard()) return;
+        e.preventDefault();
+        e.stopPropagation();
+        copyPasteRef.current.paste();
+      }
+    };
+
     // Figma-style V/H to toggle select/pan mode. Skip when typing.
     const handleModeShortcut = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -827,10 +1029,12 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
 
     el.addEventListener("keydown", handleEscape, true);
     el.addEventListener("keydown", handleUndoRedo, false);
+    el.addEventListener("keydown", handleCopyPaste, false);
     el.addEventListener("keydown", handleModeShortcut, false);
     return () => {
       el.removeEventListener("keydown", handleEscape, true);
       el.removeEventListener("keydown", handleUndoRedo, false);
+      el.removeEventListener("keydown", handleCopyPaste, false);
       el.removeEventListener("keydown", handleModeShortcut, false);
     };
   }, [dropMenu, selectedNodeId, closeDropMenu, undo, redo]);
@@ -920,6 +1124,8 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
               onClone={cloneCanvas}
               onLockAll={lockAllNodes}
               onReorder={reorderNodes}
+              onSaveTemplate={() => setSaveTemplateOpen(true)}
+              onOpenTemplates={() => setTemplatePickerOpen(true)}
               isExecuting={isExecuting}
               isAllLocked={isAllLocked}
               saveStatus={persist.saveStatus}
@@ -1025,6 +1231,33 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
             updateNodeData(selectedNode.id, { dryRunResponse: undefined } as Record<string, unknown>);
           }} />
         )}
+
+      {/* Toast de copy/paste de nodos */}
+      {copyToast && (
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 bg-popover border border-border rounded-lg shadow-xl px-3.5 py-2 text-xs text-foreground pointer-events-none max-w-[90%] text-center">
+          {copyToast}
+        </div>
+      )}
+
+      {/* Guardar canvas como template global */}
+      <SaveTemplateModal
+        isOpen={saveTemplateOpen}
+        onClose={() => setSaveTemplateOpen(false)}
+        conversationId={realConversationId}
+        nodeCount={nodes.length}
+      />
+
+      {/* Picker de templates: inserción estilo snippet, solo para el editor.
+          Se auto-abre en canvas vacío y también se abre desde el toolbar
+          sobre un canvas con contenido. */}
+      {canEdit && (
+        <TemplatePicker
+          isOpen={templatePickerOpen}
+          onClose={() => setTemplatePickerOpen(false)}
+          onUseTemplate={applyTemplate}
+          emptyCanvas={nodes.length === 0}
+        />
+      )}
 
       {/* History / Trash panel */}
       {realConversationId > 0 && (

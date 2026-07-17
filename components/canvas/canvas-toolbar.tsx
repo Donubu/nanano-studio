@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ImageIcon, Video, MessageSquare, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History, Eye } from "lucide-react";
+import { ImageIcon, Video, MessageSquare, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History, Eye, BookmarkPlus, LayoutTemplate } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CanvasNodeType } from "./lib/canvas-types";
 
@@ -10,6 +10,8 @@ interface CanvasToolbarProps {
   onClone: () => void;
   onLockAll: () => void;
   onReorder: () => void;
+  onSaveTemplate: () => void;
+  onOpenTemplates: () => void;
   isExecuting: boolean;
   isAllLocked: boolean;
   saveStatus?: "idle" | "saving" | "saved" | "error";
@@ -48,6 +50,8 @@ export function CanvasToolbar({
   onClone,
   onLockAll,
   onReorder,
+  onSaveTemplate,
+  onOpenTemplates,
   isExecuting,
   isAllLocked,
   saveStatus = "idle",
@@ -187,6 +191,34 @@ export function CanvasToolbar({
         >
           <Copy className="h-3.5 w-3.5" />
           Clonar
+        </Button>
+
+        <div className="w-px h-5 bg-border" />
+
+        {/* Templates: guardar el canvas actual como template global, e
+            insertar un template como snippet (canvas vacío o con contenido). */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onSaveTemplate}
+          disabled={isExecuting || nodeCount === 0}
+          className="gap-1.5 text-xs"
+          title="Guardar este canvas como template reutilizable"
+        >
+          <BookmarkPlus className="h-3.5 w-3.5" />
+          Template
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onOpenTemplates}
+          disabled={isExecuting}
+          className="gap-1.5 text-xs"
+          title="Insertar un template guardado en este canvas"
+        >
+          <LayoutTemplate className="h-3.5 w-3.5" />
+          Insertar
         </Button>
 
         <div className="w-px h-5 bg-border" />

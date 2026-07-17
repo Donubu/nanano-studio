@@ -3861,6 +3861,7 @@ export function ChatInterface() {
                     ) : isCanvasConversation && activeTabId !== null ? (
                         /* Canvas Node Workspace */
                         <CanvasWorkspace
+                            key={activeTabId}
                             conversationId={tabConversations[activeTabId]?.id || 0}
                             projectId={selectedProjectId!}
                             generationConfig={generationConfig}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { Node, Edge } from "@xyflow/react";
 
 export type CanvasSaveStatus = "idle" | "saving" | "saved" | "error";
@@ -23,7 +23,12 @@ export type CanvasSaveStatus = "idle" | "saving" | "saved" | "error";
  * Expone además `saveStatus` + `lastSavedAt` para el indicador visual del
  * toolbar. Errores se loggean a consola.
  */
-export function useCanvasPersist(conversationId: number | null, canEdit = true) {
+// El id de conversación llega por ref (no por valor): cuando el canvas parte
+// vacío, `ensureConversation` crea la conversación y setea el ref de forma
+// síncrona ANTES de que React re-renderice. Con el id por valor, el primer
+// `saveNode` tras la creación corría con conversationId=null y el nodo nunca
+// se persistía (se perdía al recargar).
+export function useCanvasPersist(conversationIdRef: RefObject<number | null>, canEdit = true) {
   // Lock de edición. Si el usuario está en solo-ver, TODA persistencia se
   // corta acá (chokepoint único, además del gating de UI). Vía ref para no
   // recrear los callbacks ni arrastrar `canEdit` por todas las deps.
@@ -61,6 +66,7 @@ export function useCanvasPersist(conversationId: number | null, canEdit = true) 
   }, []);
 
   const flushMoveBatch = useCallback(async () => {
+    const conversationId = conversationIdRef.current;
     if (!conversationId) return;
     if (moveBatchRef.current.size === 0) return;
     const updates = Array.from(moveBatchRef.current.entries()).map(([id, position]) => ({ id, position }));
@@ -79,7 +85,7 @@ export function useCanvasPersist(conversationId: number | null, canEdit = true) 
       console.error("[canvas-persist] move batch failed", err);
       endSave(false);
     }
-  }, [conversationId, beginSave, endSave]);
+  }, [conversationIdRef, beginSave, endSave]);
 
   // Movimiento de un nodo (drag-stop). Se batchea con otros movimientos
   // simultáneos en una ventana de 80ms.
@@ -93,6 +99,7 @@ export function useCanvasPersist(conversationId: number | null, canEdit = true) 
   }, [flushMoveBatch]);
 
   const flushSaveBatch = useCallback(async () => {
+    const conversationId = conversationIdRef.current;
     if (!conversationId) return;
     if (saveBatchRef.current.size === 0) return;
     const nodesToSave = Array.from(saveBatchRef.current.values());
@@ -115,22 +122,23 @@ export function useCanvasPersist(conversationId: number | null, canEdit = true) 
       console.error("[canvas-persist] saveNodeData batch failed", err);
       endSave(false);
     }
-  }, [conversationId, beginSave, endSave]);
+  }, [conversationIdRef, beginSave, endSave]);
 
   // UPSERT con debounce. Para ediciones de datos del nodo. El backend hace
   // INSERT ... ON DUPLICATE KEY UPDATE por (id, conversation_id).
   const saveNodeData = useCallback((node: Node) => {
-    if (!conversationId || !canEditRef.current) return;
+    if (!conversationIdRef.current || !canEditRef.current) return;
     saveBatchRef.current.set(node.id, node);
     setSaveStatus("saving");
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       flushSaveBatch();
     }, 600);
-  }, [conversationId, flushSaveBatch]);
+  }, [conversationIdRef, flushSaveBatch]);
 
   // UPSERT inmediato. Para `add node` y otras acciones discretas.
   const saveNode = useCallback(async (node: Node) => {
+    const conversationId = conversationIdRef.current;
     if (!conversationId || !canEditRef.current) return;
     beginSave();
     try {
@@ -145,13 +153,14 @@ export function useCanvasPersist(conversationId: number | null, canEdit = true) 
       console.error("[canvas-persist] saveNode failed", err);
       endSave(false);
     }
-  }, [conversationId, beginSave, endSave]);
+  }, [conversationIdRef, beginSave, endSave]);
 
   // Persiste el tamaño tras un resize manual (PATCH de width/height). Se llama
   // sólo al soltar el resize (resizing === false), no en las mediciones
   // automáticas del montaje. Sin esto, el resize vivía sólo en el state local
   // y se perdía al refrescar.
   const resizeNode = useCallback(async (id: string, width: number, height: number) => {
+    const conversationId = conversationIdRef.current;
     if (!conversationId || !canEditRef.current) return;
     beginSave();
     try {
@@ -167,9 +176,10 @@ export function useCanvasPersist(conversationId: number | null, canEdit = true) 
       console.error("[canvas-persist] resizeNode failed", err);
       endSave(false);
     }
-  }, [conversationId, beginSave, endSave]);
+  }, [conversationIdRef, beginSave, endSave]);
 
   const deleteNodes = useCallback(async (nodeIds: string[]) => {
+    const conversationId = conversationIdRef.current;
     if (!conversationId || nodeIds.length === 0 || !canEditRef.current) return;
     // Cancela cualquier save de datos pendiente de estos nodos: si no, el
     // flush debounced reviviría (deleted_at = NULL) un nodo recién borrado.
@@ -187,9 +197,10 @@ export function useCanvasPersist(conversationId: number | null, canEdit = true) 
       console.error("[canvas-persist] deleteNodes failed", err);
       endSave(false);
     }
-  }, [conversationId, beginSave, endSave]);
+  }, [conversationIdRef, beginSave, endSave]);
 
   const createEdge = useCallback(async (edge: Edge) => {
+    const conversationId = conversationIdRef.current;
     if (!conversationId || !canEditRef.current) return;
     beginSave();
     try {
@@ -204,9 +215,10 @@ export function useCanvasPersist(conversationId: number | null, canEdit = true) 
       console.error("[canvas-persist] createEdge failed", err);
       endSave(false);
     }
-  }, [conversationId, beginSave, endSave]);
+  }, [conversationIdRef, beginSave, endSave]);
 
   const deleteEdges = useCallback(async (edgeIds: string[]) => {
+    const conversationId = conversationIdRef.current;
     if (!conversationId || edgeIds.length === 0 || !canEditRef.current) return;
     beginSave();
     try {
@@ -221,7 +233,7 @@ export function useCanvasPersist(conversationId: number | null, canEdit = true) 
       console.error("[canvas-persist] deleteEdges failed", err);
       endSave(false);
     }
-  }, [conversationId, beginSave, endSave]);
+  }, [conversationIdRef, beginSave, endSave]);
 
   // Flush de pendientes al ocultar/cerrar la pestaña. `keepalive` en los POST/
   // PATCH asegura que el último write sobreviva la navegación.
