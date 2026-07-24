@@ -164,9 +164,11 @@ interface FullModeWorkspaceProps {
 
 // ---- Model capability helpers ----
 
-function getVideoBackend(model: ConfigModel | undefined): "veo" | "xai" | "kling" | "kling26" | null {
+function getVideoBackend(model: ConfigModel | undefined): "veo" | "xai" | "kling" | "kling26" | "omni" | null {
   if (!model) return null;
   if (model.api_backend === "xai") return "xai";
+  // Gemini Omni: solo por api_backend ("kling-v3-omni" también contiene "omni")
+  if (model.api_backend === "omni") return "omni";
   if (model.model_id === "kling-v2-6") return "kling26";
   if (model.api_backend === "kling" || model.model_id?.includes("kling")) return "kling";
   return "veo";
@@ -189,6 +191,7 @@ function getSupportedImageResolutions(backend: ReturnType<typeof getImageBackend
 function getSupportedVideoResolutions(backend: ReturnType<typeof getVideoBackend>): string[] {
   if (backend === "xai") return ["480p", "720p"];
   if (backend === "kling" || backend === "kling26") return ["720p", "1080p"];
+  if (backend === "omni") return ["720p"]; // fijo, sin selector
   // VEO 3.1 supports 720p, 1080p, and 4K
   return ["720p", "1080p", "4K"];
 }
@@ -199,6 +202,9 @@ function getSupportedDurations(backend: ReturnType<typeof getVideoBackend>): num
     case "xai": return [4, 6, 8, 15];
     case "kling": return [4, 6, 8, 15];
     case "kling26": return [5, 10];
+    // Omni: sin control de duración (se pide en el prompt) → lista vacía
+    // oculta el selector y muestra el hint.
+    case "omni": return [];
     default: return [4, 6, 8];
   }
 }
@@ -209,6 +215,7 @@ function getSupportedVideoAspectRatios(backend: ReturnType<typeof getVideoBacken
     case "xai": return ["16:9", "9:16", "1:1", "4:3", "3:4"];
     case "kling": return ["16:9", "9:16", "1:1"];
     case "kling26": return ["16:9", "9:16", "1:1"];
+    case "omni": return ["16:9", "9:16"];
     default: return ["16:9", "9:16"];
   }
 }
@@ -218,7 +225,9 @@ function getMaxVideoVariations(backend: ReturnType<typeof getVideoBackend>): num
 }
 
 function supportsVideoKeyframes(backend: ReturnType<typeof getVideoBackend>): boolean {
-  return backend !== null; // All backends support at least first frame
+  // All backends support at least first frame (Omni v1: SOLO first frame; el
+  // slot de last frame se oculta en el render igual que para xAI).
+  return backend !== null;
 }
 
 function supportsVideoIngredients(backend: ReturnType<typeof getVideoBackend>): boolean {
@@ -226,6 +235,7 @@ function supportsVideoIngredients(backend: ReturnType<typeof getVideoBackend>): 
 }
 
 function supportsVideoAudio(backend: ReturnType<typeof getVideoBackend>): boolean {
+  // Omni genera audio siempre pero sin toggle → false para ocultar el switch
   return backend === "veo" || backend === "kling" || backend === "kling26";
 }
 
@@ -646,7 +656,8 @@ export function FullModeWorkspace({
   // ---- Auto-correct settings when model changes ----
   useEffect(() => {
     if (format === "video") {
-      if (!supportedDurations.includes(videoDuration)) {
+      // supportedDurations vacío = el modelo no tiene control de duración (Omni)
+      if (supportedDurations.length > 0 && !supportedDurations.includes(videoDuration)) {
         onVideoSettingsChange({ duration: supportedDurations[supportedDurations.length - 1] });
       }
       if (!supportedVideoAR.includes(videoAspectRatio)) {
@@ -2409,7 +2420,7 @@ export function FullModeWorkspace({
                       projectId={projectId}
 
                     />
-                    {videoBackend !== "xai" && (
+                    {videoBackend !== "xai" && videoBackend !== "omni" && (
                       <CompactFrameSlot
                         image={videoLastFrame}
                         label="End"
@@ -2417,7 +2428,7 @@ export function FullModeWorkspace({
                         onClear={() => setVideoLastFrame(null)}
                         disabled={isSending}
                         projectId={projectId}
-  
+
                       />
                     )}
                   </>
@@ -2621,6 +2632,7 @@ export function FullModeWorkspace({
                         ) : (
                           <>
                             <div className="flex items-center gap-4 flex-wrap">
+                              {supportedDurations.length > 0 && (
                               <div className="flex items-center gap-2">
 
                                 <div className="flex gap-0.5">
@@ -2629,6 +2641,7 @@ export function FullModeWorkspace({
                                   ))}
                                 </div>
                               </div>
+                              )}
                               <div className="flex items-center gap-2">
                                 <div className="flex gap-0.5">
                                   {supportedVideoAR.map(ar => (
@@ -2636,6 +2649,9 @@ export function FullModeWorkspace({
                                   ))}
                                 </div>
                               </div>
+                              {videoBackend === "omni" ? (
+                                <span className="px-1.5 py-1 rounded bg-muted text-xs font-medium text-muted-foreground">720p · 24 fps · audio integrado</span>
+                              ) : (
                               <div className="flex items-center gap-2">
                                 <label className="text-xs text-muted-foreground">Res.</label>
                                 <div className="flex gap-0.5">
@@ -2644,7 +2660,13 @@ export function FullModeWorkspace({
                                   ))}
                                 </div>
                               </div>
+                              )}
                             </div>
+                            {videoBackend === "omni" && (
+                              <p className="text-[10px] text-muted-foreground">
+                                Gemini Omni decide la duración según tu prompt: si quieres un largo específico, pídelo ahí (p. ej. &quot;un clip de 10 segundos&quot;). Sin negative prompt ni seed (preview).
+                              </p>
+                            )}
                             <div className="flex items-center gap-4 flex-wrap">
                               {hasAudioToggle && (
                                 <div className="flex items-center gap-2">
@@ -2681,8 +2703,8 @@ export function FullModeWorkspace({
                           </>
                         )}
 
-                        {/* Negative prompt (image/video only) */}
-                        {format !== "text" && (
+                        {/* Negative prompt (image/video only; Gemini Omni no lo soporta) */}
+                        {format !== "text" && !(format === "video" && videoBackend === "omni") && (
                         <div>
                           <textarea
                             value={format === "image" ? imageNegativePrompt : videoNegativePrompt}

@@ -33,7 +33,6 @@ import {
   UserPlus,
   Cpu,
   Star,
-  FileText,
   Save,
   ImageIcon,
   Video,
@@ -77,18 +76,6 @@ interface ProjectUser {
   user_name: string | null;
   user_image: string | null;
   role: string;
-  // Legacy fields
-  max_monthly_image_generations: number;
-  max_monthly_video_generations: number;
-  // New quality-based limits
-  max_monthly_image_normal: number;
-  max_monthly_image_hq: number;
-  max_monthly_video_normal: number;
-  max_monthly_video_hq: number;
-  max_monthly_audio_normal: number;
-  max_monthly_audio_hq: number;
-  max_monthly_text_normal: number;
-  max_monthly_text_hq: number;
 }
 
 interface User {
@@ -190,32 +177,6 @@ export default function ProjectDetailPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState("");
-  const [editingUserLimit, setEditingUserLimit] = useState<number | null>(null);
-
-  // Quota limits state (add form)
-  type LimitKey = "text_normal" | "text_hq" | "image_normal" | "image_hq" | "video_normal" | "video_hq" | "audio_normal" | "audio_hq";
-  const defaultLimits: Record<LimitKey, string> = {
-    text_normal: "0", text_hq: "0",
-    image_normal: "10", image_hq: "10",
-    video_normal: "10", video_hq: "10",
-    audio_normal: "10", audio_hq: "10",
-  };
-  const [addLimits, setAddLimits] = useState<Record<LimitKey, string>>(defaultLimits);
-  const [addUnlimited, setAddUnlimited] = useState<Record<LimitKey, boolean>>({
-    text_normal: true, text_hq: true,
-    image_normal: false, image_hq: false,
-    video_normal: false, video_hq: false,
-    audio_normal: false, audio_hq: false,
-  });
-
-  // Quota limits state (edit form)
-  const [editLimits, setEditLimits] = useState<Record<LimitKey, string>>(defaultLimits);
-  const [editUnlimited, setEditUnlimited] = useState<Record<LimitKey, boolean>>({
-    text_normal: true, text_hq: true,
-    image_normal: false, image_hq: false,
-    video_normal: false, video_hq: false,
-    audio_normal: false, audio_hq: false,
-  });
 
   // Models state (for config tab selectors)
   const [models, setModels] = useState<Model[]>([]);
@@ -399,64 +360,19 @@ export default function ProjectDetailPage() {
     setSaving(true);
 
     try {
-      const limitPayload: Record<string, number> = {};
-      for (const key of Object.keys(addLimits) as LimitKey[]) {
-        limitPayload[`max_monthly_${key}`] = addUnlimited[key] ? 0 : (Number(addLimits[key]) || 10);
-      }
       const res = await fetch(`/api/projects/${projectId}/users`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: Number(selectedUserId),
-          ...limitPayload,
-        }),
+        body: JSON.stringify({ user_id: Number(selectedUserId) }),
       });
 
       if (res.ok) {
         setSelectedUserId("");
-        setAddLimits(defaultLimits);
-        setAddUnlimited({
-          text_normal: true, text_hq: true,
-          image_normal: false, image_hq: false,
-          video_normal: false, video_hq: false,
-          audio_normal: false, audio_hq: false,
-        });
         fetchProjectUsers();
         fetchStats();
       } else {
         const data = await res.json();
         alert(data.error || "Error al agregar usuario");
-      }
-    } catch (err) {
-      console.error("Error:", err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleUpdateUserLimit = async (userId: number) => {
-    setSaving(true);
-
-    try {
-      const editPayload: Record<string, number> = {};
-      for (const key of Object.keys(editLimits) as LimitKey[]) {
-        editPayload[`max_monthly_${key}`] = editUnlimited[key] ? 0 : (Number(editLimits[key]) || 10);
-      }
-      const res = await fetch(`/api/projects/${projectId}/users`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: userId,
-          ...editPayload,
-        }),
-      });
-
-      if (res.ok) {
-        setEditingUserLimit(null);
-        fetchProjectUsers();
-      } else {
-        const data = await res.json();
-        alert(data.error || "Error al actualizar límite");
       }
     } catch (err) {
       console.error("Error:", err);
@@ -971,16 +887,6 @@ export default function ProjectDetailPage() {
             ) : (
               <div className="space-y-2">
                 {projectUsers.map((pu) => {
-                  const isEditing = editingUserLimit === pu.user_id;
-                  const limitTypes = [
-                    { key: "text", label: "Texto", icon: <FileText className="h-3 w-3 text-green-400" /> },
-                    { key: "image", label: "Imagen", icon: <ImageIcon className="h-3 w-3 text-blue-400" /> },
-                    { key: "video", label: "Video", icon: <Video className="h-3 w-3 text-purple-400" /> },
-                    { key: "audio", label: "Audio", icon: <Mic className="h-3 w-3 text-orange-400" /> },
-                  ] as const;
-
-                  const formatLimit = (val: number) => val === 0 ? "∞" : val.toString();
-
                   return (
                     <div key={pu.id} className="rounded-lg border border-border/50 p-3">
                       <div className="flex items-center justify-between mb-2">

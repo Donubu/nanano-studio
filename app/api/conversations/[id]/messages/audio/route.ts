@@ -28,8 +28,6 @@ import {
   AudioTTSEngine,
 } from "@/types/audio";
 
-type QualityTier = "normal" | "hq" | "chirp";
-
 interface ConversationRow extends RowDataPacket {
   id: number;
   user_id: number;
@@ -52,13 +50,6 @@ interface ConversationRow extends RowDataPacket {
   client_name: string | null;
   cost_audio_per_minute: number;
   model_api_backend: string | null;
-}
-
-interface AudioLimitRow extends RowDataPacket {
-  max_monthly_audio_generations: number;
-  current_month_audio_count: number;
-  max_monthly_audio_normal: number;
-  max_monthly_audio_hq: number;
 }
 
 interface MessageRow extends RowDataPacket {
@@ -93,7 +84,6 @@ export async function POST(
     const {
       content,
       audioSettings,
-      quality_tier,
       selected_model_id,
       skip_user_message = false,
     } = body as {
@@ -108,48 +98,14 @@ export async function POST(
         speakingRate?: number;
         locale?: string;
       };
-      quality_tier?: QualityTier;
       selected_model_id?: number;
       skip_user_message?: boolean;
     };
-
-    const validTiers: QualityTier[] = ["normal", "hq", "chirp"];
-    const effectiveQualityTier: QualityTier = quality_tier && validTiers.includes(quality_tier) ? quality_tier : "normal";
-    const isChirpTier = effectiveQualityTier === "chirp";
-
-    // Check appropriate engine is configured
-    if (isChirpTier) {
-      if (!isChirpConfigured()) {
-        return new Response(JSON.stringify({ error: "Google Cloud TTS (Chirp) no configurado" }), {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-    } else {
-      if (!isAudioConfigured()) {
-        return new Response(JSON.stringify({ error: "API de Google AI Audio no configurada" }), {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-    }
 
     console.log("[Audio API] Received audioSettings:", audioSettings);
 
     if (!content || content.trim() === "") {
       return new Response(JSON.stringify({ error: "El texto para generar audio es requerido" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    // Validate text length based on engine
-    const textBytes = Buffer.byteLength(content, "utf8");
-    const maxBytes = isChirpTier ? 5000 : 4000;
-    if (textBytes > maxBytes) {
-      return new Response(JSON.stringify({
-        error: `El texto excede el límite de ${maxBytes} bytes (actual: ${textBytes} bytes)`,
-      }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
@@ -184,6 +140,86 @@ export async function POST(
       });
     }
 
+    // Resolver el modelo efectivo desde project_generation_models ANTES del
+    // stream: el api_backend del modelo elegido decide el engine TTS
+    // (chirp = Google Cloud TTS Chirp 3 HD, resto = Gemini TTS).
+    let effectiveModelId = conversation.model_model_id;
+    let effectiveModelDbId = conversation.model_id;
+    let effectiveBackend = conversation.model_api_backend || undefined;
+    let effectiveCostAudioPerMinute = Number(conversation.cost_audio_per_minute) || 0;
+    const generationType = conversation.generation_type || "audio";
+
+    if (conversation.project_id) {
+      const [projectModels] = await pool.execute<RowDataPacket[]>(`
+        SELECT
+          pgm.model_id,
+          pgm.is_default,
+          m.model_id as model_model_id,
+          m.api_backend as model_api_backend,
+          m.cost_audio_per_minute
+        FROM project_generation_models pgm
+        JOIN models m ON pgm.model_id = m.id
+        JOIN project_generation_config pgc ON pgc.project_id = pgm.project_id AND pgc.generation_type = pgm.generation_type
+        WHERE pgm.project_id = ? AND pgm.generation_type = ? AND pgc.is_enabled = 1
+        ORDER BY pgm.sort_order ASC
+      `, [conversation.project_id, generationType]);
+
+      if (projectModels.length > 0) {
+        const selectedRow = projectModels.find((m: RowDataPacket) => selected_model_id && m.model_id === selected_model_id);
+        // Sin selección explícita, filtrar candidatos por el engine de la
+        // conversación: una conversación Gemini no debe caer en el modelo
+        // Chirp aunque esté marcado como default del proyecto (y viceversa).
+        let candidates = projectModels;
+        if (!selectedRow) {
+          const wantsChirp = conversation.audio_tts_engine === "chirp";
+          const byEngine = projectModels.filter((m: RowDataPacket) =>
+            wantsChirp ? m.model_api_backend === "chirp" : m.model_api_backend !== "chirp"
+          );
+          if (byEngine.length > 0) candidates = byEngine;
+        }
+        const chosen = selectedRow
+          || candidates.find((m: RowDataPacket) => m.is_default)
+          || candidates[0];
+        effectiveModelId = chosen.model_model_id;
+        effectiveModelDbId = chosen.model_id;
+        effectiveBackend = chosen.model_api_backend || undefined;
+        effectiveCostAudioPerMinute = Number(chosen.cost_audio_per_minute) || 0;
+        console.log(`[Audio] Using model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
+      }
+    }
+
+    const isChirp = effectiveBackend === "chirp";
+    const effectiveQualityTier = isChirp ? "chirp" : "normal";
+
+    // Check appropriate engine is configured
+    if (isChirp) {
+      if (!isChirpConfigured()) {
+        return new Response(JSON.stringify({ error: "Google Cloud TTS (Chirp) no configurado" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    } else {
+      if (!isAudioConfigured()) {
+        return new Response(JSON.stringify({ error: "API de Google AI Audio no configurada" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    // Validate text length based on engine
+    const textBytes = Buffer.byteLength(content, "utf8");
+    const maxBytes = isChirp ? 5000 : 4000;
+    if (textBytes > maxBytes) {
+      return new Response(JSON.stringify({
+        error: `El texto excede el límite de ${maxBytes} bytes (actual: ${textBytes} bytes)`,
+      }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     // Crear el stream de respuesta SSE inmediatamente para enviar headers rápido
     const encoder = new TextEncoder();
     let controllerClosed = false;
@@ -212,40 +248,6 @@ export async function POST(
         let placeholderId: number | undefined;
 
         try {
-          // Get the correct model from project_generation_config based on quality_tier
-          let effectiveModelId = conversation.model_model_id;
-          let effectiveModelDbId = conversation.model_id;
-          let effectiveBackend = conversation.model_api_backend || undefined;
-          let effectiveCostAudioPerMinute = Number(conversation.cost_audio_per_minute) || 0;
-          const generationType = conversation.generation_type || "audio";
-
-          if (conversation.project_id) {
-            const [projectModels] = await pool.execute<RowDataPacket[]>(`
-              SELECT
-                pgm.model_id,
-                pgm.is_default,
-                m.model_id as model_model_id,
-                m.api_backend as model_api_backend,
-                m.cost_audio_per_minute
-              FROM project_generation_models pgm
-              JOIN models m ON pgm.model_id = m.id
-              JOIN project_generation_config pgc ON pgc.project_id = pgm.project_id AND pgc.generation_type = pgm.generation_type
-              WHERE pgm.project_id = ? AND pgm.generation_type = ? AND pgc.is_enabled = 1
-              ORDER BY pgm.sort_order ASC
-            `, [conversation.project_id, generationType]);
-
-            if (projectModels.length > 0) {
-              const chosen = projectModels.find((m: RowDataPacket) => selected_model_id && m.model_id === selected_model_id)
-                || projectModels.find((m: RowDataPacket) => m.is_default)
-                || projectModels[0];
-              effectiveModelId = chosen.model_model_id;
-              effectiveModelDbId = chosen.model_id;
-              effectiveBackend = chosen.model_api_backend || undefined;
-              effectiveCostAudioPerMinute = Number(chosen.cost_audio_per_minute) || 0;
-              console.log(`[Audio] Using model from config: ${effectiveModelId} (${effectiveBackend || 'default'})`);
-            }
-          }
-
           // Guardar mensaje del usuario (con quality_tier) - skip for parallel variation requests
           let userMessageId: number | null = null;
           if (!skip_user_message) {
@@ -292,9 +294,9 @@ export async function POST(
           // Configuración de generación de audio (usa request settings, fallback a conversation settings)
           const voiceId = audioSettings?.voiceId || conversation.audio_voice_id || "Kore";
           const stylePrompt = audioSettings?.stylePrompt ?? conversation.audio_style_prompt ?? "";
-          const multiSpeaker = isChirpTier ? false : (audioSettings?.multiSpeaker ?? conversation.audio_multi_speaker ?? false);
+          const multiSpeaker = isChirp ? false : (audioSettings?.multiSpeaker ?? conversation.audio_multi_speaker ?? false);
           const outputFormat = audioSettings?.outputFormat || conversation.audio_output_format || "mp3";
-          const ttsEngine: AudioTTSEngine = isChirpTier ? "chirp" : (audioSettings?.ttsEngine || conversation.audio_tts_engine || "gemini");
+          const ttsEngine: AudioTTSEngine = isChirp ? "chirp" : "gemini";
           const speakingRate = audioSettings?.speakingRate ?? (Number(conversation.audio_speaking_rate) || 1.0);
           const locale = audioSettings?.locale || conversation.audio_locale || "en-US";
 
@@ -308,13 +310,13 @@ export async function POST(
             }
           }
 
-          const engineLabel = isChirpTier ? "Chirp 3 HD (Cloud TTS)" : (effectiveBackend === 'vertex' ? 'Vertex AI' : effectiveBackend === 'gemini' ? 'Gemini API' : (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API"));
+          const engineLabel = isChirp ? "Chirp 3 HD (Cloud TTS)" : (effectiveBackend === 'vertex' ? 'Vertex AI' : effectiveBackend === 'gemini' ? 'Gemini API' : (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "Vertex AI" : "Gemini API"));
           console.log(`\n========== [AUDIO GENERATION REQUEST] (${engineLabel}) ==========`);
           console.log("Model:", effectiveModelId);
           console.log("Quality tier:", effectiveQualityTier);
           console.log("TTS Engine:", ttsEngine);
           console.log("Voice ID:", voiceId);
-          if (isChirpTier) {
+          if (isChirp) {
             console.log("Locale:", locale);
             console.log("Speaking rate:", speakingRate);
           } else {
@@ -332,7 +334,7 @@ export async function POST(
           let mimeType: string;
           let fileExtension: string;
 
-          if (isChirpTier) {
+          if (isChirp) {
             // ======== CHIRP 3 HD BRANCH ========
             const onChirpProgress = (progress: ChirpProgress) => {
               sendEvent({

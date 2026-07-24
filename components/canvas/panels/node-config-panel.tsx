@@ -82,10 +82,15 @@ export function NodeConfigPanel({
   // Video nodes: detect image inputs that make the Gemini API force 8s, so the
   // duration picker can disable 4s/6s instead of silently overriding the choice.
   const videoInputEdges = edges.filter((e) => e.target === node.id);
+  const hasFirstFrame = videoInputEdges.some((e) => baseHandleId(e.targetHandle) === HANDLES.INPUT_FIRST_FRAME);
   const hasInterpolation =
-    videoInputEdges.some((e) => baseHandleId(e.targetHandle) === HANDLES.INPUT_FIRST_FRAME) &&
+    hasFirstFrame &&
     videoInputEdges.some((e) => baseHandleId(e.targetHandle) === HANDLES.INPUT_LAST_FRAME);
   const hasReference = videoInputEdges.some((e) => baseHandleId(e.targetHandle) === HANDLES.INPUT_REFERENCE);
+
+  // Video capabilities of the selected model, needed at panel scope because the
+  // negative prompt textarea renders outside VideoSettings.
+  const videoCaps = type === "video" ? getVideoCapabilities(selectedModel) : null;
 
   return (
     <div className="w-[360px] h-full border-l border-border bg-background flex flex-col overflow-hidden">
@@ -154,8 +159,9 @@ export function NodeConfigPanel({
           />
         </div>
 
-        {/* Negative prompt - always editable for image/video (unless locked) */}
-        {(type === "image" || type === "video") && (
+        {/* Negative prompt - always editable for image/video (unless locked).
+            Hidden for video models whose API has no negative prompt (Gemini Omni). */}
+        {(type === "image" || (type === "video" && videoCaps?.supportsNegativePrompt !== false)) && (
           <div className="space-y-1.5">
             <Label className="text-xs">Negative Prompt</Label>
             <Textarea
@@ -215,7 +221,7 @@ export function NodeConfigPanel({
             {/* Type-specific settings */}
             {type === "text" && <TextSettings data={data as TextNodeData} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} models={availableModels} />}
             {type === "image" && <ImageSettings data={data as ImageNodeData} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} />}
-            {type === "video" && <VideoSettings data={data as VideoNodeData} model={selectedModel} hasInterpolation={hasInterpolation} hasReference={hasReference} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} />}
+            {type === "video" && <VideoSettings data={data as VideoNodeData} model={selectedModel} hasFirstFrame={hasFirstFrame} hasInterpolation={hasInterpolation} hasReference={hasReference} onUpdate={(u) => onUpdateData(node.id, u as Partial<CanvasNodeData>)} />}
           </>
         )}
 
@@ -433,7 +439,7 @@ function ImageSettings({ data, onUpdate }: { data: ImageNodeData; onUpdate: (u: 
   );
 }
 
-function VideoSettings({ data, model, hasInterpolation, hasReference, onUpdate }: { data: VideoNodeData; model?: CanvasModel; hasInterpolation?: boolean; hasReference?: boolean; onUpdate: (u: Partial<VideoNodeData>) => void }) {
+function VideoSettings({ data, model, hasFirstFrame, hasInterpolation, hasReference, onUpdate }: { data: VideoNodeData; model?: CanvasModel; hasFirstFrame?: boolean; hasInterpolation?: boolean; hasReference?: boolean; onUpdate: (u: Partial<VideoNodeData>) => void }) {
   // Options come from per-model capabilities so each backend (VEO / xAI / Kling /
   // OpenRouter Seedance) shows only the values it can actually accept.
   const caps = getVideoCapabilities(model);
@@ -455,6 +461,14 @@ function VideoSettings({ data, model, hasInterpolation, hasReference, onUpdate }
 
   return (
     <>
+      {caps.hasDurationControl === false ? (
+        <div className="space-y-1.5">
+          <Label className="text-xs">Duración</Label>
+          <p className="text-[10px] text-muted-foreground">
+            La duración la decide el modelo: pídela en el prompt (p. ej. &quot;un clip de 10 segundos&quot;).
+          </p>
+        </div>
+      ) : (
       <div className="space-y-1.5">
         <Label className="text-xs">Duration</Label>
         <div className="flex gap-1.5 flex-wrap">
@@ -481,6 +495,7 @@ function VideoSettings({ data, model, hasInterpolation, hasReference, onUpdate }
           <p className="text-[10px] text-amber-500">En Veo (Gemini API), {forced8sLabel}. 4s/6s solo en 720p sin imágenes.</p>
         )}
       </div>
+      )}
       <div className="space-y-1.5">
         <Label className="text-xs">Aspect Ratio</Label>
         <div className="flex gap-1.5 flex-wrap">
@@ -499,6 +514,12 @@ function VideoSettings({ data, model, hasInterpolation, hasReference, onUpdate }
           ))}
         </div>
       </div>
+      {caps.hasResolutionControl === false ? (
+        <div className="space-y-1.5">
+          <Label className="text-xs">Resolución</Label>
+          <p className="text-[10px] text-muted-foreground">720p · 24 fps fijo</p>
+        </div>
+      ) : (
       <div className="space-y-1.5">
         <Label className="text-xs">Resolution</Label>
         <div className="flex gap-1.5 flex-wrap">
@@ -528,6 +549,7 @@ function VideoSettings({ data, model, hasInterpolation, hasReference, onUpdate }
           )}
         </div>
       </div>
+      )}
       {caps.supportsAudio && (
         <div className="flex items-center gap-2">
           <input
@@ -539,6 +561,24 @@ function VideoSettings({ data, model, hasInterpolation, hasReference, onUpdate }
           />
           <Label htmlFor="audio-enabled" className="text-xs">Audio habilitado</Label>
         </div>
+      )}
+      {caps.audioAlwaysOn && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="px-2 py-0.5 rounded-md bg-muted text-[10px] font-medium">Audio integrado</span>
+          <span className="text-[10px]">siempre activo, no se puede desactivar</span>
+        </div>
+      )}
+      {caps.hasDurationControl === false && (
+        <p className="text-[10px] text-muted-foreground">
+          Modo: {hasFirstFrame ? "imagen a video (usa la imagen conectada como primer frame)" : "texto a video"}
+        </p>
+      )}
+      {caps.hints && caps.hints.length > 0 && (
+        <ul className="space-y-0.5">
+          {caps.hints.map((hint) => (
+            <li key={hint} className="text-[10px] text-muted-foreground">• {hint}</li>
+          ))}
+        </ul>
       )}
     </>
   );

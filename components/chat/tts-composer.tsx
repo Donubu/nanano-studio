@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
-import { Mic, Users, User, ChevronDown, Volume2, Loader2, Sparkles, Globe, Gauge, HelpCircle, Code, LayoutGrid, Palette } from "lucide-react";
+import { Mic, Users, User, ChevronDown, Volume2, Loader2, Globe, Gauge, HelpCircle, Code, LayoutGrid, Palette } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { VoiceSelector } from "./voice-selector";
+import { ModelSelector, ProjectModel } from "./quality-selector";
 import { AudioTagPalette } from "./audio-tag-palette";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -48,20 +49,18 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-type QualityTier = "normal" | "hq" | "chirp";
-
 interface TTSComposerProps {
   voiceId: AudioVoiceId;
   multiSpeaker: boolean;
   speakerConfig: AudioSpeakerConfig | null;
   stylePrompt: string;
   outputFormat: AudioOutputFormat;
-  qualityTier: QualityTier;
   ttsEngine?: AudioTTSEngine;
   lockedEngine?: boolean;
   chirpAvailable?: boolean;
-  normalModelName?: string | null;
-  hqModelName?: string | null;
+  models?: ProjectModel[];
+  selectedModelId?: number | null;
+  onSelectModel?: (modelId: number) => void;
   speakingRate?: number;
   locale?: string;
   disabled: boolean;
@@ -69,14 +68,13 @@ interface TTSComposerProps {
   generationProgress?: { status: string; message: string };
   restoreData?: AudioRestoreData | null;
   numVariations?: number;
-  onGenerate: (text: string, speakers?: AudioSpeakerConfig, qualityTier?: QualityTier, numVariations?: number) => void;
+  onGenerate: (text: string, speakers?: AudioSpeakerConfig, numVariations?: number) => void;
   onSettingsChange: (settings: {
     voiceId?: AudioVoiceId;
     stylePrompt?: string;
     multiSpeaker?: boolean;
     speakerConfig?: AudioSpeakerConfig | null;
     outputFormat?: AudioOutputFormat;
-    qualityTier?: QualityTier;
     ttsEngine?: AudioTTSEngine;
     speakingRate?: number;
     locale?: string;
@@ -139,12 +137,12 @@ export function TTSComposer({
   speakerConfig,
   stylePrompt,
   outputFormat,
-  qualityTier,
   ttsEngine = "gemini",
   lockedEngine = false,
   chirpAvailable = false,
-  normalModelName,
-  hqModelName,
+  models = [],
+  selectedModelId = null,
+  onSelectModel,
   speakingRate = 1.0,
   locale = "es-US",
   numVariations = 1,
@@ -261,40 +259,27 @@ export function TTSComposer({
     return new Blob([ssml]).size;
   }, [isChirp, chirpMode, chirpSegments]);
 
-  // Auto-select quality tier when current selection has no model
-  useEffect(() => {
-    if (isChirp) return;
-    const hasNormal = !!normalModelName;
-    const hasHq = !!hqModelName;
-    if (qualityTier === "normal" && !hasNormal && hasHq) {
-      onSettingsChange({ qualityTier: "hq" });
-    } else if (qualityTier === "hq" && !hasHq && hasNormal) {
-      onSettingsChange({ qualityTier: "normal" });
-    }
-  }, [normalModelName, hqModelName, qualityTier, isChirp, onSettingsChange]);
-
   const currentByteCount = isChirp && chirpMode === "visual"
     ? chirpVisualByteCount
     : multiSpeaker ? dialogueByteCount : byteCount;
   const isOverLimit = currentByteCount > maxBytes;
 
   const handleGenerate = () => {
-    const effectiveTier = isChirp ? "chirp" : qualityTier;
     const variations = numVariations > 1 ? numVariations : undefined;
     if (multiSpeaker && !isChirp) {
       const formattedText = formatDialogueForAPI(characters, dialogueLines);
       const speakers = extractSpeakersFromDialogue(characters, dialogueLines);
       if (formattedText.trim() && speakers.length >= 2) {
-        onGenerate(formattedText, { speakers }, effectiveTier, variations);
+        onGenerate(formattedText, { speakers }, variations);
       }
     } else if (isChirp && chirpMode === "visual") {
       const ssml = segmentsToSSML(chirpSegments);
       if (ssml.trim()) {
-        onGenerate(ssml, undefined, effectiveTier, variations);
+        onGenerate(ssml, undefined, variations);
       }
     } else {
       if (text.trim()) {
-        onGenerate(text, undefined, effectiveTier, variations);
+        onGenerate(text, undefined, variations);
       }
     }
   };
@@ -690,41 +675,16 @@ export function TTSComposer({
             </div>
           </div>
 
-          {/* Quality Tier (hidden when Chirp since it's always "chirp" tier) */}
-          {!isChirp && (normalModelName || hqModelName) && (
+          {/* Modelo (hidden when Chirp: engine fijo con su único modelo) */}
+          {!isChirp && models.length > 0 && onSelectModel && (
             <div className="flex items-center gap-2">
-              <Label className="text-xs text-muted-foreground">Calidad:</Label>
-              <div className="flex gap-1">
-                {normalModelName && (
-                  <button
-                    onClick={() => onSettingsChange({ qualityTier: "normal" })}
-                    disabled={disabled || isGenerating}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors truncate max-w-[140px] ${
-                      qualityTier === "normal"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground hover:text-foreground"
-                    } ${disabled || isGenerating ? "opacity-50 cursor-not-allowed" : ""}`}
-                    title={normalModelName}
-                  >
-                    {normalModelName}
-                  </button>
-                )}
-                {hqModelName && (
-                  <button
-                    onClick={() => onSettingsChange({ qualityTier: "hq" })}
-                    disabled={disabled || isGenerating}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1 truncate max-w-[140px] ${
-                      qualityTier === "hq"
-                        ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white"
-                        : "bg-muted text-muted-foreground hover:text-foreground"
-                    } ${disabled || isGenerating ? "opacity-50 cursor-not-allowed" : ""}`}
-                    title={hqModelName}
-                  >
-                    <Sparkles className="w-3 h-3 shrink-0" />
-                    {hqModelName}
-                  </button>
-                )}
-              </div>
+              <Label className="text-xs text-muted-foreground">Modelo:</Label>
+              <ModelSelector
+                models={models}
+                selectedModelId={selectedModelId}
+                onSelect={onSelectModel}
+                disabled={disabled || isGenerating}
+              />
             </div>
           )}
           {isChirp && (

@@ -82,7 +82,7 @@ import {VideoInputFrames, ReferenceImage} from "./video-input-frames";
 import {VideoDuration, VideoResolution, VideoAspectRatio, VideoGenerationStatus} from "@/types/video";
 import {GenerationModeSelector, GenerationMode} from "./generation-mode-selector";
 import {GenerationTypeSelector, GenerationType, GenerationTypeBadge} from "./generation-type-selector";
-import {ModelSelector, ProjectModel as ConfigModel, QualityBadge, QualityTier} from "./quality-selector";
+import {ModelSelector, ProjectModel as ConfigModel} from "./quality-selector";
 import {ReasoningSelector, ThinkingLevel} from "./reasoning-selector";
 import {DeploymentBanner} from "./deployment-banner";
 import {CreateProjectDialog} from "./create-project-dialog";
@@ -347,7 +347,6 @@ export function ChatInterface() {
     const [audioMultiSpeaker, setAudioMultiSpeaker] = useState(false);
     const [audioSpeakerConfig, setAudioSpeakerConfig] = useState<AudioSpeakerConfig | null>(null);
     const [audioOutputFormat, setAudioOutputFormat] = useState<AudioOutputFormat>("mp3");
-    const [audioQualityTier, setAudioQualityTier] = useState<"normal" | "hq" | "chirp">("normal");
     const [audioRestoreData, setAudioRestoreData] = useState<AudioRestoreData | null>(null);
     const [audioTTSEngine, setAudioTTSEngine] = useState<"gemini" | "chirp">("gemini");
     const [audioSpeakingRate, setAudioSpeakingRate] = useState(1.0);
@@ -478,6 +477,8 @@ export function ChatInterface() {
     const isXaiVideoProvider = activeVideoModel?.api_backend === "xai";
     const isKlingVideoProvider = activeVideoModel?.api_backend === "kling" || activeVideoModel?.model_id?.includes("kling-v3-omni") || activeVideoModel?.model_id === "kling-v2-6";
     const isKlingV26 = activeVideoModel?.model_id === "kling-v2-6";
+    // Gemini Omni: solo por api_backend (model_id con "omni" chocaría con kling-v3-omni)
+    const isOmniVideoProvider = activeVideoModel?.api_backend === "omni";
 
     // Kling dynamic limits: max 7 images without video input, max 4 with video input, max 1 video
     const klingHasVideoInput = klingAssetList.some(a => a.type === "video") || selectedKlingAssets.some(a => a.type === "video");
@@ -774,7 +775,7 @@ export function ChatInterface() {
     }, [selectedModelId]);
 
     // Poll VEO available slots when in video conversation with VEO provider
-    const isVeoProvider = isVideoConversation && generationMode === "video" && !isKlingVideoProvider && !isXaiVideoProvider;
+    const isVeoProvider = isVideoConversation && generationMode === "video" && !isKlingVideoProvider && !isXaiVideoProvider && !isOmniVideoProvider;
     useEffect(() => {
         if (!isVeoProvider) {
             setVeoAvailableSlots(null);
@@ -3040,7 +3041,7 @@ export function ChatInterface() {
         }
     };
 
-    const sendAudioMessage = async (content: string, qualityTier: "normal" | "hq" | "chirp" = "normal", overrideSpeakerConfig?: AudioSpeakerConfig, modelId?: number | null, numVariations: number = 1) => {
+    const sendAudioMessage = async (content: string, overrideSpeakerConfig?: AudioSpeakerConfig, modelId?: number | null, numVariations: number = 1) => {
         if (!activeTabId || !content.trim()) return;
 
         let tabId = activeTabId;
@@ -3066,7 +3067,6 @@ export function ChatInterface() {
             stylePrompt: audioStylePrompt,
             multiSpeaker: audioMultiSpeaker,
             outputFormat: audioOutputFormat,
-            qualityTier,
             numVariations,
         });
 
@@ -3895,12 +3895,12 @@ export function ChatInterface() {
                                     speakerConfig={audioSpeakerConfig}
                                     stylePrompt={audioStylePrompt}
                                     outputFormat={audioOutputFormat}
-                                    qualityTier={audioQualityTier}
                                     ttsEngine={audioTTSEngine}
                                     lockedEngine={currentConversation?.generation_type === "audio_hd"}
                                     chirpAvailable={false}
-                                    normalModelName={currentTypeConfig?.models?.[0]?.display_name}
-                                    hqModelName={currentTypeConfig?.models?.[1]?.display_name}
+                                    models={currentTypeConfig?.models ?? []}
+                                    selectedModelId={selectedConfigModelId}
+                                    onSelectModel={setSelectedConfigModelId}
                                     speakingRate={audioSpeakingRate}
                                     locale={audioLocale}
                                     disabled={isSending}
@@ -3915,13 +3915,13 @@ export function ChatInterface() {
                                     })()}
                                     restoreData={audioRestoreData}
                                     numVariations={audioNumVariations}
-                                    onGenerate={(text, speakers, qualityTier, numVariations) => {
+                                    onGenerate={(text, speakers, numVariations) => {
                                         if (speakers) {
                                             // Multi-speaker mode
                                             setAudioSpeakerConfig(speakers);
                                             setAudioMultiSpeaker(true);
                                         }
-                                        sendAudioMessage(text, qualityTier || audioQualityTier, speakers || undefined, selectedConfigModelId, numVariations);
+                                        sendAudioMessage(text, speakers || undefined, selectedConfigModelId, numVariations);
                                     }}
                                     onSettingsChange={(settings) => {
                                         if (settings.voiceId !== undefined) {
@@ -3943,9 +3943,6 @@ export function ChatInterface() {
                                         if (settings.outputFormat !== undefined) {
                                             setAudioOutputFormat(settings.outputFormat);
                                             handleSettingChange("audio_output_format", settings.outputFormat);
-                                        }
-                                        if (settings.qualityTier !== undefined) {
-                                            setAudioQualityTier(settings.qualityTier);
                                         }
                                         if (settings.ttsEngine !== undefined) {
                                             setAudioTTSEngine(settings.ttsEngine);
@@ -5147,7 +5144,7 @@ export function ChatInterface() {
                                     disabled={isSending}
                                     hasReferenceImages={videoReferenceImages.length > 0}
                                     hasVideoInput={isKlingVideoProvider && !isKlingV26 && klingHasVideoInput}
-                                    provider={isKlingVideoProvider ? "kling" : isXaiVideoProvider ? "xai" : "google"}
+                                    provider={isKlingVideoProvider ? "kling" : isXaiVideoProvider ? "xai" : isOmniVideoProvider ? "omni" : "google"}
                                     modelId={activeVideoModel?.model_id}
                                     imageAssets={isKlingVideoProvider && !isKlingV26 ? klingImageAssets.map(a => ({ assetId: a.assetId, type: a.type as "image" | "video", label: a.label })) : undefined}
                                     voiceBindings={isKlingVideoProvider ? klingVoiceBindings : undefined}
@@ -5225,8 +5222,8 @@ export function ChatInterface() {
                                     onLastFrameChange={setVideoLastFrame}
                                     onReferenceImagesChange={setVideoReferenceImages}
                                     disabled={isSending}
-                                    supportsReferenceImages={!isKlingVideoProvider}
-                                    provider={isKlingVideoProvider ? "kling" : isXaiVideoProvider ? "xai" : "google"}
+                                    supportsReferenceImages={!isKlingVideoProvider && !isOmniVideoProvider}
+                                    provider={isKlingVideoProvider ? "kling" : isXaiVideoProvider ? "xai" : isOmniVideoProvider ? "omni" : "google"}
                                     isGeminiBackend={activeVideoModel?.api_backend === "gemini"}
                                 />
                             </div>

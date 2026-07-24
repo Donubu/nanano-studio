@@ -21,7 +21,7 @@ export interface ReferenceImage {
   sourceUrl?: string;
 }
 
-export type VideoInputProvider = "google" | "xai" | "kling";
+export type VideoInputProvider = "google" | "xai" | "kling" | "omni";
 
 interface VideoInputFramesProps {
   projectId: number;
@@ -54,6 +54,8 @@ export function VideoInputFrames({
   isGeminiBackend = false,
 }: VideoInputFramesProps) {
   const isXai = provider === "xai";
+  // Gemini Omni v1: solo first frame (sin last frame ni referencias)
+  const isOmni = provider === "omni";
   const [modalMode, setModalMode] = useState<ModalMode>(null);
 
   // Gemini API: reference images and first/last frame are mutually exclusive
@@ -323,8 +325,8 @@ export function VideoInputFrames({
           )}
         </div>
 
-        {/* Last Frame - not supported by xAI */}
-        {!isXai && <div className={cn("space-y-2", framesDisabledByReferences && "opacity-40 pointer-events-none")}>
+        {/* Last Frame - not supported by xAI or Gemini Omni */}
+        {!isXai && !isOmni && <div className={cn("space-y-2", framesDisabledByReferences && "opacity-40 pointer-events-none")}>
           <Label className="text-xs text-muted-foreground flex items-center gap-1">
             Last Frame
             <span className="text-muted-foreground/60">
@@ -408,8 +410,8 @@ export function VideoInputFrames({
           )}
         </div>}
 
-        {/* Reference Images - not supported by xAI */}
-        {supportsReferenceImages && !isXai && (
+        {/* Reference Images - not supported by xAI or Gemini Omni (v1) */}
+        {supportsReferenceImages && !isXai && !isOmni && (
           <div className={cn("space-y-2", referencesDisabledByFrames && "opacity-40 pointer-events-none")}>
             <Label className="text-xs text-muted-foreground flex items-center gap-1">
               Imágenes de Referencia

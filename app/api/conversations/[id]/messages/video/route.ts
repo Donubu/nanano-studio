@@ -6,6 +6,7 @@ import { generateVideo, isVideoConfigured, VideoGenerationConfig, VideoInput, Vi
 import { generateXaiVideo, isXaiVideoConfigured, XaiVideoConfig, validateXaiVideoConfig } from "@/lib/xai-video";
 import { generateKlingVideo, isKlingConfigured, KlingVideoConfig, validateKlingVideoConfig, KlingImageInput } from "@/lib/kling-video";
 import { generateOpenRouterVideo, isOpenRouterConfigured, OpenRouterVideoConfig, validateOpenRouterVideoConfig, OpenRouterImageInputs } from "@/lib/openrouter-video";
+import { generateOmniVideo, isOmniConfigured, OmniVideoConfig, validateOmniVideoConfig } from "@/lib/omni-video";
 import { uploadVideoToS3, generateVideoFileName, isS3Configured, uploadToS3, generateFileName } from "@/lib/s3";
 import { generateConversationTitle, Labels } from "@/lib/google-ai";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
@@ -36,13 +37,6 @@ interface ConversationRow extends RowDataPacket {
   // Cost fields from model
   cost_video_per_second: number;
   model_api_backend: string | null;
-}
-
-interface VideoLimitRow extends RowDataPacket {
-  max_monthly_video_generations: number;
-  current_month_video_count: number;
-  max_monthly_video_normal: number;
-  max_monthly_video_hq: number;
 }
 
 interface MessageRow extends RowDataPacket {
@@ -220,7 +214,7 @@ export async function POST(
         let placeholderId: number | undefined;
 
         try {
-          // Get the correct model from project_generation_config based on quality_tier
+          // Resolver el modelo desde project_generation_models (selected_model_id → default → primero)
           let effectiveModelId = conversation.model_model_id;
           let effectiveModelDbId = conversation.model_id;
           let effectiveBackend = conversation.model_api_backend || undefined;
@@ -259,6 +253,9 @@ export async function POST(
           const isXaiProvider = effectiveBackend === 'xai';
           const isKlingProvider = effectiveBackend === 'kling' || effectiveModelId.includes('kling-v3-omni') || effectiveModelId === 'kling-v2-6';
           const isOpenRouterProvider = effectiveBackend === 'openrouter';
+          // Gemini Omni (interactions API). Detección SOLO por backend: matchear
+          // por model_id chocaría con 'kling-v3-omni'.
+          const isOmniProvider = effectiveBackend === 'omni';
 
           // Per-user gate for OpenRouter (paid out-of-pocket). Defense-in-depth:
           // generation-config GET already hides these models for non-flagged
@@ -298,6 +295,14 @@ export async function POST(
           } else if (isOpenRouterProvider) {
             if (!isOpenRouterConfigured()) {
               sendEvent({ type: "error", message: "API de OpenRouter no configurada (falta OPENROUTER_API_KEY)" });
+              clearInterval(heartbeat);
+              controllerClosed = true;
+              controller.close();
+              return;
+            }
+          } else if (isOmniProvider) {
+            if (!isOmniConfigured()) {
+              sendEvent({ type: "error", message: "API de Gemini Omni no configurada (falta GEMINI_API_KEY)" });
               clearInterval(heartbeat);
               controllerClosed = true;
               controller.close();
@@ -672,6 +677,50 @@ export async function POST(
               orImageInputs,
             );
 
+          } else if (isOmniProvider) {
+            // ===== Gemini Omni (interactions API) =====
+            // La interactions API no acepta duration/resolution/negativePrompt/
+            // seed/audioEnabled: se ignoran deliberadamente aunque vengan en el
+            // body (p.ej. datos stale de un nodo de canvas que cambió de modelo).
+            generatedSeed = 0;
+
+            const omniConfig: OmniVideoConfig = {
+              aspectRatio: (videoSettings?.aspectRatio || conversation.video_aspect_ratio) === "9:16" ? "9:16" : "16:9",
+            };
+
+            const validationError = validateOmniVideoConfig(omniConfig);
+            if (validationError) {
+              sendEvent({ type: "error", message: validationError });
+              clearInterval(heartbeat);
+              controllerClosed = true;
+              controller.close();
+              return;
+            }
+
+            // Omni acepta imágenes inline; el módulo resuelve data URLs, base64
+            // crudo y URLs http (canvas manda URLs de CloudFront). Sin last
+            // frame ni referencias en v1.
+            const omniFirstFrame = videoInputs?.firstFrame || firstFrameImage || undefined;
+
+            console.log(`\n========== [VIDEO GENERATION REQUEST] (Gemini Omni) ==========`);
+            console.log("Model:", effectiveModelId);
+            console.log("Quality tier:", effectiveQualityTier);
+            console.log("Config:", JSON.stringify(omniConfig, null, 2));
+            console.log("Input prompt:", content);
+            console.log("Has first frame:", !!omniFirstFrame);
+            console.log("================================================\n");
+
+            // Sin semáforo VEO (keys Redis veo:* son exclusivas de ese backend).
+            // TODO: si el preview de Omni empieza a devolver 429 sostenidos,
+            // agregar un contador Redis simple estilo veo-semaphore (key omni:*).
+            generatedVideo = await generateOmniVideo(
+              effectiveModelId,
+              content,
+              omniConfig,
+              onProgress,
+              omniFirstFrame ? { firstFrame: omniFirstFrame } : undefined,
+            );
+
           } else {
             // ===== Google AI (VEO) =====
             const audioEnabled = videoSettings?.audioEnabled !== undefined
@@ -837,8 +886,8 @@ export async function POST(
 
           // Update placeholder message with generated video data
           await pool.execute(
-            `UPDATE messages SET status = 'completed', generation_seed = ?, video_url = ?, video_mime_type = ?, video_file_size = ?, video_duration = ?, video_has_audio = ?, video_aspect_ratio = ?, estimated_cost = ? WHERE id = ?`,
-            [generatedVideo.seed, uploadResult.url, generatedVideo.mimeType, uploadResult.fileSize, generatedVideo.duration, generatedVideo.hasAudio ? 1 : 0, effectiveAspectRatio, estimatedCost, placeholderId]
+            `UPDATE messages SET status = 'completed', generation_seed = ?, video_url = ?, video_mime_type = ?, video_file_size = ?, video_duration = ?, video_has_audio = ?, video_aspect_ratio = ?, estimated_cost = ?, provider_generation_ref = ? WHERE id = ?`,
+            [generatedVideo.seed, uploadResult.url, generatedVideo.mimeType, uploadResult.fileSize, generatedVideo.duration, generatedVideo.hasAudio ? 1 : 0, effectiveAspectRatio, estimatedCost, generatedVideo.providerRef ?? null, placeholderId]
           );
           const modelMessageId = placeholderId;
 

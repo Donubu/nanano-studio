@@ -15,7 +15,7 @@ import { VideoDuration, VideoResolution, VideoAspectRatio } from "@/types/video"
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-export type VideoProvider = "google" | "xai" | "kling";
+export type VideoProvider = "google" | "xai" | "kling" | "omni";
 
 export interface VoiceBinding {
   dataUrl: string;
@@ -123,13 +123,76 @@ export function VideoSettings({
 
   const isXai = provider === "xai";
   const isKling = provider === "kling";
+  const isOmni = provider === "omni";
   const isKlingV26 = isKling && modelId === "kling-v2-6";
 
   const resolutions = isKling ? KLING_RESOLUTIONS : isXai ? XAI_RESOLUTIONS : GOOGLE_RESOLUTIONS;
   const aspectRatios = isKling ? KLING_ASPECT_RATIOS : isXai ? XAI_ASPECT_RATIOS : GOOGLE_ASPECT_RATIOS;
 
   // Google VEO: 1080p/4K only available for 8s. Kling: 1080p (pro) available for all durations.
-  const hasHighResRestriction = !isKling && !isXai;
+  const hasHighResRestriction = !isKling && !isXai && !isOmni;
+
+  // Gemini Omni (interactions API) tiene un panel propio: la API no acepta
+  // duración, resolución, negative prompt, seed ni toggle de audio. Solo se
+  // elige la proporción; el resto se comunica como limitación fija.
+  if (isOmni) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Video className="w-4 h-4" />
+          <span>Configuración de Video</span>
+        </div>
+
+        {/* Proporción: única opción configurable */}
+        <div className="space-y-2">
+          <Label className="text-xs text-muted-foreground">Proporcion</Label>
+          <div className="grid gap-2 grid-cols-2">
+            {GOOGLE_ASPECT_RATIOS.map((ar) => (
+              <button
+                key={ar.value}
+                disabled={disabled}
+                onClick={() => onChange({ aspectRatio: ar.value })}
+                className={`py-2 px-2 text-sm rounded-md border transition-colors flex items-center justify-center gap-1.5 ${
+                  aspectRatio === ar.value
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-background border-border hover:bg-muted"
+                } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+              >
+                <span>{ar.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Duración automática */}
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Duración automática</Label>
+          <p className="text-xs text-muted-foreground">
+            Gemini Omni decide la duración según tu prompt. Si quieres un largo
+            específico, pídelo ahí, por ejemplo: &quot;un clip de 10 segundos&quot;.
+          </p>
+        </div>
+
+        {/* Salida fija */}
+        <div className="flex items-center gap-2">
+          <span className="px-2 py-0.5 rounded-md bg-muted text-xs font-medium">720p · 24 fps</span>
+          <div className="flex items-center gap-1.5">
+            <Volume2 className="w-3.5 h-3.5 text-muted-foreground" />
+            <span className="px-2 py-0.5 rounded-md bg-muted text-xs font-medium">Audio integrado</span>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground -mt-2">
+          El audio siempre viene incluido (diálogos, efectos y ambiente); no se
+          puede desactivar.
+        </p>
+
+        <p className="text-xs text-muted-foreground border-t border-border/50 pt-3">
+          Este modelo está en preview: sin negative prompt, sin seed y sin
+          control de resolución.
+        </p>
+      </div>
+    );
+  }
   const isHighRes = (r: string) => r === "1080p" || r === "4K";
 
   const handleDurationChange = (newDuration: VideoDuration) => {

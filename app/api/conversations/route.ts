@@ -6,8 +6,6 @@ import { z } from "zod";
 import { parseBody, getPagination, paginationMeta } from "@/lib/api-utils";
 
 type GenerationType = "text" | "image" | "video" | "audio" | "music" | "full" | "canvas";
-// quality_tier kept in type for legacy DB column references
-type QualityTier = "normal" | "hq" | "chirp";
 
 interface ConversationRow extends RowDataPacket {
   id: number;
@@ -109,7 +107,6 @@ export async function POST(request: NextRequest) {
       project_id: z.number().int().positive().nullable().optional(),
       model_id: z.number().int().positive().nullable().optional(),
       generation_type: z.enum(["text", "image", "video", "audio", "music", "full", "canvas"]).default("text"),
-      quality_tier: z.string().nullable().optional(),
       selected_model_id: z.number().int().positive().nullable().optional(),
       title: z.string().max(500).default("Nueva conversación"),
       system_instruction: z.string().max(50000).nullable().optional(),

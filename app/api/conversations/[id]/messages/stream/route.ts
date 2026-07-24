@@ -230,7 +230,7 @@ export async function POST(
           let effectiveModelDbId = conversation.model_id; // Track the DB id for cost lookup
           let effectiveBackend = conversation.model_api_backend || undefined;
 
-          // Get the correct model from project_generation_config based on quality_tier
+          // Resolver el modelo desde project_generation_models (selected_model_id → default → primero)
           // Use generation_type_override if provided (e.g., when video conversation is in image mode)
           // Canvas/full types resolve to "text" for model lookup in stream endpoint
           const rawGenType = generation_type_override || conversation.generation_type || "text";

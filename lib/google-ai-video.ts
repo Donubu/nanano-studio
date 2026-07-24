@@ -206,6 +206,11 @@ export interface GeneratedVideo {
   // tokens = w*h*d*24/1024) compute the cost in USD themselves and return it here.
   // When set, the route uses this instead of cost_video_per_second * duration.
   actualCost?: number;
+  // Optional: opaque provider-side generation reference. Gemini Omni returns the
+  // interaction id ("v1_...") created with store=true; the route persists it in
+  // messages.provider_generation_ref to enable conversational editing later
+  // (previous_interaction_id).
+  providerRef?: string;
 }
 
 export interface VideoGenerationProgress {

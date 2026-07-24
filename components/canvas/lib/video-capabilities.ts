@@ -11,6 +11,7 @@
  *  - xAI Grok Imagine:      lib/xai-video.ts (validateXaiVideoConfig)
  *  - Kling v2.6 / v3 Omni:  lib/kling-video.ts
  *  - OpenRouter Seedance:   lib/openrouter-video.ts (validateOpenRouterVideoConfig)
+ *  - Gemini Omni:           lib/omni-video.ts (interactions API)
  */
 
 import type { CanvasModel } from "../canvas-workspace";
@@ -26,6 +27,14 @@ export interface VideoCapabilities {
   defaultDuration: number;
   defaultAspectRatio: string;
   defaultResolution: string;
+  // Flags for providers whose API simply lacks a control (vs offering a single
+  // option). Omitted = current behavior (control visible). durations/resolutions
+  // keep a canonical single value for storage/reconciliation even when hidden.
+  hasDurationControl?: boolean;      // false ⇒ hide the duration selector
+  hasResolutionControl?: boolean;    // false ⇒ hide the resolution selector
+  supportsNegativePrompt?: boolean;  // false ⇒ hide the negative prompt input
+  audioAlwaysOn?: boolean;           // true ⇒ "audio integrado" badge instead of checkbox
+  hints?: string[];                  // user-visible notes about model constraints
 }
 
 const VEO_CAPS: VideoCapabilities = {
@@ -88,6 +97,30 @@ const SEEDANCE_FAST_CAPS: VideoCapabilities = {
   resolutions: ["480p", "720p"], // fast does not support 1080p
 };
 
+// Gemini Omni (interactions API): sin control de duración ni resolución (720p
+// fijo, la duración se pide en el prompt), audio siempre integrado, sin
+// negative prompt ni seed. durations/resolutions guardan el valor canónico
+// para reconciliación — no se muestran.
+const OMNI_CAPS: VideoCapabilities = {
+  durations: [8],
+  aspectRatios: ["16:9", "9:16"],
+  resolutions: ["720p"],
+  supportsAudio: false,
+  supportsSeed: false,
+  defaultDuration: 8,
+  defaultAspectRatio: "16:9",
+  defaultResolution: "720p",
+  hasDurationControl: false,
+  hasResolutionControl: false,
+  supportsNegativePrompt: false,
+  audioAlwaysOn: true,
+  hints: [
+    "La duración la decide el modelo: pídela en el prompt (p. ej. \"un clip de 10 segundos\").",
+    "Salida fija en 720p a 24 fps, con audio integrado siempre.",
+    "No soporta negative prompt ni seed.",
+  ],
+};
+
 // Fallback when the model is unknown — most permissive subset so the UI
 // stays usable. Backend validation is the final guard.
 const FALLBACK_CAPS: VideoCapabilities = VEO_CAPS;
@@ -105,6 +138,9 @@ export function getVideoCapabilities(model: Pick<CanvasModel, "model_id" | "api_
   }
 
   if (backend === "xai") return XAI_CAPS;
+
+  // Gemini Omni: match by backend only — 'kling-v3-omni' also contains "omni".
+  if (backend === "omni") return OMNI_CAPS;
 
   if (backend === "kling" || id === "kling-v2-6") return id === "kling-v2-6" ? KLING_V26_CAPS : KLING_V3_CAPS;
 

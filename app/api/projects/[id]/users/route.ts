@@ -10,18 +10,6 @@ interface ProjectUserRow extends RowDataPacket {
   user_name: string | null;
   user_image: string | null;
   role: string;
-  // Límites legacy (mantener por retrocompatibilidad)
-  max_monthly_image_generations: number;
-  max_monthly_video_generations: number;
-  // Nuevos límites por calidad
-  max_monthly_image_normal: number;
-  max_monthly_image_hq: number;
-  max_monthly_video_normal: number;
-  max_monthly_video_hq: number;
-  max_monthly_audio_normal: number;
-  max_monthly_audio_hq: number;
-  max_monthly_text_normal: number;
-  max_monthly_text_hq: number;
   created_at: Date;
 }
 
@@ -41,18 +29,7 @@ export async function GET(
 
     const [rows] = await pool.execute<ProjectUserRow[]>(`
       SELECT
-        pu.id, pu.user_id, pu.role,
-        COALESCE(pu.max_monthly_image_generations, 0) as max_monthly_image_generations,
-        COALESCE(pu.max_monthly_video_generations, 0) as max_monthly_video_generations,
-        COALESCE(pu.max_monthly_image_normal, 0) as max_monthly_image_normal,
-        COALESCE(pu.max_monthly_image_hq, 0) as max_monthly_image_hq,
-        COALESCE(pu.max_monthly_video_normal, 0) as max_monthly_video_normal,
-        COALESCE(pu.max_monthly_video_hq, 0) as max_monthly_video_hq,
-        COALESCE(pu.max_monthly_audio_normal, 0) as max_monthly_audio_normal,
-        COALESCE(pu.max_monthly_audio_hq, 0) as max_monthly_audio_hq,
-        COALESCE(pu.max_monthly_text_normal, 0) as max_monthly_text_normal,
-        COALESCE(pu.max_monthly_text_hq, 0) as max_monthly_text_hq,
-        pu.created_at,
+        pu.id, pu.user_id, pu.role, pu.created_at,
         u.email as user_email, u.name as user_name, u.image as user_image
       FROM project_users pu
       JOIN users u ON pu.user_id = u.id
@@ -84,22 +61,7 @@ export async function POST(
 
     const { id } = await params;
     const body = await request.json();
-    const {
-      user_id,
-      role = "member",
-      // Legacy fields
-      max_monthly_image_generations = 0,
-      max_monthly_video_generations = 0,
-      // New quality-based limits
-      max_monthly_image_normal = 0,
-      max_monthly_image_hq = 0,
-      max_monthly_video_normal = 0,
-      max_monthly_video_hq = 0,
-      max_monthly_audio_normal = 0,
-      max_monthly_audio_hq = 0,
-      max_monthly_text_normal = 0,
-      max_monthly_text_hq = 0,
-    } = body;
+    const { user_id, role = "member" } = body;
 
     if (!user_id) {
       return NextResponse.json(
@@ -121,23 +83,11 @@ export async function POST(
       );
     }
 
+    // Las columnas legacy de límites (max_monthly_*) tienen DEFAULT 0 y ya no
+    // se administran: la cuota real es la de créditos por cliente.
     const [result] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO project_users (
-        project_id, user_id, role,
-        max_monthly_image_generations, max_monthly_video_generations,
-        max_monthly_image_normal, max_monthly_image_hq,
-        max_monthly_video_normal, max_monthly_video_hq,
-        max_monthly_audio_normal, max_monthly_audio_hq,
-        max_monthly_text_normal, max_monthly_text_hq
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id, user_id, role,
-        max_monthly_image_generations, max_monthly_video_generations,
-        max_monthly_image_normal, max_monthly_image_hq,
-        max_monthly_video_normal, max_monthly_video_hq,
-        max_monthly_audio_normal, max_monthly_audio_hq,
-        max_monthly_text_normal, max_monthly_text_hq,
-      ]
+      `INSERT INTO project_users (project_id, user_id, role) VALUES (?, ?, ?)`,
+      [id, user_id, role]
     );
 
     return NextResponse.json(
@@ -146,16 +96,6 @@ export async function POST(
         project_id: Number(id),
         user_id,
         role,
-        max_monthly_image_generations,
-        max_monthly_video_generations,
-        max_monthly_image_normal,
-        max_monthly_image_hq,
-        max_monthly_video_normal,
-        max_monthly_video_hq,
-        max_monthly_audio_normal,
-        max_monthly_audio_hq,
-        max_monthly_text_normal,
-        max_monthly_text_hq,
       },
       { status: 201 }
     );
@@ -168,7 +108,7 @@ export async function POST(
   }
 }
 
-// PUT - Actualizar límites de generaciones del usuario en proyecto
+// PUT - Actualizar rol del usuario en proyecto
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -182,22 +122,7 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
-    const {
-      user_id,
-      // Legacy fields
-      max_monthly_image_generations,
-      max_monthly_video_generations,
-      // New quality-based limits
-      max_monthly_image_normal,
-      max_monthly_image_hq,
-      max_monthly_video_normal,
-      max_monthly_video_hq,
-      max_monthly_audio_normal,
-      max_monthly_audio_hq,
-      max_monthly_text_normal,
-      max_monthly_text_hq,
-      role,
-    } = body;
+    const { user_id, role } = body;
 
     if (!user_id) {
       return NextResponse.json(
@@ -219,71 +144,16 @@ export async function PUT(
       );
     }
 
-    // Construir query dinámicamente
-    const updates: string[] = [];
-    const values: (string | number)[] = [];
-
-    // Legacy fields
-    if (max_monthly_image_generations !== undefined) {
-      updates.push("max_monthly_image_generations = ?");
-      values.push(max_monthly_image_generations);
-    }
-    if (max_monthly_video_generations !== undefined) {
-      updates.push("max_monthly_video_generations = ?");
-      values.push(max_monthly_video_generations);
-    }
-
-    // New quality-based limits
-    if (max_monthly_image_normal !== undefined) {
-      updates.push("max_monthly_image_normal = ?");
-      values.push(max_monthly_image_normal);
-    }
-    if (max_monthly_image_hq !== undefined) {
-      updates.push("max_monthly_image_hq = ?");
-      values.push(max_monthly_image_hq);
-    }
-    if (max_monthly_video_normal !== undefined) {
-      updates.push("max_monthly_video_normal = ?");
-      values.push(max_monthly_video_normal);
-    }
-    if (max_monthly_video_hq !== undefined) {
-      updates.push("max_monthly_video_hq = ?");
-      values.push(max_monthly_video_hq);
-    }
-    if (max_monthly_audio_normal !== undefined) {
-      updates.push("max_monthly_audio_normal = ?");
-      values.push(max_monthly_audio_normal);
-    }
-    if (max_monthly_audio_hq !== undefined) {
-      updates.push("max_monthly_audio_hq = ?");
-      values.push(max_monthly_audio_hq);
-    }
-    if (max_monthly_text_normal !== undefined) {
-      updates.push("max_monthly_text_normal = ?");
-      values.push(max_monthly_text_normal);
-    }
-    if (max_monthly_text_hq !== undefined) {
-      updates.push("max_monthly_text_hq = ?");
-      values.push(max_monthly_text_hq);
-    }
-
-    if (role !== undefined) {
-      updates.push("role = ?");
-      values.push(role);
-    }
-
-    if (updates.length === 0) {
+    if (role === undefined) {
       return NextResponse.json(
         { error: "No hay campos para actualizar" },
         { status: 400 }
       );
     }
 
-    values.push(Number(id), user_id);
-
     await pool.execute<ResultSetHeader>(
-      `UPDATE project_users SET ${updates.join(", ")} WHERE project_id = ? AND user_id = ?`,
-      values
+      `UPDATE project_users SET role = ? WHERE project_id = ? AND user_id = ?`,
+      [role, Number(id), user_id]
     );
 
     return NextResponse.json({ success: true });
