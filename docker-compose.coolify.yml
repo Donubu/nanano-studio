@@ -12,10 +12,14 @@
 #   - Env vars: definirlas en la UI de Coolify. Coolify genera un .env junto
 #     al compose al deployar; los servicios lo cargan vía env_file.
 #     NO subir .env.production al repo.
-#   - credentials.json (Vertex AI): crear en Coolify un "File Storage" por
-#     servicio (web y workers) con destino /run/secrets/credentials.json y
-#     pegar el contenido del JSON. Sin esto, los backends 'vertex' fallan
-#     (Gemini API / Omni siguen funcionando con API keys).
+#   - credentials.json (OBLIGATORIO): crear en Coolify un "File Storage" por
+#     servicio (web y los 3 workers) con destino /run/secrets/credentials.json
+#     y pegar el JSON de la service account. Lo usan Vertex AI Y el storage de
+#     assets (lib/s3.ts = Google Cloud Storage vía ADC): sin este archivo
+#     NINGUNA generación puede guardar su resultado. En AWS no existe el
+#     fallback del metadata server de GCP.
+#   - Env vars: copiarlas del .env.production REAL del server actual
+#     (el .env.gcp del repo local está desactualizado: BD y GCS_*).
 #
 # Checklist post-setup (fuera de este archivo):
 #   1. BD (AWS RDS sa-east-1): abrir 3306 en el security group del RDS
