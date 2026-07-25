@@ -1,0 +1,144 @@
+# ============================================================
+# Docker Compose para Coolify
+# ============================================================
+# Diferencias vs docker-compose.gcp.yml:
+#   - SIN nginx ni certbot: Coolify pone Traefik con SSL automático.
+#     En la UI de Coolify asigna el dominio al servicio `web` (puerto 3000).
+#   - SIN blue/green: Coolify maneja el redeploy (hay segundos de downtime
+#     al recrear; el healthcheck evita enrutar antes de que esté listo).
+#   - SIN container_name: Coolify nombra los contenedores con su propio prefijo.
+#   - SIN mount de /var/run/docker.sock: /dashboard/logs degrada solo
+#     (isDockerAvailable) y Coolify trae su propio visor de logs.
+#   - Env vars: definirlas en la UI de Coolify. Coolify genera un .env junto
+#     al compose al deployar; los servicios lo cargan vía env_file.
+#     NO subir .env.production al repo.
+#   - credentials.json (Vertex AI): crear en Coolify un "File Storage" por
+#     servicio (web y workers) con destino /run/secrets/credentials.json y
+#     pegar el contenido del JSON. Sin esto, los backends 'vertex' fallan
+#     (Gemini API / Omni siguen funcionando con API keys).
+#
+# Checklist post-setup (fuera de este archivo):
+#   1. BD (AWS RDS sa-east-1): abrir 3306 en el security group del RDS
+#      hacia el EC2 de Coolify — regla SG-a-SG si comparten VPC, si no
+#      por IP (Elastic IP). Sin esto ni las migraciones arrancan.
+#   2. Probar en dominio temporal: generación de video con SSE largo,
+#      canvas colaborativo (websocket /socket.io) y subida de archivos.
+#   3. Al cortar: apuntar DNS de puerto.studio y ELIMINAR el webhook viejo
+#      de GitHub (si no, cada push deploya en dos lados).
+# ============================================================
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-2048mb} --maxmemory-policy allkeys-lru --tcp-keepalive 60 --hz 10 --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb --client-output-buffer-limit "pubsub 32mb 8mb 60"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      # Coolify genera este .env al deployar con las vars definidas en su UI.
+      # required:false permite validar el compose fuera de Coolify.
+      - path: .env
+        required: false
+    environment:
+      - NODE_ENV=production
+      - NODE_OPTIONS=--max-old-space-size=2048
+      - PORT=3000
+      - APP_MODE=web
+      - REDIS_URL=redis://redis:6379
+      - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
+    # Sin ports: Traefik llega por la red interna de Coolify al 3000.
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      # Coolify genera este .env al deployar con las vars definidas en su UI.
+      # required:false permite validar el compose fuera de Coolify.
+      - path: .env
+        required: false
+    environment:
+      - NODE_ENV=production
+      - NODE_OPTIONS=--max-old-space-size=3072
+      - APP_MODE=worker
+      - REDIS_URL=redis://redis:6379
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-3}
+      - WORKER_NAME=worker_1
+      - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
+    # Dejar terminar generaciones en curso antes de matar el proceso.
+    stop_grace_period: 120s
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      # Coolify genera este .env al deployar con las vars definidas en su UI.
+      # required:false permite validar el compose fuera de Coolify.
+      - path: .env
+        required: false
+    environment:
+      - NODE_ENV=production
+      - NODE_OPTIONS=--max-old-space-size=3072
+      - APP_MODE=worker
+      - REDIS_URL=redis://redis:6379
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-3}
+      - WORKER_NAME=worker_2
+      - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
+    stop_grace_period: 120s
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker-3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      # Coolify genera este .env al deployar con las vars definidas en su UI.
+      # required:false permite validar el compose fuera de Coolify.
+      - path: .env
+        required: false
+    environment:
+      - NODE_ENV=production
+      - NODE_OPTIONS=--max-old-space-size=3072
+      - APP_MODE=worker
+      - REDIS_URL=redis://redis:6379
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-3}
+      - WORKER_NAME=worker_3
+      - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
+    stop_grace_period: 120s
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis_data:
