@@ -9,17 +9,21 @@
 #   - SIN container_name: Coolify nombra los contenedores con su propio prefijo.
 #   - SIN mount de /var/run/docker.sock: /dashboard/logs degrada solo
 #     (isDockerAvailable) y Coolify trae su propio visor de logs.
-#   - Env vars: definirlas en la UI de Coolify. Coolify genera un .env junto
-#     al compose al deployar; los servicios lo cargan vía env_file.
-#     NO subir .env.production al repo.
-#   - credentials.json (OBLIGATORIO): crear en Coolify un "File Storage" por
-#     servicio (web y los 3 workers) con destino /run/secrets/credentials.json
-#     y pegar el JSON de la service account. Lo usan Vertex AI Y el storage de
-#     assets (lib/s3.ts = Google Cloud Storage vía ADC): sin este archivo
-#     NINGUNA generación puede guardar su resultado. En AWS no existe el
-#     fallback del metadata server de GCP.
-#   - Env vars: copiarlas del .env.production REAL del server actual
-#     (el .env.gcp del repo local está desactualizado: BD y GCS_*).
+#   - Env vars: definirlas en la UI de Coolify (Coolify genera un .env junto
+#     al compose al deployar; los servicios lo cargan vía env_file). Copiarlas
+#     del .env.production REAL del server actual — el .env.gcp del repo local
+#     está desactualizado (BD y GCS_*). NO subir .env.production al repo.
+#   - credentials.json (OBLIGATORIO): el bind mount ya está declarado abajo
+#     en web y los 3 workers (./credentials.json → /run/secrets/credentials.json).
+#     En Coolify los mounts de compose no se crean desde la UI: al cargar este
+#     compose, el archivo aparece en la sección Storages de cada servicio y
+#     AHÍ pegas el JSON de la service account UNA VEZ (antes del primer
+#     deploy; si Docker levanta con el archivo inexistente, crea un
+#     DIRECTORIO con ese nombre y el mount queda inservible hasta borrarlo).
+#     Lo usan Vertex AI Y el storage de assets (lib/s3.ts = Google Cloud
+#     Storage vía ADC): sin este archivo NINGUNA generación puede guardar su
+#     resultado. En AWS no existe el fallback del metadata server de GCP.
+#     El archivo está gitignoreado — jamás commitearlo.
 #
 # Checklist post-setup (fuera de este archivo):
 #   1. BD (AWS RDS sa-east-1): abrir 3306 en el security group del RDS
@@ -61,6 +65,9 @@ services:
       - APP_MODE=web
       - REDIS_URL=redis://redis:6379
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
+    volumes:
+      # Contenido se pega una vez en Coolify → Storages (ver header).
+      - ./credentials.json:/run/secrets/credentials.json:ro
     # Sin ports: Traefik llega por la red interna de Coolify al 3000.
     expose:
       - "3000"
@@ -92,6 +99,9 @@ services:
       - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-3}
       - WORKER_NAME=worker_1
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
+    volumes:
+      # Contenido se pega una vez en Coolify → Storages (ver header).
+      - ./credentials.json:/run/secrets/credentials.json:ro
     # Dejar terminar generaciones en curso antes de matar el proceso.
     stop_grace_period: 120s
     depends_on:
@@ -116,6 +126,9 @@ services:
       - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-3}
       - WORKER_NAME=worker_2
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
+    volumes:
+      # Contenido se pega una vez en Coolify → Storages (ver header).
+      - ./credentials.json:/run/secrets/credentials.json:ro
     stop_grace_period: 120s
     depends_on:
       redis:
@@ -139,6 +152,9 @@ services:
       - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-3}
       - WORKER_NAME=worker_3
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
+    volumes:
+      # Contenido se pega una vez en Coolify → Storages (ver header).
+      - ./credentials.json:/run/secrets/credentials.json:ro
     stop_grace_period: 120s
     depends_on:
       redis:

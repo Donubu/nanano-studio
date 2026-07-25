@@ -49,3 +49,5 @@ public/uploads/*
 next-env.d.ts
 
 tmp/
+# DB dumps del script backup-db.sh
+backups/
