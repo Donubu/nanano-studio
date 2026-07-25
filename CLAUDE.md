@@ -1,29 +1,28 @@
 # Nanano (Puerto Studio) - AI Generation Platform
 
 ## Overview
-Multi-provider AI generation platform for text, images, video, audio, and music. Manages users, projects, clients, costs, billing, and analytics. Deployed on GCP using Docker on a VM with Google Cloud SQL (MySQL).
+Multi-provider AI generation platform for text, images, video, audio, and music. Manages users, projects, clients, costs, billing, and analytics. Deployed on AWS EC2 via Coolify (Docker Compose), with MySQL on AWS RDS and assets on Google Cloud Storage.
 
 ## Tech Stack
 - **Framework**: Next.js 16+ (App Router, standalone output), React 19, TypeScript
-- **Database**: MySQL via `mysql2/promise` (Google Cloud SQL in production)
+- **Database**: MySQL 8.4 via `mysql2/promise` (AWS RDS `puertocl_studio` in production, sa-east-1)
 - **Auth**: NextAuth v5 (beta) with Google OAuth (`auth.ts` + `auth.config.ts`)
 - **Queue**: BullMQ + Redis for async generation jobs
-- **Storage**: AWS S3 for generated files, CloudFront CDN for delivery
+- **Storage**: Google Cloud Storage for generated files (public `storage.googleapis.com` URLs). NOTE: `lib/s3.ts` keeps S3-named exports (`uploadToS3`, etc.) for compatibility but uses `@google-cloud/storage` internally. Auth via `GOOGLE_APPLICATION_CREDENTIALS` (service account JSON)
 - **AI Providers**:
   - Google Gemini API / Vertex AI (text streaming, Imagen 4 images, VEO video, Chirp 3 HD TTS, Lyria music)
-  - xAI Grok (Grok Imagine Video)
-  - Future: more providers planned
+  - Google Gemini Omni (`api_backend='omni'`, video via interactions API — `lib/omni-video.ts`)
+  - xAI Grok (Grok Imagine Video), Kling (v3 Omni / v2.6), OpenRouter (ByteDance Seedance)
 - **UI**: Tailwind CSS, Radix UI primitives, Lucide icons
-- **Deployment**: Docker + docker-compose on GCP VM, Nginx reverse proxy
+- **Deployment**: Coolify on AWS EC2 (m5.2xlarge) — Docker Compose stack behind Coolify's Traefik proxy
 
 ## Production Environment
-- **Domain**: `https://puerto.studio` (primary), `https://v2.puerto.studio` (temporary alias)
-- **Branch**: `main` (auto-deployed via GitHub webhook on push)
-- **Deploy script**: `scripts/deploy.sh` (blue-green zero-downtime)
-- **SSL**: Let's Encrypt certificates via certbot (installed on host, certs copied to Docker volume `nanano-studio_certbot_certs`)
-- **Auto-deploy webhook**: GitHub pushes to `main` trigger `/home/mgomez/deploy.sh` on the server
-- **Server**: GCP VM at `34.176.106.54`, user `mgomez`, root for docker commands
-- **Git on server**: Must run as `mgomez` user (SSH key), not root: `su - mgomez -c "cd /home/mgomez/nanano-studio && git pull origin main"`
+- **Domain**: `https://puerto.studio` → EC2 `18.231.67.114` (AWS)
+- **Platform**: Coolify manages the stack from `docker-compose.coolify.yml` (web + worker-1/2/3 + redis). Traefik handles reverse proxy and automatic Let's Encrypt SSL
+- **Env vars**: defined in the Coolify UI (injected as `.env` next to the compose at deploy time). `.env.production` in the local repo mirrors the production values (gitignored)
+- **credentials.json**: pasted once into Coolify → Storages for each of the 4 app services (bind mount `/run/secrets/credentials.json`). Required by Vertex AI AND GCS uploads — without it no generation can save its output
+- **Database**: AWS RDS MySQL 8.4, same region as the EC2. Access via RDS security group
+- **Legacy (stopped, kept as cold rollback)**: previous GCP VM (`34.176.106.54`) + Cloud SQL `puerto-sql`. Migrated 2026-07-25; do not assume they are running
 
 ## Project Structure
 
@@ -89,12 +88,15 @@ lib/
   google-ai-audio.ts      # TTS audio generation
   google-ai-music.ts      # Lyria music generation
   google-cloud-tts.ts     # Google Cloud TTS (Chirp 3 HD)
+  omni-video.ts           # Gemini Omni video (interactions API)
   xai-video.ts            # xAI Grok video generation
+  kling-video.ts          # Kling video generation
+  openrouter-video.ts     # OpenRouter (Seedance) video generation
   cost-calculator.ts      # Cost estimation logic
   gcp-billing.ts          # GCP billing integration (BigQuery)
   queue.ts                # BullMQ queue definitions
   redis.ts                # Redis client
-  s3.ts                   # S3 upload/download utilities
+  s3.ts                   # Storage utilities (Google Cloud Storage; S3-named exports are legacy)
   topaz-video.ts          # Topaz video processing
   utils.ts                # General utilities
 
@@ -102,30 +104,26 @@ worker/
   index.ts                # BullMQ worker process (runs separately)
 
 scripts/
-  migrations/             # SQL migration files (001-073+)
+  migrations/             # SQL migration files (001-124+)
   migrate.js              # Migration runner
   migrate-init.js         # Migration initialization
   build-worker.js         # Worker build script
   bump-version.js         # Version auto-increment
-  deploy.sh               # Blue-green zero-downtime deploy script
-  docker-start.sh         # Docker entrypoint (web vs worker mode)
-  init-ssl.sh             # SSL certificate initialization (puerto.studio)
+  docker-start.sh         # Docker entrypoint (web vs worker mode; web runs migrations first)
   recalculate-costs.js    # Cost recalculation utility
   sync-gcp-costs.ts       # GCP cost sync script
 
-nginx/
-  conf.d/default.conf     # Nginx config (serves puerto.studio + v2.puerto.studio)
-  conf.d/upstream.active  # Active blue/green backend slot
+docker-compose.coolify.yml  # Production stack (Coolify): web + 3 workers + redis
 ```
 
 ## Architecture
 
-### Blue-Green Deployment
-- `scripts/deploy.sh` manages zero-downtime deploys
-- Two slots: `puerto_studio_blue` and `puerto_studio_green`
-- `nginx/conf.d/upstream.active` contains `set $backend puerto_studio_blue:3000;` or green
-- Deploy builds new slot, health checks it, switches nginx upstream, stops old slot
-- Workers are rolling-restarted after web deploy
+### Deployment (Coolify)
+- Coolify deploys the stack from `docker-compose.coolify.yml` on the AWS EC2
+- On redeploy, services are recreated (brief downtime; the `web` healthcheck against `/api/health` gates routing). Redis is not recreated unless its config changes; its data persists in the `redis_data` volume
+- Workers get `stop_grace_period: 120s`: SIGTERM → BullMQ `worker.close()` drains active jobs; longer jobs are re-queued as stalled and retried
+- The `web` container runs `scripts/migrate.js` at startup before serving (see `scripts/docker-start.sh`)
+- Video generation runs inline in the `web` container (SSE), NOT in the BullMQ workers — only text streaming and image jobs go through the queue
 
 ### Web + Worker Pattern
 - `APP_MODE=web` runs the Next.js server
@@ -149,17 +147,17 @@ nginx/
 ### Database
 - MySQL with migration system (numbered SQL files in `scripts/migrations/`)
 - Soft delete on conversations (`deleted_at`)
-- `project_users` links users to projects with roles and monthly generation limits (per quality tier)
-- `project_generation_config` configures allowed models per project per generation type
-- `models` table with `api_backend` field for per-model backend selection (Vertex AI vs Gemini API)
+- `project_users` links users to projects with roles (its monthly-limit columns are legacy and NOT enforced; the real quota is the per-client credit system in `lib/client-credits.ts`)
+- `project_generation_config` (enabled flag) + `project_generation_models` (N models per project per generation type, with label/sort_order/is_default — no quality tiers)
+- `models` table with `api_backend` field for per-model backend selection: `vertex`, `gemini`, `omni`, `xai`, `kling`, `openrouter`, `chirp`
 
 ### Generation Flow
-1. User sends prompt from chat interface
+1. User sends prompt from chat interface (or canvas / full mode — all surfaces hit the same endpoints)
 2. Request hits API endpoint (`stream/`, `imagen/`, `video/`, `audio/`, `music/`)
-3. Job queued in BullMQ (Redis)
-4. Worker picks up job, calls AI provider API
-5. Results streamed back via SSE or stored in S3
-6. Cost calculated and recorded per generation
+3. Text and image jobs are queued in BullMQ (Redis) and processed by workers; video and audio run inline in the web container
+4. The AI provider is dispatched by the resolved model's `api_backend`
+5. Results streamed back via SSE and stored in Google Cloud Storage
+6. Cost calculated and recorded per generation (`messages.estimated_cost`)
 7. Conversation title auto-generated after first message
 
 ## Key Commands
@@ -171,14 +169,11 @@ npm run migrate      # Run database migrations
 ```
 
 ## Docker Deployment
-```bash
-docker compose -f docker-compose.gcp.yml up -d  # Production (GCP)
-docker compose up -d                              # Development
-```
-- Services: nginx, redis, puerto_studio_blue/green (web), worker_1+ (workers), certbot
-- Memory limits: 4GB for web, configured per worker
-- Node heap limit: `--max-old-space-size=4096`
-- Docker volumes: `nanano-studio_certbot_certs` (SSL certs), `certbot_webroot` (ACME challenges)
+Production runs on Coolify from `docker-compose.coolify.yml` (see the file's header comments for the full setup checklist):
+- Services: `web` (Next.js + collab socket.io on port 3000), `worker-1/2/3` (BullMQ), `redis`
+- Single Docker image for web and workers, differentiated by `APP_MODE`
+- No nginx/certbot: Coolify's Traefik terminates TLS (automatic Let's Encrypt)
+- Local dev does not use Docker for the app: `npm run dev` + local MySQL 8.4 (`mysql84` container on port 3307)
 
 ## Conventions
 - API routes use `mysql2/promise` with raw SQL (no ORM)
@@ -187,7 +182,7 @@ docker compose up -d                              # Development
 - Costs tracked per generation, synced with GCP billing via BigQuery
 - Timezone: `America/Santiago` (-03:00)
 - Body size limit: 50MB (middleware + server actions)
-- Env files: `.env.local` (dev), `.env.gcp` (production, gitignored), `.env.private` (reference)
+- Env files: `.env.local` (dev), `.env.production` (mirror of production values — the live env vars are defined in the Coolify UI), `.env.gcp` / `.env.private` (legacy, outdated — do not trust for current infra)
 
 ## Production Templates — Banner Designer (Practicante AI)
 

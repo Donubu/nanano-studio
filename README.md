@@ -111,27 +111,16 @@ npm run dev
 ## Deployment (Producción)
 
 - **Dominio**: `https://puerto.studio`
+- **Plataforma**: Coolify en AWS EC2, desde `docker-compose.coolify.yml`
 - **Branch**: `main`
-- **Auto-deploy**: Webhook de GitHub dispara deploy automático en push a `main`
-- **Blue-green**: Zero-downtime deployment via `scripts/deploy.sh`
-- **SSL**: Certificados Let's Encrypt (certbot instalado en el host)
-
-```bash
-# Deploy manual
-./scripts/deploy.sh
-
-# Inicializar SSL (primera vez)
-./scripts/init-ssl.sh
-
-# Docker (producción GCP)
-docker compose -f docker-compose.gcp.yml up -d
-```
+- **SSL**: Let's Encrypt automático vía Traefik (proxy de Coolify)
+- **BD**: AWS RDS MySQL 8.4 · **Storage**: Google Cloud Storage
+- Setup completo: ver los comentarios en el header de `docker-compose.coolify.yml`
 
 ### Arquitectura de servicios
-- **nginx**: Reverse proxy con SSL, blue-green upstream switching
-- **puerto_studio_blue/green**: Slots de la app Next.js (blue-green)
-- **worker_1+**: Workers BullMQ para procesamiento de generaciones
-- **redis**: Cola de trabajos y cache
+- **web**: App Next.js + socket.io de colaboración (puerto 3000, corre migraciones al arrancar)
+- **worker-1/2/3**: Workers BullMQ para procesamiento de generaciones
+- **redis**: Cola de trabajos, pub/sub SSE y estado de colaboración
 
 ## Estructura de Proyecto
 
@@ -183,15 +172,11 @@ lib/                      # Shared utilities and API clients
 worker/                   # BullMQ worker process
 scripts/
   migrations/             # SQL migration files
-  deploy.sh               # Blue-green zero-downtime deploy
-  init-ssl.sh             # SSL certificate initialization
   docker-start.sh         # Docker entrypoint (web vs worker mode)
   build-worker.js         # Worker build script
   bump-version.js         # Version auto-increment
   migrate.js              # Migration runner
-nginx/
-  conf.d/default.conf     # Nginx config (puerto.studio + v2.puerto.studio)
-  conf.d/upstream.active  # Active blue/green slot
+docker-compose.coolify.yml  # Stack de producción (Coolify)
 ```
 
 ## Modelos Soportados
