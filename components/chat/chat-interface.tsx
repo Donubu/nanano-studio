@@ -1949,6 +1949,29 @@ export function ChatInterface() {
         }
     };
 
+    // Asegura que el tab activo tenga conversación real en BD (los tabs draft
+    // no la tienen hasta el primer envío). Mismo flujo que usan sendMessage/
+    // sendVideoMessage; lo necesita el modo full para subir archivos al grid
+    // antes de mandar el primer mensaje (si no, el upload iba a /api/
+    // conversations/0/uploads → "Conversación no encontrada").
+    const ensureActiveConversation = async (): Promise<number | null> => {
+        if (!activeTabId) return null;
+        const currentTab = openTabs.find(t => t.id === activeTabId);
+        const existingId = tabConversations[activeTabId]?.id;
+        if (existingId && !currentTab?.isDraft) return existingId;
+
+        const draftConv = tabConversations[activeTabId];
+        const newConv = await createNewConversation(draftConv?.model_id);
+        if (!newConv) return null;
+        setTabConversations((prev) => ({...prev, [activeTabId]: newConv}));
+        setOpenTabs((prev) =>
+            prev.map((t) =>
+                t.id === activeTabId ? {...t, conversationId: newConv.id, title: newConv.title, isDraft: false} : t
+            )
+        );
+        return newConv.id;
+    };
+
     const sendMessage = async (
         content: string,
         files?: AttachedFile[],
@@ -3819,6 +3842,7 @@ export function ChatInterface() {
                         /* Full Mode (Estudio) Workspace */
                         <FullModeWorkspace
                             conversationId={tabConversations[activeTabId]?.id || 0}
+                            onEnsureConversation={ensureActiveConversation}
                             projectId={selectedProjectId!}
                             messages={messages}
                             isSending={false}

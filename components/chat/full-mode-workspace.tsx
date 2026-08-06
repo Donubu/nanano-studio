@@ -112,6 +112,9 @@ interface GenerationConfigItem {
 
 interface FullModeWorkspaceProps {
   conversationId: number;
+  // Crea la conversación real si el tab es draft (id 0) y devuelve su id.
+  // Necesario para subir archivos al grid antes del primer mensaje.
+  onEnsureConversation?: () => Promise<number | null>;
   projectId: number;
   messages: Array<{
     id: number;
@@ -250,6 +253,7 @@ function supportsVideoAudio(backend: ReturnType<typeof getVideoBackend>): boolea
 
 export function FullModeWorkspace({
   conversationId,
+  onEnsureConversation,
   projectId,
   messages,
   isSending,
@@ -965,7 +969,20 @@ export function FullModeWorkspace({
     }
 
     try {
-      const res = await fetch(`/api/conversations/${conversationId}/uploads`, {
+      // Conversación nueva en blanco (tab draft, id 0): crearla primero o el
+      // upload va a /api/conversations/0/uploads → "Conversación no encontrada".
+      let targetConversationId = conversationId;
+      if (targetConversationId <= 0) {
+        const ensured = await onEnsureConversation?.();
+        if (!ensured) {
+          setUploadError("No se pudo crear la conversación para subir el archivo");
+          setTimeout(() => setUploadError(null), 6000);
+          return;
+        }
+        targetConversationId = ensured;
+      }
+
+      const res = await fetch(`/api/conversations/${targetConversationId}/uploads`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -981,7 +998,7 @@ export function FullModeWorkspace({
         const newGen: Generation = {
           type: data.type,
           id: data.id,
-          conversation_id: conversationId,
+          conversation_id: targetConversationId,
           conversation_user_id: 0,
           conversation_title: "",
           user_name: null,
@@ -1025,7 +1042,7 @@ export function FullModeWorkspace({
     } finally {
       setUploadingItems(prev => prev.filter(u => u.tempId !== tempId));
     }
-  }, [conversationId]);
+  }, [conversationId, onEnsureConversation]);
 
   const handleSendText = async (content: string, files?: AttachedFile[]) => {
     if (!content.trim() || !activeTextModel) return;
