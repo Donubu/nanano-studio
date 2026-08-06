@@ -529,7 +529,11 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       x: center.x + Math.random() * 40 - 20,
       y: center.y + Math.random() * 40 - 20,
     };
-    const { nodes: pastedNodes, edges: pastedEdges } = remapClipboardForPaste(payload, anchor);
+    const { nodes: pastedNodes, edges: pastedEdges } = remapClipboardForPaste(
+      payload,
+      anchor,
+      new Set(nodes.map((n) => n.id))
+    );
     takeSnapshot();
     // Los pegados quedan como única selección (selected: true viene del remap).
     setNodes((nds) => [
@@ -547,7 +551,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     }
     const n = pastedNodes.length;
     showCopyToast(`${n} nodo${n === 1 ? "" : "s"} pegado${n === 1 ? "" : "s"}`);
-  }, [canEdit, ensureConversation, screenToFlowPosition, takeSnapshot, setNodes, setEdges, persist, collab.emitNodeAdd, collab.emitEdgeAdd, showCopyToast]);
+  }, [canEdit, ensureConversation, screenToFlowPosition, takeSnapshot, setNodes, setEdges, persist, collab.emitNodeAdd, collab.emitEdgeAdd, showCopyToast, nodes]);
 
   // Ref para el handler de teclado (declarado en un effect con otras deps).
   const copyPasteRef = useRef<{ copy: (withDescendants: boolean) => boolean; paste: () => void }>({

@@ -20,6 +20,10 @@ export interface ClipboardEdge {
   sourceHandle: string | null;
   target: string;
   targetHandle: string | null;
+  // true = el source NO viene en el copy: es un nodo preexistente del canvas
+  // (edge de frontera entrante). Al pegar en el mismo canvas se reconecta al
+  // nodo original; si ya no existe, el edge se descarta.
+  externalSource?: boolean;
 }
 
 export interface CanvasClipboardPayload {
@@ -54,7 +58,14 @@ function sanitizeDataForCopy(data: Record<string, unknown>): Record<string, unkn
   return copy;
 }
 
-/** Serializa los nodos a copiar + los edges internos entre ellos. */
+/**
+ * Serializa los nodos a copiar + los edges internos entre ellos + los edges
+ * de frontera entrantes (nodo NO copiado → nodo copiado). Estos últimos van
+ * marcados con externalSource para que el paste los reconecte al nodo
+ * original en vez de remapearlos. Los de frontera salientes no se copian:
+ * reconectar la salida de la copia a un nodo existente ocuparía un input que
+ * ya está ocupado por el original.
+ */
 export function buildClipboardPayload(nodesToCopy: Node[], allEdges: Edge[]): CanvasClipboardPayload {
   const ids = new Set(nodesToCopy.map((n) => n.id));
   return {
@@ -66,13 +77,14 @@ export function buildClipboardPayload(nodesToCopy: Node[], allEdges: Edge[]): Ca
       data: sanitizeDataForCopy(n.data as Record<string, unknown>),
     })),
     edges: allEdges
-      .filter((e) => ids.has(e.source) && ids.has(e.target))
+      .filter((e) => ids.has(e.target))
       .map((e) => ({
         id: e.id,
         source: e.source,
         sourceHandle: e.sourceHandle ?? null,
         target: e.target,
         targetHandle: e.targetHandle ?? null,
+        ...(ids.has(e.source) ? {} : { externalSource: true }),
       })),
     copiedAt: new Date().toISOString(),
   };
@@ -104,10 +116,15 @@ export function readCanvasClipboard(): CanvasClipboardPayload | null {
  * que la inserción de templates: sufijo no numérico que el contador node-N
  * del cliente ignora). `anchor` (coords de flow) ancla la esquina
  * superior-izquierda del bounding box; el layout relativo se preserva.
+ *
+ * `existingNodeIds` = nodos presentes en el canvas destino. Los edges de
+ * frontera (externalSource) se reconectan al nodo original solo si sigue
+ * existiendo ahí; si no (nodo borrado, o paste en otro canvas), se descartan.
  */
 export function remapClipboardForPaste(
   payload: CanvasClipboardPayload,
-  anchor: { x: number; y: number } | null
+  anchor: { x: number; y: number } | null,
+  existingNodeIds?: Set<string>
 ): { nodes: Node[]; edges: Edge[] } {
   const stamp = Date.now().toString(36);
   const idMap = new Map<string, string>();
@@ -141,12 +158,18 @@ export function remapClipboardForPaste(
     };
   });
 
-  const edges: Edge[] = payload.edges.map((edge, i) => ({
-    ...edge,
-    id: `e-clip${stamp}-${i + 1}`,
-    source: idMap.get(edge.source)!,
-    target: idMap.get(edge.target)!,
-  }));
+  const edges: Edge[] = [];
+  payload.edges.forEach((edge, i) => {
+    const target = idMap.get(edge.target);
+    // El source puede venir del propio copy (remapear) o ser un nodo
+    // preexistente del canvas destino (conservar el ID original).
+    const source =
+      idMap.get(edge.source) ??
+      (edge.externalSource && existingNodeIds?.has(edge.source) ? edge.source : undefined);
+    if (!source || !target) return;
+    const { externalSource: _drop, ...rest } = edge;
+    edges.push({ ...rest, id: `e-clip${stamp}-${i + 1}`, source, target });
+  });
 
   return { nodes, edges };
 }
