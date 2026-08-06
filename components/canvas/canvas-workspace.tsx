@@ -601,7 +601,13 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
         }
         case "edge:add": {
           const { edge } = data as { edge: Edge };
-          setEdges((eds) => [...eds, edge]);
+          // Upsert: el mismo evento se usa para crear un edge y para
+          // actualizar su data (p. ej. prioridad de referencia).
+          setEdges((eds) =>
+            eds.some((e) => e.id === edge.id)
+              ? eds.map((e) => (e.id === edge.id ? edge : e))
+              : [...eds, edge]
+          );
           break;
         }
         case "edge:remove": {
@@ -660,6 +666,27 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       collab.emitEdgeAdd(newEdge as unknown as Record<string, unknown>);
     },
     [nodes, edges, setEdges, takeSnapshot, persist, collab.emitEdgeAdd]
+  );
+
+  // Prioridad de un edge de referencia (null = neutro). Reusa el POST de
+  // edges (upsert) para persistir y el evento edge:add (upsert en el remoto)
+  // para colaborar.
+  const updateEdgePriority = useCallback(
+    (edgeId: string, priority: number | null) => {
+      if (!canEdit) return;
+      const current = edges.find((e) => e.id === edgeId);
+      if (!current) return;
+      takeSnapshot();
+      const { priority: _prev, ...restData } = (current.data ?? {}) as Record<string, unknown>;
+      const updated: Edge = {
+        ...current,
+        data: priority != null ? { ...restData, priority } : restData,
+      };
+      setEdges((eds) => eds.map((e) => (e.id === edgeId ? updated : e)));
+      persist.createEdge(updated);
+      collab.emitEdgeAdd(updated as unknown as Record<string, unknown>);
+    },
+    [canEdit, edges, takeSnapshot, setEdges, persist, collab.emitEdgeAdd]
   );
 
   const closeDropMenu = useCallback(() => {
@@ -1195,6 +1222,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
           generationConfig={generationConfig}
           edges={edges}
           onUpdateData={updateNodeData}
+          onUpdateEdgePriority={updateEdgePriority}
           onDelete={deleteNode}
           onExecute={executeNode}
           isExecuting={isExecuting}

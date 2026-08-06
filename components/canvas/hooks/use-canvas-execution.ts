@@ -106,6 +106,11 @@ interface ResolvedInputs {
   firstFrameUrl: string | null;
   lastFrameUrl: string | null;
   referenceImageUrls: string[];
+  // true si el usuario asignó prioridad a al menos una referencia: las URLs
+  // vienen ordenadas (prioridad asc, luego neutras en orden de conexión) y
+  // los ejecutores inyectan la nota de prioridad en el prompt. Con todo
+  // neutro es false y el comportamiento es el histórico.
+  referencesPrioritized: boolean;
   mediaUrls: { url: string; type: "image" | "video" }[];
   paramsOverride: Record<string, unknown> | null;
 }
@@ -123,7 +128,9 @@ function resolveNodeInputs(
   let referenceImageUrl: string | null = null;
   let firstFrameUrl: string | null = null;
   let lastFrameUrl: string | null = null;
-  const referenceImageUrls: string[] = [];
+  // Un grupo por edge de referencia: conserva la prioridad del edge para
+  // ordenar al final (un static-image-group aporta varias URLs en bloque).
+  const referenceGroups: { urls: string[]; priority: number | null }[] = [];
   const mediaUrls: { url: string; type: "image" | "video" }[] = [];
   let paramsOverride: Record<string, unknown> | null = null;
 
@@ -183,7 +190,7 @@ function resolveNodeInputs(
       const urls = getAllImageOutputs();
       if (urls.length > 0) {
         referenceImageUrl = urls[0];
-        referenceImageUrls.push(...urls);
+        referenceGroups.push({ urls, priority: input.priority });
       }
     }
 
@@ -208,7 +215,17 @@ function resolveNodeInputs(
     }
   }
 
-  return { promptContext, referenceImageUrl, firstFrameUrl, lastFrameUrl, referenceImageUrls, mediaUrls, paramsOverride };
+  // Orden final de referencias: las con prioridad primero (1 = más alta),
+  // las neutras después en orden de conexión (comportamiento histórico).
+  // Sort estable de Array.prototype.sort preserva el orden relativo de las
+  // neutras entre sí.
+  const referencesPrioritized = referenceGroups.some((g) => g.priority != null);
+  if (referencesPrioritized) {
+    referenceGroups.sort((a, b) => (a.priority ?? Infinity) - (b.priority ?? Infinity));
+  }
+  const referenceImageUrls = referenceGroups.flatMap((g) => g.urls);
+
+  return { promptContext, referenceImageUrl, firstFrameUrl, lastFrameUrl, referenceImageUrls, referencesPrioritized, mediaUrls, paramsOverride };
 }
 
 /**
@@ -484,7 +501,7 @@ export function useCanvasExecution({
       }
 
       // Resolve inputs from the live snapshot
-      const { promptContext, referenceImageUrl, firstFrameUrl, lastFrameUrl, referenceImageUrls, mediaUrls, paramsOverride } = resolveNodeInputs(nodeId, liveNodes, edges);
+      const { promptContext, referenceImageUrl, firstFrameUrl, lastFrameUrl, referenceImageUrls, referencesPrioritized, mediaUrls, paramsOverride } = resolveNodeInputs(nodeId, liveNodes, edges);
       const scriptContext = resolveScriptContext(nodeId, liveNodes, edges);
 
       // Set generating
@@ -640,11 +657,11 @@ export function useCanvasExecution({
               : imgData.prompt;
 
             if (isNanoBananaModel(imgData.modelId, generationConfig)) {
-              result = await executeNanoBananaNode(conversationId, fullPrompt, imgData, referenceImageUrls, scriptContext);
+              result = await executeNanoBananaNode(conversationId, fullPrompt, imgData, referenceImageUrls, scriptContext, referencesPrioritized);
             } else {
               // Imagen endpoint doesn't accept systemInstruction → prepend context to prompt
               const promptWithContext = scriptContext ? `${scriptContext}\n\n${fullPrompt}` : fullPrompt;
-              result = await executeImageNode(conversationId, promptWithContext, imgData, referenceImageUrls);
+              result = await executeImageNode(conversationId, promptWithContext, imgData, referenceImageUrls, referencesPrioritized);
             }
             break;
           }
@@ -657,7 +674,7 @@ export function useCanvasExecution({
             // Video endpoint doesn't accept systemInstruction → prepend context to prompt
             const promptWithContext = scriptContext ? `${scriptContext}\n\n${fullPrompt}` : fullPrompt;
 
-            result = await executeVideoNode(conversationId, promptWithContext, vidData, { firstFrameUrl, lastFrameUrl, referenceImageUrls });
+            result = await executeVideoNode(conversationId, promptWithContext, vidData, { firstFrameUrl, lastFrameUrl, referenceImageUrls, referencesPrioritized });
             break;
           }
         }
@@ -1262,7 +1279,8 @@ async function executeNanoBananaNode(
   prompt: string,
   config: ImageNodeData,
   referenceImageUrls: string[],
-  scriptContext: string | null = null
+  scriptContext: string | null = null,
+  referencesPrioritized = false
 ): Promise<{ outputUrl?: string; messageId?: number }> {
   // When reference images are attached, append an explicit hint so the model
   // doesn't ignore them in favor of a vivid prompt. Nano-banana otherwise
@@ -1270,6 +1288,9 @@ async function executeNanoBananaNode(
   let effectivePrompt = prompt;
   if (referenceImageUrls.length > 0) {
     effectivePrompt += `\n\n[Imágenes de referencia adjuntas: úsalas como contexto visual obligatorio. Incorpora sus elementos clave (personajes, props, marca, paleta cromática, estilo gráfico) en la imagen generada. No las ignores aunque el prompt no las nombre explícitamente.]`;
+    if (referencesPrioritized) {
+      effectivePrompt += `\n[Las imágenes adjuntas van ordenadas por prioridad: la primera es la referencia principal y sus elementos deben prevalecer; las siguientes son secundarias, en orden decreciente de importancia. Si hay conflicto entre referencias, gana la de mayor prioridad.]`;
+    }
   }
 
   console.log(`[Canvas] nano-banana with ${referenceImageUrls.length} reference image(s)`,
@@ -1366,13 +1387,17 @@ async function executeImageNode(
   conversationId: number,
   prompt: string,
   config: ImageNodeData,
-  referenceImageUrls: string[]
+  referenceImageUrls: string[],
+  referencesPrioritized = false
 ): Promise<{ outputUrl?: string; messageId?: number }> {
   // Same hint as nano-banana — Imagen-style models can also prioritize the
   // textual prompt over reference images.
   let effectivePrompt = prompt;
   if (referenceImageUrls.length > 0) {
     effectivePrompt += `\n\n[Imágenes de referencia adjuntas: úsalas como contexto visual obligatorio. Incorpora sus elementos clave (personajes, props, marca, paleta cromática, estilo gráfico) en la imagen generada.]`;
+    if (referencesPrioritized) {
+      effectivePrompt += `\n[Las imágenes adjuntas van ordenadas por prioridad: la primera es la referencia principal y sus elementos deben prevalecer; las siguientes son secundarias, en orden decreciente de importancia.]`;
+    }
   }
 
   console.log(`[Canvas] Imagen with ${referenceImageUrls.length} reference image(s)`,
@@ -1467,10 +1492,18 @@ async function executeVideoNode(
   conversationId: number,
   prompt: string,
   config: VideoNodeData,
-  imageInputs: { firstFrameUrl: string | null; lastFrameUrl: string | null; referenceImageUrls: string[] }
+  imageInputs: { firstFrameUrl: string | null; lastFrameUrl: string | null; referenceImageUrls: string[]; referencesPrioritized?: boolean }
 ): Promise<{ outputUrl?: string; messageId?: number }> {
+  // Nota de prioridad solo cuando el usuario la activó: las referencias ya
+  // vienen ordenadas (afecta el corte a 3 de VEO y el orden de image_list en
+  // Kling); la nota le dice al modelo que la primera referencia domina.
+  let effectivePrompt = prompt;
+  if (imageInputs.referencesPrioritized && imageInputs.referenceImageUrls.length > 1) {
+    effectivePrompt += `\n\n[Las imágenes de referencia están ordenadas por prioridad: la primera referencia es la principal y debe prevalecer sobre las siguientes, que son secundarias en orden decreciente de importancia.]`;
+  }
+
   const body: Record<string, unknown> = {
-    content: prompt,
+    content: effectivePrompt,
     selected_model_id: config.modelId,
     videoSettings: {
       duration: config.duration,

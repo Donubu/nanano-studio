@@ -23,10 +23,19 @@ interface IncomingEdge {
   target: string;
   sourceHandle?: string | null;
   targetHandle?: string | null;
+  // Prioridad opcional (edges de referencia). NULL = neutro.
+  data?: { priority?: unknown } | null;
 }
 
-// POST - Crear (o resucitar) un edge.
-// Body: { edge: { id, source, target, sourceHandle?, targetHandle? } }
+// Sanitiza la prioridad: entero 1..99 o null (neutro).
+function parsePriority(raw: unknown): number | null {
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 && n <= 99 ? n : null;
+}
+
+// POST - Crear (o resucitar) un edge. También actualiza la prioridad
+// (es un upsert: re-postear el mismo edge con otra data.priority la cambia).
+// Body: { edge: { id, source, target, sourceHandle?, targetHandle?, data?: { priority? } } }
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -47,15 +56,24 @@ export async function POST(
 
     await pool.execute(
       `INSERT INTO canvas_edges
-        (id, conversation_id, source_node_id, source_handle, target_node_id, target_handle)
-       VALUES (?, ?, ?, ?, ?, ?)
+        (id, conversation_id, source_node_id, source_handle, target_node_id, target_handle, priority)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          source_node_id = VALUES(source_node_id),
          source_handle = VALUES(source_handle),
          target_node_id = VALUES(target_node_id),
          target_handle = VALUES(target_handle),
+         priority = VALUES(priority),
          deleted_at = NULL`,
-      [edge.id, id, edge.source, edge.sourceHandle ?? null, edge.target, edge.targetHandle ?? null]
+      [
+        edge.id,
+        id,
+        edge.source,
+        edge.sourceHandle ?? null,
+        edge.target,
+        edge.targetHandle ?? null,
+        parsePriority(edge.data?.priority),
+      ]
     );
 
     broadcastCanvasEvent(id, "edge:created", { edge });

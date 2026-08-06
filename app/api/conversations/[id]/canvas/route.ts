@@ -28,6 +28,7 @@ interface CanvasEdgeRow extends RowDataPacket {
   source_handle: string | null;
   target_node_id: string;
   target_handle: string | null;
+  priority: number | null;
 }
 
 interface ConversationCheckRow extends RowDataPacket {
@@ -103,6 +104,7 @@ export async function GET(
       sourceHandle: row.source_handle,
       target: row.target_node_id,
       targetHandle: row.target_handle,
+      ...(row.priority != null ? { data: { priority: row.priority } } : {}),
     }));
 
     return NextResponse.json({ nodes, edges });
@@ -161,6 +163,7 @@ export async function PUT(
         sourceHandle?: string | null;
         target: string;
         targetHandle?: string | null;
+        data?: { priority?: number | null } | null;
       }>;
       allowWipe?: boolean;
     };
@@ -221,6 +224,7 @@ export async function PUT(
         source_handle: r.source_handle,
         target_node_id: r.target_node_id,
         target_handle: r.target_handle,
+        priority: r.priority,
       })));
 
       if (currentAlive > 0 || aliveEdgeRows.length > 0) {
@@ -293,15 +297,18 @@ export async function PUT(
 
       // 5) UPSERT de edges entrantes.
       for (const edge of edges) {
+        const rawPriority = Number(edge.data?.priority);
+        const priority = Number.isInteger(rawPriority) && rawPriority >= 1 && rawPriority <= 99 ? rawPriority : null;
         await conn.execute(
           `INSERT INTO canvas_edges
-            (id, conversation_id, source_node_id, source_handle, target_node_id, target_handle)
-           VALUES (?, ?, ?, ?, ?, ?)
+            (id, conversation_id, source_node_id, source_handle, target_node_id, target_handle, priority)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
            ON DUPLICATE KEY UPDATE
              source_node_id = VALUES(source_node_id),
              source_handle = VALUES(source_handle),
              target_node_id = VALUES(target_node_id),
              target_handle = VALUES(target_handle),
+             priority = VALUES(priority),
              deleted_at = NULL`,
           [
             edge.id,
@@ -310,6 +317,7 @@ export async function PUT(
             edge.sourceHandle || null,
             edge.target,
             edge.targetHandle || null,
+            priority,
           ]
         );
       }

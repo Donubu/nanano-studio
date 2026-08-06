@@ -122,7 +122,7 @@ export function getDescendantNodes(
 export function getDirectInputs(
   nodeId: string,
   edges: CanvasEdge[]
-): { sourceNodeId: string; sourceHandle: string | null; targetHandle: string | null }[] {
+): { sourceNodeId: string; sourceHandle: string | null; targetHandle: string | null; priority: number | null }[] {
   return edges
     .filter((e) => e.target === nodeId)
     .map((e) => ({
@@ -131,5 +131,9 @@ export function getDirectInputs(
       // Normalize the top-edge twin (e.g. "input-prompt__top") back to its base
       // id so all downstream `=== HANDLE_IDS.X` comparisons keep working.
       targetHandle: baseHandleId(e.targetHandle),
+      // Prioridad opcional del edge (referencias). null = neutro.
+      priority: typeof (e.data as { priority?: unknown } | undefined)?.priority === "number"
+        ? ((e.data as { priority: number }).priority)
+        : null,
     }));
 }

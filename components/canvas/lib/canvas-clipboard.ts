@@ -24,6 +24,8 @@ export interface ClipboardEdge {
   // (edge de frontera entrante). Al pegar en el mismo canvas se reconecta al
   // nodo original; si ya no existe, el edge se descarta.
   externalSource?: boolean;
+  // Prioridad de referencia asignada por el usuario (null/ausente = neutro).
+  priority?: number | null;
 }
 
 export interface CanvasClipboardPayload {
@@ -85,6 +87,9 @@ export function buildClipboardPayload(nodesToCopy: Node[], allEdges: Edge[]): Ca
         target: e.target,
         targetHandle: e.targetHandle ?? null,
         ...(ids.has(e.source) ? {} : { externalSource: true }),
+        ...(typeof (e.data as { priority?: unknown } | undefined)?.priority === "number"
+          ? { priority: (e.data as { priority: number }).priority }
+          : {}),
       })),
     copiedAt: new Date().toISOString(),
   };
@@ -167,8 +172,14 @@ export function remapClipboardForPaste(
       idMap.get(edge.source) ??
       (edge.externalSource && existingNodeIds?.has(edge.source) ? edge.source : undefined);
     if (!source || !target) return;
-    const { externalSource: _drop, ...rest } = edge;
-    edges.push({ ...rest, id: `e-clip${stamp}-${i + 1}`, source, target });
+    const { externalSource: _drop, priority, ...rest } = edge;
+    edges.push({
+      ...rest,
+      id: `e-clip${stamp}-${i + 1}`,
+      source,
+      target,
+      ...(typeof priority === "number" ? { data: { priority } } : {}),
+    });
   });
 
   return { nodes, edges };

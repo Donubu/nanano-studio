@@ -699,8 +699,10 @@ export async function POST(
 
             // Omni acepta imágenes inline; el módulo resuelve data URLs, base64
             // crudo y URLs http (canvas manda URLs de CloudFront). Sin last
-            // frame ni referencias en v1.
+            // frame. Las referencias van como <IMAGE_REF_N> en el orden
+            // recibido (el canvas ya las ordena por prioridad); la lib corta a 3.
             const omniFirstFrame = videoInputs?.firstFrame || firstFrameImage || undefined;
+            const omniRefs = (referenceImages || videoInputs?.referenceImages || []).map((r) => r.image);
 
             console.log(`\n========== [VIDEO GENERATION REQUEST] (Gemini Omni) ==========`);
             console.log("Model:", effectiveModelId);
@@ -708,6 +710,7 @@ export async function POST(
             console.log("Config:", JSON.stringify(omniConfig, null, 2));
             console.log("Input prompt:", content);
             console.log("Has first frame:", !!omniFirstFrame);
+            console.log("Reference images:", omniRefs.length);
             console.log("================================================\n");
 
             // Sin semáforo VEO (keys Redis veo:* son exclusivas de ese backend).
@@ -718,7 +721,9 @@ export async function POST(
               content,
               omniConfig,
               onProgress,
-              omniFirstFrame ? { firstFrame: omniFirstFrame } : undefined,
+              omniFirstFrame || omniRefs.length > 0
+                ? { firstFrame: omniFirstFrame, referenceImages: omniRefs }
+                : undefined,
             );
 
           } else {

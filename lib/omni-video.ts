@@ -66,9 +66,13 @@ export interface OmniImageInputs {
   // Data URL / base64 crudo, o URL http (canvas manda URLs de CloudFront; se
   // descarga y convierte a inline).
   firstFrame?: string;
-  // Reservado para v1.5 (<IMAGE_REF_N>): aún sin cablear en route/UI.
+  // Imágenes de referencia (<IMAGE_REF_N>). El orden importa: el caller las
+  // manda ya ordenadas por prioridad (la primera domina). Máx 3.
   referenceImages?: string[];
 }
+
+// Límite conservador de referencias (mismo criterio que VEO).
+const MAX_REFERENCE_IMAGES = 3;
 
 interface OmniContentPart {
   type?: string;
@@ -232,12 +236,32 @@ export async function generateOmniVideo(
   const hasFirstFrame = !!imageInputs?.firstFrame;
   const task = hasFirstFrame ? "image_to_video" : "text_to_video";
 
+  const allRefs = imageInputs?.referenceImages ?? [];
+  const referenceImages = allRefs.slice(0, MAX_REFERENCE_IMAGES);
+  if (allRefs.length > referenceImages.length) {
+    console.warn(`[Omni Video] ${allRefs.length} referencias recibidas; solo se envían las primeras ${MAX_REFERENCE_IMAGES}`);
+  }
+
+  // El texto lleva un marcador por imagen, en el mismo orden en que las
+  // imágenes aparecen después del texto: <FIRST_FRAME> primero (si hay),
+  // luego <IMAGE_REF_1>..<IMAGE_REF_N> (ya ordenadas por prioridad).
   let input: string | Array<Record<string, unknown>>;
-  if (hasFirstFrame) {
-    const image = await resolveImageInput(imageInputs!.firstFrame!);
+  if (hasFirstFrame || referenceImages.length > 0) {
+    const markers: string[] = [];
+    const imageParts: Array<Record<string, unknown>> = [];
+    if (hasFirstFrame) {
+      const image = await resolveImageInput(imageInputs!.firstFrame!);
+      markers.push("<FIRST_FRAME>");
+      imageParts.push({ type: "image", data: image.data, mime_type: image.mimeType });
+    }
+    for (let i = 0; i < referenceImages.length; i++) {
+      const image = await resolveImageInput(referenceImages[i]);
+      markers.push(`<IMAGE_REF_${i + 1}>`);
+      imageParts.push({ type: "image", data: image.data, mime_type: image.mimeType });
+    }
     input = [
-      { type: "text", text: `<FIRST_FRAME> ${prompt}` },
-      { type: "image", data: image.data, mime_type: image.mimeType },
+      { type: "text", text: `${markers.join(" ")} ${prompt}` },
+      ...imageParts,
     ];
   } else {
     input = prompt;

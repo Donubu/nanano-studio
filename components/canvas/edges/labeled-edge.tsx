@@ -56,6 +56,7 @@ export const LabeledEdge = memo(function LabeledEdge({
   targetHandleId,
   style,
   markerEnd,
+  data,
 }: EdgeProps) {
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
@@ -72,6 +73,11 @@ export const LabeledEdge = memo(function LabeledEdge({
   const label = baseTargetHandle ? HANDLE_LABELS[baseTargetHandle] : null;
   const colorClass = baseTargetHandle ? HANDLE_COLORS[baseTargetHandle] : "bg-muted text-muted-foreground border-border";
   const dualLabel = baseTargetHandle ? HANDLE_DUAL_LABEL[baseTargetHandle] : null;
+  // Prioridad asignada por el usuario (solo referencias). Neutro = sin badge.
+  const priority =
+    baseTargetHandle === HANDLE_IDS.INPUT_REFERENCE && typeof (data as { priority?: unknown } | undefined)?.priority === "number"
+      ? ((data as { priority: number }).priority)
+      : null;
 
   return (
     <>
@@ -84,15 +90,20 @@ export const LabeledEdge = memo(function LabeledEdge({
               transform: `translate(-50%, -120%) translate(${labelX}px,${labelY}px)`,
             }}
           >
-            {dualLabel ? (
-              <span className="flex items-center gap-0.5">
-                {dualLabel.map((part, i) => (
+            <span className="flex items-center gap-0.5">
+              {dualLabel ? (
+                dualLabel.map((part, i) => (
                   <span key={i} className={part.color}>{part.text}</span>
-                ))}
-              </span>
-            ) : (
-              label
-            )}
+                ))
+              ) : (
+                label
+              )}
+              {priority != null && (
+                <span className="ml-0.5 px-1 rounded-sm bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                  {priority}
+                </span>
+              )}
+            </span>
           </div>
         </EdgeLabelRenderer>
       )}
