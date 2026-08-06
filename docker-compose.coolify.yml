@@ -76,7 +76,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 3
+      # Durante el arranque chequea cada 2s (requiere Docker Engine 25+):
+      # Traefik enruta apenas el server responde, en vez de esperar el
+      # próximo tick de 5s.
       start_period: 30s
+      start_interval: 2s
     depends_on:
       redis:
         condition: service_healthy
