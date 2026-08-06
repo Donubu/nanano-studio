@@ -234,13 +234,18 @@ export async function generateOmniVideo(
 
   // task derivada de los inputs, no elegida por el usuario.
   const hasFirstFrame = !!imageInputs?.firstFrame;
-  const task = hasFirstFrame ? "image_to_video" : "text_to_video";
 
   const allRefs = imageInputs?.referenceImages ?? [];
   const referenceImages = allRefs.slice(0, MAX_REFERENCE_IMAGES);
   if (allRefs.length > referenceImages.length) {
     console.warn(`[Omni Video] ${allRefs.length} referencias recibidas; solo se envían las primeras ${MAX_REFERENCE_IMAGES}`);
   }
+
+  // La API rechaza cualquier media con task text_to_video ("No other media
+  // should be provided for text_to_video task"). Con imágenes presentes
+  // (first frame O referencias) la task debe ser image_to_video; el rol de
+  // cada imagen lo definen los marcadores <FIRST_FRAME> / <IMAGE_REF_N>.
+  const task = hasFirstFrame || referenceImages.length > 0 ? "image_to_video" : "text_to_video";
 
   // El texto lleva un marcador por imagen, en el mismo orden en que las
   // imágenes aparecen después del texto: <FIRST_FRAME> primero (si hay),
