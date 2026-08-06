@@ -379,7 +379,7 @@ function ReferencePriorityList({
                 <span className="text-xs truncate" title={label}>{label}</span>
                 {showRefNames && (
                   refName ? (
-                    <span className="text-[10px] font-mono text-amber-400">{refName}</span>
+                    <span className="text-[10px] font-mono text-amber-700 dark:text-amber-400">{refName}</span>
                   ) : (
                     <span className="text-[10px] text-muted-foreground">sin imagen aún</span>
                   )
@@ -413,7 +413,7 @@ function ReferencePriorityList({
         </p>
       )}
       {showRefNames && (
-        <p className="text-[10px] text-amber-400/80">
+        <p className="text-[10px] text-amber-700/90 dark:text-amber-400/80">
           Puedes mencionar @ref1, @ref2… dentro del prompt para dirigir una referencia específica
           (se traduce automáticamente al marcador de Gemini Omni). Si cambias prioridades, los
           nombres se reasignan según el nuevo orden.

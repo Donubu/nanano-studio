@@ -231,7 +231,14 @@ function supportsVideoKeyframes(backend: ReturnType<typeof getVideoBackend>): bo
 }
 
 function supportsVideoIngredients(backend: ReturnType<typeof getVideoBackend>): boolean {
-  return backend === "veo" || backend === "kling";
+  // Omni: referencias vía <IMAGE_REF_N> (el server traduce las menciones @refN
+  // del prompt; mismo sistema que el nodo de video omni en canvas).
+  return backend === "veo" || backend === "kling" || backend === "omni";
+}
+
+function getMaxVideoReferences(backend: ReturnType<typeof getVideoBackend>): number {
+  // Omni corta a 3 en lib/omni-video.ts; mostrar más slots solo confunde.
+  return backend === "omni" ? 3 : 14;
 }
 
 function supportsVideoAudio(backend: ReturnType<typeof getVideoBackend>): boolean {
@@ -521,6 +528,8 @@ export function FullModeWorkspace({
   const hasKeyframes = supportsVideoKeyframes(videoBackend);
   const hasIngredients = supportsVideoIngredients(videoBackend);
   const hasAudioToggle = supportsVideoAudio(videoBackend);
+  const maxVideoReferences = getMaxVideoReferences(videoBackend);
+  const isOmniVideo = videoBackend === "omni";
 
   // Track placeholder IDs so we can clean them up after generation
   const placeholderIdsRef = useRef<number[]>([]);
@@ -674,6 +683,19 @@ export function FullModeWorkspace({
       }
       if (videoMode === "keyframes" && !hasKeyframes) {
         setVideoMode("none");
+      }
+      // Limpiar estado que el nuevo modelo no soporta. Sin esto las
+      // referencias quedaban invisibles en el UI (videoMode "none" no las
+      // pinta) pero handleSend las seguía enviando y backends como Omni las
+      // consumían igual → generaciones con referencias fantasma.
+      if (!hasIngredients && videoReferenceImages.length > 0) {
+        setVideoReferenceImages([]);
+      }
+      if (videoReferenceImages.length > maxVideoReferences) {
+        setVideoReferenceImages(videoReferenceImages.slice(0, maxVideoReferences));
+      }
+      if ((videoBackend === "xai" || videoBackend === "omni") && videoLastFrame) {
+        setVideoLastFrame(null);
       }
     }
   }, [activeVideoModel?.id, format]);
@@ -1388,6 +1410,10 @@ export function FullModeWorkspace({
       // Transform <<<image_N>>> or <<<video_N>>> back to @assetN
       prompt = prompt.replace(/<<<(?:image|video)_(\d+)>>>/g, (_, num) => `@asset${num}`);
     }
+    // Gemini Omni: des-transformar los marcadores a su forma arrobable.
+    if (targetModel && getVideoBackend(targetModel) === "omni") {
+      prompt = prompt.replace(/<IMAGE_REF_(\d+)>/g, (_, num) => `@ref${num}`);
+    }
 
     setInternalPrompt(prompt);
     requestAnimationFrame(() => messageInputRef.current?.focus());
@@ -1794,9 +1820,9 @@ export function FullModeWorkspace({
       };
       messageInputRef.current?.addFiles([file]);
     } else if (format === "video") {
-      // VEO/other: only accept images as references
+      // VEO/Omni/other: only accept images as references
       if (media.mediaType !== "image") return;
-      if (videoReferenceImages.length < 14) {
+      if (videoReferenceImages.length < maxVideoReferences) {
         setVideoReferenceImages(prev => [...prev, { image: media.base64, type: "ASSET", sourceUrl: media.sourceUrl }]);
         if (videoMode !== "ingredients") setVideoMode("ingredients");
       }
@@ -2439,7 +2465,9 @@ export function FullModeWorkspace({
                       <CompactFrameSlot
                         key={i}
                         image={ref.image}
-                        label={ref.type === "STYLE" ? "S" : "A"}
+                        // Omni: el nombre @N es arrobable en el prompt como
+                        // @refN (mismo sistema que el nodo de canvas).
+                        label={isOmniVideo ? `@${i + 1}` : ref.type === "STYLE" ? "S" : "A"}
                         onSet={() => {}}
                         onClear={() => {
                           const next = [...videoReferenceImages];
@@ -2448,10 +2476,10 @@ export function FullModeWorkspace({
                         }}
                         disabled={isSending}
                         projectId={projectId}
-  
+
                       />
                     ))}
-                    {videoReferenceImages.length < 14 && (
+                    {videoReferenceImages.length < maxVideoReferences && (
                       <CompactFrameSlot
                         image={null}
                         label="+"
@@ -2459,7 +2487,7 @@ export function FullModeWorkspace({
                         onClear={() => {}}
                         disabled={isSending}
                         projectId={projectId}
-  
+
                       />
                     )}
                   </>
@@ -2476,7 +2504,11 @@ export function FullModeWorkspace({
                 placeholder={format === "text"
                   ? "Escribe un prompt..."
                   : format === "video"
-                    ? isKlingOmni ? "Describe el video... usa @asset para referenciar" : "Describe el video..."
+                    ? isKlingOmni
+                      ? "Describe el video... usa @asset para referenciar"
+                      : isOmniVideo && videoReferenceImages.length > 0
+                        ? "Describe el video... usa @ref1, @ref2… para dirigir una referencia"
+                        : "Describe el video..."
                     : "Describe la imagen..."}
                 supportsFiles={format === "text" || format === "image" || isKlingAssetMode}
                 initialValue={internalPrompt || reusePrompt || undefined}
