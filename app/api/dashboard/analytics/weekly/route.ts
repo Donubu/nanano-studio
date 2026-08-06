@@ -22,6 +22,19 @@ interface TrackedRow extends RowDataPacket {
   music_pcs: number;
 }
 
+interface ProjectTrackedRow extends RowDataPacket {
+  week_start: string;
+  project_id: number | null;
+  project_name: string | null;
+  client_name: string | null;
+  tracked: string;
+  images: number;
+  videos: number;
+  texts: number;
+  audios: number;
+  music_pcs: number;
+}
+
 interface UserTrackedRow extends RowDataPacket {
   week_start: string;
   user_id: number;
@@ -85,6 +98,18 @@ interface ClientBucket {
   name: string;
   isInternal: boolean;
   perWeek: Record<string, number>; // key = week start YYYY-MM-DD, value = total USD (tracked + prorateado)
+  countsPerWeek: Record<string, PieceCounts>;
+  trackedTotal: number;
+  proratedTotal: number;
+  grandTotal: number;
+  countsTotal: PieceCounts;
+}
+
+interface ProjectBucket {
+  projectId: number; // 0 = Sin proyecto
+  name: string;
+  clientName: string | null;
+  perWeek: Record<string, number>;
   countsPerWeek: Record<string, PieceCounts>;
   trackedTotal: number;
   proratedTotal: number;
@@ -171,6 +196,7 @@ export async function GET(request: NextRequest) {
         currency: "USD",
         weeks: [],
         clients: [],
+        projects: [],
         users: [],
         totals: { tracked: 0, infra: 0, grand: 0 },
         pieceAverages: {
@@ -207,6 +233,28 @@ export async function GET(request: NextRequest) {
          AND m.created_at >= ?
          AND m.created_at < DATE_ADD(?, INTERVAL 1 DAY)
        GROUP BY week_start, client_id, client_name, is_internal, hidden`,
+      [rangeStart, rangeEnd]
+    );
+
+    // 1a) Tracked por (semana, proyecto). Mismo join que clientes, agrupado por
+    //     proyecto y con el nombre del cliente para mostrar "cliente > proyecto".
+    const [projectTrackedRows] = await pool.execute<ProjectTrackedRow[]>(
+      `SELECT
+         DATE(m.created_at - INTERVAL WEEKDAY(m.created_at) DAY) AS week_start,
+         p.id AS project_id,
+         p.title AS project_name,
+         c.name AS client_name,
+         COALESCE(SUM(m.estimated_cost), 0) AS tracked,
+         ${PIECE_COUNT_SQL}
+       FROM messages m
+       LEFT JOIN conversations conv ON conv.id = m.conversation_id
+       LEFT JOIN projects p ON p.id = conv.project_id
+       LEFT JOIN clients c ON c.id = p.client_id
+       WHERE m.role = 'model'
+         AND m.estimated_cost IS NOT NULL
+         AND m.created_at >= ?
+         AND m.created_at < DATE_ADD(?, INTERVAL 1 DAY)
+       GROUP BY week_start, project_id, project_name, client_name`,
       [rangeStart, rangeEnd]
     );
 
@@ -395,6 +443,86 @@ export async function GET(request: NextRequest) {
       return b.grandTotal - a.grandTotal;
     });
 
+    // === Desglose por proyecto ===
+    // Usa el MISMO total tracked por semana que los clientes, para que el prorateo
+    // de infra sea consistente entre las tres tablas.
+    const trackedByWeekProject = new Map<string, Map<number, number>>();
+    const countsByWeekProject = new Map<string, Map<number, PieceCounts>>();
+    const projectsMeta = new Map<number, { name: string; clientName: string | null }>();
+
+    for (const r of projectTrackedRows) {
+      const week = r.week_start;
+      const projectId = r.project_id ?? 0;
+      const tracked = Number(r.tracked) || 0;
+
+      if (!trackedByWeekProject.has(week)) trackedByWeekProject.set(week, new Map());
+      const inner = trackedByWeekProject.get(week)!;
+      inner.set(projectId, (inner.get(projectId) || 0) + tracked);
+
+      if (!countsByWeekProject.has(week)) countsByWeekProject.set(week, new Map());
+      countsByWeekProject.get(week)!.set(projectId, {
+        images: Number(r.images) || 0,
+        videos: Number(r.videos) || 0,
+        texts: Number(r.texts) || 0,
+        audios: Number(r.audios) || 0,
+        music: Number(r.music_pcs) || 0,
+      });
+
+      if (!projectsMeta.has(projectId)) {
+        projectsMeta.set(projectId, {
+          name: r.project_name ?? "Sin proyecto",
+          clientName: r.client_name,
+        });
+      }
+    }
+
+    const projects: ProjectBucket[] = [];
+    for (const [projectId, meta] of projectsMeta.entries()) {
+      const bucket: ProjectBucket = {
+        projectId,
+        name: meta.name,
+        clientName: meta.clientName,
+        perWeek: {},
+        countsPerWeek: {},
+        trackedTotal: 0,
+        proratedTotal: 0,
+        grandTotal: 0,
+        countsTotal: { ...EMPTY_COUNTS },
+      };
+
+      for (const w of weeks) {
+        const weekTracked = trackedByWeek.get(w.start) || 0;
+        const weekInfra = infraByWeek.get(w.start) || 0;
+        const projectTracked = trackedByWeekProject.get(w.start)?.get(projectId) || 0;
+        const share = weekTracked > 0 ? projectTracked / weekTracked : 0;
+        const prorated = share * weekInfra;
+        const total = projectTracked + prorated;
+        if (total !== 0) bucket.perWeek[w.start] = total;
+        bucket.trackedTotal += projectTracked;
+        bucket.proratedTotal += prorated;
+        bucket.grandTotal += total;
+
+        const counts = countsByWeekProject.get(w.start)?.get(projectId);
+        if (counts) {
+          bucket.countsPerWeek[w.start] = counts;
+          bucket.countsTotal.images += counts.images;
+          bucket.countsTotal.videos += counts.videos;
+          bucket.countsTotal.texts += counts.texts;
+          bucket.countsTotal.audios += counts.audios;
+          bucket.countsTotal.music += counts.music;
+        }
+      }
+
+      projects.push(bucket);
+    }
+
+    // Orden: grand desc, pero "Sin proyecto" al final siempre
+    projects.sort((a, b) => {
+      if (a.projectId === 0) return 1;
+      if (b.projectId === 0) return -1;
+      return b.grandTotal - a.grandTotal;
+    });
+
     // === Desglose por usuario ===
     // Usa el MISMO total tracked por semana que los clientes, para que el prorateo
     // de infra sea consistente (share_usuario × infra_semana).
@@ -513,6 +641,7 @@ export async function GET(request: NextRequest) {
       currency: "USD",
       weeks,
       clients,
+      projects,
       users,
       totals: {
         tracked: rangeTracked,

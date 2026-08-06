@@ -48,6 +48,18 @@ interface ClientBucket {
   countsTotal: PieceCounts;
 }
 
+interface ProjectBucket {
+  projectId: number;
+  name: string;
+  clientName: string | null;
+  perWeek: Record<string, number>;
+  countsPerWeek: Record<string, PieceCounts>;
+  trackedTotal: number;
+  proratedTotal: number;
+  grandTotal: number;
+  countsTotal: PieceCounts;
+}
+
 interface UserBucket {
   userId: number;
   name: string;
@@ -73,6 +85,7 @@ interface WeeklyReport {
   currency: "USD";
   weeks: WeekInfo[];
   clients: ClientBucket[];
+  projects: ProjectBucket[];
   users: UserBucket[];
   totals: { tracked: number; infra: number; grand: number };
   pieceAverages: Record<keyof PieceCounts, PieceAverage>;
@@ -577,6 +590,21 @@ export default function WeeklyReportPage() {
     }));
   }, [report]);
 
+  // Rows para la tabla de proyectos (cliente como subtítulo de cada fila)
+  const projectRows: BreakdownRow[] = useMemo(() => {
+    if (!report) return [];
+    return (report.projects ?? []).map((p) => ({
+      id: p.projectId,
+      name: p.name,
+      subtitle: p.projectId === 0 ? undefined : p.clientName ?? "Sin cliente",
+      italic: p.projectId === 0,
+      perWeek: p.perWeek,
+      countsPerWeek: p.countsPerWeek,
+      grandTotal: p.grandTotal,
+      countsTotal: p.countsTotal,
+    }));
+  }, [report]);
+
   // Rows para la tabla de usuarios
   const userRows: BreakdownRow[] = useMemo(() => {
     if (!report) return [];
@@ -603,7 +631,7 @@ export default function WeeklyReportPage() {
 
   const remainingUsd = balanceUsd != null && report ? balanceUsd - report.globalSpentUsd : null;
 
-  const printSection = useCallback((mode: "clients" | "users" | "both") => {
+  const printSection = useCallback((mode: "clients" | "projects" | "users" | "both") => {
     const cls = `print-${mode}`;
     document.body.classList.add(cls);
     const cleanup = () => {
@@ -625,7 +653,7 @@ export default function WeeklyReportPage() {
             Reporte Semanal por Cliente
           </h1>
           <p className="text-muted-foreground mt-1">
-            Costo por cliente y semana (incluye infra GCP prorateada).
+            Costo por cliente, proyecto y usuario por semana (incluye infra GCP prorateada).
           </p>
         </div>
         <div className="flex gap-2">
@@ -634,10 +662,10 @@ export default function WeeklyReportPage() {
             size="sm"
             onClick={() => printSection("both")}
             disabled={!report || loading}
-            title="Descargar ambas tablas en un mismo PDF"
+            title="Descargar las tres tablas en un mismo PDF"
           >
             <FileDown className="h-4 w-4 mr-2" />
-            Ambas tablas (PDF)
+            Todas las tablas (PDF)
           </Button>
           <Link href="/dashboard/settings/finance">
             <Button variant="outline" size="sm">
@@ -952,6 +980,59 @@ export default function WeeklyReportPage() {
         </CardContent>
       </Card>
 
+      {/* Tabla proyectos */}
+      <Card data-print-section="projects">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <div>
+            <CardTitle>Desglose por proyecto · Año {year}</CardTitle>
+            {showSubtotal && effectiveRange && (
+              <p className="text-xs text-muted-foreground mt-1" data-range-subtitle>
+                Subtotal rango{" "}
+                <span className="font-medium">
+                  {rangeLabel(report, effectiveRange.from)} → {rangeLabel(report, effectiveRange.to)}
+                </span>
+                : <span className="font-semibold text-foreground">{toDisplay(rangeSubtotal)}</span>
+                {" · "}
+                Total año: <span className="font-semibold text-foreground">{toDisplay(report?.totals.grand ?? 0)}</span>
+              </p>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => printSection("projects")}
+            disabled={!report || loading}
+            className="no-print"
+          >
+            <FileDown className="h-4 w-4 mr-2" />
+            PDF
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : error ? (
+            <p className="text-sm text-destructive">{error}</p>
+          ) : !report || report.weeks.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Sin datos para este año.</p>
+          ) : (
+            <BreakdownTable
+              firstColLabel="Proyecto"
+              weeks={report.weeks}
+              rows={projectRows}
+              grandTotal={report.totals.grand}
+              toDisplay={toDisplay}
+              showCounts={showCounts}
+              rangeFrom={effectiveRange?.from}
+              rangeTo={effectiveRange?.to}
+              showSubtotal={showSubtotal}
+            />
+          )}
+        </CardContent>
+      </Card>
+
       {/* Tabla usuarios */}
       <Card data-print-section="users">
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
@@ -1025,18 +1106,27 @@ export default function WeeklyReportPage() {
 
   /* Ocultar secciones según la clase activa en body */
   body.print-clients [data-print-section="users"],
+  body.print-clients [data-print-section="projects"],
   body.print-clients [data-print-section="controls"],
   body.print-clients [data-print-section="balance"],
   body.print-clients [data-print-section="notes"] { display: none !important; }
 
+  body.print-projects [data-print-section="clients"],
+  body.print-projects [data-print-section="users"],
+  body.print-projects [data-print-section="controls"],
+  body.print-projects [data-print-section="balance"],
+  body.print-projects [data-print-section="notes"] { display: none !important; }
+
   body.print-users [data-print-section="clients"],
+  body.print-users [data-print-section="projects"],
   body.print-users [data-print-section="controls"],
   body.print-users [data-print-section="balance"],
   body.print-users [data-print-section="notes"] { display: none !important; }
 
   body.print-both [data-print-section="controls"],
   body.print-both [data-print-section="notes"] { display: none !important; }
-  body.print-both [data-print-section="clients"] { page-break-after: always; break-after: page; }
+  body.print-both [data-print-section="clients"],
+  body.print-both [data-print-section="projects"] { page-break-after: always; break-after: page; }
 
   /* Mostrar la tabla completa sin scroll horizontal y en tamaño reducido para fit */
   [data-print-section] .overflow-x-auto { overflow: visible !important; }
