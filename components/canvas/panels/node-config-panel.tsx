@@ -94,11 +94,14 @@ export function NodeConfigPanel({
   // negative prompt textarea renders outside VideoSettings.
   const videoCaps = type === "video" ? getVideoCapabilities(selectedModel) : null;
 
-  // Edges de referencia entrantes (para el control de prioridad). Solo tiene
-  // sentido priorizar cuando hay 2+ referencias conectadas.
+  // Edges de referencia entrantes (para el control de prioridad). Priorizar
+  // tiene sentido con 2+ referencias; el arrobado @refN (solo video Omni)
+  // sirve desde la primera.
   const referenceEdges = (type === "image" || type === "video")
     ? edges.filter((e) => e.target === node.id && e.id && baseHandleId(e.targetHandle) === HANDLES.INPUT_REFERENCE)
     : [];
+  const isOmniVideo = type === "video" && selectedModel?.api_backend === "omni";
+  const showReferenceSection = referenceEdges.length >= 2 || (referenceEdges.length >= 1 && isOmniVideo);
 
   return (
     <div className="w-[360px] h-full border-l border-border bg-background flex flex-col overflow-hidden">
@@ -184,11 +187,12 @@ export function NodeConfigPanel({
         {/* Prioridad de referencias — opt-in: todo parte en Neutro (orden de
             conexión, sin nota en el prompt). Al asignar un número a alguna,
             las referencias se reordenan y se inyecta la nota de prioridad. */}
-        {referenceEdges.length >= 2 && onUpdateEdgePriority && (
+        {showReferenceSection && onUpdateEdgePriority && (
           <ReferencePriorityList
             referenceEdges={referenceEdges}
             nodes={nodes}
             onUpdateEdgePriority={onUpdateEdgePriority}
+            showRefNames={isOmniVideo}
           />
         )}
 
@@ -306,34 +310,64 @@ function ReferencePriorityList({
   referenceEdges,
   nodes,
   onUpdateEdgePriority,
+  showRefNames = false,
 }: {
   referenceEdges: Array<{ id?: string; source: string; data?: { priority?: number | null } | null }>;
   nodes: Node[];
   onUpdateEdgePriority: (edgeId: string, priority: number | null) => void;
+  // Video Omni: muestra el nombre @refN de cada referencia (arrobable en el
+  // prompt; se traduce a <IMAGE_REF_N> en el request).
+  showRefNames?: boolean;
 }) {
   const anyPrioritized = referenceEdges.some((e) => e.data?.priority != null);
 
-  const thumbFor = (sourceId: string): { url: string | null; label: string } => {
+  const infoFor = (sourceId: string): { url: string | null; label: string; count: number } => {
     const source = nodes.find((n) => n.id === sourceId);
-    if (!source) return { url: null, label: sourceId };
+    if (!source) return { url: null, label: sourceId, count: 0 };
     const d = source.data as Record<string, unknown>;
     const label = (d.label as string) || source.type || sourceId;
-    if (source.type === "static-image") return { url: (d.imageUrl as string) || null, label };
+    if (source.type === "static-image") {
+      const url = (d.imageUrl as string) || null;
+      return { url, label, count: url ? 1 : 0 };
+    }
     if (source.type === "static-image-group") {
       const images = (d.images as Array<{ url: string }> | undefined) || [];
-      return { url: images[0]?.url || null, label: `${label} (${images.length})` };
+      return { url: images[0]?.url || null, label: `${label} (${images.length})`, count: images.length };
     }
-    if (source.type === "image") return { url: (d.outputUrl as string) || null, label };
-    return { url: null, label };
+    if (source.type === "image") {
+      const url = (d.outputUrl as string) || null;
+      return { url, label, count: url ? 1 : 0 };
+    }
+    return { url: null, label, count: 0 };
   };
+
+  // Orden efectivo = el mismo que usa la ejecución: prioridad asc primero,
+  // neutras después en orden de conexión (sort estable). Los nombres @refN
+  // se asignan por imagen aportada en ese orden; una referencia sin imagen
+  // todavía (nodo no generado) no consume número.
+  const ordered = [...referenceEdges].sort(
+    (a, b) => (a.data?.priority ?? Infinity) - (b.data?.priority ?? Infinity)
+  );
+  const nameByEdgeId = new Map<string, string | null>();
+  let refIdx = 1;
+  for (const edge of ordered) {
+    const { count } = infoFor(edge.source);
+    if (count === 0) {
+      nameByEdgeId.set(edge.id!, null);
+      continue;
+    }
+    nameByEdgeId.set(edge.id!, count === 1 ? `@ref${refIdx}` : `@ref${refIdx}…@ref${refIdx + count - 1}`);
+    refIdx += count;
+  }
 
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs">Prioridad de referencias</Label>
+      <Label className="text-xs">{showRefNames ? "Referencias" : "Prioridad de referencias"}</Label>
       <div className="space-y-1">
-        {referenceEdges.map((edge) => {
-          const { url, label } = thumbFor(edge.source);
+        {ordered.map((edge) => {
+          const { url, label } = infoFor(edge.source);
           const priority = edge.data?.priority ?? null;
+          const refName = nameByEdgeId.get(edge.id!) ?? null;
           return (
             <div key={edge.id} className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-1.5">
               {url ? (
@@ -341,30 +375,50 @@ function ReferencePriorityList({
               ) : (
                 <div className="h-8 w-8 rounded bg-muted shrink-0" />
               )}
-              <span className="text-xs flex-1 truncate" title={label}>{label}</span>
-              <select
-                value={priority ?? ""}
-                onChange={(e) => onUpdateEdgePriority(edge.id!, e.target.value === "" ? null : Number(e.target.value))}
-                className={`h-7 rounded-md border bg-background px-1.5 text-xs ${
-                  priority != null ? "border-purple-500/50 text-purple-400" : "border-input text-muted-foreground"
-                }`}
-              >
-                <option value="">Neutro</option>
-                {referenceEdges.map((_, i) => (
-                  <option key={i + 1} value={i + 1}>
-                    {i + 1}
-                  </option>
-                ))}
-              </select>
+              <div className="flex flex-col flex-1 min-w-0">
+                <span className="text-xs truncate" title={label}>{label}</span>
+                {showRefNames && (
+                  refName ? (
+                    <span className="text-[10px] font-mono text-amber-400">{refName}</span>
+                  ) : (
+                    <span className="text-[10px] text-muted-foreground">sin imagen aún</span>
+                  )
+                )}
+              </div>
+              {referenceEdges.length >= 2 && (
+                <select
+                  value={priority ?? ""}
+                  onChange={(e) => onUpdateEdgePriority(edge.id!, e.target.value === "" ? null : Number(e.target.value))}
+                  className={`h-7 rounded-md border bg-background px-1.5 text-xs ${
+                    priority != null ? "border-purple-500/50 text-purple-400" : "border-input text-muted-foreground"
+                  }`}
+                >
+                  <option value="">Neutro</option>
+                  {referenceEdges.map((_, i) => (
+                    <option key={i + 1} value={i + 1}>
+                      {i + 1}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           );
         })}
       </div>
-      <p className="text-[10px] text-muted-foreground">
-        {anyPrioritized
-          ? "Las referencias con número van primero (1 = domina) y el prompt indica al modelo que respete ese orden. Las neutras van después, en orden de conexión."
-          : "Neutro = comportamiento normal (orden de conexión, sin instrucción extra). Asigna números solo si quieres que una referencia prevalezca sobre otra."}
-      </p>
+      {referenceEdges.length >= 2 && (
+        <p className="text-[10px] text-muted-foreground">
+          {anyPrioritized
+            ? "Las referencias con número van primero (1 = domina) y el prompt indica al modelo que respete ese orden. Las neutras van después, en orden de conexión."
+            : "Neutro = comportamiento normal (orden de conexión, sin instrucción extra). Asigna números solo si quieres que una referencia prevalezca sobre otra."}
+        </p>
+      )}
+      {showRefNames && (
+        <p className="text-[10px] text-amber-400/80">
+          Puedes mencionar @ref1, @ref2… dentro del prompt para dirigir una referencia específica
+          (se traduce automáticamente al marcador de Gemini Omni). Si cambias prioridades, los
+          nombres se reasignan según el nuevo orden.
+        </p>
+      )}
     </div>
   );
 }

@@ -245,8 +245,24 @@ export async function generateOmniVideo(
   // El texto lleva un marcador por imagen, en el mismo orden en que las
   // imágenes aparecen después del texto: <FIRST_FRAME> primero (si hay),
   // luego <IMAGE_REF_1>..<IMAGE_REF_N> (ya ordenadas por prioridad).
+  //
+  // Arrobado (mismo patrón que el @assetN de Kling en chat): si el prompt
+  // menciona @refN, la mención se reemplaza inline por <IMAGE_REF_N> y ese
+  // marcador ya no se antepone (aparece donde el usuario lo puso). Las
+  // referencias no mencionadas conservan su marcador antepuesto para que el
+  // modelo sepa que existen. Menciones fuera de rango quedan literales.
   let input: string | Array<Record<string, unknown>>;
   if (hasFirstFrame || referenceImages.length > 0) {
+    const mentioned = new Set<number>();
+    const promptWithMentions = prompt.replace(/@ref(\d+)\b/gi, (match, digits: string) => {
+      const n = Number(digits);
+      if (n >= 1 && n <= referenceImages.length) {
+        mentioned.add(n);
+        return `<IMAGE_REF_${n}>`;
+      }
+      return match;
+    });
+
     const markers: string[] = [];
     const imageParts: Array<Record<string, unknown>> = [];
     if (hasFirstFrame) {
@@ -256,11 +272,11 @@ export async function generateOmniVideo(
     }
     for (let i = 0; i < referenceImages.length; i++) {
       const image = await resolveImageInput(referenceImages[i]);
-      markers.push(`<IMAGE_REF_${i + 1}>`);
+      if (!mentioned.has(i + 1)) markers.push(`<IMAGE_REF_${i + 1}>`);
       imageParts.push({ type: "image", data: image.data, mime_type: image.mimeType });
     }
     input = [
-      { type: "text", text: `${markers.join(" ")} ${prompt}` },
+      { type: "text", text: [markers.join(" "), promptWithMentions].filter(Boolean).join(" ") },
       ...imageParts,
     ];
   } else {
