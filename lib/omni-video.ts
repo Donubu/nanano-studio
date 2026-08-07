@@ -242,17 +242,24 @@ export async function generateOmniVideo(
   }
 
   // La API rechaza cualquier media con task text_to_video ("No other media
-  // should be provided for text_to_video task"). Con imágenes presentes
-  // (first frame O referencias) la task debe ser image_to_video; el rol de
-  // cada imagen lo definen los marcadores <FIRST_FRAME> / <IMAGE_REF_N>.
-  const task = hasFirstFrame || referenceImages.length > 0 ? "image_to_video" : "text_to_video";
+  // should be provided for text_to_video task") y acepta EXACTAMENTE 1 imagen
+  // con image_to_video ("Image-to-video does not support more than 1 image").
+  // Con referencias (con o sin first frame) la task es reference_to_video; el
+  // rol de cada imagen lo definen los marcadores <FIRST_FRAME> / <IMAGE_REF_N>.
+  const task = referenceImages.length > 0
+    ? "reference_to_video"
+    : hasFirstFrame
+      ? "image_to_video"
+      : "text_to_video";
 
   // El texto lleva un marcador por imagen, en el mismo orden en que las
   // imágenes aparecen después del texto: <FIRST_FRAME> primero (si hay),
-  // luego <IMAGE_REF_1>..<IMAGE_REF_N> (ya ordenadas por prioridad).
+  // luego las referencias (ya ordenadas por prioridad). OJO: los marcadores
+  // <IMAGE_REF_N> de la API son 0-based (doc oficial); el arrobado @refN de
+  // la UI sigue siendo 1-based, acá se traduce (@ref1 → <IMAGE_REF_0>).
   //
   // Arrobado (mismo patrón que el @assetN de Kling en chat): si el prompt
-  // menciona @refN, la mención se reemplaza inline por <IMAGE_REF_N> y ese
+  // menciona @refN, la mención se reemplaza inline por su marcador y ese
   // marcador ya no se antepone (aparece donde el usuario lo puso). Las
   // referencias no mencionadas conservan su marcador antepuesto para que el
   // modelo sepa que existen. Menciones fuera de rango quedan literales.
@@ -263,7 +270,7 @@ export async function generateOmniVideo(
       const n = Number(digits);
       if (n >= 1 && n <= referenceImages.length) {
         mentioned.add(n);
-        return `<IMAGE_REF_${n}>`;
+        return `<IMAGE_REF_${n - 1}>`;
       }
       return match;
     });
@@ -277,7 +284,7 @@ export async function generateOmniVideo(
     }
     for (let i = 0; i < referenceImages.length; i++) {
       const image = await resolveImageInput(referenceImages[i]);
-      if (!mentioned.has(i + 1)) markers.push(`<IMAGE_REF_${i + 1}>`);
+      if (!mentioned.has(i + 1)) markers.push(`<IMAGE_REF_${i}>`);
       imageParts.push({ type: "image", data: image.data, mime_type: image.mimeType });
     }
     input = [

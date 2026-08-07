@@ -1428,8 +1428,9 @@ export function FullModeWorkspace({
       prompt = prompt.replace(/<<<(?:image|video)_(\d+)>>>/g, (_, num) => `@asset${num}`);
     }
     // Gemini Omni: des-transformar los marcadores a su forma arrobable.
+    // Los marcadores de la API son 0-based; el arrobado @refN es 1-based.
     if (targetModel && getVideoBackend(targetModel) === "omni") {
-      prompt = prompt.replace(/<IMAGE_REF_(\d+)>/g, (_, num) => `@ref${num}`);
+      prompt = prompt.replace(/<IMAGE_REF_(\d+)>/g, (_, num) => `@ref${Number(num) + 1}`);
     }
 
     setInternalPrompt(prompt);
