@@ -72,6 +72,12 @@ export async function GET(request: NextRequest) {
 
     const baseParams = [...hiddenParams, ...clientParams];
 
+    // Los costos y métricas de proyecto son solo para admins; los usuarios
+    // normales solo necesitan el listado para navegar
+    const costSelect = isAdmin
+      ? "COALESCE(gen.estimated_cost, 0) as estimated_cost, COALESCE(uc.user_count, 0) as user_count"
+      : "NULL as estimated_cost, NULL as user_count";
+
     if (limit !== null) {
       const [[{ total }]] = await pool.execute<(RowDataPacket & { total: number })[]>(
         `SELECT COUNT(*) as total ${baseQuery}`, [...baseParams]
@@ -79,7 +85,7 @@ export async function GET(request: NextRequest) {
       const [rows] = await pool.execute<ProjectRow[]>(`
         SELECT p.id, p.title, p.description, p.client_id, p.status, p.hidden, p.is_personal, p.owner_user_id, p.created_at,
           c.name as client_name, c.logo as client_logo, 0 as generation_count,
-          COALESCE(gen.estimated_cost, 0) as estimated_cost, COALESCE(uc.user_count, 0) as user_count,
+          ${costSelect},
           gen.last_message_at
         ${baseQuery} ORDER BY gen.last_message_at DESC, p.created_at DESC LIMIT ? OFFSET ?
       `, [...baseParams, limit, offset]);
@@ -89,7 +95,7 @@ export async function GET(request: NextRequest) {
     const [rows] = await pool.execute<ProjectRow[]>(`
       SELECT p.id, p.title, p.description, p.client_id, p.status, p.hidden, p.is_personal, p.owner_user_id, p.created_at,
         c.name as client_name, c.logo as client_logo, 0 as generation_count,
-        COALESCE(gen.estimated_cost, 0) as estimated_cost, COALESCE(uc.user_count, 0) as user_count,
+        ${costSelect},
         gen.last_message_at
       ${baseQuery} ORDER BY gen.last_message_at DESC, p.created_at DESC
     `, [...baseParams]);

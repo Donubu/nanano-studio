@@ -51,6 +51,23 @@ export default auth((req) => {
     return NextResponse.redirect(new URL("/login", req.url));
   }
 
+  // Rutas de administración: solo rol admin. Los API routes además re-validan
+  // sesión/rol con auth() en Node; esto corta el acceso ya en el Edge.
+  const pathname = req.nextUrl.pathname;
+  const isAdminPage = pathname === "/dashboard" || pathname.startsWith("/dashboard/");
+  const isAdminApi =
+    pathname.startsWith("/api/dashboard") || pathname.startsWith("/api/admin");
+  if (isAdminPage || isAdminApi) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const role = (token?.user as any)?.role;
+    if (role !== "admin") {
+      if (isAdminApi) {
+        return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+      }
+      return NextResponse.redirect(new URL("/", req.url));
+    }
+  }
+
   return NextResponse.next();
 });
 
