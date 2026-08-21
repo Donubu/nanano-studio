@@ -14,8 +14,9 @@ import { useState, useRef } from "react";
 import { VideoDuration, VideoResolution, VideoAspectRatio } from "@/types/video";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { getOpenRouterModelCaps } from "@/lib/openrouter-video-caps";
 
-export type VideoProvider = "google" | "xai" | "kling" | "omni";
+export type VideoProvider = "google" | "xai" | "kling" | "omni" | "seedance";
 
 export interface VoiceBinding {
   dataUrl: string;
@@ -124,13 +125,21 @@ export function VideoSettings({
   const isXai = provider === "xai";
   const isKling = provider === "kling";
   const isOmni = provider === "omni";
+  // OpenRouter Seedance (2.5 / 2.0-fast): opciones desde la tabla compartida
+  // con el backend (lib/openrouter-video-caps.ts), por model_id.
+  const isSeedance = provider === "seedance";
+  const seedanceCaps = isSeedance ? getOpenRouterModelCaps(modelId ?? "") : null;
   const isKlingV26 = isKling && modelId === "kling-v2-6";
 
-  const resolutions = isKling ? KLING_RESOLUTIONS : isXai ? XAI_RESOLUTIONS : GOOGLE_RESOLUTIONS;
-  const aspectRatios = isKling ? KLING_ASPECT_RATIOS : isXai ? XAI_ASPECT_RATIOS : GOOGLE_ASPECT_RATIOS;
+  const resolutions: { value: VideoResolution; label: string; note?: string }[] = seedanceCaps
+    ? seedanceCaps.resolutions.map((r) => ({ value: r as VideoResolution, label: r }))
+    : isKling ? KLING_RESOLUTIONS : isXai ? XAI_RESOLUTIONS : GOOGLE_RESOLUTIONS;
+  const aspectRatios: { value: VideoAspectRatio; label: string }[] = seedanceCaps
+    ? seedanceCaps.aspectRatios.filter((ar) => ar !== "9:21").map((ar) => ({ value: ar as VideoAspectRatio, label: ar }))
+    : isKling ? KLING_ASPECT_RATIOS : isXai ? XAI_ASPECT_RATIOS : GOOGLE_ASPECT_RATIOS;
 
   // Google VEO: 1080p/4K only available for 8s. Kling: 1080p (pro) available for all durations.
-  const hasHighResRestriction = !isKling && !isXai && !isOmni;
+  const hasHighResRestriction = !isKling && !isXai && !isOmni && !isSeedance;
 
   // Gemini Omni (interactions API) tiene un panel propio: la API no acepta
   // duración, resolución, negative prompt, seed ni toggle de audio. Solo se
@@ -221,9 +230,25 @@ export function VideoSettings({
       {/* Duración */}
       <div className="space-y-2">
         <Label className="text-xs text-muted-foreground">
-          Duración {(isXai || isKling) && <span className="text-muted-foreground/60">({duration}s)</span>}
+          Duración {(isXai || isKling || isSeedance) && <span className="text-muted-foreground/60">({duration}s)</span>}
         </Label>
-        {isKlingV26 ? (
+        {seedanceCaps ? (
+          <>
+            <Slider
+              value={[duration]}
+              onValueChange={([val]) => onChange({ duration: val })}
+              min={seedanceCaps.minDuration}
+              max={seedanceCaps.maxDuration}
+              step={1}
+              disabled={disabled}
+              className="w-full"
+            />
+            <div className="flex justify-between text-[10px] text-muted-foreground/60">
+              <span>{seedanceCaps.minDuration}s</span>
+              <span>{seedanceCaps.maxDuration}s</span>
+            </div>
+          </>
+        ) : isKlingV26 ? (
           <div className="flex gap-2">
             {KLING_V26_DURATIONS.map((d) => (
               <button
@@ -325,7 +350,7 @@ export function VideoSettings({
       {/* Aspect Ratio */}
       <div className="space-y-2">
         <Label className="text-xs text-muted-foreground">Proporcion</Label>
-        <div className={`grid gap-2 ${isXai ? "grid-cols-4" : isKling ? "grid-cols-3" : "grid-cols-2"}`}>
+        <div className={`grid gap-2 ${isXai || isSeedance ? "grid-cols-4" : isKling ? "grid-cols-3" : "grid-cols-2"}`}>
           {aspectRatios.map((ar) => (
             <button
               key={ar.value}
@@ -479,8 +504,9 @@ export function VideoSettings({
         </div>
       )}
 
-      {/* Opciones avanzadas - Google and Kling support negative prompt, xAI does not */}
-      {!isXai && (
+      {/* Opciones avanzadas - Google and Kling support negative prompt; xAI and
+          Seedance (OpenRouter drops negative_prompt) do not */}
+      {!isXai && !isSeedance && (
         <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
           <CollapsibleTrigger className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors w-full">
             <ChevronDown

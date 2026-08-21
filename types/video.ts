@@ -8,7 +8,7 @@
 
 export type VideoDuration = number;
 export type VideoResolution = "480p" | "720p" | "1080p" | "4K";
-export type VideoAspectRatio = "1:1" | "16:9" | "9:16" | "4:3" | "3:4" | "3:2" | "2:3";
+export type VideoAspectRatio = "1:1" | "16:9" | "9:16" | "4:3" | "3:4" | "3:2" | "2:3" | "21:9";
 export type PersonGeneration = "allow_adult" | "allow_all" | "dont_allow";
 
 export interface VideoGenerationSettings {

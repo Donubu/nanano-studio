@@ -5,7 +5,7 @@ import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { generateVideo, isVideoConfigured, VideoGenerationConfig, VideoInput, VideoGenerationProgress } from "@/lib/google-ai-video";
 import { generateXaiVideo, isXaiVideoConfigured, XaiVideoConfig, validateXaiVideoConfig } from "@/lib/xai-video";
 import { generateKlingVideo, isKlingConfigured, KlingVideoConfig, validateKlingVideoConfig, KlingImageInput } from "@/lib/kling-video";
-import { generateOpenRouterVideo, isOpenRouterConfigured, OpenRouterVideoConfig, validateOpenRouterVideoConfig, OpenRouterImageInputs } from "@/lib/openrouter-video";
+import { generateOpenRouterVideo, isOpenRouterConfigured, OpenRouterVideoConfig, validateOpenRouterVideoConfig, OpenRouterImageInputs, getOpenRouterModelCaps } from "@/lib/openrouter-video";
 import { generateOmniVideo, isOmniConfigured, OmniVideoConfig, validateOmniVideoConfig } from "@/lib/omni-video";
 import { uploadVideoToS3, generateVideoFileName, isS3Configured, uploadToS3, generateFileName } from "@/lib/s3";
 import { generateConversationTitle, Labels } from "@/lib/google-ai";
@@ -611,13 +611,30 @@ export async function POST(
             generatedSeed = 0; // xAI does not support seeds
 
           } else if (isOpenRouterProvider) {
-            // ===== OpenRouter (Seedance 2.0 / 2.0-fast) =====
+            // ===== OpenRouter (Seedance 2.5 / 2.0-fast) =====
             generatedSeed = videoSettings?.seed ?? Math.floor(Math.random() * 4294967295);
+
+            // Resolución/aspect guardados en la conversación pueden venir de
+            // otro modelo (p. ej. 1080p de Seedance 2.0 o de VEO). Si el modelo
+            // actual no los soporta, degradar a un valor válido en vez de
+            // fallar: el usuario no los eligió para este modelo.
+            const orCaps = getOpenRouterModelCaps(effectiveModelId);
+            let orResolution = (videoSettings?.resolution || conversation.video_resolution || "720p") as OpenRouterVideoConfig["resolution"];
+            if (!orCaps.resolutions.includes(orResolution)) {
+              const fallback = orCaps.resolutions.includes("720p") ? "720p" : orCaps.resolutions[orCaps.resolutions.length - 1];
+              console.warn(`[Video API] ${effectiveModelId} no soporta ${orResolution}; usando ${fallback}`);
+              orResolution = fallback;
+            }
+            let orAspect = (videoSettings?.aspectRatio || conversation.video_aspect_ratio || "16:9") as OpenRouterVideoConfig["aspectRatio"];
+            if (!orCaps.aspectRatios.includes(orAspect)) {
+              console.warn(`[Video API] ${effectiveModelId} no soporta aspect ${orAspect}; usando 16:9`);
+              orAspect = "16:9";
+            }
 
             const orConfig: OpenRouterVideoConfig = {
               duration: videoSettings?.duration || conversation.video_duration || 8,
-              aspectRatio: (videoSettings?.aspectRatio || conversation.video_aspect_ratio || "16:9") as OpenRouterVideoConfig["aspectRatio"],
-              resolution: (videoSettings?.resolution || conversation.video_resolution || "720p") as OpenRouterVideoConfig["resolution"],
+              aspectRatio: orAspect,
+              resolution: orResolution,
               generateAudio: videoSettings?.audioEnabled !== undefined
                 ? videoSettings.audioEnabled
                 : (conversation.video_audio_enabled ?? false),

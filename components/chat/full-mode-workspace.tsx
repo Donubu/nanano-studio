@@ -21,6 +21,7 @@ import remarkGfm from "remark-gfm";
 import { ProjectModel as ConfigModel } from "./quality-selector";
 import { ReasoningSelector, type ThinkingLevel } from "./reasoning-selector";
 import { cn, formatDateTimeLocal } from "@/lib/utils";
+import { getOpenRouterModelCaps } from "@/lib/openrouter-video-caps";
 import { useNavigation } from "@/contexts/navigation-context";
 import { type ImagenAspectRatio, getDailyPin } from "./image-settings";
 
@@ -167,9 +168,12 @@ interface FullModeWorkspaceProps {
 
 // ---- Model capability helpers ----
 
-function getVideoBackend(model: ConfigModel | undefined): "veo" | "xai" | "kling" | "kling26" | "omni" | null {
+function getVideoBackend(model: ConfigModel | undefined): "veo" | "xai" | "kling" | "kling26" | "omni" | "seedance" | null {
   if (!model) return null;
   if (model.api_backend === "xai") return "xai";
+  // OpenRouter (Seedance 2.5 / 2.0-fast): capacidades por model_id en
+  // lib/openrouter-video-caps.ts (misma tabla que valida el backend).
+  if (model.api_backend === "openrouter") return "seedance";
   // Gemini Omni: solo por api_backend ("kling-v3-omni" también contiene "omni")
   if (model.api_backend === "omni") return "omni";
   if (model.model_id === "kling-v2-6") return "kling26";
@@ -191,17 +195,22 @@ function getSupportedImageResolutions(backend: ReturnType<typeof getImageBackend
   return ["1K", "2K", "4K"];
 }
 
-function getSupportedVideoResolutions(backend: ReturnType<typeof getVideoBackend>): string[] {
+function getSupportedVideoResolutions(backend: ReturnType<typeof getVideoBackend>, modelId?: string): string[] {
   if (backend === "xai") return ["480p", "720p"];
+  if (backend === "seedance") return [...getOpenRouterModelCaps(modelId ?? "").resolutions];
   if (backend === "kling" || backend === "kling26") return ["720p", "1080p"];
   if (backend === "omni") return ["720p"]; // fijo, sin selector
   // VEO 3.1 supports 720p, 1080p, and 4K
   return ["720p", "1080p", "4K"];
 }
 
-function getSupportedDurations(backend: ReturnType<typeof getVideoBackend>): number[] {
+function getSupportedDurations(backend: ReturnType<typeof getVideoBackend>, modelId?: string): number[] {
   switch (backend) {
     case "veo": return [4, 6, 8];
+    case "seedance": {
+      const caps = getOpenRouterModelCaps(modelId ?? "");
+      return Array.from({ length: caps.maxDuration - caps.minDuration + 1 }, (_, i) => caps.minDuration + i);
+    }
     case "xai": return [4, 6, 8, 15];
     case "kling": return [4, 6, 8, 15];
     case "kling26": return [5, 10];
@@ -212,9 +221,10 @@ function getSupportedDurations(backend: ReturnType<typeof getVideoBackend>): num
   }
 }
 
-function getSupportedVideoAspectRatios(backend: ReturnType<typeof getVideoBackend>): string[] {
+function getSupportedVideoAspectRatios(backend: ReturnType<typeof getVideoBackend>, modelId?: string): string[] {
   switch (backend) {
     case "veo": return ["16:9", "9:16"];
+    case "seedance": return [...getOpenRouterModelCaps(modelId ?? "").aspectRatios];
     case "xai": return ["16:9", "9:16", "1:1", "4:3", "3:4"];
     case "kling": return ["16:9", "9:16", "1:1"];
     case "kling26": return ["16:9", "9:16", "1:1"];
@@ -236,17 +246,25 @@ function supportsVideoKeyframes(backend: ReturnType<typeof getVideoBackend>): bo
 function supportsVideoIngredients(backend: ReturnType<typeof getVideoBackend>): boolean {
   // Omni: referencias vía <IMAGE_REF_N> (el server traduce las menciones @refN
   // del prompt; mismo sistema que el nodo de video omni en canvas).
-  return backend === "veo" || backend === "kling" || backend === "omni";
+  // Seedance: input_references + @refN → @ImageN (lib/openrouter-video.ts).
+  return backend === "veo" || backend === "kling" || backend === "omni" || backend === "seedance";
 }
 
-function getMaxVideoReferences(backend: ReturnType<typeof getVideoBackend>): number {
+function getMaxVideoReferences(backend: ReturnType<typeof getVideoBackend>, modelId?: string): number {
   // Omni corta a 3 en lib/omni-video.ts; mostrar más slots solo confunde.
-  return backend === "omni" ? 3 : 14;
+  if (backend === "omni") return 3;
+  if (backend === "seedance") return getOpenRouterModelCaps(modelId ?? "").maxReferenceImages;
+  return 14;
 }
 
 function supportsVideoAudio(backend: ReturnType<typeof getVideoBackend>): boolean {
   // Omni genera audio siempre pero sin toggle → false para ocultar el switch
-  return backend === "veo" || backend === "kling" || backend === "kling26";
+  return backend === "veo" || backend === "kling" || backend === "kling26" || backend === "seedance";
+}
+
+// Modelos con arrobado @refN en el prompt (el backend traduce al marcador nativo).
+function supportsRefMentions(backend: ReturnType<typeof getVideoBackend>): boolean {
+  return backend === "omni" || backend === "seedance";
 }
 
 // ---- Component ----
@@ -526,14 +544,16 @@ export function FullModeWorkspace({
   }, [format, onSelectConfigModel]);
 
   // Video capability checks
-  const supportedDurations = getSupportedDurations(videoBackend);
-  const supportedVideoAR = getSupportedVideoAspectRatios(videoBackend);
+  const supportedDurations = getSupportedDurations(videoBackend, activeVideoModel?.model_id);
+  const supportedVideoAR = getSupportedVideoAspectRatios(videoBackend, activeVideoModel?.model_id);
   const maxVideoVariations = getMaxVideoVariations(videoBackend);
   const hasKeyframes = supportsVideoKeyframes(videoBackend);
   const hasIngredients = supportsVideoIngredients(videoBackend);
   const hasAudioToggle = supportsVideoAudio(videoBackend);
-  const maxVideoReferences = getMaxVideoReferences(videoBackend);
+  const maxVideoReferences = getMaxVideoReferences(videoBackend, activeVideoModel?.model_id);
   const isOmniVideo = videoBackend === "omni";
+  // Omni y Seedance: referencias arrobables como @refN en el prompt.
+  const hasRefMentions = supportsRefMentions(videoBackend);
 
   // Track placeholder IDs so we can clean them up after generation
   const placeholderIdsRef = useRef<number[]>([]);
@@ -664,7 +684,7 @@ export function FullModeWorkspace({
   // Supported resolutions per model
   const imageBackend = getImageBackend(activeImageModel);
   const supportedImageResolutions = getSupportedImageResolutions(imageBackend);
-  const supportedVideoResolutions = getSupportedVideoResolutions(videoBackend);
+  const supportedVideoResolutions = getSupportedVideoResolutions(videoBackend, activeVideoModel?.model_id);
 
   // ---- Auto-correct settings when model changes ----
   useEffect(() => {
@@ -2483,9 +2503,9 @@ export function FullModeWorkspace({
                       <CompactFrameSlot
                         key={i}
                         image={ref.image}
-                        // Omni: el nombre @N es arrobable en el prompt como
-                        // @refN (mismo sistema que el nodo de canvas).
-                        label={isOmniVideo ? `@${i + 1}` : ref.type === "STYLE" ? "S" : "A"}
+                        // Omni / Seedance: el nombre @N es arrobable en el
+                        // prompt como @refN (mismo sistema que el nodo de canvas).
+                        label={hasRefMentions ? `@${i + 1}` : ref.type === "STYLE" ? "S" : "A"}
                         onSet={() => {}}
                         onClear={() => {
                           const next = [...videoReferenceImages];
@@ -2524,7 +2544,7 @@ export function FullModeWorkspace({
                   : format === "video"
                     ? isKlingOmni
                       ? "Describe el video... usa @asset para referenciar"
-                      : isOmniVideo && videoReferenceImages.length > 0
+                      : hasRefMentions && videoReferenceImages.length > 0
                         ? "Describe el video... usa @ref1, @ref2… para dirigir una referencia"
                         : "Describe el video..."
                     : "Describe la imagen..."}
@@ -2685,11 +2705,24 @@ export function FullModeWorkspace({
                               {supportedDurations.length > 0 && (
                               <div className="flex items-center gap-2">
 
+                                {supportedDurations.length > 12 ? (
+                                  // Seedance 2.5: 4..30s → select en vez de 27 botones.
+                                  <select
+                                    value={videoDuration}
+                                    onChange={(e) => onVideoSettingsChange({ duration: Number(e.target.value) })}
+                                    className="h-7 rounded border border-input bg-background px-1.5 text-xs"
+                                  >
+                                    {supportedDurations.map(d => (
+                                      <option key={d} value={d}>{d}s</option>
+                                    ))}
+                                  </select>
+                                ) : (
                                 <div className="flex gap-0.5">
                                   {supportedDurations.map(d => (
                                     <button key={d} onClick={() => onVideoSettingsChange({ duration: d })} className={cn("px-1.5 py-1 rounded text-xs font-medium transition-colors", videoDuration === d ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground")}>{d}s</button>
                                   ))}
                                 </div>
+                                )}
                               </div>
                               )}
                               <div className="flex items-center gap-2">

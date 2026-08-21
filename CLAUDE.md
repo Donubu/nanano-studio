@@ -12,7 +12,7 @@ Multi-provider AI generation platform for text, images, video, audio, and music.
 - **AI Providers**:
   - Google Gemini API / Vertex AI (text streaming, Imagen 4 images, VEO video, Chirp 3 HD TTS, Lyria music)
   - Google Gemini Omni (`api_backend='omni'`, video via interactions API — `lib/omni-video.ts`)
-  - xAI Grok (Grok Imagine Video), Kling (v3 Omni / v2.6), OpenRouter (ByteDance Seedance)
+  - xAI Grok (Grok Imagine Video), Kling (v3 Omni / v2.6), OpenRouter (ByteDance Seedance 2.5 / 2.0 Fast — caps y pricing por modelo en `lib/openrouter-video-caps.ts`)
 - **UI**: Tailwind CSS, Radix UI primitives, Lucide icons
 - **Deployment**: Coolify on AWS EC2 (m5.2xlarge) — Docker Compose stack behind Coolify's Traefik proxy
 
@@ -91,7 +91,7 @@ lib/
   omni-video.ts           # Gemini Omni video (interactions API)
   xai-video.ts            # xAI Grok video generation
   kling-video.ts          # Kling video generation
-  openrouter-video.ts     # OpenRouter (Seedance) video generation
+  openrouter-video.ts     # OpenRouter (Seedance) video generation (+ openrouter-video-caps.ts: tabla compartida UI/backend)
   cost-calculator.ts      # Cost estimation logic
   gcp-billing.ts          # GCP billing integration (BigQuery)
   queue.ts                # BullMQ queue definitions

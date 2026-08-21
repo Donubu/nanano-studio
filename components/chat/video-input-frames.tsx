@@ -21,7 +21,7 @@ export interface ReferenceImage {
   sourceUrl?: string;
 }
 
-export type VideoInputProvider = "google" | "xai" | "kling" | "omni";
+export type VideoInputProvider = "google" | "xai" | "kling" | "omni" | "seedance";
 
 interface VideoInputFramesProps {
   projectId: number;
@@ -34,6 +34,7 @@ interface VideoInputFramesProps {
   disabled?: boolean;
   supportsReferenceImages?: boolean;
   provider?: VideoInputProvider;
+  maxReferenceImages?: number; // default 3 (VEO); Seedance acepta más
   isGeminiBackend?: boolean; // Gemini API: reference images and first/last frame are mutually exclusive
 }
 
@@ -51,9 +52,12 @@ export function VideoInputFrames({
   disabled = false,
   supportsReferenceImages = false,
   provider = "google",
+  maxReferenceImages = 3,
   isGeminiBackend = false,
 }: VideoInputFramesProps) {
   const isXai = provider === "xai";
+  // Seedance: referencias arrobables como @ref1, @ref2… (el backend traduce a @ImageN)
+  const isSeedance = provider === "seedance";
   // Gemini Omni v1: solo first frame (sin last frame ni referencias)
   const isOmni = provider === "omni";
   const [modalMode, setModalMode] = useState<ModalMode>(null);
@@ -95,7 +99,7 @@ export function VideoInputFrames({
     } else if (target === "last") {
       onLastFrameChange(base64);
     } else if (target === "reference") {
-      if (referenceImages.length < 3) {
+      if (referenceImages.length < maxReferenceImages) {
         onReferenceImagesChange([
           ...referenceImages,
           { image: base64, type: "ASSET" },
@@ -186,7 +190,7 @@ export function VideoInputFrames({
     } else if (modalMode === "last") {
       onLastFrameChange(imageUrl);
     } else if (modalMode === "reference" && referenceType) {
-      if (referenceImages.length < 3) {
+      if (referenceImages.length < maxReferenceImages) {
         onReferenceImagesChange([
           ...referenceImages,
           { image: imageUrl, type: referenceType },
@@ -416,7 +420,7 @@ export function VideoInputFrames({
             <Label className="text-xs text-muted-foreground flex items-center gap-1">
               Imágenes de Referencia
               <span className="text-muted-foreground/60">
-                {referencesDisabledByFrames ? "(bloqueado por frames)" : `(${referenceImages.length}/3)`}
+                {referencesDisabledByFrames ? "(bloqueado por frames)" : `(${referenceImages.length}/${maxReferenceImages})`}
               </span>
             </Label>
             <div className="grid grid-cols-3 gap-2">
@@ -445,11 +449,11 @@ export function VideoInputFrames({
                       ? "bg-purple-500/80 text-white"
                       : "bg-blue-500/80 text-white"
                   }`}>
-                    {ref.type}
+                    {isSeedance ? `@ref${index + 1}` : ref.type}
                   </div>
                 </div>
               ))}
-              {referenceImages.length < 3 && (
+              {referenceImages.length < maxReferenceImages && (
                 <div
                   className={cn(
                     "aspect-square rounded-md border-2 border-dashed flex flex-col items-center justify-center gap-1 transition-colors",

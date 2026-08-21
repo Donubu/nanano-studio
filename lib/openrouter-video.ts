@@ -5,8 +5,10 @@
  * Submit response:  { id, polling_url }
  * Poll response:    { status, unsigned_urls?, error? }
  *
- * Currently used for ByteDance Seedance 2.0 and 2.0-fast. Other OpenRouter
- * video models with the same submit/poll shape should plug in here too.
+ * Currently used for ByteDance Seedance 2.5 and 2.0-fast (2.0 retired; kept
+ * in the caps table for historical cost recalculation). Other OpenRouter video
+ * models with the same submit/poll shape plug in by adding an entry to
+ * OPENROUTER_MODEL_CAPS.
  *
  * Pricing for Seedance follows tokens = (w * h * d * 24) / 1024, multiplied
  * by the per-token rate. We compute it locally and return it via
@@ -14,6 +16,7 @@
  */
 
 import { GeneratedVideo, VideoGenerationProgress, ReferenceImageInput } from "./google-ai-video";
+import { getOpenRouterModelCaps, resolveOpenRouterDimensions, computeSeedanceCost } from "./openrouter-video-caps";
 
 const OPENROUTER_API_BASE = "https://openrouter.ai/api/v1";
 
@@ -37,11 +40,11 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 // TYPES
 // ============================================
 
-export type OpenRouterAspectRatio = "1:1" | "3:4" | "9:16" | "4:3" | "16:9" | "21:9" | "9:21";
-export type OpenRouterResolution = "480p" | "720p" | "1080p";
+export type { OpenRouterAspectRatio, OpenRouterResolution } from "./openrouter-video-caps";
+import type { OpenRouterAspectRatio, OpenRouterResolution } from "./openrouter-video-caps";
 
 export interface OpenRouterVideoConfig {
-  duration: number; // integer 4..15
+  duration: number; // integer, range depends on the model (see getOpenRouterModelCaps)
   aspectRatio: OpenRouterAspectRatio;
   resolution: OpenRouterResolution;
   generateAudio?: boolean;
@@ -94,88 +97,54 @@ function isRetriableStatus(status: number): boolean {
   return status === 429 || status === 500 || status === 502 || status === 503;
 }
 
-// ============================================
-// PRICING
-// ============================================
-
-// Per-token USD rates from OpenRouter model metadata (pricing_skus.video_tokens).
-const SEEDANCE_PRICING_PER_TOKEN: Record<string, number> = {
-  "bytedance/seedance-2.0": 0.000007,
-  "bytedance/seedance-2.0-fast": 0.0000056,
-};
-
-// (aspectRatio, resolution) -> (width, height). Picks the canonical size from
-// Seedance's supported_sizes list. Used to compute token count; the actual
-// pixel dimensions the model produces match these.
-const SEEDANCE_DIMENSIONS: Record<OpenRouterResolution, Partial<Record<OpenRouterAspectRatio, [number, number]>>> = {
-  "480p": {
-    "1:1": [480, 480],
-    "3:4": [480, 640],
-    "9:16": [480, 854],
-    "4:3": [640, 480],
-    "16:9": [854, 480],
-    "21:9": [1120, 480],
-    "9:21": [480, 1120],
-  },
-  "720p": {
-    "1:1": [720, 720],
-    "3:4": [720, 960],
-    "9:16": [720, 1280],
-    "4:3": [960, 720],
-    "16:9": [1280, 720],
-    "21:9": [1680, 720],
-    "9:21": [720, 1680],
-  },
-  "1080p": {
-    "1:1": [1080, 1080],
-    "3:4": [1080, 1440],
-    "9:16": [1080, 1920],
-    "4:3": [1440, 1080],
-    "16:9": [1920, 1080],
-    "21:9": [2520, 1080],
-    "9:21": [1080, 2520],
-  },
-};
-
-function resolveDimensions(resolution: OpenRouterResolution, aspectRatio: OpenRouterAspectRatio): [number, number] {
-  const dims = SEEDANCE_DIMENSIONS[resolution]?.[aspectRatio];
-  if (dims) return dims;
-  // Fallback: assume worst-case 16:9 at the requested resolution. Keeps cost
-  // estimate conservative if a future aspect ratio slips through validation.
-  return SEEDANCE_DIMENSIONS[resolution]["16:9"] ?? [1280, 720];
-}
-
-export function computeSeedanceCost(
-  modelId: string,
-  width: number,
-  height: number,
-  durationSeconds: number,
-): number {
-  const rate = SEEDANCE_PRICING_PER_TOKEN[modelId];
-  if (!rate) return 0;
-  const tokens = (width * height * durationSeconds * 24) / 1024;
-  return Number((tokens * rate).toFixed(6));
-}
+// Per-model capabilities, dimensions and pricing live in a dependency-free
+// module so client bundles (canvas / full mode) can import the same table.
+export {
+  OPENROUTER_MODEL_CAPS,
+  DEFAULT_OPENROUTER_MODEL_ID,
+  getOpenRouterModelCaps,
+  resolveOpenRouterDimensions,
+  computeSeedanceCost,
+  estimateOpenRouterVideoCost,
+} from "./openrouter-video-caps";
+export type { OpenRouterModelCaps } from "./openrouter-video-caps";
 
 // ============================================
 // VALIDATION
 // ============================================
 
-const VALID_ASPECT_RATIOS: OpenRouterAspectRatio[] = ["1:1", "3:4", "9:16", "4:3", "16:9", "21:9", "9:21"];
-
 export function validateOpenRouterVideoConfig(config: OpenRouterVideoConfig, modelId: string): string | null {
-  if (!Number.isInteger(config.duration) || config.duration < 4 || config.duration > 15) {
-    return "La duración debe ser un entero entre 4 y 15 segundos";
+  const caps = getOpenRouterModelCaps(modelId);
+  if (!Number.isInteger(config.duration) || config.duration < caps.minDuration || config.duration > caps.maxDuration) {
+    return `La duración debe ser un entero entre ${caps.minDuration} y ${caps.maxDuration} segundos`;
   }
-  if (!VALID_ASPECT_RATIOS.includes(config.aspectRatio)) {
-    return `Aspect ratio inválido. Debe ser uno de: ${VALID_ASPECT_RATIOS.join(", ")}`;
+  if (!caps.aspectRatios.includes(config.aspectRatio)) {
+    return `Aspect ratio inválido para ${modelId}. Debe ser uno de: ${caps.aspectRatios.join(", ")}`;
   }
-  const isFast = modelId === "bytedance/seedance-2.0-fast";
-  const allowedResolutions: OpenRouterResolution[] = isFast ? ["480p", "720p"] : ["480p", "720p", "1080p"];
-  if (!allowedResolutions.includes(config.resolution)) {
-    return `Resolución inválida para ${modelId}. Permitidas: ${allowedResolutions.join(", ")}`;
+  if (!caps.resolutions.includes(config.resolution)) {
+    return `Resolución inválida para ${modelId}. Permitidas: ${caps.resolutions.join(", ")}`;
   }
   return null;
+}
+
+// ============================================
+// PROMPT: @refN → @ImageN
+// ============================================
+
+/**
+ * Seedance addresses reference assets natively as `@Image1`, `@Image2`… in
+ * the order of `input_references`. Our UIs (canvas node, full mode) expose the
+ * same slots as `@ref1`, `@ref2`… (1-based, already sorted by priority), so we
+ * translate the mentions here. Mentions pointing past the last attached
+ * reference are left untouched (the model will just read them as text).
+ */
+export function translateRefMentionsForSeedance(prompt: string, referenceCount: number): string {
+  if (referenceCount <= 0) return prompt;
+  return prompt.replace(/@ref\s?(\d+)\b/gi, (match, num: string) => {
+    const n = Number(num);
+    if (n < 1 || n > referenceCount) return match;
+    return `@Image${n}`;
+  });
 }
 
 // ============================================
@@ -196,12 +165,26 @@ export async function generateOpenRouterVideo(
     message: "Iniciando generación de video con OpenRouter...",
   });
 
+  const caps = getOpenRouterModelCaps(modelId);
+
+  // Cap references to what the model accepts and translate @refN mentions to
+  // Seedance's native @ImageN addressing (same order as input_references).
+  const references = (imageInputs?.referenceImages ?? []).slice(0, caps.maxReferenceImages);
+  if ((imageInputs?.referenceImages?.length ?? 0) > references.length) {
+    console.warn(`[OpenRouter Video] ${imageInputs!.referenceImages!.length} references received, capped to ${references.length} for ${modelId}`);
+  }
+  const effectivePrompt = translateRefMentionsForSeedance(prompt, references.length);
+
+  const [width, height] = resolveOpenRouterDimensions(modelId, config.resolution, config.aspectRatio);
+
   const requestBody: Record<string, unknown> = {
     model: modelId,
-    prompt,
+    prompt: effectivePrompt,
     duration: config.duration,
     aspect_ratio: config.aspectRatio,
     resolution: config.resolution,
+    // Explicit canonical size so the billed pixels match our cost estimate.
+    size: `${width}x${height}`,
   };
   if (typeof config.seed === "number") requestBody.seed = config.seed;
   if (typeof config.generateAudio === "boolean") requestBody.generate_audio = config.generateAudio;
@@ -226,14 +209,15 @@ export async function generateOpenRouterVideo(
   }
   if (frameImages.length > 0) requestBody.frame_images = frameImages;
 
-  if (imageInputs?.referenceImages && imageInputs.referenceImages.length > 0) {
-    requestBody.input_references = imageInputs.referenceImages.map(r => ({
+  if (references.length > 0) {
+    requestBody.input_references = references.map(r => ({
       type: "image_url",
       image_url: { url: r.image },
     }));
   }
 
-  console.log("[OpenRouter Video] Submit body keys:", Object.keys(requestBody).join(", "));
+  console.log("[OpenRouter Video] Submit body keys:", Object.keys(requestBody).join(", "),
+    `| size=${width}x${height} duration=${config.duration}s refs=${references.length}`);
 
   onProgress?.({
     status: "processing",
@@ -385,7 +369,7 @@ async function pollAndDownloadOpenRouterVideo(
   const arrayBuffer = await videoResponse.arrayBuffer();
   const videoData = Buffer.from(arrayBuffer);
 
-  const [width, height] = resolveDimensions(config.resolution, config.aspectRatio);
+  const [width, height] = resolveOpenRouterDimensions(modelId, config.resolution, config.aspectRatio);
   const computedCost = computeSeedanceCost(modelId, width, height, config.duration);
   const actualCost = typeof reportedUsageCost === "number" ? reportedUsageCost : computedCost;
 

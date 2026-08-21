@@ -95,13 +95,13 @@ export function NodeConfigPanel({
   const videoCaps = type === "video" ? getVideoCapabilities(selectedModel) : null;
 
   // Edges de referencia entrantes (para el control de prioridad). Priorizar
-  // tiene sentido con 2+ referencias; el arrobado @refN (solo video Omni)
-  // sirve desde la primera.
+  // tiene sentido con 2+ referencias; el arrobado @refN (video Omni y
+  // Seedance/OpenRouter) sirve desde la primera.
   const referenceEdges = (type === "image" || type === "video")
     ? edges.filter((e) => e.target === node.id && e.id && baseHandleId(e.targetHandle) === HANDLES.INPUT_REFERENCE)
     : [];
-  const isOmniVideo = type === "video" && selectedModel?.api_backend === "omni";
-  const showReferenceSection = referenceEdges.length >= 2 || (referenceEdges.length >= 1 && isOmniVideo);
+  const supportsRefMentions = type === "video" && !!videoCaps?.supportsRefMentions;
+  const showReferenceSection = referenceEdges.length >= 2 || (referenceEdges.length >= 1 && supportsRefMentions);
 
   return (
     <div className="w-[360px] h-full border-l border-border bg-background flex flex-col overflow-hidden">
@@ -192,7 +192,8 @@ export function NodeConfigPanel({
             referenceEdges={referenceEdges}
             nodes={nodes}
             onUpdateEdgePriority={onUpdateEdgePriority}
-            showRefNames={isOmniVideo}
+            showRefNames={supportsRefMentions}
+            maxReferences={videoCaps?.maxReferences}
           />
         )}
 
@@ -311,13 +312,15 @@ function ReferencePriorityList({
   nodes,
   onUpdateEdgePriority,
   showRefNames = false,
+  maxReferences,
 }: {
   referenceEdges: Array<{ id?: string; source: string; data?: { priority?: number | null } | null }>;
   nodes: Node[];
   onUpdateEdgePriority: (edgeId: string, priority: number | null) => void;
-  // Video Omni: muestra el nombre @refN de cada referencia (arrobable en el
-  // prompt; se traduce a <IMAGE_REF_N> en el request).
+  // Video Omni / Seedance: muestra el nombre @refN de cada referencia
+  // (arrobable en el prompt; el backend lo traduce al marcador nativo).
   showRefNames?: boolean;
+  maxReferences?: number;
 }) {
   const anyPrioritized = referenceEdges.some((e) => e.data?.priority != null);
 
@@ -415,8 +418,8 @@ function ReferencePriorityList({
       {showRefNames && (
         <p className="text-[10px] text-amber-700/90 dark:text-amber-400/80">
           Puedes mencionar @ref1, @ref2… dentro del prompt para dirigir una referencia específica
-          (se traduce automáticamente al marcador de Gemini Omni). Si cambias prioridades, los
-          nombres se reasignan según el nuevo orden.
+          (se traduce automáticamente al marcador nativo del modelo). Si cambias prioridades, los
+          nombres se reasignan según el nuevo orden.{maxReferences ? ` El modelo usa como máximo ${maxReferences} referencias.` : ""}
         </p>
       )}
     </div>
@@ -613,6 +616,18 @@ function VideoSettings({ data, model, hasFirstFrame, hasInterpolation, hasRefere
       ) : (
       <div className="space-y-1.5">
         <Label className="text-xs">Duration</Label>
+        {caps.durations.length > 12 ? (
+          // Listas largas (Seedance 2.5: 4..30s) → select en vez de 27 botones.
+          <select
+            value={effectiveDuration}
+            onChange={(e) => onUpdate({ duration: Number(e.target.value) })}
+            className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+          >
+            {caps.durations.map((d) => (
+              <option key={d} value={d}>{d}s</option>
+            ))}
+          </select>
+        ) : (
         <div className="flex gap-1.5 flex-wrap">
           {caps.durations.map((d) => {
             const disabled = !!forced8s && d !== 8;
@@ -633,6 +648,7 @@ function VideoSettings({ data, model, hasFirstFrame, hasInterpolation, hasRefere
             );
           })}
         </div>
+        )}
         {forced8sLabel && (
           <p className="text-[10px] text-amber-500">En Veo (Gemini API), {forced8sLabel}. 4s/6s solo en 720p sin imágenes.</p>
         )}

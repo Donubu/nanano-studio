@@ -15,6 +15,7 @@
  */
 
 import type { CanvasModel } from "../canvas-workspace";
+import { getOpenRouterModelCaps, OPENROUTER_MODEL_CAPS } from "@/lib/openrouter-video-caps";
 
 export interface VideoCapabilities {
   durations: number[];
@@ -35,6 +36,11 @@ export interface VideoCapabilities {
   supportsNegativePrompt?: boolean;  // false ⇒ hide the negative prompt input
   audioAlwaysOn?: boolean;           // true ⇒ "audio integrado" badge instead of checkbox
   hints?: string[];                  // user-visible notes about model constraints
+  // Reference addressing: the prompt can mention @ref1, @ref2… and the backend
+  // translates them to the provider's native marker (Omni <IMAGE_REF_N>,
+  // Seedance @ImageN). Omitted = no mention system.
+  supportsRefMentions?: boolean;
+  maxReferences?: number;            // provider cap on reference images (UI hint only)
 }
 
 const VEO_CAPS: VideoCapabilities = {
@@ -81,21 +87,33 @@ const KLING_V26_CAPS: VideoCapabilities = {
   defaultResolution: "720p",
 };
 
-const SEEDANCE_CAPS: VideoCapabilities = {
-  durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-  aspectRatios: ["1:1", "3:4", "9:16", "4:3", "16:9", "21:9", "9:21"],
-  resolutions: ["480p", "720p", "1080p"],
-  supportsAudio: true,
-  supportsSeed: true,
-  defaultDuration: 5,
-  defaultAspectRatio: "16:9",
-  defaultResolution: "720p",
-};
+// OpenRouter Seedance (2.5 / 2.0-fast / legacy 2.0): derived from the shared
+// caps table so the UI can never drift from what the backend validates.
+// Seedance 2.5 allows 4..30s — the panel switches to a <select> for long lists.
+function seedanceCaps(modelId: string): VideoCapabilities {
+  const caps = getOpenRouterModelCaps(modelId);
+  const durations: number[] = [];
+  for (let d = caps.minDuration; d <= caps.maxDuration; d++) durations.push(d);
+  return {
+    durations,
+    aspectRatios: [...caps.aspectRatios],
+    resolutions: [...caps.resolutions],
+    supportsAudio: true,
+    supportsSeed: true,
+    defaultDuration: 5,
+    defaultAspectRatio: "16:9",
+    defaultResolution: "720p",
+    supportsRefMentions: true,
+    maxReferences: caps.maxReferenceImages,
+    hints: caps.maxDuration > 15
+      ? [`Hasta ${caps.maxDuration}s por clip; el costo escala con píxeles × segundos.`]
+      : undefined,
+  };
+}
 
-const SEEDANCE_FAST_CAPS: VideoCapabilities = {
-  ...SEEDANCE_CAPS,
-  resolutions: ["480p", "720p"], // fast does not support 1080p
-};
+const SEEDANCE_CAPS_BY_MODEL: Record<string, VideoCapabilities> = Object.fromEntries(
+  Object.keys(OPENROUTER_MODEL_CAPS).map((id) => [id, seedanceCaps(id)])
+);
 
 // Gemini Omni (interactions API): sin control de duración ni resolución (720p
 // fijo, la duración se pide en el prompt), audio siempre integrado, sin
@@ -114,6 +132,8 @@ const OMNI_CAPS: VideoCapabilities = {
   hasResolutionControl: false,
   supportsNegativePrompt: false,
   audioAlwaysOn: true,
+  supportsRefMentions: true,
+  maxReferences: 3,
   hints: [
     "La duración la decide el modelo: pídela en el prompt (p. ej. \"un clip de 10 segundos\").",
     "Salida fija en 720p a 24 fps, con audio integrado siempre.",
@@ -132,9 +152,8 @@ export function getVideoCapabilities(model: Pick<CanvasModel, "model_id" | "api_
   const id = model.model_id;
 
   if (backend === "openrouter") {
-    if (id === "bytedance/seedance-2.0-fast") return SEEDANCE_FAST_CAPS;
-    if (id === "bytedance/seedance-2.0") return SEEDANCE_CAPS;
-    return SEEDANCE_CAPS; // any future Seedance variant defaults to full caps
+    // Unknown OpenRouter model → caps of the current flagship (2.5).
+    return SEEDANCE_CAPS_BY_MODEL[id] ?? seedanceCaps(id);
   }
 
   if (backend === "xai") return XAI_CAPS;

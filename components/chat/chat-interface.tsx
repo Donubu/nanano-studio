@@ -1,6 +1,7 @@
 "use client";
 
 import {useState, useEffect, useRef, useCallback} from "react";
+import { getOpenRouterModelCaps } from "@/lib/openrouter-video-caps";
 import {useSession, signOut} from "next-auth/react";
 import {useTheme} from "next-themes";
 import ReactMarkdown from "react-markdown";
@@ -479,6 +480,9 @@ export function ChatInterface() {
     const isKlingV26 = activeVideoModel?.model_id === "kling-v2-6";
     // Gemini Omni: solo por api_backend (model_id con "omni" chocaría con kling-v3-omni)
     const isOmniVideoProvider = activeVideoModel?.api_backend === "omni";
+    // OpenRouter Seedance (2.5 / 2.0-fast)
+    const isSeedanceVideoProvider = activeVideoModel?.api_backend === "openrouter";
+    const seedanceMaxReferences = isSeedanceVideoProvider ? getOpenRouterModelCaps(activeVideoModel?.model_id ?? "").maxReferenceImages : 3;
 
     // Kling dynamic limits: max 7 images without video input, max 4 with video input, max 1 video
     const klingHasVideoInput = klingAssetList.some(a => a.type === "video") || selectedKlingAssets.some(a => a.type === "video");
@@ -775,7 +779,7 @@ export function ChatInterface() {
     }, [selectedModelId]);
 
     // Poll VEO available slots when in video conversation with VEO provider
-    const isVeoProvider = isVideoConversation && generationMode === "video" && !isKlingVideoProvider && !isXaiVideoProvider && !isOmniVideoProvider;
+    const isVeoProvider = isVideoConversation && generationMode === "video" && !isKlingVideoProvider && !isXaiVideoProvider && !isOmniVideoProvider && !isSeedanceVideoProvider;
     useEffect(() => {
         if (!isVeoProvider) {
             setVeoAvailableSlots(null);
@@ -5168,7 +5172,7 @@ export function ChatInterface() {
                                     disabled={isSending}
                                     hasReferenceImages={videoReferenceImages.length > 0}
                                     hasVideoInput={isKlingVideoProvider && !isKlingV26 && klingHasVideoInput}
-                                    provider={isKlingVideoProvider ? "kling" : isXaiVideoProvider ? "xai" : isOmniVideoProvider ? "omni" : "google"}
+                                    provider={isKlingVideoProvider ? "kling" : isXaiVideoProvider ? "xai" : isOmniVideoProvider ? "omni" : isSeedanceVideoProvider ? "seedance" : "google"}
                                     modelId={activeVideoModel?.model_id}
                                     imageAssets={isKlingVideoProvider && !isKlingV26 ? klingImageAssets.map(a => ({ assetId: a.assetId, type: a.type as "image" | "video", label: a.label })) : undefined}
                                     voiceBindings={isKlingVideoProvider ? klingVoiceBindings : undefined}
@@ -5247,7 +5251,8 @@ export function ChatInterface() {
                                     onReferenceImagesChange={setVideoReferenceImages}
                                     disabled={isSending}
                                     supportsReferenceImages={!isKlingVideoProvider && !isOmniVideoProvider}
-                                    provider={isKlingVideoProvider ? "kling" : isXaiVideoProvider ? "xai" : isOmniVideoProvider ? "omni" : "google"}
+                                    provider={isKlingVideoProvider ? "kling" : isXaiVideoProvider ? "xai" : isOmniVideoProvider ? "omni" : isSeedanceVideoProvider ? "seedance" : "google"}
+                                    maxReferenceImages={seedanceMaxReferences}
                                     isGeminiBackend={activeVideoModel?.api_backend === "gemini"}
                                 />
                             </div>
