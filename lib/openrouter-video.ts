@@ -128,6 +128,46 @@ export function validateOpenRouterVideoConfig(config: OpenRouterVideoConfig, mod
 }
 
 // ============================================
+// ERRORES
+// ============================================
+
+/**
+ * Traduce los errores de submit de OpenRouter/ByteDance a mensajes accionables
+ * en español. El detalle crudo se conserva al final para debugging (queda en
+ * el content del mensaje de error y en los logs).
+ */
+export function describeOpenRouterSubmitError(status: number, rawText: string, referenceCount: number): string {
+  const raw = rawText.slice(0, 600);
+  let friendly: string | null = null;
+
+  if (status === 402) {
+    friendly = "La cuenta de OpenRouter no tiene créditos. Avísale al administrador para recargar saldo (openrouter.ai/settings/credits).";
+  } else if (status === 401 || status === 403) {
+    friendly = "La API key de OpenRouter es inválida o está bloqueada. Avísale al administrador.";
+  } else if (/PrivacyInformation|may contain real person/i.test(rawText)) {
+    // content[0] es el prompt; content[N] la N-ésima imagen (frames primero,
+    // luego referencias). Sin frames, content[N] == @refN.
+    const idx = [...rawText.matchAll(/content\[(\d+)\]/g)].map((m) => Number(m[1])).filter((n) => n >= 1);
+    const names = idx.length > 0 && idx.every((n) => n <= referenceCount)
+      ? idx.map((n) => `@ref${n}`).join(", ")
+      : idx.length > 0 ? `imagen ${idx.join(", ")}` : "alguna imagen de entrada";
+    friendly = `Seedance rechazó ${names}: parece contener una persona real y el modelo no acepta rostros reales en las imágenes de entrada. Usa un retrato generado por IA como referencia, o cambia a Omni / Kling para personas reales.`;
+  } else if (/TaskTypeConstraint|ratio specified/i.test(rawText)) {
+    friendly = "Con first/last frame la proporción la define la imagen; el sistema no debería mandar aspect_ratio. Reintenta; si persiste, avísale al administrador.";
+  } else if (/seed specified/i.test(rawText)) {
+    friendly = "El seed está fuera del rango que acepta Seedance (máx. 2147483647). Reintenta sin seed o con uno menor.";
+  } else if (/SensitiveContent|content policy|moderation/i.test(rawText)) {
+    friendly = "El proveedor rechazó la solicitud por moderación de contenido (prompt o imágenes). Ajusta el prompt o las imágenes.";
+  } else if (status === 429) {
+    friendly = "OpenRouter está limitando las solicitudes (429). Espera unos segundos y reintenta.";
+  }
+
+  return friendly
+    ? `${friendly} [OpenRouter ${status}: ${raw}]`
+    : `OpenRouter video submit failed (${status}): ${raw}`;
+}
+
+// ============================================
 // SEED
 // ============================================
 
@@ -190,15 +230,22 @@ export async function generateOpenRouterVideo(
 
   const [width, height] = resolveOpenRouterDimensions(modelId, config.resolution, config.aspectRatio);
 
+  // Con first/last frame, Seedance deriva la proporción de la imagen y
+  // rechaza aspect_ratio/size ("InvalidParameter.TaskTypeConstraint: the
+  // output ratio follows the first-frame image"). Solo se manda resolution.
+  const hasFrameImages = !!(imageInputs?.firstFrame || imageInputs?.lastFrame);
+
   const requestBody: Record<string, unknown> = {
     model: modelId,
     prompt: effectivePrompt,
     duration: config.duration,
-    aspect_ratio: config.aspectRatio,
     resolution: config.resolution,
-    // Explicit canonical size so the billed pixels match our cost estimate.
-    size: `${width}x${height}`,
   };
+  if (!hasFrameImages) {
+    requestBody.aspect_ratio = config.aspectRatio;
+    // Explicit canonical size so the billed pixels match our cost estimate.
+    requestBody.size = `${width}x${height}`;
+  }
   if (typeof config.seed === "number" && Number.isFinite(config.seed)) {
     requestBody.seed = normalizeOpenRouterSeed(config.seed);
     if (requestBody.seed !== config.seed) {
@@ -263,7 +310,7 @@ export async function generateOpenRouterVideo(
 
     if (!isRetriableStatus(response.status) || attempt === RETRY_CONFIG.maxRetries) {
       const errorText = await response.text();
-      throw new Error(`OpenRouter video submit failed (${response.status}): ${errorText}`);
+      throw new Error(describeOpenRouterSubmitError(response.status, errorText, references.length));
     }
 
     console.warn(
