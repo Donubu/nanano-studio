@@ -5,7 +5,7 @@ import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { generateVideo, isVideoConfigured, VideoGenerationConfig, VideoInput, VideoGenerationProgress } from "@/lib/google-ai-video";
 import { generateXaiVideo, isXaiVideoConfigured, XaiVideoConfig, validateXaiVideoConfig } from "@/lib/xai-video";
 import { generateKlingVideo, isKlingConfigured, KlingVideoConfig, validateKlingVideoConfig, KlingImageInput } from "@/lib/kling-video";
-import { generateOpenRouterVideo, isOpenRouterConfigured, OpenRouterVideoConfig, validateOpenRouterVideoConfig, OpenRouterImageInputs, getOpenRouterModelCaps } from "@/lib/openrouter-video";
+import { generateOpenRouterVideo, isOpenRouterConfigured, OpenRouterVideoConfig, validateOpenRouterVideoConfig, OpenRouterImageInputs, getOpenRouterModelCaps, OPENROUTER_MAX_SEED } from "@/lib/openrouter-video";
 import { generateOmniVideo, isOmniConfigured, OmniVideoConfig, validateOmniVideoConfig } from "@/lib/omni-video";
 import { uploadVideoToS3, generateVideoFileName, isS3Configured, uploadToS3, generateFileName } from "@/lib/s3";
 import { generateConversationTitle, Labels } from "@/lib/google-ai";
@@ -612,7 +612,10 @@ export async function POST(
 
           } else if (isOpenRouterProvider) {
             // ===== OpenRouter (Seedance 2.5 / 2.0-fast) =====
-            generatedSeed = videoSettings?.seed ?? Math.floor(Math.random() * 4294967295);
+            // Seedance (Dreamina) exige seed int32: "must be less than or equal
+            // to 2147483647". Un seed explícito fuera de rango se reduce con
+            // módulo (determinista) en la lib; aquí generamos dentro del rango.
+            generatedSeed = videoSettings?.seed ?? Math.floor(Math.random() * OPENROUTER_MAX_SEED);
 
             // Resolución/aspect guardados en la conversación pueden venir de
             // otro modelo (p. ej. 1080p de Seedance 2.0 o de VEO). Si el modelo

@@ -128,6 +128,19 @@ export function validateOpenRouterVideoConfig(config: OpenRouterVideoConfig, mod
 }
 
 // ============================================
+// SEED
+// ============================================
+
+// Seedance (Dreamina) rejects seeds above int32: "The parameter seed specified
+// in the request must be less than or equal to 2147483647".
+export const OPENROUTER_MAX_SEED = 2147483647;
+
+export function normalizeOpenRouterSeed(seed: number): number {
+  const s = Math.floor(Math.abs(seed));
+  return s > OPENROUTER_MAX_SEED ? s % (OPENROUTER_MAX_SEED + 1) : s;
+}
+
+// ============================================
 // PROMPT: @refN → @ImageN
 // ============================================
 
@@ -186,7 +199,12 @@ export async function generateOpenRouterVideo(
     // Explicit canonical size so the billed pixels match our cost estimate.
     size: `${width}x${height}`,
   };
-  if (typeof config.seed === "number") requestBody.seed = config.seed;
+  if (typeof config.seed === "number" && Number.isFinite(config.seed)) {
+    requestBody.seed = normalizeOpenRouterSeed(config.seed);
+    if (requestBody.seed !== config.seed) {
+      console.warn(`[OpenRouter Video] seed ${config.seed} fuera de rango int32, usando ${requestBody.seed}`);
+    }
+  }
   if (typeof config.generateAudio === "boolean") requestBody.generate_audio = config.generateAudio;
   // Note: negative_prompt is not a documented top-level field for OpenRouter's
   // /videos endpoint. If a provider supports it, it would go under
@@ -384,7 +402,7 @@ async function pollAndDownloadOpenRouterVideo(
     mimeType: "video/mp4",
     duration: config.duration,
     hasAudio: config.generateAudio ?? false,
-    seed: config.seed ?? 0,
+    seed: typeof config.seed === "number" ? normalizeOpenRouterSeed(config.seed) : 0,
     actualCost,
   };
 }
