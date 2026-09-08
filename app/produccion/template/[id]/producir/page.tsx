@@ -4976,7 +4976,9 @@ function DatasetPanel({
   // vive dentro de un acordeón que ya provee título y scroll.
   embedded?: boolean;
 }) {
-  if (detectedVariables.length === 0 && !dataset) return null;
+  // Sin variables ni dataset igual mostramos el panel: el acordeón ya está
+  // en pantalla y un panel vacío parecía roto. En ese estado explica cómo
+  // usar {{variables}} y deja subir el CSV de antemano.
   const row = dataset && selectedRowIdx !== null ? dataset.rows[selectedRowIdx] : null;
   return (
     <aside
@@ -4998,8 +5000,9 @@ function DatasetPanel({
       <div className="p-3 space-y-3">
         {detectedVariables.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            Sin variables. Escribe {"{{variable}}"} en algún texto para
-            insertar datos del CSV.
+            Sin variables todavía. Escribe {"{{nombre}}"} dentro de un texto
+            (por ejemplo {"{{precio}}"}) y cada fila del CSV generará una
+            versión de la pieza con ese valor.
           </p>
         ) : (
           <div className="flex flex-wrap gap-1">
