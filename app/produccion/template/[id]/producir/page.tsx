@@ -1733,9 +1733,11 @@ export default function ProducirPage() {
             onClick={() => !disabled && goToStep(s)}
             disabled={disabled}
             className={cn(
-              "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs transition-colors",
+              // Mismo peso y padding en activo e inactivo: solo cambia el
+              // color, así el ancho del stepper no varía entre pasos.
+              "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
               active
-                ? "bg-primary text-primary-foreground font-medium"
+                ? "bg-primary text-primary-foreground"
                 : disabled
                   ? "text-muted-foreground/40 cursor-not-allowed"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted",
@@ -1765,7 +1767,7 @@ export default function ProducirPage() {
   return (
     <div className="flex flex-col min-h-screen bg-background">
       <header className="border-b border-border/50 bg-card/40 shrink-0">
-        <div className="px-6 py-3 flex items-center gap-4">
+        <div className="px-6 py-3 flex items-center gap-4 relative">
           <Button
             variant="ghost"
             size="icon"
@@ -1786,8 +1788,11 @@ export default function ProducirPage() {
             </span>
           </div>
 
-          <div className="flex-1" />
-          {stepperNode}
+          {/* Stepper anclado al centro absoluto del header: así no se
+              desplaza cuando cambian los botones de la derecha o el título. */}
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+            {stepperNode}
+          </div>
           <div className="flex-1" />
 
           {stepIndex < STEP_ORDER.length - 1 && (
