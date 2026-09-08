@@ -1852,15 +1852,15 @@ export default function ProducirPage() {
           ref={editorSectionRef}
           className="bg-card rounded-xl border border-border/50 overflow-hidden scroll-mt-4"
         >
-          {/* Barra de ajustes avanzados. Por defecto el productor solo ve el
-              lienzo del master; brand kit base, orientaciones vinculadas y
-              dataset aparecen al abrirla. */}
+          {/* Barra de ajustes avanzados. Por defecto el productor ve el lienzo
+              del master y la tira de orientaciones; brand kit base y dataset
+              aparecen al abrirla. */}
           {editingId == null && (
             <div className="flex items-center justify-between gap-2 px-4 py-1.5 border-b border-border/30 bg-muted/10 text-xs">
               <span className="text-muted-foreground">
                 {advancedOpen
-                  ? "Ajustes avanzados visibles: brand kit base, orientaciones y datos."
-                  : "Diseña el master. Las orientaciones y los formatos se derivan solos."}
+                  ? "Ajustes avanzados visibles: brand kit base y datos."
+                  : "Diseña el master; las orientaciones de arriba se derivan solas y los formatos salen de ellas."}
               </span>
               <button
                 type="button"
@@ -1871,7 +1871,7 @@ export default function ProducirPage() {
                     ? "border-foreground/40 bg-foreground/10 text-foreground"
                     : "border-border/50 text-muted-foreground hover:text-foreground hover:border-foreground/40",
                 )}
-                title="Brand kit base, orientaciones vinculadas, dataset CSV y regenerar preview"
+                title="Brand kit base, dataset CSV y regenerar preview"
               >
                 <Settings2 className="h-3.5 w-3.5" />
                 {advancedOpen ? "Ocultar avanzado" : "Avanzado"}
@@ -1920,7 +1920,7 @@ export default function ProducirPage() {
                     fetchBrandKits(clientId, template.production_project_id);
                 }}
                 dataRow={previewRow}
-                topAccessory={advancedOpen ? variantsStripNode : undefined}
+                topAccessory={variantsStripNode}
                 rightAccessory={
                   advancedOpen || dataset ? (
                   <DatasetPanel
@@ -1959,7 +1959,7 @@ export default function ProducirPage() {
                   if (clientId)
                     fetchBrandKits(clientId, template.production_project_id);
                 }}
-                topAccessory={advancedOpen ? variantsStripNode : undefined}
+                topAccessory={variantsStripNode}
                 /* Huincha de edición independiente. Vive dentro del editor,
                    debajo de los PreviewThumbnails de la adaptación. Antes
                    estaba arriba de toda la sección — al moverla acá queda
