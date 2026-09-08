@@ -345,8 +345,10 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
       setProjectSlugState(state.projectSlug);
     }
 
-    // Set initial state for deep linking (only if beyond just client level)
-    if (state.projectSlug || state.type !== 'base') {
+    // Set initial state for deep linking. Incluye el nivel cliente (/puerto):
+    // sin esto, recargar la vista de un cliente volvía al home porque nadie
+    // seleccionaba el cliente desde la URL.
+    if (state.clientSlug) {
       setInitialState(state);
     }
   }, []);

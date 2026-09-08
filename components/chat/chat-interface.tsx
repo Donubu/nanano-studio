@@ -665,10 +665,17 @@ export function ChatInterface() {
                     navigation.setClientSlug(newSlug);
                 }
             }
-        } else if (!selectedClientId && navigation.clientSlug) {
+        } else if (
+            !selectedClientId &&
+            navigation.clientSlug &&
+            // En un deep-link (/cliente) el cliente todavía no está seleccionado
+            // porque los clientes no cargaron: no borrar la URL hasta que el
+            // effect "from URL" la haya procesado. Si no, /puerto → "/".
+            (fromUrlHandled.current || !navigation.initialState?.clientSlug)
+        ) {
             navigation.setClientSlug(null);
         }
-    }, [selectedClientId, clients, navigation.clientSlug, navigation.setClientSlug]);
+    }, [selectedClientId, clients, navigation.clientSlug, navigation.setClientSlug, navigation.initialState]);
 
     // Update navigation projectSlug when project changes
     useEffect(() => {
