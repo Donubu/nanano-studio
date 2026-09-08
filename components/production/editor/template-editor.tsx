@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { ChevronDown, ChevronRight, ChevronUp, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TemplateDefinition, TemplateLayer, findLayer, findParent, updateLayer as updateLayerInTree } from "@/lib/production/types";
@@ -27,6 +27,11 @@ interface Props {
   baseWidth: number;
   baseHeight: number;
   onSave: (definition: TemplateDefinition) => Promise<void>;
+  // Guardado inmediato expuesto al padre. El autosave tiene un retraso de
+  // ~1s; si el padre desmonta el editor antes (cerrar la pieza, cambiar de
+  // paso u orientación) los últimos cambios se perdían. El padre llama
+  // saveRef.current() y espera antes de desmontar.
+  saveRef?: MutableRefObject<(() => Promise<void>) | null>;
   brandKit?: BrandKitContent;
   clientId?: number | null;
   projectId?: number;
@@ -60,6 +65,7 @@ export function TemplateEditor({
   baseWidth,
   baseHeight,
   onSave,
+  saveRef,
   brandKit = EMPTY_KIT_CONTENT,
   clientId,
   projectId,
@@ -284,6 +290,14 @@ export function TemplateEditor({
   // rotation), NO position/size/content. Pegar style mantiene el contenido
   // del target intacto y solo le aplica el look del source.
   const styleClipboardRef = useRef<TemplateLayer | null>(null);
+
+  useEffect(() => {
+    if (!saveRef) return;
+    saveRef.current = editor.saveNow;
+    return () => {
+      saveRef.current = null;
+    };
+  }, [saveRef, editor.saveNow]);
 
   // Keyboard shortcuts. Skip when typing in an input/textarea or in preview mode.
   useEffect(() => {

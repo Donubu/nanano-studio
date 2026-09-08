@@ -321,6 +321,17 @@ export default function ProducirPage() {
   //   null  → master del template (variante activa)
   //   N     → adaptación N (override editing)
   const [editingId, setEditingId] = useState<number | null>(null);
+  // Guardado inmediato del editor montado (master o pieza). Se llama antes
+  // de cualquier acción que desmonte el editor para no perder los cambios
+  // que el autosave todavía no alcanzó a enviar.
+  const editorSaveRef = useRef<(() => Promise<void>) | null>(null);
+  const flushEditor = useCallback(async () => {
+    try {
+      await editorSaveRef.current?.();
+    } catch (err) {
+      console.error("No se pudo guardar antes de cerrar el editor:", err);
+    }
+  }, []);
   // Snapshot del overrides_json de la adaptación al momento de entrar a
   // editarla. Si el productor cancela, restauramos este valor (o reset_overrides
   // si no había). Sin esto, los cambios auto-guardados del editor ya están
@@ -981,7 +992,8 @@ export default function ProducirPage() {
   // de `definition`, ya quedó apuntando al source correcto. Sin esto, editar
   // 300x250 desde el master horizontal heredaba del horizontal en vez del
   // cuadrado más cercano.
-  const handleEditAdaptation = useCallback((adaptationId: number) => {
+  const handleEditAdaptation = useCallback(async (adaptationId: number) => {
+    await flushEditor();
     const adapt = adaptations.find((a) => a.id === adaptationId);
     editSnapshotRef.current = adapt?.overrides_json ?? null;
     setEditingId(adaptationId);
@@ -993,7 +1005,7 @@ export default function ProducirPage() {
         block: "start",
       });
     });
-  }, [adaptations]);
+  }, [adaptations, flushEditor]);
 
   // Cancela la edición de la adaptación: descarta los cambios que se hayan
   // auto-guardado restaurando el overrides_json al snapshot inicial. Si no
@@ -1651,7 +1663,8 @@ export default function ProducirPage() {
   // Cambiar de paso: sincroniza el hash, cierra la edición de una pieza y
   // carga las adaptaciones cuando el paso las necesita.
   const goToStep = useCallback(
-    (next: ProducirStep) => {
+    async (next: ProducirStep) => {
+      await flushEditor();
       setStep(next);
       if (next !== "formats") {
         setEditingId(null);
@@ -1662,7 +1675,7 @@ export default function ProducirPage() {
         window.history.replaceState(null, "", url);
       } catch {}
     },
-    [],
+    [flushEditor],
   );
   useEffect(() => {
     if (step !== "design" && !adaptationsLoaded && !adaptationsLoading && adaptationCount > 0) {
@@ -1701,7 +1714,8 @@ export default function ProducirPage() {
       activeOrientationId={editingId != null ? null : activeOrientationId}
       brandKit={brandKitContent}
       orientationNumberById={orientationNumberById}
-      onSwitch={(id) => {
+      onSwitch={async (id) => {
+        await flushEditor();
         if (editingId != null) {
           editSnapshotRef.current = null;
           setEditingId(null);
@@ -1916,6 +1930,7 @@ export default function ProducirPage() {
                 baseHeight={activeOrientation.base_height}
                 templateId={activeOrientation.id}
                 onSave={handleSaveMaster}
+                saveRef={editorSaveRef}
                 brandKit={brandKitContent}
                 clientId={clientId}
                 projectId={template.production_project_id}
@@ -1956,6 +1971,7 @@ export default function ProducirPage() {
                 baseWidth={editingAdaptation.width}
                 baseHeight={editingAdaptation.height}
                 onSave={handleSaveAdapt}
+                saveRef={editorSaveRef}
                 brandKit={brandKitContent}
                 clientId={clientId}
                 projectId={template.production_project_id}
@@ -2026,7 +2042,11 @@ export default function ProducirPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={async () => {
+                        // Guardar lo pendiente ANTES de limpiar editingId:
+                        // handleSaveAdapt lo necesita para saber qué pieza
+                        // parchear, y el desmontaje cancela el autosave.
+                        await flushEditor();
                         setEditingId(null);
                         editSnapshotRef.current = null;
                       }}

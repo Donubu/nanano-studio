@@ -786,6 +786,9 @@ export function useTemplateEditor({
   }, []);
 
   const saveNow = useCallback(async () => {
+    // Sin cambios no hay nada que mandar: evita crear un manual_layout en
+    // una pieza que solo se abrió y se cerró.
+    if (!dirtyRef.current) return;
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
