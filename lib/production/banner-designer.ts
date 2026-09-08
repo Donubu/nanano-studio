@@ -126,6 +126,22 @@ export interface GenerateFromReferenceInput {
   referenceFiles: AgentReferenceFile[];
 }
 
+// Input para GENERATE_FROM_PROMPT: sin imágenes. El agente compone master +
+// variantes desde cero a partir de la intención textual, el tono opcional y
+// el brand kit del cliente (BANNERS.md §2.2 / §3.3).
+export interface GenerateFromPromptInput {
+  masterDims: { w: number; h: number };
+  secondaryAspects: Array<{ w: number; h: number }>;
+  brandKit: BrandKitForAgent;
+  // Qué se quiere comunicar. Obligatorio — es lo único que describe el banner.
+  intent: string;
+  // "energetic" | "premium" | "corporate" | "playful" | ... — texto libre,
+  // el agente lo interpreta.
+  tone?: string;
+  instructions?: string;
+  userEmail: string;
+}
+
 // Output unificado para GENERATE: master + array de variantes por aspect.
 // Cada variante trae sus dims así el caller puede mapearlas al endpoint
 // POST templates sin recalcular.
@@ -589,7 +605,7 @@ export async function runGenerateFromReference(
     };
   }
   const refList = input.referenceFiles.map((f) => f.filename).join(", ");
-  const message = `Genera un banner ${input.masterDims.w}x${input.masterDims.h} replicando el estilo de las referencias adjuntas (${refList}). Aplicá el brand kit del cliente. Si vienen secondary_aspects, generá también esas variantes.`;
+  const message = `Genera un banner ${input.masterDims.w}x${input.masterDims.h} replicando el estilo de las referencias adjuntas (${refList}). Aplica el brand kit del cliente. Si vienen secondary_aspects, genera también esas variantes.`;
   const context = {
     operation: "GENERATE_FROM_REFERENCE" as const,
     master_dims: input.masterDims,
@@ -598,16 +614,77 @@ export async function runGenerateFromReference(
     intent: input.intent ?? null,
     instructions: input.instructions ?? null,
   };
-  const promptSuffix = JSON.stringify(context);
+  return runGenerateOperation({
+    message,
+    context,
+    masterDims: input.masterDims,
+    secondaryAspects: input.secondaryAspects,
+    userEmail: input.userEmail,
+    files: input.referenceFiles,
+  });
+}
+
+// Operación GENERATE_FROM_PROMPT: sin referencias visuales. El agente parte
+// de la intención textual + tono + brand kit y compone master + variants
+// desde cero. Mismo contrato de salida y misma validación que el modo por
+// referencia; solo cambia el contexto y que no viajan archivos.
+export async function runGenerateFromPrompt(
+  input: GenerateFromPromptInput,
+): Promise<AgentGenerateResult | AgentInvocationError> {
+  const intent = input.intent.trim();
+  if (!intent) {
+    return {
+      ok: false,
+      error: "GENERATE_FROM_PROMPT requiere una intención (intent) no vacía",
+    };
+  }
+  const aspects =
+    input.secondaryAspects.length > 0
+      ? ` y también las variantes ${input.secondaryAspects
+          .map((a) => `${a.w}x${a.h}`)
+          .join(", ")}`
+      : "";
+  const message = `Genera desde cero un banner ${input.masterDims.w}x${input.masterDims.h}${aspects} para: ${intent}. Aplica el brand kit del cliente.`;
+  const context = {
+    operation: "GENERATE_FROM_PROMPT" as const,
+    master_dims: input.masterDims,
+    secondary_aspects: input.secondaryAspects,
+    brand_kit: input.brandKit,
+    intent,
+    tone: input.tone?.trim() || null,
+    instructions: input.instructions?.trim() || null,
+  };
+  return runGenerateOperation({
+    message,
+    context,
+    masterDims: input.masterDims,
+    secondaryAspects: input.secondaryAspects,
+    userEmail: input.userEmail,
+  });
+}
+
+// Núcleo compartido de las operaciones GENERATE_*: llama al agente, valida
+// master + variants, y si falla reintenta UNA vez en la misma conversación
+// con el error concreto (BANNERS.md §10). Devuelve tokens combinados de
+// ambas rondas para que el caller registre el costo real.
+async function runGenerateOperation(params: {
+  message: string;
+  context: Record<string, unknown>;
+  masterDims: { w: number; h: number };
+  secondaryAspects: Array<{ w: number; h: number }>;
+  userEmail: string;
+  files?: AgentReferenceFile[];
+}): Promise<AgentGenerateResult | AgentInvocationError> {
+  const promptSuffix = JSON.stringify(params.context);
 
   let response: PracticanteRunResponse;
   try {
     response = await callPracticante({
-      message,
+      message: params.message,
       promptSuffix,
       agentName: BANNER_DESIGNER_AGENT_NAME,
-      userEmail: input.userEmail,
-      files: input.referenceFiles,
+      userEmail: params.userEmail,
+      files: params.files,
     });
   } catch (e) {
     return { ok: false, error: (e as Error).message };
@@ -615,8 +692,8 @@ export async function runGenerateFromReference(
 
   const validation = validateGenerateResponse(
     response,
-    input.masterDims,
-    input.secondaryAspects,
+    params.masterDims,
+    params.secondaryAspects,
   );
   if (validation.ok) {
     return {
@@ -638,7 +715,7 @@ export async function runGenerateFromReference(
       promptSuffix,
       agentName: BANNER_DESIGNER_AGENT_NAME,
       existingConversationId: response.conversationId,
-      userEmail: input.userEmail,
+      userEmail: params.userEmail,
     });
   } catch (e) {
     return {
@@ -651,21 +728,17 @@ export async function runGenerateFromReference(
 
   const retryValidation = validateGenerateResponse(
     retryResponse,
-    input.masterDims,
-    input.secondaryAspects,
+    params.masterDims,
+    params.secondaryAspects,
   );
   if (retryValidation.ok) {
-    const combinedTokens = combineTokenUsage(
-      response.tokenUsage,
-      retryResponse.tokenUsage,
-    );
     return {
       ok: true,
       definition: retryValidation.definition,
       variants: retryValidation.variants,
       rationale: retryValidation.rationale,
       conversationId: retryResponse.conversationId ?? response.conversationId,
-      tokenUsage: combinedTokens,
+      tokenUsage: combineTokenUsage(response.tokenUsage, retryResponse.tokenUsage),
     };
   }
   return {

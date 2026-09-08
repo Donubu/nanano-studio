@@ -8,6 +8,10 @@
 //   3. "Clonar existente" — copia exacta de otro template del mismo proyecto
 //                          (master + variantes), útil para variar contenido
 //                          sin re-componer el layout desde cero.
+//   4. "Subir referencia" — el Banner Designer replica el estilo de 1-3
+//                          imágenes (GENERATE_FROM_REFERENCE).
+//   5. "Crear desde texto" — el Banner Designer compone desde cero a partir
+//                          de una descripción (GENERATE_FROM_PROMPT).
 //
 // Cada selección actualiza `pickedSource` (discriminated union). Al pulsar
 // Crear, el caller recibe el source y arma el POST correspondiente:
@@ -18,6 +22,7 @@ import {
   Copy,
   Image as ImageIcon,
   Loader2,
+  MessageSquareText,
   Plus,
   Rocket,
   Sparkles,
@@ -44,11 +49,20 @@ export type PickerSource =
   | {
       kind: "ai-reference";
       definition: TemplateDefinition;
-      variants: Array<{
-        dims: { w: number; h: number };
-        definition: TemplateDefinition;
-      }>;
+      variants: AiVariant[];
+    }
+  // Generación IA desde texto (sin imágenes). Misma forma que ai-reference;
+  // viene de /api/production/ai/generate-from-prompt.
+  | {
+      kind: "ai-prompt";
+      definition: TemplateDefinition;
+      variants: AiVariant[];
     };
+
+interface AiVariant {
+  dims: { w: number; h: number };
+  definition: TemplateDefinition;
+}
 
 // Shape mínimo de un template existente del proyecto, según lo que devuelve
 // /api/production/templates. Solo usamos los campos visibles en la card.
@@ -69,7 +83,7 @@ interface Props {
   onCreate: (params: { name: string; source: PickerSource }) => Promise<void>;
 }
 
-type TabKey = "templates" | "clone" | "reference";
+type TabKey = "templates" | "clone" | "reference" | "prompt";
 
 export function LayoutTemplatePicker({
   open,
@@ -139,6 +153,7 @@ export function LayoutTemplatePicker({
       const t = existing?.find((x) => x.id === pickedSource.templateId);
       return t ? `Clonando: ${t.name}` : "Clon de template existente";
     }
+    if (pickedSource.kind === "ai-prompt") return "Propuesta IA desde texto";
     return "Propuesta IA desde referencia";
   })();
 
@@ -154,7 +169,8 @@ export function LayoutTemplatePicker({
           <div>
             <h2 className="text-sm font-semibold">Nuevo template</h2>
             <p className="text-xs text-muted-foreground">
-              Empieza desde una plantilla, clona uno existente o canvas vacío.
+              Empieza desde una plantilla, clona uno existente, canvas vacío o
+              genera con IA (referencia o texto).
             </p>
           </div>
           <Button variant="ghost" size="icon" onClick={onClose}>
@@ -195,6 +211,13 @@ export function LayoutTemplatePicker({
             icon={<ImageIcon className="h-3.5 w-3.5" />}
           >
             Subir referencia
+          </TabButton>
+          <TabButton
+            active={tab === "prompt"}
+            onClick={() => setTab("prompt")}
+            icon={<MessageSquareText className="h-3.5 w-3.5" />}
+          >
+            Crear desde texto
           </TabButton>
         </div>
 
@@ -281,6 +304,14 @@ export function LayoutTemplatePicker({
 
           {tab === "reference" && (
             <ReferenceUploadTab
+              productionProjectId={productionProjectId}
+              pickedSource={pickedSource}
+              onPicked={(source) => setPickedSource(source)}
+            />
+          )}
+
+          {tab === "prompt" && (
+            <PromptTab
               productionProjectId={productionProjectId}
               pickedSource={pickedSource}
               onPicked={(source) => setPickedSource(source)}
@@ -390,7 +421,7 @@ function ReferenceUploadTab({
 
   const removeFile = (idx: number) => {
     setFiles((cur) => cur.filter((_, i) => i !== idx));
-    // Cuando borrás la última referencia, invalidamos la selección IA pendiente
+    // Cuando borras la última referencia, invalidamos la selección IA pendiente
     // para que el botón Crear no quede activo apuntando a algo desconectado.
     if (pickedSource.kind === "ai-reference") {
       onPicked({ kind: "blank" });
@@ -399,7 +430,7 @@ function ReferenceUploadTab({
 
   const callAgent = async () => {
     if (files.length === 0) {
-      setError("Subí al menos una imagen de referencia");
+      setError("Sube al menos una imagen de referencia");
       return;
     }
     setGenerating(true);
@@ -492,7 +523,7 @@ function ReferenceUploadTab({
                 <Upload className="h-6 w-6 text-muted-foreground/60" />
               )}
               <span>
-                Click para seleccionar imágenes o arrastrá acá (1-3
+                Click para seleccionar imágenes o arrastra acá (1-3
                 referencias)
               </span>
             </button>
@@ -566,7 +597,7 @@ function ReferenceUploadTab({
             type="text"
             value={instructions}
             onChange={(e) => setInstructions(e.target.value)}
-            placeholder="Ej: usá nuestro azul, no el rojo"
+            placeholder="Ej: usa nuestro azul, no el rojo"
             disabled={generating}
             className="w-full bg-muted border border-border/50 rounded-md px-3 py-2 text-sm disabled:opacity-50"
           />
@@ -611,7 +642,185 @@ function ReferenceUploadTab({
           </p>
           <p className="text-xs text-foreground">{rationale}</p>
           <p className="text-[10px] text-muted-foreground mt-2">
-            Propuesta lista. Pulsá Crear abajo para instanciar el template.
+            Propuesta lista. Pulsa Crear abajo para instanciar el template.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Tab "Crear desde texto": el productor describe el banner y el Banner
+// Designer lo compone desde cero (GENERATE_FROM_PROMPT). Sin imágenes. Misma
+// mecánica que ReferenceUploadTab: la proposal validada queda en
+// pickedSource ({ kind: "ai-prompt" }) y el botón Crear del footer la
+// instancia.
+const TONE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "", label: "Que decida el agente" },
+  { value: "energetic", label: "Energético / promo" },
+  { value: "premium", label: "Premium / elegante" },
+  { value: "corporate", label: "Corporativo / sobrio" },
+  { value: "playful", label: "Juguetón / cercano" },
+  { value: "minimal", label: "Minimalista" },
+  { value: "urgent", label: "Urgente / oferta flash" },
+];
+
+function PromptTab({
+  productionProjectId,
+  pickedSource,
+  onPicked,
+}: {
+  productionProjectId: number;
+  pickedSource: PickerSource;
+  onPicked: (source: PickerSource) => void;
+}) {
+  const [intent, setIntent] = useState("");
+  const [tone, setTone] = useState("");
+  const [instructions, setInstructions] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [rationale, setRationale] = useState<string | null>(null);
+  const [cost, setCost] = useState<number | null>(null);
+
+  const canGenerate = intent.trim().length >= 3 && !generating;
+
+  const callAgent = async () => {
+    if (!canGenerate) return;
+    setGenerating(true);
+    setError(null);
+    setRationale(null);
+    try {
+      const res = await fetch("/api/production/ai/generate-from-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          production_project_id: productionProjectId,
+          intent: intent.trim(),
+          tone: tone || undefined,
+          instructions: instructions.trim() || undefined,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(body?.error || `Error ${res.status}`);
+        return;
+      }
+      const proposal = body.proposal as {
+        definition: TemplateDefinition;
+        variants: AiVariant[];
+      };
+      setRationale(typeof body.rationale === "string" ? body.rationale : null);
+      setCost(
+        typeof body.tokenUsage?.estimatedCost === "number"
+          ? body.tokenUsage.estimatedCost
+          : null,
+      );
+      onPicked({
+        kind: "ai-prompt",
+        definition: proposal.definition,
+        variants: proposal.variants,
+      });
+    } catch (e) {
+      setError(`Error de red: ${(e as Error).message}`);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const hasProposal = pickedSource.kind === "ai-prompt";
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="text-xs text-muted-foreground block mb-1">
+          ¿Qué debe comunicar el banner?
+        </label>
+        <textarea
+          value={intent}
+          onChange={(e) => setIntent(e.target.value)}
+          placeholder="Ej: venta flash de pizzas 2x1 solo por hoy, con precio destacado y botón de pedir ahora"
+          disabled={generating}
+          rows={3}
+          className="w-full bg-muted border border-border/50 rounded-md px-3 py-2 text-sm resize-y disabled:opacity-50"
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") callAgent();
+          }}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1">
+            Tono (opcional)
+          </label>
+          <select
+            value={tone}
+            onChange={(e) => setTone(e.target.value)}
+            disabled={generating}
+            className="w-full bg-muted border border-border/50 rounded-md px-3 py-2 text-sm disabled:opacity-50"
+          >
+            {TONE_OPTIONS.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1">
+            Instrucciones extra (opcional)
+          </label>
+          <input
+            type="text"
+            value={instructions}
+            onChange={(e) => setInstructions(e.target.value)}
+            placeholder="Ej: deja espacio para una foto del producto a la derecha"
+            disabled={generating}
+            className="w-full bg-muted border border-border/50 rounded-md px-3 py-2 text-sm disabled:opacity-50"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] text-muted-foreground">
+          El agente compone master 16:9 más variantes 1:1 y 9:16 con el brand kit
+          del cliente. Las imágenes quedan como slots vacíos para que las subas
+          después en el editor.
+        </p>
+        <Button
+          size="sm"
+          onClick={callAgent}
+          disabled={!canGenerate}
+          className="gap-1 shrink-0"
+        >
+          {generating ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Sparkles className="h-4 w-4" />
+          )}
+          {hasProposal ? "Regenerar" : "Generar con IA"}
+        </Button>
+      </div>
+
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/30 text-red-300 text-xs rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+
+      {hasProposal && rationale && (
+        <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg px-3 py-2">
+          <p className="text-[10px] uppercase tracking-wide text-violet-400 mb-1 flex items-center justify-between">
+            <span>Decisión del agente</span>
+            {cost != null && (
+              <span className="text-muted-foreground normal-case tracking-normal">
+                ~ USD {cost.toFixed(4)}
+              </span>
+            )}
+          </p>
+          <p className="text-xs text-foreground">{rationale}</p>
+          <p className="text-[10px] text-muted-foreground mt-2">
+            Propuesta lista. Pulsa Crear abajo para instanciar el template.
           </p>
         </div>
       )}

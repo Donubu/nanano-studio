@@ -25,12 +25,7 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { z } from "zod";
 import { parseBody } from "@/lib/api-utils";
-import {
-  BrandKit,
-  BrandKitContent,
-  EMPTY_KIT_CONTENT,
-  brandKitFromApi,
-} from "@/lib/production/brand-kit";
+import { loadMergedBrandKit } from "@/lib/production/project-brand-kit";
 import {
   runGenerateFromReference,
   brandKitForAgent,
@@ -39,20 +34,6 @@ import {
 
 interface ProjectRow extends RowDataPacket {
   client_id: number;
-}
-
-interface BrandKitRow extends RowDataPacket {
-  id: number;
-  client_id: number;
-  production_project_id: number | null;
-  name: string;
-  colors_json: unknown;
-  typography_json: unknown;
-  logos_json: unknown;
-  spacing_json: unknown;
-  rules_text: string | null;
-  is_default: number;
-  deleted_at: Date | null;
 }
 
 const bodySchema = z.object({
@@ -133,57 +114,7 @@ export async function POST(request: NextRequest) {
     }
     const clientId = projRows[0].client_id;
 
-    let mergedKit: BrandKitContent = EMPTY_KIT_CONTENT;
-    const [kitRows] = await pool.execute<BrandKitRow[]>(
-      `SELECT id, client_id, production_project_id, name, colors_json,
-              typography_json, logos_json, spacing_json, rules_text,
-              is_default, deleted_at
-         FROM production_brand_kits
-        WHERE client_id = ?
-          AND (production_project_id IS NULL OR production_project_id = ?)
-          AND deleted_at IS NULL`,
-      [clientId, production_project_id],
-    );
-    const parsedKits: BrandKit[] = kitRows.map((r) => brandKitFromApi(r));
-    const clientWide = parsedKits.filter((k) => k.production_project_id === null);
-    const projectScoped = parsedKits.filter((k) => k.production_project_id != null);
-    const baseClient = clientWide.find((k) => k.is_default) ?? clientWide[0];
-    const baseProject =
-      projectScoped.find((k) => k.is_default) ?? projectScoped[0];
-    // Merge manual aquí (mergeKits vive en brand-kit lib, lo replicamos
-    // mínimo): project pisa client token-por-token.
-    if (baseClient || baseProject) {
-      mergedKit = {
-        colors: [
-          ...(baseClient?.content.colors ?? []),
-          ...(baseProject?.content.colors ?? []),
-        ],
-        fonts: [
-          ...(baseClient?.content.fonts ?? []),
-          ...(baseProject?.content.fonts ?? []),
-        ],
-        scales: [
-          ...(baseClient?.content.scales ?? []),
-          ...(baseProject?.content.scales ?? []),
-        ],
-        spacing: [
-          ...(baseClient?.content.spacing ?? []),
-          ...(baseProject?.content.spacing ?? []),
-        ],
-        logos: [
-          ...(baseClient?.content.logos ?? []),
-          ...(baseProject?.content.logos ?? []),
-        ],
-      };
-      // Dedupe por name preservando el último (= project gana sobre client).
-      mergedKit = {
-        colors: dedupeByName(mergedKit.colors),
-        fonts: dedupeByName(mergedKit.fonts),
-        scales: dedupeByName(mergedKit.scales),
-        spacing: dedupeByName(mergedKit.spacing),
-        logos: dedupeByName(mergedKit.logos),
-      };
-    }
+    const mergedKit = await loadMergedBrandKit(clientId, production_project_id);
 
     // Llamada al agente.
     const masterDims = master_dims ?? DEFAULT_MASTER;
@@ -250,10 +181,3 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function dedupeByName<T extends { name: string }>(items: T[]): T[] {
-  const map = new Map<string, T>();
-  for (const it of items) {
-    map.set(it.name, it);
-  }
-  return Array.from(map.values());
-}

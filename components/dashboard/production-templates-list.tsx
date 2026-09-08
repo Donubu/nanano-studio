@@ -203,9 +203,9 @@ export default function ProductionTemplatesList({ productionProjectId, clientId 
               definition: freshDefinitionIds(v.definition as TemplateDefinition),
             })),
         };
-      } else if (source.kind === "ai-reference") {
+      } else if (source.kind === "ai-reference" || source.kind === "ai-prompt") {
         // La proposal del agente ya viene validada por el endpoint
-        // /generate-from-reference. Solo armamos el POST templates con la
+        // /generate-from-reference o /generate-from-prompt. Solo armamos el POST templates con la
         // definition + variants frescas (ids regenerados por si el agente
         // usó ids semánticos repetidos entre master y variants).
         const masterDef = freshDefinitionIds(source.definition);
