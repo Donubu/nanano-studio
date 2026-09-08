@@ -37,6 +37,7 @@ import {
   downloadBlob,
   sanitizeFilename,
 } from "@/lib/production/export";
+import { prepareImageForAgent } from "@/lib/production/prepare-image";
 import { buildHtml5Zip } from "@/lib/production/html5-export";
 import { AdaptationRenderer } from "@/components/production/render/adaptation-renderer";
 import {
@@ -4064,7 +4065,13 @@ function AiAdaptModal({
   // Cuando referenceUrl está set, se pasa en `files` a la siguiente llamada.
   // Si la captura/upload falla, seguimos sin imagen (degradación gracil).
   const [referenceUrl, setReferenceUrl] = useState<string | null>(null);
+  const [referenceMime, setReferenceMime] = useState<"image/webp" | "image/jpeg">("image/jpeg");
   const [capturePhase, setCapturePhase] = useState<"pending" | "done">("pending");
+  // Adjuntar la captura del master es opcional: con imagen el agente hace
+  // una ida y vuelta extra por analyze_media (Gemini) y el input se duplica
+  // (~36k → ~74k tokens medidos). Default ON porque mejora la fidelidad;
+  // el productor puede apagarlo para un ajuste barato.
+  const [useReference, setUseReference] = useState(true);
   const captureWrapRef = useRef<HTMLDivElement | null>(null);
 
   const targetDef =
@@ -4091,22 +4098,20 @@ function AiAdaptModal({
     try {
       // Esperamos un tick a que el DOM termine de pintar el preview.
       await new Promise((r) => setTimeout(r, 80));
-      const blob = await captureNodeToJpeg(node);
-      const dataUri: string = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(new Error("FileReader falló"));
-        reader.readAsDataURL(blob);
-      });
+      const jpeg = await captureNodeToJpeg(node);
+      // Re-codificamos a WebP (≤1568 px). La captura ya viene a ≤1280 px,
+      // así que acá el ahorro es solo de bytes, no de tokens.
+      const prepared = await prepareImageForAgent(jpeg, { maxSide: CAPTURE_MAX_SIDE });
       const upRes = await fetch("/api/production/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageData: dataUri }),
+        body: JSON.stringify({ imageData: prepared.dataUri }),
       });
       if (upRes.ok) {
         const body = await upRes.json();
         if (typeof body.url === "string") {
           setReferenceUrl(body.url);
+          setReferenceMime(prepared.mimeType);
         }
       } else {
         console.warn("Upload de referencia visual falló:", upRes.status);
@@ -4125,12 +4130,12 @@ function AiAdaptModal({
     setRationale(null);
     try {
       const filesParam =
-        referenceUrl != null
+        useReference && referenceUrl != null
           ? [
               {
-                filename: "master-reference.jpg",
+                filename: referenceMime === "image/webp" ? "master-reference.webp" : "master-reference.jpg",
                 publicUrl: referenceUrl,
-                mimeType: "image/jpeg",
+                mimeType: referenceMime,
               },
             ]
           : undefined;
@@ -4172,7 +4177,7 @@ function AiAdaptModal({
     } finally {
       setLoading(false);
     }
-  }, [target.id, instructions, referenceUrl]);
+  }, [target.id, instructions, referenceUrl, referenceMime, useReference]);
 
   // Captura + upload del master ocurre en background al abrir el modal —
   // el productor puede ir escribiendo instructions mientras tanto. La
@@ -4253,6 +4258,21 @@ function AiAdaptModal({
               discreto debajo del textarea para que el productor sepa que
               la referencia visual se está preparando, sin bloquear la UI. */}
           {!proposal && !loading && (
+            <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={useReference}
+                onChange={(e) => setUseReference(e.target.checked)}
+                className="accent-violet-500"
+              />
+              <span>Adjuntar captura del master como referencia visual</span>
+              <span className="text-[10px] text-muted-foreground">
+                (más fiel; duplica el costo de la llamada)
+              </span>
+            </label>
+          )}
+
+          {!proposal && !loading && useReference && (
             <p className="text-[10px] text-muted-foreground/80 flex items-center gap-1.5">
               {capturePhase === "pending" ? (
                 <>
@@ -4279,7 +4299,7 @@ function AiAdaptModal({
               <Loader2 className="h-5 w-5 animate-spin text-violet-400" />
               <span>
                 Pidiéndole al Banner Designer una propuesta
-                {referenceUrl ? " (con imagen de referencia)" : ""}…
+                {useReference && referenceUrl ? " (con imagen de referencia)" : ""}…
               </span>
             </div>
           )}

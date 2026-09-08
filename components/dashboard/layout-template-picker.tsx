@@ -38,6 +38,7 @@ import {
   AspectKey,
 } from "@/lib/production/layout-templates";
 import { TemplateDefinition, TemplateLayer } from "@/lib/production/types";
+import { prepareImageForAgent, renameForPrepared } from "@/lib/production/prepare-image";
 
 export type PickerSource =
   | { kind: "blank" }
@@ -389,11 +390,20 @@ function ReferenceUploadTab({
           setError(`Archivo no soportado: ${file.name} (solo imágenes)`);
           continue;
         }
-        const dataUri = await fileToDataUri(file);
+        // Preparación client-side: ≤1568 px de lado largo + WebP (fallback
+        // JPEG). Los modelos de visión cobran por píxeles, así que mandar
+        // el pantallazo Retina completo no mejora nada y pesa 10-20× más.
+        let prepared;
+        try {
+          prepared = await prepareImageForAgent(file);
+        } catch (e) {
+          setError(`No se pudo procesar ${file.name}: ${(e as Error).message}`);
+          continue;
+        }
         const res = await fetch("/api/production/upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageData: dataUri }),
+          body: JSON.stringify({ imageData: prepared.dataUri }),
         });
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
@@ -402,10 +412,14 @@ function ReferenceUploadTab({
         }
         const body = await res.json();
         uploaded.push({
-          filename: file.name,
+          filename: renameForPrepared(file.name, prepared.extension),
           publicUrl: body.url as string,
-          mimeType: file.type,
-          previewUrl: dataUri,
+          mimeType: prepared.mimeType,
+          previewUrl: prepared.dataUri,
+          bytes: prepared.blob.size,
+          originalBytes: prepared.originalBytes,
+          width: prepared.width,
+          height: prepared.height,
         });
       }
       setFiles((cur) => [...cur, ...uploaded]);
@@ -551,6 +565,10 @@ function ReferenceUploadTab({
                     </button>
                     <p className="text-[10px] truncate px-1 py-0.5 bg-background/80">
                       {f.filename}
+                      <span className="text-muted-foreground">
+                        {" "}· {f.width}×{f.height} · {formatKb(f.bytes)}
+                        {f.originalBytes > f.bytes * 1.5 && ` (antes ${formatKb(f.originalBytes)})`}
+                      </span>
                     </p>
                   </div>
                 ))}
@@ -834,15 +852,17 @@ interface UploadedReference {
   mimeType: string;
   // dataUri local para mostrar preview inline sin hacer otro fetch.
   previewUrl: string;
+  // Métricas de la preparación, para mostrarle al productor cuánto se
+  // redujo (y detectar si alguien sube algo raro).
+  bytes: number;
+  originalBytes: number;
+  width: number;
+  height: number;
 }
 
-function fileToDataUri(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error("FileReader falló"));
-    reader.readAsDataURL(file);
-  });
+function formatKb(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 function TabButton({
