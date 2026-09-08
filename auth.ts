@@ -1,4 +1,5 @@
 import NextAuth from "next-auth";
+import type { Session } from "next-auth";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { authConfig } from "./auth.config";
@@ -16,10 +17,11 @@ interface UserRow extends RowDataPacket {
 }
 
 // Cada cuánto re-consultar la BD en el jwt callback para detectar bloqueos
-// o eliminaciones de usuarios con sesión activa.
-const REVALIDATE_INTERVAL_MS = 5 * 60 * 1000;
+// o eliminaciones de usuarios con sesión activa. Un minuto: la consulta es
+// por PK y solo corre en contextos Node (API routes / server components).
+const REVALIDATE_INTERVAL_MS = 60 * 1000;
 
-export const { handlers, signIn, signOut, auth } = NextAuth({
+const { handlers, signIn, signOut, auth: baseAuth } = NextAuth({
   ...authConfig,
   callbacks: {
     ...authConfig.callbacks,
@@ -112,3 +114,19 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
   },
 });
+
+// auth() con bloqueo aplicado. El jwt callback marca token.blocked cuando la
+// BD dice que el usuario está bloqueado o eliminado, pero en route handlers y
+// server components NextAuth no puede reescribir la cookie, así que ese flag
+// nunca llegaba al middleware y NINGUNA ruta lo miraba: un usuario
+// desactivado seguía operando hasta que expirara su JWT (30 días). Acá, si la
+// sesión viene bloqueada, auth() devuelve null: las ~200 rutas que hacen
+// `if (!session?.user) 401` lo rechazan de inmediato y el catch-all de páginas
+// lo manda a /login, donde signIn vuelve a rechazarlo.
+export const auth = async (): Promise<Session | null> => {
+  const session = await baseAuth();
+  const user = session?.user as { blocked?: boolean } | undefined;
+  return user?.blocked ? null : session;
+};
+
+export { handlers, signIn, signOut };
