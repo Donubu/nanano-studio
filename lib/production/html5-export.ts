@@ -47,7 +47,7 @@ import {
   getBaseValue,
   sampleTrack,
 } from "./animation";
-import { reflowForPreview } from "./reflow";
+import { adaptTree } from "./adapt";
 import { parseOverrides } from "./overrides";
 import { substituteVariables } from "./variables";
 import { AdaptationRenderer } from "@/components/production/render/adaptation-renderer";
@@ -147,7 +147,7 @@ function renderInner(opts: BuildHtml5Options): {
   } else {
     const effectiveMaster = dataRow ? substituteVariables(master, dataRow) : master;
     if (adaptation.fit_mode === "responsive") {
-      const reflowed = reflowForPreview(effectiveMaster, {
+      const reflowed = adaptTree(effectiveMaster, {
         w: adaptation.width,
         h: adaptation.height,
       });

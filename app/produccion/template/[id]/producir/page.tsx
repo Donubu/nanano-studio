@@ -66,6 +66,7 @@ import {
   resolveTreeTokens,
 } from "@/lib/production/brand-kit";
 import { reflowForPreview } from "@/lib/production/reflow";
+import { adaptTree } from "@/lib/production/adapt";
 import {
   TemplateLayerView,
   stackToFlexStyle,
@@ -192,7 +193,7 @@ const FIT_MODE_LABEL: Record<FitMode, string> = {
   cover: "Cover",
   width: "Ancho 100%",
   height: "Alto 100%",
-  responsive: "Responsive",
+  responsive: "Automático",
 };
 
 const FIT_MODE_DESCRIPTION: Record<FitMode, string> = {
@@ -200,7 +201,7 @@ const FIT_MODE_DESCRIPTION: Record<FitMode, string> = {
   cover: "Llena toda la adaptación; recorta lo que sobra",
   width: "Ajusta al ancho de la adaptación; recorta o extiende vertical",
   height: "Ajusta al alto de la adaptación; recorta o extiende horizontal",
-  responsive: "Usa los constraints por capa del master (layout fluido)",
+  responsive: "Reacomoda las capas al formato: reflow por constraints con texto a escala; en tiras extremas (728×90, 160×600) ordena en fila o columna",
 };
 
 interface Adaptation {
@@ -2959,7 +2960,7 @@ function AdaptationPreview({
   }
 
   if (adaptation.fit_mode === "responsive") {
-    const reflowed = reflowForPreview(effectiveMaster, { w: adaptW, h: adaptH });
+    const reflowed = adaptTree(effectiveMaster, { w: adaptW, h: adaptH });
     const resolved = resolveTreeTokens(reflowed, brandKit);
     const bg =
       resolved.background && resolved.background.type === "color"

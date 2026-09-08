@@ -1,15 +1,14 @@
 // Heurísticas para elegir el fit_mode default y para detectar mismatches
 // de aspect ratio que probablemente requieren ajuste manual.
 //
-// Reglas (basadas en la diferencia relativa de aspect ratios):
-//   - Diff ≤ 20%  → "responsive": los constraints reflowan bien la pieza.
-//   - Diff ≤ 200% → "cover":      llena la adaptación, recorta lo que sobra.
-//   - Diff > 200% → "cover" + warning: aspect demasiado distinto, sugerir
-//                    override manual o un master dedicado.
+// Reglas:
+//   - fit_mode default = "responsive" (adapt.ts elige reflow o recomposición
+//     lineal según el aspect).
+//   - Diff > 200% → warning informativo: el resultado automático conviene
+//     revisarlo o pedir "Adaptar con IA".
 
 export type FitMode = "contain" | "cover" | "width" | "height" | "responsive";
 
-const RESPONSIVE_THRESHOLD = 0.2;
 const EXTREME_THRESHOLD = 2.0;
 
 function aspectDiff(masterW: number, masterH: number, adaptW: number, adaptH: number): number {
@@ -18,15 +17,15 @@ function aspectDiff(masterW: number, masterH: number, adaptW: number, adaptH: nu
   return Math.abs(m - a) / Math.min(m, a);
 }
 
-export function suggestFitMode(
-  masterW: number,
-  masterH: number,
-  adaptW: number,
-  adaptH: number,
-): FitMode {
-  const diff = aspectDiff(masterW, masterH, adaptW, adaptH);
-  if (diff <= RESPONSIVE_THRESHOLD) return "responsive";
-  return "cover";
+// Default: "responsive" siempre. El motor de adaptación (adapt.ts) decide
+// internamente entre reflow+ajuste y recomposición lineal según el aspect,
+// así que ya no hace falta caer a "cover" (que recortaba el centro del
+// master en tiras como 728×90). Los modos scale-based quedan como opción
+// manual para casos puntuales.
+// Los parámetros se conservan por compatibilidad con los callers.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function suggestFitMode(masterW: number, masterH: number, adaptW: number, adaptH: number): FitMode {
+  return "responsive";
 }
 
 export function hasExtremeAspectMismatch(

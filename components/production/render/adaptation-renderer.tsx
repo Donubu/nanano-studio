@@ -10,7 +10,7 @@ import {
   BrandKitContent,
   resolveTreeTokens,
 } from "@/lib/production/brand-kit";
-import { reflowForPreview } from "@/lib/production/reflow";
+import { adaptTree } from "@/lib/production/adapt";
 import { parseOverrides } from "@/lib/production/overrides";
 import { substituteVariables, DataRow } from "@/lib/production/variables";
 import {
@@ -96,7 +96,7 @@ export const AdaptationRenderer = forwardRef<HTMLDivElement, Props>(function Ada
   const effectiveMaster = dataRow ? substituteVariables(master, dataRow) : master;
 
   if (adaptation.fit_mode === "responsive") {
-    const reflowed = reflowForPreview(effectiveMaster, { w: adaptW, h: adaptH });
+    const reflowed = adaptTree(effectiveMaster, { w: adaptW, h: adaptH });
     const resolved = resolveTreeTokens(reflowed, brandKit);
     const bg =
       resolved.background && resolved.background.type === "color"

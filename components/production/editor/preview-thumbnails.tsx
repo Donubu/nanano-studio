@@ -9,7 +9,7 @@ import {
   StackLayout,
 } from "@/lib/production/types";
 import { BrandKitContent, resolveTreeTokens } from "@/lib/production/brand-kit";
-import { reflowForPreview } from "@/lib/production/reflow";
+import { adaptTree } from "@/lib/production/adapt";
 import { TemplateLayerView, stackToFlexStyle } from "./template-layer";
 
 export interface ThumbnailPreset {
@@ -100,7 +100,7 @@ function PreviewCard({
   active: boolean;
   onClick: () => void;
 }) {
-  const reflowed = reflowForPreview(definition, preset.size);
+  const reflowed = adaptTree(definition, preset.size);
   const resolved = resolveTreeTokens(reflowed, brandKit);
   const scale = THUMB_HEIGHT / preset.size.h;
   const cssW = preset.size.w * scale;

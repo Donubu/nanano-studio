@@ -15,7 +15,7 @@ import {
   findLayer,
   findParent,
 } from "@/lib/production/types";
-import { reflowForPreview } from "@/lib/production/reflow";
+import { adaptTree } from "@/lib/production/adapt";
 import { BrandKitContent, EMPTY_KIT_CONTENT, resolveTreeTokens } from "@/lib/production/brand-kit";
 import { substituteVariables, DataRow } from "@/lib/production/variables";
 import { TemplateLayerView, stackToFlexStyle } from "./template-layer";
@@ -85,6 +85,9 @@ interface Guide {
 }
 
 const CANVAS_PADDING = 32;
+// Reloj para detectar doble click en handlers (fuera del componente para
+// que el linter de pureza no lo confunda con una lectura en render).
+const nowMs = () => Date.now();
 const SNAP_THRESHOLD_PX = 6; // in screen pixels
 const MIN_SIZE = 8;
 
@@ -107,7 +110,7 @@ export function TemplateCanvas({
   // In preview mode, render against a reflowed clone derived from constraints.
   // The master `definition` is never mutated.
   const reflowed: TemplateDefinition = isPreview
-    ? reflowForPreview(definition, previewSize!)
+    ? adaptTree(definition, previewSize!)
     : definition;
   // Token references ({color.x}, {font.x}, {scale.x}, {spacing.x}, {logo.x})
   // are resolved to literal values before the renderer consumes them. The
@@ -186,7 +189,7 @@ export function TemplateCanvas({
   // lastClickRef que acabamos de actualizar.
   const pendingTargetRef = useRef<{ raw: string; target: string; t: number } | null>(null);
   const handleLayerSelect = (id: string, opts?: { additive?: boolean }) => {
-    const now = Date.now();
+    const now = nowMs();
     const last = lastClickRef.current;
     lastClickRef.current = { id, t: now };
     const isDouble = !!last && last.id === id && now - last.t < 350;
@@ -197,7 +200,7 @@ export function TemplateCanvas({
   const handleLayerPointerDown = (e: ReactPointerEvent<HTMLDivElement>, layerId: string) => {
     const pending = pendingTargetRef.current;
     pendingTargetRef.current = null;
-    if (pending && pending.raw === layerId && Date.now() - pending.t < 100) {
+    if (pending && pending.raw === layerId && nowMs() - pending.t < 100) {
       startMove(e, pending.target);
       return;
     }

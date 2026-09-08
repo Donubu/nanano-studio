@@ -14,11 +14,9 @@
 
 import {
   TemplateDefinition,
-  TemplateLayer,
-  isFontSizeRange,
-  StackLayout,
 } from "./types";
-import { reflowForPreview } from "./reflow";
+import { adaptTree } from "./adapt";
+import { scaleLayerUniform, scaleLayoutConfig } from "./scale";
 import { FitMode } from "./fit-mode";
 import {
   AnimationConfig,
@@ -53,7 +51,7 @@ export function deriveManualLayoutFromMaster(
   adaptW: number,
   adaptH: number,
 ): TemplateDefinition {
-  return reflowForPreview(master, { w: adaptW, h: adaptH });
+  return adaptTree(master, { w: adaptW, h: adaptH });
 }
 
 // Cuando la adapt usa un fit_mode scale-based (contain/cover/width/height),
@@ -79,7 +77,7 @@ export function buildInitialFromAdaptFit(
   fitMode: FitMode,
 ): TemplateDefinition {
   if (fitMode === "responsive") {
-    return reflowForPreview(master, { w: adaptW, h: adaptH });
+    return adaptTree(master, { w: adaptW, h: adaptH });
   }
   const masterW = master.size.w;
   const masterH = master.size.h;
@@ -187,119 +185,4 @@ function scaleTrackUniform(
       // opacity, scale, scale.x/y, rotation, color → adimensionales, sin cambio.
       return track;
   }
-}
-
-function scaleLayerUniform(
-  layer: TemplateLayer,
-  scale: number,
-  offsetX: number,
-  offsetY: number,
-): TemplateLayer {
-  const baseScaled = {
-    position: {
-      x: layer.position.x * scale + offsetX,
-      y: layer.position.y * scale + offsetY,
-    },
-    size: { w: layer.size.w * scale, h: layer.size.h * scale },
-    shadow: layer.shadow
-      ? {
-          x: layer.shadow.x * scale,
-          y: layer.shadow.y * scale,
-          blur: layer.shadow.blur * scale,
-          color: layer.shadow.color,
-        }
-      : layer.shadow,
-  };
-  if (layer.type === "frame") {
-    return {
-      ...layer,
-      ...baseScaled,
-      cornerRadius:
-        layer.cornerRadius != null ? layer.cornerRadius * scale : layer.cornerRadius,
-      layout: scaleLayoutConfig(layer.layout, scale),
-      // Children dentro de un frame mantienen sus coords RELATIVAS al frame.
-      // Solo escalamos sus pos/size con el mismo factor; el offset (X,Y) del
-      // root NO se propaga adentro porque el frame ya está en su posición
-      // global escalada.
-      children: layer.children.map((c) => scaleLayerUniform(c, scale, 0, 0)),
-    };
-  }
-  if (layer.type === "text") {
-    return {
-      ...layer,
-      ...baseScaled,
-      style: {
-        ...layer.style,
-        fontSize: scaleFontSize(layer.style.fontSize, scale),
-        lineHeight: layer.style.lineHeight, // unitless multiplier, NO escalar
-        letterSpacing:
-          layer.style.letterSpacing != null
-            ? layer.style.letterSpacing * scale
-            : layer.style.letterSpacing,
-        backgroundCornerRadius:
-          layer.style.backgroundCornerRadius != null
-            ? layer.style.backgroundCornerRadius * scale
-            : layer.style.backgroundCornerRadius,
-        outline: layer.style.outline
-          ? {
-              color: layer.style.outline.color,
-              width: layer.style.outline.width * scale,
-            }
-          : layer.style.outline,
-      },
-    };
-  }
-  if (layer.type === "image") {
-    return {
-      ...layer,
-      ...baseScaled,
-      cornerRadius:
-        layer.cornerRadius != null ? layer.cornerRadius * scale : layer.cornerRadius,
-    };
-  }
-  if (layer.type === "shape") {
-    return {
-      ...layer,
-      ...baseScaled,
-      cornerRadius:
-        layer.cornerRadius != null ? layer.cornerRadius * scale : layer.cornerRadius,
-      stroke: layer.stroke
-        ? { color: layer.stroke.color, width: layer.stroke.width * scale }
-        : layer.stroke,
-    };
-  }
-  if (layer.type === "icon") {
-    return {
-      ...layer,
-      ...baseScaled,
-      strokeWidth:
-        layer.strokeWidth != null ? layer.strokeWidth * scale : layer.strokeWidth,
-    };
-  }
-  // TS estrecha a never acá — todos los tipos del union están cubiertos.
-  // Si se agrega un nuevo LayerType, este path se vuelve alcanzable y TS
-  // forzará a manejarlo arriba.
-  return layer;
-}
-
-function scaleFontSize(
-  fs: number | string | { min: number; max: number },
-  scale: number,
-): number | string | { min: number; max: number } {
-  if (typeof fs === "number") return fs * scale;
-  if (isFontSizeRange(fs)) return { min: fs.min * scale, max: fs.max * scale };
-  // string token (e.g. "{scale.lg}") — sin info para escalar, dejar igual.
-  // En la práctica, los layers escalados pixel-perfect deberían tener
-  // fontSize numérico. Tokens dejan el comportamiento al brand-kit.
-  return fs;
-}
-
-function scaleLayoutConfig(layout: { mode: string }, scale: number) {
-  if (layout.mode !== "stack") return layout as never;
-  const stack = layout as unknown as StackLayout;
-  return {
-    ...stack,
-    padding: stack.padding.map((p) => (typeof p === "number" ? p * scale : p)) as StackLayout["padding"],
-    gap: typeof stack.gap === "number" ? stack.gap * scale : stack.gap,
-  };
 }
