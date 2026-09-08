@@ -578,6 +578,8 @@ export function TemplateEditor({
                 selectedIds={editor.selectedIds}
                 onAlign={editor.alignSelected}
                 onDistribute={editor.distributeSelected}
+                onMerge={editor.mergeSelectedIntoButton}
+                canMerge={editor.canMergeSelection}
                 onUpdateLayer={updateLayerAutoKf}
                 onUpdateRoot={editor.updateRoot}
                 brandKit={brandKit}

@@ -22,6 +22,7 @@ import {
   ValidationErr,
 } from "./template-schema";
 import { BrandKitContent } from "./brand-kit";
+import { collapseShapeTextPairs } from "./composites";
 import type { AnimationConfig } from "./animation";
 
 export const BANNER_DESIGNER_AGENT_NAME = "Banner Designer";
@@ -585,9 +586,21 @@ function validateAgentResponse(
   }
   return {
     ok: true,
-    definition: v.definition,
+    definition: normalizeAgentDefinition(v.definition, "adapt"),
     rationale: parsed.rationale ?? "",
   };
+}
+
+// Normaliza lo que devuelve el agente antes de exponerlo al productor:
+// colapsa pares shape+text con la misma caja en un TextLayer con fondo
+// (BANNERS.md §8.6 lo prohíbe pero el agente igual los emite). Determinista,
+// así el resultado no depende de que el prompt se respete.
+function normalizeAgentDefinition(def: TemplateDefinition, label: string): TemplateDefinition {
+  const { definition, merged } = collapseShapeTextPairs(def);
+  if (merged > 0) {
+    console.info(`[banner-designer] ${label}: ${merged} par(es) shape+text colapsados en capa única`);
+  }
+  return definition;
 }
 
 // Operación GENERATE_FROM_REFERENCE: el productor sube imágenes que quiere
@@ -823,13 +836,16 @@ function validateGenerateResponse(
           error: `variant ${expected.w}x${expected.h}: ${v.error}`,
         };
       }
-      validatedVariants.push({ dims: expected, definition: v.definition });
+      validatedVariants.push({
+        dims: expected,
+        definition: normalizeAgentDefinition(v.definition, `variant ${expected.w}x${expected.h}`),
+      });
     }
   }
 
   return {
     ok: true,
-    definition: masterValidation.definition,
+    definition: normalizeAgentDefinition(masterValidation.definition, "master"),
     variants: validatedVariants,
     rationale: parsed.rationale ?? "",
   };

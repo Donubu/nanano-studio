@@ -18,6 +18,7 @@ import {
   PanelRightClose,
   Pipette,
   Upload,
+  Combine,
 } from "lucide-react";
 import * as LucideIcons from "lucide-react";
 import {
@@ -147,6 +148,10 @@ interface Props {
       | "bottom",
   ) => void;
   onDistribute?: (axis: "horizontal" | "vertical") => void;
+  // Fusión shape+text → botón/badge de una sola capa. canMerge lo decide el
+  // hook según la selección actual.
+  onMerge?: () => void;
+  canMerge?: boolean;
   onUpdateLayer: (id: string, mutator: (layer: TemplateLayer) => TemplateLayer) => void;
   onUpdateRoot: (mutator: (root: TemplateDefinition) => TemplateDefinition) => void;
   brandKit?: BrandKitContent;
@@ -774,6 +779,8 @@ export function PropertiesPanel({
   brandKit = EMPTY_KIT_CONTENT,
   clientId = null,
   onCollapse,
+  onMerge,
+  canMerge,
   embedded = false,
 }: Props) {
   const noSelection = !selectedLayer;
@@ -821,6 +828,8 @@ export function PropertiesPanel({
             count={selectedIds!.length}
             onAlign={onAlign}
             onDistribute={onDistribute}
+            onMerge={onMerge}
+            canMerge={canMerge}
           />
         )}
 
@@ -855,6 +864,8 @@ function MultiSelectAlignPanel({
   count,
   onAlign,
   onDistribute,
+  onMerge,
+  canMerge,
 }: {
   count: number;
   onAlign?: (
@@ -867,6 +878,10 @@ function MultiSelectAlignPanel({
       | "bottom",
   ) => void;
   onDistribute?: (axis: "horizontal" | "vertical") => void;
+  // Fusión shape+text → botón/badge de una sola capa. canMerge lo decide el
+  // hook según la selección actual.
+  onMerge?: () => void;
+  canMerge?: boolean;
 }) {
   const canDistribute = count >= 3;
   const btnClass =
@@ -925,6 +940,25 @@ function MultiSelectAlignPanel({
           </button>
         </div>
       </div>
+      {canMerge && (
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">
+            Compuesto
+          </p>
+          <button
+            type="button"
+            onClick={onMerge}
+            className="w-full flex items-center justify-center gap-1.5 h-9 rounded border border-primary/50 bg-primary/10 hover:bg-primary/20 text-xs font-medium transition-colors"
+            title="Convierte la forma + el texto en una sola capa de texto con fondo (botón, badge). Se mueve, anima y copia como una unidad."
+          >
+            <Combine className="h-4 w-4" />
+            Fusionar en botón
+          </button>
+          <p className="text-[10px] text-muted-foreground mt-1.5 leading-snug">
+            La forma pasa a ser el fondo del texto. Queda una sola capa.
+          </p>
+        </div>
+      )}
     </Section>
   );
 }

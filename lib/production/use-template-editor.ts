@@ -22,6 +22,11 @@ import {
   newBadgeLayer,
   newRibbonLayer,
 } from "./preset-layers";
+import {
+  isMergeableShape,
+  isMergeableText,
+  mergeShapeAndText,
+} from "./composites";
 
 export type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
 
@@ -63,6 +68,9 @@ interface UseTemplateEditorResult {
   selectedLayer: TemplateLayer | null;
   alignSelected: (direction: AlignDirection) => void;
   distributeSelected: (axis: DistributeAxis) => void;
+  // true cuando la selección es exactamente un shape + un text fusionables.
+  canMergeSelection: boolean;
+  mergeSelectedIntoButton: () => void;
 
   addText: () => void;
   addImage: () => void;
@@ -320,6 +328,36 @@ export function useTemplateEditor({
     },
     [selectedIds, definition, mutate]
   );
+
+  // Fusión shape + text → un solo TextLayer con fondo (botón / badge). Aplica
+  // cuando la selección es exactamente un shape fusionable y un text sin
+  // fondo propio, hermanos en el mismo padre. La caja resultante es la del
+  // shape; el id que sobrevive es el del texto (conserva tracks de animación).
+  const mergeCandidate = (() => {
+    if (selectedIds.length !== 2) return null;
+    const a = findLayer(definition, selectedIds[0]);
+    const b = findLayer(definition, selectedIds[1]);
+    if (!a || !b) return null;
+    const shape = isMergeableShape(a) ? a : isMergeableShape(b) ? b : null;
+    const text = isMergeableText(a) ? a : isMergeableText(b) ? b : null;
+    if (!shape || !text || shape.id === text.id) return null;
+    const pa = findParent(definition, shape.id);
+    const pb = findParent(definition, text.id);
+    if ((pa?.id ?? "tpl_root") !== (pb?.id ?? "tpl_root")) return null;
+    return { shape, text };
+  })();
+  const canMergeSelection = mergeCandidate != null;
+
+  const mergeSelectedIntoButton = useCallback(() => {
+    if (!mergeCandidate) return;
+    const { shape, text } = mergeCandidate;
+    const merged = mergeShapeAndText(shape, text);
+    mutate((d) => {
+      const withText = updateLayerInTree(d, text.id, () => merged);
+      return deleteLayerInTree(withText, shape.id);
+    });
+    selectSingle(text.id);
+  }, [mergeCandidate, mutate, selectSingle]);
 
   // Distribuye las capas en el eje indicado dejando gaps iguales entre
   // ellas, fijando la primera y la última. Requiere 3+ capas (con 2 no
@@ -615,6 +653,8 @@ export function useTemplateEditor({
     selectedLayer,
     alignSelected,
     distributeSelected,
+    canMergeSelection,
+    mergeSelectedIntoButton,
     addText,
     addImage,
     addShape,

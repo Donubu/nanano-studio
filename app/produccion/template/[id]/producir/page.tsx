@@ -4150,6 +4150,16 @@ function AiAdaptModal({
         setError(body?.error || `Error ${res.status} del Banner Designer`);
         return;
       }
+      // Respuesta 2xx sin proposal (proxy que devolvió otra cosa, JSON
+      // truncado, etc.): antes quedaba en silencio — el modal volvía al
+      // estado inicial sin propuesta ni error. Lo hacemos visible.
+      if (!body || typeof body !== "object" || body.proposal?.type !== "frame") {
+        console.error("adapt-orientation: respuesta sin proposal", res.status, body);
+        setError(
+          "El Banner Designer respondió pero no llegó una propuesta válida. Revisa el panel de costos IA del proyecto: si la invocación figura como exitosa, reintenta con Regenerar.",
+        );
+        return;
+      }
       setProposal(body.proposal as TemplateDefinition);
       setRationale(typeof body.rationale === "string" ? body.rationale : null);
       setCost(
