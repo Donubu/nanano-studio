@@ -65,8 +65,15 @@ export default auth((req) => {
     pathname.startsWith("/api/production");
   if (isAdminPage || isAdminApi) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const role = (token?.user as any)?.role;
-    if (role !== "admin") {
+    const user = token?.user as any;
+    const role = user?.role;
+    // Excepción: /api/admin/templates (listar + aplicar plantilla) también lo
+    // usan los usuarios con permiso "puede crear proyectos" desde el diálogo
+    // de crear proyecto en el chat. La ruta re-valida ese permiso en Node;
+    // acá solo dejamos pasar para que el Edge no la corte con 403.
+    const isTemplatesApi = pathname.startsWith("/api/admin/templates");
+    const canCreateProjects = user?.canCreateProjects === true;
+    if (role !== "admin" && !(isTemplatesApi && canCreateProjects)) {
       if (isAdminApi) {
         return NextResponse.json({ error: "No autorizado" }, { status: 403 });
       }
