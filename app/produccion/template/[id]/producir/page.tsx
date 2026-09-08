@@ -4356,7 +4356,7 @@ function AiAdaptModal({
               />
               <span>Adjuntar captura del master como referencia visual</span>
               <span className="text-[10px] text-muted-foreground">
-                (más fiel; duplica el costo de la llamada)
+                (más fiel al diseño original)
               </span>
             </label>
           )}

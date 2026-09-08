@@ -378,14 +378,20 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   // Collaboration — declarado antes de la persistencia porque el lock de
   // edición (`canEdit`) sale de acá y la persistencia se corta cuando es false.
   const { data: session } = useSession();
+  // Deps por valor: `session.user` cambia de identidad en cada revalidación
+  // de next-auth (foco de ventana). useCollaboration solo mira user.id en sus
+  // deps, así que no reconectaba, pero el memo se recalculaba sin motivo.
+  const sessionUserId = (session?.user as unknown as { id?: number } | undefined)?.id;
+  const sessionUserName = session?.user?.name;
+  const sessionUserImage = session?.user?.image;
   const collabUser = useMemo(() => {
-    if (!session?.user) return undefined;
+    if (sessionUserId == null) return undefined;
     return {
-      id: Number((session.user as unknown as { id: number }).id),
-      name: session.user.name || "Usuario",
-      image: session.user.image,
+      id: Number(sessionUserId),
+      name: sessionUserName || "Usuario",
+      image: sessionUserImage,
     };
-  }, [session?.user]);
+  }, [sessionUserId, sessionUserName, sessionUserImage]);
 
   const collab = useCollaboration({
     conversationId: realConversationId,

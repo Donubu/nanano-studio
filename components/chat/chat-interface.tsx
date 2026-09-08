@@ -437,14 +437,18 @@ export function ChatInterface() {
     // el modal con "text" preseleccionado (default o auto-select), lo movemos al
     // primer tipo creable disponible para que el selector y el botón Crear sean
     // coherentes con la opción oculta.
+    // Dep por valor (rol), no por identidad de `session`: next-auth entrega un
+    // objeto nuevo en cada revalidación (foco de ventana) y eso re-corría el
+    // efecto sin motivo.
+    const sessionRole = session?.user?.role;
     useEffect(() => {
         if (!showNewConversationModal) return;
-        if (session?.user?.role === "admin" || newConversationType !== "text") return;
+        if (sessionRole === "admin" || newConversationType !== "text") return;
         const fallback = generationConfig.find(
             (c) => c.is_enabled && c.models.length > 0 && c.generation_type !== "text"
         );
         if (fallback) setNewConversationType(fallback.generation_type);
-    }, [showNewConversationModal, generationConfig, session, newConversationType]);
+    }, [showNewConversationModal, generationConfig, sessionRole, newConversationType]);
 
     // Image viewer modal
     const [viewingImageMessage, setViewingImageMessage] = useState<Message | null>(null);
