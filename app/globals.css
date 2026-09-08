@@ -151,3 +151,10 @@
     scrollbar-color: rgba(128, 128, 128, 0.3) transparent;
   }
 }
+
+/* Reserva siempre el espacio de la barra de scroll vertical. Sin esto, el
+   ancho del viewport cambia ~15px entre páginas con y sin scroll y todo lo
+   centrado (p. ej. el stepper de producir) se corre al navegar. */
+html {
+  scrollbar-gutter: stable;
+}
