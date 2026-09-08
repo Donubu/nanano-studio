@@ -259,6 +259,7 @@ export default function TemplateDetailPage() {
           initial={initialDefinition}
           baseWidth={template.base_width}
           baseHeight={template.base_height}
+          templateId={template.id}
           onSave={handleSaveDefinition}
           brandKit={brandKitContent}
           clientId={clientId}

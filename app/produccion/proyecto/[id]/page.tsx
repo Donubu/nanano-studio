@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, Loader2, Building2, Pencil, Check, X } from "lucide-react";
 import Image from "next/image";
 import ProductionTemplatesList from "@/components/dashboard/production-templates-list";
+import { AiCostsSummary } from "@/components/production/ai-costs-summary";
 
 interface ProductionProject {
   id: number;
@@ -240,6 +241,8 @@ export default function ProductionProjectPage() {
         )}
 
         <ProductionTemplatesList productionProjectId={Number(projectId)} clientId={project.client_id} />
+
+        <AiCostsSummary productionProjectId={Number(projectId)} />
       </main>
     </div>
   );
