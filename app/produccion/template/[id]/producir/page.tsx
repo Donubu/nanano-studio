@@ -29,6 +29,9 @@ import {
   Trash2,
   Unlink,
   X,
+  Settings2,
+  ChevronRight,
+  Boxes,
 } from "lucide-react";
 import { hasExtremeAspectMismatch } from "@/lib/production/fit-mode";
 import { parseOverrides } from "@/lib/production/overrides";
@@ -71,6 +74,19 @@ import {
   TemplateLayerView,
   stackToFlexStyle,
 } from "@/components/production/editor/template-layer";
+
+type ProducirStep = "design" | "formats" | "export";
+const STEP_ORDER: ProducirStep[] = ["design", "formats", "export"];
+const STEP_LABEL: Record<ProducirStep, string> = {
+  design: "Diseñar",
+  formats: "Formatos",
+  export: "Descargar",
+};
+const STEP_HASH: Record<ProducirStep, string> = {
+  design: "",
+  formats: "#formatos",
+  export: "#descargar",
+};
 
 const CHANNEL_LABEL: Record<string, string> = {
   gdn: "Google Display",
@@ -289,6 +305,13 @@ export default function ProducirPage() {
   //                badges, fit mode, descarga individual, etc.
   // No persiste; cada entrada a la página arranca en clean.
   const [adaptationsView, setAdaptationsView] = useState<"clean" | "detailed">("clean");
+  // Flujo en tres pasos: diseñar el master → elegir formatos → descargar.
+  // Cada paso muestra solo lo suyo. El paso vive en el hash de la URL para
+  // sobrevivir a un refresh y poder linkear "#formatos" o "#descargar".
+  const [step, setStep] = useState<ProducirStep>("design");
+  // Ajustes avanzados (brand kit base, orientaciones vinculadas, dataset,
+  // regenerar preview): ocultos por defecto. Preferencia por navegador.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showPicker, setShowPicker] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -1610,6 +1633,43 @@ export default function ProducirPage() {
     }
   };
 
+  // Paso inicial desde el hash + preferencia de "avanzado".
+  useEffect(() => {
+    try {
+      const h = window.location.hash;
+      if (h === "#formatos") setStep("formats");
+      else if (h === "#descargar") setStep("export");
+      const adv = localStorage.getItem("prod-producir-advanced");
+      if (adv === "1") setAdvancedOpen(true);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem("prod-producir-advanced", advancedOpen ? "1" : "0");
+    } catch {}
+  }, [advancedOpen]);
+  // Cambiar de paso: sincroniza el hash, cierra la edición de una pieza y
+  // carga las adaptaciones cuando el paso las necesita.
+  const goToStep = useCallback(
+    (next: ProducirStep) => {
+      setStep(next);
+      if (next !== "formats") {
+        setEditingId(null);
+        editSnapshotRef.current = null;
+      }
+      try {
+        const url = `${window.location.pathname}${window.location.search}${STEP_HASH[next]}`;
+        window.history.replaceState(null, "", url);
+      } catch {}
+    },
+    [],
+  );
+  useEffect(() => {
+    if (step !== "design" && !adaptationsLoaded && !adaptationsLoading && adaptationCount > 0) {
+      fetchAdaptations();
+    }
+  }, [step, adaptationsLoaded, adaptationsLoading, adaptationCount, fetchAdaptations]);
+
   if (loading || sessionStatus === "loading") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -1660,6 +1720,48 @@ export default function ProducirPage() {
     />
   );
 
+  const stepIndex = STEP_ORDER.indexOf(step);
+  const stepperNode = (
+    <nav className="flex items-center gap-1" aria-label="Pasos">
+      {STEP_ORDER.map((s, i) => {
+        const active = s === step;
+        const disabled = s === "export" && adaptationCount === 0;
+        return (
+          <button
+            key={s}
+            type="button"
+            onClick={() => !disabled && goToStep(s)}
+            disabled={disabled}
+            className={cn(
+              "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs transition-colors",
+              active
+                ? "bg-primary text-primary-foreground font-medium"
+                : disabled
+                  ? "text-muted-foreground/40 cursor-not-allowed"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted",
+            )}
+            title={disabled ? "Agrega formatos antes de descargar" : STEP_LABEL[s]}
+          >
+            <span
+              className={cn(
+                "h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold",
+                active ? "bg-primary-foreground/20" : "bg-muted-foreground/15",
+              )}
+            >
+              {i + 1}
+            </span>
+            {STEP_LABEL[s]}
+            {s === "formats" && adaptationCount > 0 && (
+              <span className={cn("text-[10px] rounded-full px-1.5", active ? "bg-primary-foreground/20" : "bg-muted-foreground/15")}>
+                {adaptationCount}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </nav>
+  );
+
   return (
     <div className="flex flex-col min-h-screen bg-background">
       <header className="border-b border-border/50 bg-card/40 shrink-0">
@@ -1682,12 +1784,32 @@ export default function ProducirPage() {
             <span>
               {template.base_width}×{template.base_height}
             </span>
-            <span className="text-muted-foreground/50">·</span>
-            <span>Producir</span>
           </div>
 
           <div className="flex-1" />
+          {stepperNode}
+          <div className="flex-1" />
 
+          {stepIndex < STEP_ORDER.length - 1 && (
+            <Button
+              size="sm"
+              onClick={() => goToStep(STEP_ORDER[stepIndex + 1])}
+              disabled={step === "formats" && adaptationCount === 0}
+              className="gap-1"
+              title={
+                step === "design"
+                  ? "Elegir en qué formatos sale esta pieza"
+                  : adaptationCount === 0
+                    ? "Agrega formatos antes de descargar"
+                    : "Descargar las piezas"
+              }
+            >
+              {step === "design" ? "Elegir formatos" : "Descargar"}
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          )}
+
+          {step === "design" && advancedOpen && (
           <Button
             variant="ghost"
             size="sm"
@@ -1703,7 +1825,9 @@ export default function ProducirPage() {
             )}
             {thumbnailJob ? "Generando..." : "Rehacer preview"}
           </Button>
+          )}
 
+          {step === "design" && (
           <Button
             variant="ghost"
             size="sm"
@@ -1714,6 +1838,7 @@ export default function ProducirPage() {
             <Pencil className="h-3.5 w-3.5" />
             Pantalla completa
           </Button>
+          )}
         </div>
       </header>
 
@@ -1722,16 +1847,43 @@ export default function ProducirPage() {
             Por defecto edita el master. Click en una adaptación más abajo
             cambia el editor a esa adaptación; el botón "Volver al master"
             arriba del editor regresa al master. */}
+        {(step === "design" || (step === "formats" && editingId != null)) && (
         <section
           ref={editorSectionRef}
           className="bg-card rounded-xl border border-border/50 overflow-hidden scroll-mt-4"
         >
+          {/* Barra de ajustes avanzados. Por defecto el productor solo ve el
+              lienzo del master; brand kit base, orientaciones vinculadas y
+              dataset aparecen al abrirla. */}
+          {editingId == null && (
+            <div className="flex items-center justify-between gap-2 px-4 py-1.5 border-b border-border/30 bg-muted/10 text-xs">
+              <span className="text-muted-foreground">
+                {advancedOpen
+                  ? "Ajustes avanzados visibles: brand kit base, orientaciones y datos."
+                  : "Diseña el master. Las orientaciones y los formatos se derivan solos."}
+              </span>
+              <button
+                type="button"
+                onClick={() => setAdvancedOpen((v) => !v)}
+                className={cn(
+                  "flex items-center gap-1.5 px-2 py-1 rounded border transition-colors",
+                  advancedOpen
+                    ? "border-foreground/40 bg-foreground/10 text-foreground"
+                    : "border-border/50 text-muted-foreground hover:text-foreground hover:border-foreground/40",
+                )}
+                title="Brand kit base, orientaciones vinculadas, dataset CSV y regenerar preview"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+                {advancedOpen ? "Ocultar avanzado" : "Avanzado"}
+              </button>
+            </div>
+          )}
           {/* Selector de brand kit base. Lista todos los kits disponibles
               (client-wide + project-scoped del proyecto) y permite cambiar
               el activo. Si el activo es client-wide, el botón ofrece
               "Personalizar para este proyecto" (fork). Si ya es un fork
               project-scoped, el botón ofrece "Editar". */}
-          {editingId == null && (
+          {editingId == null && advancedOpen && (
             <BrandKitSelectorBar
               kits={brandKits}
               activeKit={activeBrandKit}
@@ -1768,8 +1920,9 @@ export default function ProducirPage() {
                     fetchBrandKits(clientId, template.production_project_id);
                 }}
                 dataRow={previewRow}
-                topAccessory={variantsStripNode}
+                topAccessory={advancedOpen ? variantsStripNode : undefined}
                 rightAccessory={
+                  advancedOpen || dataset ? (
                   <DatasetPanel
                     detectedVariables={detectedVariables}
                     dataset={dataset}
@@ -1782,6 +1935,7 @@ export default function ProducirPage() {
                     onSelectRow={(i) => setSelectedRowIdx(i)}
                     onClear={handleClearDataset}
                   />
+                  ) : undefined
                 }
               />
             ) : editingAdaptation && adaptInitialDefinition ? (
@@ -1805,7 +1959,7 @@ export default function ProducirPage() {
                   if (clientId)
                     fetchBrandKits(clientId, template.production_project_id);
                 }}
-                topAccessory={variantsStripNode}
+                topAccessory={advancedOpen ? variantsStripNode : undefined}
                 /* Huincha de edición independiente. Vive dentro del editor,
                    debajo de los PreviewThumbnails de la adaptación. Antes
                    estaba arriba de toda la sección — al moverla acá queda
@@ -1889,6 +2043,7 @@ export default function ProducirPage() {
                 Link (diferenciada) on hover. */}
           </div>
         </section>
+        )}
 
 
         {fitModeError && (
@@ -1904,13 +2059,14 @@ export default function ProducirPage() {
           </div>
         )}
 
-        {/* Adaptations list */}
+        {/* Adaptations list — paso "Formatos" */}
+        {step === "formats" && (
         <section className="bg-card rounded-xl border border-border/50 p-4">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h3 className="text-sm font-medium">Adaptaciones</h3>
+              <h3 className="text-sm font-medium">Formatos de salida</h3>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Una pieza de salida por formato. Click en + para agregar.
+                Una pieza por formato, derivada del master. Click en una pieza para ajustarla a mano.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -1946,44 +2102,23 @@ export default function ProducirPage() {
                   </button>
                 </div>
               )}
-              {adaptationsLoaded && adaptations.length > 0 && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleDownloadAll}
-                  disabled={!!batchProgress || !!singleDownloadingId}
-                  className="gap-1"
-                  title={
-                    dataset
-                      ? `Renderiza ${dataset.rows.length} filas × ${adaptations.length} adaptaciones y descarga ZIP con subcarpetas por fila`
-                      : "Renderiza todas las adaptaciones y descarga un ZIP"
-                  }
-                >
-                  {batchProgress ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      {batchProgress.current}/{batchProgress.total}
-                    </>
-                  ) : (
-                    <>
-                      <Package className="h-4 w-4" />
-                      {dataset
-                        ? `Descargar ZIP (${dataset.rows.length} × ${adaptations.length})`
-                        : "Descargar todas (ZIP)"}
-                    </>
-                  )}
-                </Button>
-              )}
               <Button size="sm" onClick={() => setShowPicker(true)} className="gap-1">
-                <Plus className="h-4 w-4" /> Agregar adaptación
+                <Plus className="h-4 w-4" /> Agregar formatos
               </Button>
             </div>
           </div>
 
           {adaptationCount === 0 ? (
-            <p className="text-sm text-muted-foreground py-6 text-center">
-              Aún no hay adaptaciones. Empieza agregando uno o varios formatos.
-            </p>
+            <div className="flex flex-col items-center gap-3 py-10 text-center">
+              <Boxes className="h-8 w-8 text-muted-foreground/50" />
+              <p className="text-sm text-muted-foreground max-w-md">
+                Todavía no elegiste formatos. Agrega un paquete completo por canal
+                (Google Display, Meta, Instagram…) o formatos sueltos.
+              </p>
+              <Button size="sm" onClick={() => setShowPicker(true)} className="gap-1">
+                <Plus className="h-4 w-4" /> Agregar formatos
+              </Button>
+            </div>
           ) : !adaptationsLoaded ? (
             // Lazy load: el botón muestra el conteo. Click renderea las
             // cards (cada una hace reflow + token resolve + layer render).
@@ -2258,6 +2393,93 @@ export default function ProducirPage() {
             )
           )}
         </section>
+        )}
+
+        {/* Paso "Descargar" */}
+        {step === "export" && (
+        <section className="bg-card rounded-xl border border-border/50 p-6 space-y-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-medium">Descargar</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {adaptationCount} {adaptationCount === 1 ? "pieza" : "piezas"}
+                {dataset ? ` × ${dataset.rows.length} filas de datos` : ""}. JPG listo para subir; HTML5 para
+                banners animados (Google Ads / GDN).
+              </p>
+            </div>
+            <Button
+              size="sm"
+              onClick={handleDownloadAll}
+              disabled={!adaptationsLoaded || adaptations.length === 0 || !!batchProgress || !!singleDownloadingId}
+              className="gap-1.5"
+              title={
+                dataset
+                  ? `Renderiza ${dataset.rows.length} filas × ${adaptations.length} piezas y descarga un ZIP con subcarpetas por fila`
+                  : "Renderiza todas las piezas y descarga un ZIP"
+              }
+            >
+              {batchProgress ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {batchProgress.current}/{batchProgress.total}
+                </>
+              ) : (
+                <>
+                  <Package className="h-4 w-4" />
+                  {dataset ? `Descargar todo (${dataset.rows.length} × ${adaptations.length})` : "Descargar todo (ZIP)"}
+                </>
+              )}
+            </Button>
+          </div>
+
+          {!adaptationsLoaded ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground py-6 justify-center">
+              <Loader2 className="h-4 w-4 animate-spin" /> Cargando piezas…
+            </div>
+          ) : (
+            <ul className="divide-y divide-border/40 rounded-lg border border-border/40">
+              {groupAdaptationsByChannel(adaptations).flatMap((g) => g.items).map((a) => {
+                const label = a.custom_name || a.preset_name || `${a.width}×${a.height}`;
+                const manual = !!parseOverrides(a.overrides_json).manual_layout;
+                return (
+                  <li key={a.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+                    <span className="font-mono text-xs text-muted-foreground w-24 shrink-0">
+                      {a.width}×{a.height}
+                    </span>
+                    <span className="flex-1 truncate">{label}</span>
+                    {manual && (
+                      <span className="text-[10px] text-emerald-400 border border-emerald-500/40 rounded px-1.5 py-0.5" title="Ajustada a mano">
+                        manual
+                      </span>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleDownloadSingle(a)}
+                      disabled={singleDownloadingId === a.id || !!batchProgress}
+                      className="gap-1 h-7"
+                    >
+                      {singleDownloadingId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                      JPG
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleDownloadSingleHtml5(a)}
+                      disabled={singleDownloadingHtml5Id === a.id || !!batchProgress}
+                      className="gap-1 h-7"
+                      title="ZIP con index.html (animación WAAPI, clickTag, meta ad.size)"
+                    >
+                      {singleDownloadingHtml5Id === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Code className="h-3.5 w-3.5" />}
+                      HTML5
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+        )}
       </main>
 
       {showAddVariant && (
@@ -3131,9 +3353,9 @@ function PresetPickerModal({
     return [...known, ...extras];
   }, [presets]);
 
-  const [activeChannel, setActiveChannel] = useState<string>(
-    channelsInOrder[0] ?? "custom"
-  );
+  // Arranca en "Paquetes": un click agrega todo un canal (o un grupo del
+  // canal); la lista completa por canal sigue disponible al lado.
+  const [activeChannel, setActiveChannel] = useState<string>("packs");
   // Selection persists across channel switches so the user can pick items
   // from several channels before confirming.
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -3183,6 +3405,51 @@ function PresetPickerModal({
     });
   };
 
+  // Paquetes: uno por canal completo y uno por cada grupo del canal con 2+
+  // formatos. Solo cuentan los formatos que aún no están agregados.
+  const packs = useMemo(() => {
+    const out: { id: string; label: string; sublabel: string; presetIds: number[]; total: number }[] = [];
+    for (const c of channelsInOrder) {
+      const inChannel = presets.filter((p) => p.channel === c);
+      const free = inChannel.filter((p) => !usedPresetIds.has(p.id));
+      out.push({
+        id: `ch:${c}`,
+        label: `${CHANNEL_LABEL[c] ?? c} completo`,
+        sublabel: inChannel.map((p) => `${p.width}×${p.height}`).join(" · "),
+        presetIds: free.map((p) => p.id),
+        total: inChannel.length,
+      });
+      const byGroup = new Map<string, FormatPreset[]>();
+      for (const p of inChannel) {
+        const key = p.group_name ?? "";
+        if (!key) continue;
+        byGroup.set(key, [...(byGroup.get(key) ?? []), p]);
+      }
+      if (byGroup.size > 1) {
+        for (const [g, items] of byGroup) {
+          if (items.length < 2) continue;
+          out.push({
+            id: `grp:${c}:${g}`,
+            label: `${CHANNEL_LABEL[c] ?? c} · ${g}`,
+            sublabel: items.map((p) => `${p.width}×${p.height}`).join(" · "),
+            presetIds: items.filter((p) => !usedPresetIds.has(p.id)).map((p) => p.id),
+            total: items.length,
+          });
+        }
+      }
+    }
+    return out;
+  }, [channelsInOrder, presets, usedPresetIds]);
+  const packSelected = (ids: number[]) => ids.length > 0 && ids.every((id) => selected.has(id));
+  const togglePack = (ids: number[]) => {
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (packSelected(ids)) for (const id of ids) next.delete(id);
+      else for (const id of ids) next.add(id);
+      return next;
+    });
+  };
+
   // Custom form state
   const [customName, setCustomName] = useState("");
   const [customW, setCustomW] = useState("1080");
@@ -3202,8 +3469,8 @@ function PresetPickerModal({
           <div>
             <h2 className="text-sm font-semibold">Agregar adaptaciones</h2>
             <p className="text-xs text-muted-foreground">
-              Elegí uno o varios formatos del catálogo (podés seleccionar de
-              distintos canales) o creá uno personalizado.
+              Agrega un paquete completo por canal, elige formatos sueltos del
+              catálogo o crea uno personalizado.
             </p>
           </div>
           <Button variant="ghost" size="icon" onClick={onClose}>
@@ -3214,6 +3481,19 @@ function PresetPickerModal({
         <div className="flex flex-1 min-h-0">
           {/* Channel sidebar */}
           <aside className="w-44 shrink-0 border-r border-border/50 p-2 overflow-y-auto">
+            <button
+              type="button"
+              onClick={() => setActiveChannel("packs")}
+              className={cn(
+                "w-full text-left text-xs px-2 py-1.5 rounded-md transition-colors flex items-center gap-2 mb-1 border-b border-border/30 pb-2",
+                activeChannel === "packs"
+                  ? "bg-primary/10 text-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <Boxes className="h-3.5 w-3.5" />
+              Paquetes
+            </button>
             {channelsInOrder.map((c) => {
               const countInChannel = presets.filter(
                 (p) => p.channel === c && selected.has(p.id)
@@ -3255,10 +3535,55 @@ function PresetPickerModal({
 
           {/* Presets grid */}
           <div className="flex-1 overflow-y-auto p-4">
-            {activeChannel === "custom" ? (
+            {activeChannel === "packs" ? (
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Un click agrega todos los formatos del canal. Después puedes
+                  quitar los que no necesites o sumar sueltos desde la lista.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {packs.map((pk) => {
+                    const allUsed = pk.presetIds.length === 0;
+                    const on = packSelected(pk.presetIds);
+                    return (
+                      <button
+                        key={pk.id}
+                        type="button"
+                        onClick={() => !allUsed && togglePack(pk.presetIds)}
+                        disabled={allUsed}
+                        className={cn(
+                          "border rounded-md p-3 text-left transition-colors",
+                          allUsed
+                            ? "border-border/30 opacity-50 cursor-not-allowed"
+                            : on
+                              ? "border-primary bg-primary/10"
+                              : "border-border/50 hover:bg-muted hover:border-foreground/30",
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Boxes className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <p className="text-sm font-medium flex-1 truncate">{pk.label}</p>
+                          {allUsed ? (
+                            <span className="text-[10px] text-muted-foreground">Ya agregado</span>
+                          ) : on ? (
+                            <Check className="h-4 w-4 text-primary shrink-0" />
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground">
+                              {pk.presetIds.length}
+                              {pk.presetIds.length !== pk.total ? ` de ${pk.total}` : ""} formatos
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-1 line-clamp-2">{pk.sublabel}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : activeChannel === "custom" ? (
               <div className="max-w-md space-y-3">
                 <p className="text-xs text-muted-foreground">
-                  Definí un tamaño que no está en el catálogo. Se agrega al
+                  Define un tamaño que no está en el catálogo. Se agrega al
                   instante (no requiere confirmar selección).
                 </p>
                 <input
