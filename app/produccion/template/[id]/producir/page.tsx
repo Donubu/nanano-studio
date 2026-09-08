@@ -1872,13 +1872,13 @@ export default function ProducirPage() {
           className="bg-card rounded-xl border border-border/50 overflow-hidden scroll-mt-4"
         >
           {/* Barra de ajustes avanzados. Por defecto el productor ve el lienzo
-              del master y la tira de orientaciones; brand kit base y dataset
-              aparecen al abrirla. */}
+              del master, la tira de orientaciones y el acordeón de variables y
+              datos; el brand kit base aparece al abrirla. */}
           {editingId == null && (
             <div className="flex items-center justify-between gap-2 px-4 py-1.5 border-b border-border/30 bg-muted/10 text-xs">
               <span className="text-muted-foreground">
                 {advancedOpen
-                  ? "Ajustes avanzados visibles: brand kit base y datos."
+                  ? "Ajustes avanzados visibles: brand kit base."
                   : "Diseña el master; las orientaciones de arriba se derivan solas y los formatos salen de ellas."}
               </span>
               <button
@@ -1890,7 +1890,7 @@ export default function ProducirPage() {
                     ? "border-foreground/40 bg-foreground/10 text-foreground"
                     : "border-border/50 text-muted-foreground hover:text-foreground hover:border-foreground/40",
                 )}
-                title="Brand kit base, dataset CSV y regenerar preview"
+                title="Brand kit base y regenerar preview"
               >
                 <Settings2 className="h-3.5 w-3.5" />
                 {advancedOpen ? "Ocultar avanzado" : "Avanzado"}
@@ -1942,7 +1942,6 @@ export default function ProducirPage() {
                 dataRow={previewRow}
                 topAccessory={variantsStripNode}
                 rightAccessory={
-                  advancedOpen || dataset ? (
                   <DatasetPanel
                     detectedVariables={detectedVariables}
                     dataset={dataset}
@@ -1955,7 +1954,6 @@ export default function ProducirPage() {
                     onSelectRow={(i) => setSelectedRowIdx(i)}
                     onClear={handleClearDataset}
                   />
-                  ) : undefined
                 }
               />
             ) : editingAdaptation && adaptInitialDefinition ? (
