@@ -40,6 +40,13 @@ export interface BaseLayer {
   locked?: boolean;
   constraints?: Constraints;
   shadow?: DropShadow;
+  // Volteo horizontal / vertical (scaleX(-1) / scaleY(-1)). Estático, no
+  // animable; se compone con rotation/scale en el transform.
+  flipX?: boolean;
+  flipY?: boolean;
+  // Candado de proporción al redimensionar desde el canvas (equivale a
+  // mantener Shift). Solo afecta la interacción, no el render.
+  lockAspect?: boolean;
   // Transformaciones extra que el motor de animación puede animar. Default
   // 1 / 0 — no afectan el render cuando no se setean ni hay tracks que los
   // animen. Se aplican como CSS transform/filter por encima de position +
@@ -171,6 +178,11 @@ export interface ImageLayer extends BaseLayer {
   src: string | null;
   fit?: "cover" | "contain" | "fill";
   cornerRadius?: number;
+  // Punto focal en % (0-100) del ancho/alto de la imagen. Con fit=cover
+  // decide qué parte sobrevive al recorte (object-position). Default 50/50
+  // = centro. Clave en adaptaciones verticales de fotos horizontales.
+  focalX?: number;
+  focalY?: number;
 }
 
 export type ShapeKind = "rect" | "ellipse";

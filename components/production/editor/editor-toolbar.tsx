@@ -16,6 +16,8 @@ import {
   Tag,
   Smile,
   ShieldCheck,
+  Grid3x3,
+  Ruler,
 } from "lucide-react";
 import { SaveStatus } from "@/lib/production/use-template-editor";
 import { cn, formatDateTimeLocal } from "@/lib/utils";
@@ -40,6 +42,13 @@ interface Props {
   // punteado al 5% del borde. Es un visual-aid, no afecta export.
   showSafetyZone: boolean;
   onToggleSafetyZone: () => void;
+  // Grilla y reglas (ayudas visuales del canvas).
+  showGrid?: boolean;
+  onToggleGrid?: () => void;
+  gridSize?: number;
+  onGridSizeChange?: (n: number) => void;
+  showRulers?: boolean;
+  onToggleRulers?: () => void;
   // Orientación de la barra. "horizontal" es la default histórica (banda
   // arriba del canvas con labels al lado del ícono). "vertical" es un
   // strip angosto a la izquierda del canvas con botones icon-only — pensado
@@ -119,6 +128,12 @@ export function EditorToolbar({
   canRedo,
   showSafetyZone,
   onToggleSafetyZone,
+  showGrid,
+  onToggleGrid,
+  gridSize = 20,
+  onGridSizeChange,
+  showRulers,
+  onToggleRulers,
   orientation = "horizontal",
 }: Props) {
   const isVertical = orientation === "vertical";
@@ -177,6 +192,40 @@ export function EditorToolbar({
         active={showSafetyZone}
         iconOnly={isVertical}
       />
+      {onToggleGrid && (
+        <ToolbarBtn
+          onClick={onToggleGrid}
+          title="Grilla: líneas cada N px del canvas. Al mover, las capas se pegan a la grilla si no hay otra guía más cercana (Alt = libre). No afecta la exportación."
+          label="Grilla"
+          icon={Grid3x3}
+          active={!!showGrid}
+          iconOnly={isVertical}
+        />
+      )}
+      {onToggleGrid && showGrid && !isVertical && onGridSizeChange && (
+        <select
+          value={gridSize}
+          onChange={(e) => onGridSizeChange(Number(e.target.value))}
+          className="bg-muted border border-border/50 rounded px-1 py-1 text-[10px]"
+          title="Tamaño de la grilla en px del canvas"
+        >
+          {[8, 10, 16, 20, 24, 32, 40, 50, 64, 100].map((n) => (
+            <option key={n} value={n}>
+              {n} px
+            </option>
+          ))}
+        </select>
+      )}
+      {onToggleRulers && (
+        <ToolbarBtn
+          onClick={onToggleRulers}
+          title="Reglas: escala en px del canvas arriba y a la izquierda."
+          label="Reglas"
+          icon={Ruler}
+          active={!!showRulers}
+          iconOnly={isVertical}
+        />
+      )}
 
       {onOpenProjectBrandKit && (
         <ToolbarBtn

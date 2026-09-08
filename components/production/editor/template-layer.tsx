@@ -84,8 +84,10 @@ function shadowKind(layer: TemplateLayer): "box" | "text" {
 function transformCss(layer: TemplateLayer): string | undefined {
   const parts: string[] = [];
   if (layer.rotation) parts.push(`rotate(${layer.rotation}deg)`);
-  const sx = layer.scaleX ?? layer.scale ?? 1;
-  const sy = layer.scaleY ?? layer.scale ?? 1;
+  // Flip se compone multiplicando el scale por -1 en el eje: así convive
+  // con scale animado y con rotation sin ambigüedad de orden.
+  const sx = (layer.scaleX ?? layer.scale ?? 1) * (layer.flipX ? -1 : 1);
+  const sy = (layer.scaleY ?? layer.scale ?? 1) * (layer.flipY ? -1 : 1);
   if (sx !== 1 || sy !== 1) {
     parts.push(sx === sy ? `scale(${sx})` : `scale(${sx}, ${sy})`);
   }
@@ -278,7 +280,10 @@ function renderFrame(
         : undefined,
     borderRadius: layer.cornerRadius,
     ...(isStack ? stackToFlexStyle(layer.layout as StackLayout) : {}),
-    overflow: "hidden",
+    // Un frame con fondo o radio recorta a sus hijos (es una "tarjeta"). Un
+    // grupo (fondo transparente, sin radio) no: igual que en Figma, sus hijos
+    // pueden asomarse fuera de la caja sin desaparecer.
+    overflow: (!bg || bg.type === "transparent") && !layer.cornerRadius ? "visible" : "hidden",
   };
   const childParentMode: "free" | "stack" = isStack ? "stack" : "free";
   return (
@@ -392,6 +397,7 @@ function renderImage(layer: ImageLayer, parentMode: "free" | "stack", common: Co
             width: "100%",
             height: "100%",
             objectFit: layer.fit ?? "cover",
+            objectPosition: `${layer.focalX ?? 50}% ${layer.focalY ?? 50}%`,
             pointerEvents: "none",
             userSelect: "none",
           }}

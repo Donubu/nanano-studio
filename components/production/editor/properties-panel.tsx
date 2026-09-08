@@ -19,6 +19,14 @@ import {
   Pipette,
   Upload,
   Combine,
+  Eye,
+  EyeOff,
+  FlipHorizontal2,
+  FlipVertical2,
+  Italic,
+  LockKeyhole,
+  UnlockKeyhole,
+  Group,
 } from "lucide-react";
 import * as LucideIcons from "lucide-react";
 import {
@@ -152,6 +160,8 @@ interface Props {
   // hook según la selección actual.
   onMerge?: () => void;
   canMerge?: boolean;
+  onGroup?: () => void;
+  canGroup?: boolean;
   onUpdateLayer: (id: string, mutator: (layer: TemplateLayer) => TemplateLayer) => void;
   onUpdateRoot: (mutator: (root: TemplateDefinition) => TemplateDefinition) => void;
   brandKit?: BrandKitContent;
@@ -781,6 +791,8 @@ export function PropertiesPanel({
   onCollapse,
   onMerge,
   canMerge,
+  onGroup,
+  canGroup,
   embedded = false,
 }: Props) {
   const noSelection = !selectedLayer;
@@ -830,6 +842,8 @@ export function PropertiesPanel({
             onDistribute={onDistribute}
             onMerge={onMerge}
             canMerge={canMerge}
+            onGroup={onGroup}
+            canGroup={canGroup}
           />
         )}
 
@@ -866,6 +880,8 @@ function MultiSelectAlignPanel({
   onDistribute,
   onMerge,
   canMerge,
+  onGroup,
+  canGroup,
 }: {
   count: number;
   onAlign?: (
@@ -882,6 +898,8 @@ function MultiSelectAlignPanel({
   // hook según la selección actual.
   onMerge?: () => void;
   canMerge?: boolean;
+  onGroup?: () => void;
+  canGroup?: boolean;
 }) {
   const canDistribute = count >= 3;
   const btnClass =
@@ -940,6 +958,23 @@ function MultiSelectAlignPanel({
           </button>
         </div>
       </div>
+      {canGroup && (
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">
+            Grupo
+          </p>
+          <button
+            type="button"
+            onClick={onGroup}
+            className="w-full flex items-center justify-center gap-1.5 h-9 rounded border border-border/50 hover:bg-muted text-xs font-medium transition-colors"
+            title="Agrupar la selección en un frame (⌘G). El grupo se mueve, anima y adapta como una unidad."
+          >
+            <Group className="h-4 w-4" />
+            Agrupar
+            <span className="text-[10px] text-muted-foreground ml-1">⌘G</span>
+          </button>
+        </div>
+      )}
       {canMerge && (
         <div>
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">
@@ -1106,6 +1141,8 @@ function LayerProps({
           }
         />
       </Section>
+
+      <AppearanceSection layer={layer} onUpdate={onUpdate} animatedProps={animatedProps} />
 
       <ConstraintsControls
         layer={layer}
@@ -1373,7 +1410,39 @@ function TextProps({
               </option>
             ))}
           </select>
+          <button
+            type="button"
+            onClick={() => updateStyle({ italic: !layer.style.italic })}
+            title="Cursiva"
+            className={cn(
+              "h-7 w-7 flex items-center justify-center rounded border transition-colors",
+              layer.style.italic
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            <Italic className="h-3.5 w-3.5" />
+          </button>
         </div>
+        {/* Interlineado (multiplicador) e interletrado (px). Antes existían
+            en el schema y en los presets pero sin control: un diseñador no
+            podía ajustar el tracking de un titular. */}
+        <NumberRow
+          label="Interl."
+          value={layer.style.lineHeight ?? 1.2}
+          min={0.5}
+          max={4}
+          step={0.05}
+          onChange={(v) => updateStyle({ lineHeight: Math.max(0.5, v) })}
+        />
+        <NumberRow
+          label="Espac."
+          value={layer.style.letterSpacing ?? 0}
+          min={-20}
+          max={100}
+          step={0.5}
+          onChange={(v) => updateStyle({ letterSpacing: v })}
+        />
         <ColorRow
           label="Color"
           value={layer.style.color}
@@ -1726,6 +1795,7 @@ function ImageProps({
   };
 
   return (
+    <>
     <Section title="Imagen">
       <TokenTextRow
         label="Logo"
@@ -1835,6 +1905,207 @@ function ImageProps({
           )
         }
       />
+    </Section>
+    <FocalPointSection layer={layer} onUpdate={onUpdate} />
+    </>
+  );
+}
+
+// Punto focal: qué parte de la imagen sobrevive al recorte cuando fit=cover.
+// Click sobre la miniatura fija el punto; los 9 botones son atajos a los
+// tercios. Es la pieza que faltaba para que "se adapte solo" no corte la
+// cara del modelo al pasar de horizontal a vertical.
+function FocalPointSection({
+  layer,
+  onUpdate,
+}: {
+  layer: ImageLayer;
+  onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
+}) {
+  const fx = layer.focalX ?? 50;
+  const fy = layer.focalY ?? 50;
+  const set = (x: number, y: number) =>
+    onUpdate(layer.id, (l) =>
+      l.type === "image"
+        ? { ...l, focalX: Math.round(Math.max(0, Math.min(100, x))), focalY: Math.round(Math.max(0, Math.min(100, y))) }
+        : l,
+    );
+  const isCover = (layer.fit ?? "cover") === "cover";
+  return (
+    <Section title="Punto focal">
+      {layer.src ? (
+        <div
+          className="relative w-full rounded border border-border/50 overflow-hidden bg-muted/30 cursor-crosshair select-none"
+          style={{ aspectRatio: "16 / 9" }}
+          title="Click para fijar el punto focal"
+          onPointerDown={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            // Coordenadas relativas a la imagen contenida (contain) dentro
+            // de la caja: aproximamos con la caja completa, suficiente para
+            // elegir "la cara está arriba a la derecha".
+            set(((e.clientX - r.left) / r.width) * 100, ((e.clientY - r.top) / r.height) * 100);
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={layer.src} alt="" draggable={false} className="w-full h-full object-fill pointer-events-none" />
+          <span
+            className="absolute h-3 w-3 -ml-1.5 -mt-1.5 rounded-full border-2 border-white shadow ring-1 ring-black/40 pointer-events-none"
+            style={{ left: `${fx}%`, top: `${fy}%`, background: "rgb(139, 92, 246)" }}
+          />
+        </div>
+      ) : (
+        <p className="text-[10px] text-muted-foreground">Sube una imagen para elegir el punto focal.</p>
+      )}
+      <div className="grid grid-cols-3 gap-1">
+        {[0, 50, 100].map((y) =>
+          [0, 50, 100].map((x) => (
+            <button
+              key={`${x}-${y}`}
+              type="button"
+              onClick={() => set(x, y)}
+              title={`${x}% / ${y}%`}
+              className={cn(
+                "h-5 rounded border transition-colors",
+                fx === x && fy === y
+                  ? "border-primary bg-primary/20"
+                  : "border-border/50 hover:bg-muted",
+              )}
+            />
+          )),
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <NumberRow label="X %" value={fx} min={0} max={100} onChange={(v) => set(v, fy)} />
+        <NumberRow label="Y %" value={fy} min={0} max={100} onChange={(v) => set(fx, v)} />
+      </div>
+      {!isCover && (
+        <p className="text-[10px] text-muted-foreground">
+          Solo afecta con ajuste <span className="font-medium">cover</span>; con contain o fill la imagen no se recorta.
+        </p>
+      )}
+    </Section>
+  );
+}
+
+// Apariencia estática común a todas las capas: opacidad, rotación, flip,
+// visibilidad y candado de proporción. Estos campos ya existían en el modelo
+// (y en la timeline) pero no tenían control estático en el panel.
+function AppearanceSection({
+  layer,
+  onUpdate,
+  animatedProps,
+}: {
+  layer: TemplateLayer;
+  onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
+  animatedProps: AnimatedPropertySet;
+}) {
+  const opacityPct = Math.round((layer.opacity ?? 1) * 100);
+  const rotation = Math.round(((layer.rotation ?? 0) + 540) % 360 - 180);
+  const toggleClass = (on: boolean) =>
+    cn(
+      "flex-1 flex items-center justify-center gap-1 h-7 rounded border text-[10px] transition-colors",
+      on
+        ? "border-primary bg-primary/10 text-foreground"
+        : "border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground",
+    );
+  return (
+    <Section title="Apariencia">
+      <label className="flex items-center gap-2 text-xs">
+        <span className="w-12 text-muted-foreground flex items-center gap-1">
+          {animatedProps.has("opacity") && <AnimatedDot label="Opacidad animada" />}
+          Opacid.
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={opacityPct}
+          onChange={(e) =>
+            onUpdate(layer.id, (l) => ({ ...l, opacity: Number(e.target.value) / 100 }))
+          }
+          className="flex-1 accent-primary"
+        />
+        <input
+          type="number"
+          min={0}
+          max={100}
+          value={opacityPct}
+          onChange={(e) =>
+            onUpdate(layer.id, (l) => ({
+              ...l,
+              opacity: Math.max(0, Math.min(100, Number(e.target.value))) / 100,
+            }))
+          }
+          className="w-14 bg-muted border border-border/50 rounded px-1.5 py-1 text-xs text-right"
+        />
+      </label>
+      <label className="flex items-center gap-2 text-xs">
+        <span className="w-12 text-muted-foreground flex items-center gap-1">
+          {animatedProps.has("rotation") && <AnimatedDot label="Rotación animada" />}
+          Rotac.
+        </span>
+        <input
+          type="number"
+          min={-180}
+          max={180}
+          step={1}
+          value={rotation}
+          onChange={(e) =>
+            onUpdate(layer.id, (l) => ({ ...l, rotation: Number(e.target.value) || 0 }))
+          }
+          className="flex-1 bg-muted border border-border/50 rounded px-2 py-1 text-xs"
+        />
+        <span className="text-muted-foreground">°</span>
+        <button
+          type="button"
+          onClick={() => onUpdate(layer.id, (l) => ({ ...l, rotation: 0 }))}
+          disabled={!layer.rotation}
+          className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+          title="Volver a 0°"
+        >
+          0°
+        </button>
+      </label>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => onUpdate(layer.id, (l) => ({ ...l, flipX: !l.flipX || undefined }))}
+          className={toggleClass(!!layer.flipX)}
+          title="Voltear horizontalmente"
+        >
+          <FlipHorizontal2 className="h-3.5 w-3.5" /> Flip H
+        </button>
+        <button
+          type="button"
+          onClick={() => onUpdate(layer.id, (l) => ({ ...l, flipY: !l.flipY || undefined }))}
+          className={toggleClass(!!layer.flipY)}
+          title="Voltear verticalmente"
+        >
+          <FlipVertical2 className="h-3.5 w-3.5" /> Flip V
+        </button>
+      </div>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() =>
+            onUpdate(layer.id, (l) => ({ ...l, visible: l.visible === false ? undefined : false }))
+          }
+          className={toggleClass(layer.visible !== false)}
+          title={layer.visible === false ? "Mostrar capa" : "Ocultar capa (no se exporta)"}
+        >
+          {layer.visible === false ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+          {layer.visible === false ? "Oculta" : "Visible"}
+        </button>
+        <button
+          type="button"
+          onClick={() => onUpdate(layer.id, (l) => ({ ...l, lockAspect: !l.lockAspect || undefined }))}
+          className={toggleClass(!!layer.lockAspect)}
+          title="Mantener proporción al redimensionar desde el canvas (como tener Shift apretado)"
+        >
+          {layer.lockAspect ? <LockKeyhole className="h-3.5 w-3.5" /> : <UnlockKeyhole className="h-3.5 w-3.5" />}
+          Proporción
+        </button>
+      </div>
     </Section>
   );
 }

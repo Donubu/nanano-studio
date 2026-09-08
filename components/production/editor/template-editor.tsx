@@ -210,6 +210,35 @@ export function TemplateEditor({
   // distintos márgenes para distintas piezas, abre el toggle, edita, lo
   // apaga. La constante de 5% vive en TemplateCanvas.
   const [showSafetyZone, setShowSafetyZone] = useState(false);
+  // Grilla y reglas: preferencias del productor, persistidas por navegador.
+  const [showGrid, setShowGrid] = useState(false);
+  const [gridSize, setGridSize] = useState(20);
+  const [showRulers, setShowRulers] = useState(false);
+  // viewLoadedRef evita que el efecto de escritura pise lo guardado antes de
+  // que la lectura haya aplicado (en dev, StrictMode monta dos veces y sin
+  // esto el segundo montaje leía los defaults recién escritos).
+  const viewLoadedRef = useRef(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("prod-editor-view");
+      if (raw) {
+        const v = JSON.parse(raw) as { grid?: boolean; gridSize?: number; rulers?: boolean };
+        if (typeof v.grid === "boolean") setShowGrid(v.grid);
+        if (typeof v.gridSize === "number" && v.gridSize >= 2) setGridSize(v.gridSize);
+        if (typeof v.rulers === "boolean") setShowRulers(v.rulers);
+      }
+    } catch {}
+    viewLoadedRef.current = true;
+  }, []);
+  useEffect(() => {
+    if (!viewLoadedRef.current) return;
+    try {
+      localStorage.setItem(
+        "prod-editor-view",
+        JSON.stringify({ grid: showGrid, gridSize, rulers: showRulers }),
+      );
+    } catch {}
+  }, [showGrid, gridSize, showRulers]);
 
   const openContextMenu = useCallback(
     (clientX: number, clientY: number, layerId: string) => {
@@ -297,6 +326,19 @@ export function TemplateEditor({
           editor.duplicateLayer(editor.selectedId);
           return;
         }
+        // Agrupar / desagrupar (Figma: ⌘G / ⌘⇧G).
+        if (key === "g" && !previewSize) {
+          if (e.shiftKey) {
+            if (editor.canUngroupSelection) {
+              e.preventDefault();
+              editor.ungroupSelected();
+            }
+          } else if (editor.canGroupSelection) {
+            e.preventDefault();
+            editor.groupSelected();
+          }
+          return;
+        }
         // Z-order keyboard shortcuts (Figma convention):
         //   Cmd+]        → forward (sube 1 nivel)
         //   Cmd+[        → backward (baja 1 nivel)
@@ -331,6 +373,27 @@ export function TemplateEditor({
           const src = styleClipboardRef.current;
           const targetId = editor.selectedLayer.id;
           editor.updateLayer(targetId, (l) => applyStyleFromSource(l, src));
+          return;
+        }
+      }
+
+      // Flechas: mover la selección 1px (10px con Shift). Escape: deseleccionar.
+      if (!isTextField && !previewSize && !mod) {
+        const stepPx = e.shiftKey ? 10 : 1;
+        const arrows: Record<string, [number, number]> = {
+          ArrowLeft: [-stepPx, 0],
+          ArrowRight: [stepPx, 0],
+          ArrowUp: [0, -stepPx],
+          ArrowDown: [0, stepPx],
+        };
+        const delta = arrows[e.key];
+        if (delta && (editor.selectedIds.length > 0 || (editor.selectedId && editor.selectedId !== "tpl_root"))) {
+          e.preventDefault();
+          editor.nudgeSelected(delta[0], delta[1]);
+          return;
+        }
+        if (e.key === "Escape" && (editor.selectedId || editor.selectedIds.length > 0)) {
+          editor.select(null);
           return;
         }
       }
@@ -376,6 +439,12 @@ export function TemplateEditor({
           onReorder={(op) => editor.reorderInParent(contextMenu.layerId, op)}
           onDuplicate={() => editor.duplicateLayer(contextMenu.layerId)}
           onToggleLock={() => editor.toggleLock(contextMenu.layerId)}
+          onGroup={editor.canGroupSelection ? editor.groupSelected : undefined}
+          onUngroup={
+            editor.canUngroupSelection && editor.selectedId === contextMenu.layerId
+              ? editor.ungroupSelected
+              : undefined
+          }
           onDelete={() => editor.deleteLayer(contextMenu.layerId)}
         />
       )}
@@ -407,6 +476,7 @@ export function TemplateEditor({
               onDelete={editor.deleteLayer}
               onReorder={editor.reorderRootChildren}
               onToggleLock={editor.toggleLock}
+              onToggleVisible={editor.toggleVisible}
               onLayerContextMenu={previewSize ? undefined : openContextMenu}
               onCollapse={() => setLayersCollapsed(true)}
             />
@@ -495,6 +565,12 @@ export function TemplateEditor({
                 canRedo={editor.canRedo}
                 showSafetyZone={showSafetyZone}
                 onToggleSafetyZone={() => setShowSafetyZone((v) => !v)}
+                showGrid={showGrid}
+                onToggleGrid={() => setShowGrid((v) => !v)}
+                gridSize={gridSize}
+                onGridSizeChange={setGridSize}
+                showRulers={showRulers}
+                onToggleRulers={() => setShowRulers((v) => !v)}
               />
             </div>
             <TemplateCanvas
@@ -508,6 +584,9 @@ export function TemplateEditor({
               dataRow={dataRow}
               onLayerContextMenu={openContextMenu}
               showSafetyZone={showSafetyZone}
+              showGrid={showGrid}
+              gridSize={gridSize}
+              showRulers={showRulers}
             />
           </div>
           <TimelinePanel
@@ -580,6 +659,8 @@ export function TemplateEditor({
                 onDistribute={editor.distributeSelected}
                 onMerge={editor.mergeSelectedIntoButton}
                 canMerge={editor.canMergeSelection}
+                onGroup={editor.groupSelected}
+                canGroup={editor.canGroupSelection}
                 onUpdateLayer={updateLayerAutoKf}
                 onUpdateRoot={editor.updateRoot}
                 brandKit={brandKit}

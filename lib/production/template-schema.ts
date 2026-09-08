@@ -74,6 +74,9 @@ const baseLayerSchema = z.object({
   scaleX: z.number().min(0).max(100).optional(),
   scaleY: z.number().min(0).max(100).optional(),
   blur: z.number().min(0).max(200).optional(),
+  flipX: z.boolean().optional(),
+  flipY: z.boolean().optional(),
+  lockAspect: z.boolean().optional(),
 });
 
 // fontSize puede ser número, token string "{scale.X}", o FontSizeRange.
@@ -123,6 +126,8 @@ const imageLayerSchema = baseLayerSchema.extend({
   src: z.string().max(2000).nullable(),
   fit: z.enum(["cover", "contain", "fill"]).optional(),
   cornerRadius: z.number().int().min(0).max(2000).optional(),
+  focalX: z.number().min(0).max(100).optional(),
+  focalY: z.number().min(0).max(100).optional(),
 });
 
 const shapeLayerSchema = baseLayerSchema.extend({

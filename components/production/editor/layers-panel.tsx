@@ -2,7 +2,7 @@
 
 import { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, useState } from "react";
 import { cn } from "@/lib/utils";
-import { Trash2, Type, Image as ImageIcon, Square, Layers as LayersIcon, GripVertical, Lock, Unlock, PanelLeftClose, Braces, Smile } from "lucide-react";
+import { Trash2, Type, Image as ImageIcon, Square, Layers as LayersIcon, GripVertical, Lock, Unlock, PanelLeftClose, Braces, Smile, Eye, EyeOff } from "lucide-react";
 import {
   TemplateDefinition,
   TemplateLayer,
@@ -20,6 +20,7 @@ interface Props {
   onDelete: (id: string) => void;
   onReorder: (sourceId: string, targetId: string, position: "before" | "after") => void;
   onToggleLock: (id: string) => void;
+  onToggleVisible?: (id: string) => void;
   onLayerContextMenu?: (clientX: number, clientY: number, layerId: string) => void;
   // Cuando viene, el panel muestra un botón para colapsarse. El padre
   // controla el estado abierto/cerrado.
@@ -85,6 +86,7 @@ export function LayersPanel({
   onDelete,
   onReorder,
   onToggleLock,
+  onToggleVisible,
   onLayerContextMenu,
   onCollapse,
 }: Props) {
@@ -267,7 +269,7 @@ export function LayersPanel({
                   )}
                 >
                   {iconFor(layer)}
-                  <span className={cn("truncate flex-1", isLocked && "italic")}>
+                  <span className={cn("truncate flex-1", isLocked && "italic", layer.visible === false && "opacity-50 line-through")}>
                     {defaultName(layer)}
                   </span>
                   {vars.length > 0 && (
@@ -279,6 +281,24 @@ export function LayersPanel({
                     </span>
                   )}
                 </button>
+                {onToggleVisible && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleVisible(layer.id);
+                    }}
+                    className={cn(
+                      "px-1.5 py-1 transition-all",
+                      layer.visible === false
+                        ? "opacity-100 text-muted-foreground"
+                        : "opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground"
+                    )}
+                    title={layer.visible === false ? "Mostrar" : "Ocultar"}
+                  >
+                    {layer.visible === false ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={(e) => {

@@ -13,6 +13,8 @@ import {
   Lock,
   Unlock,
   Trash2,
+  Group,
+  Ungroup,
 } from "lucide-react";
 import { TemplateLayer } from "@/lib/production/types";
 
@@ -32,6 +34,10 @@ interface Props {
   onDuplicate: () => void;
   onToggleLock: () => void;
   onDelete: () => void;
+  // Agrupar (selección múltiple) / desagrupar (frame seleccionado). Vienen
+  // undefined cuando no aplican y el ítem no se muestra.
+  onGroup?: () => void;
+  onUngroup?: () => void;
 }
 
 const MENU_WIDTH = 220;
@@ -47,6 +53,8 @@ export function LayerContextMenu({
   onDuplicate,
   onToggleLock,
   onDelete,
+  onGroup,
+  onUngroup,
 }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -122,6 +130,16 @@ export function LayerContextMenu({
 
       <Divider />
 
+      {onGroup && (
+        <MenuItem icon={<Group className="h-3.5 w-3.5" />} onClick={wrap(onGroup)} shortcut="⌘G">
+          Agrupar
+        </MenuItem>
+      )}
+      {onUngroup && (
+        <MenuItem icon={<Ungroup className="h-3.5 w-3.5" />} onClick={wrap(onUngroup)} shortcut="⌘⇧G">
+          Desagrupar
+        </MenuItem>
+      )}
       <MenuItem icon={<Copy className="h-3.5 w-3.5" />} onClick={wrap(onDuplicate)} shortcut="⌘D">
         Duplicar
       </MenuItem>

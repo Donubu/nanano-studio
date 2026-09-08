@@ -44,6 +44,11 @@ interface Props {
   // bordes (story de Instagram con UI overlay, foto de perfil cuando el banner
   // se usa como cover, etc).
   showSafetyZone?: boolean;
+  // Grilla (en unidades del canvas) y reglas. Ambas son ayudas visuales; la
+  // grilla además atrae al mover cuando no hay otro snap más cercano.
+  showGrid?: boolean;
+  gridSize?: number;
+  showRulers?: boolean;
 }
 
 type Bounds = { x: number; y: number; w: number; h: number };
@@ -70,6 +75,8 @@ type DragOp =
       startMouseY: number;
       startBounds: Bounds;
       aspectRatio: number;
+      // Candado de proporción persistente del layer (layer.lockAspect).
+      lockAspect: boolean;
     };
 
 interface Guide {
@@ -92,6 +99,9 @@ export function TemplateCanvas({
   dataRow,
   onLayerContextMenu,
   showSafetyZone = false,
+  showGrid = false,
+  gridSize = 20,
+  showRulers = false,
 }: Props) {
   const isPreview = !!previewSize;
   // In preview mode, render against a reflowed clone derived from constraints.
@@ -138,6 +148,61 @@ export function TemplateCanvas({
   // el layer id. Renderizamos via applyGhostBounds iterando.
   const [ghosts, setGhosts] = useState<Record<string, Bounds>>({});
   const [guides, setGuides] = useState<Guide[]>([]);
+
+  // Selección tipo Figma para grupos: un click sobre un hijo selecciona el
+  // grupo más externo que lo contiene; si la selección ya está dentro de ese
+  // grupo, el click baja un nivel; doble click entra directo al hijo. El
+  // panel de capas no pasa por acá, así que desde ahí siempre es directo.
+  const lastClickRef = useRef<{ id: string; t: number } | null>(null);
+  const resolveGroupTarget = (rawId: string): string => {
+    const chain = ancestorGroups(definition, rawId);
+    if (chain.length === 0) return rawId;
+    // Si la capa ya está seleccionada (single o multi), el click es sobre
+    // ella misma: no la reemplazamos por el grupo.
+    if (selectedId === rawId || (selectedIds && selectedIds.includes(rawId))) return rawId;
+    // Si un grupo de la cadena está en la multi-selección, el click mueve
+    // ese grupo (multi-move del set).
+    if (selectedIds && selectedIds.length > 1) {
+      const inSet = chain.find((g) => selectedIds.includes(g));
+      if (inSet) return inSet;
+    }
+    // Profundidad "abierta": cuántos grupos de la cadena son ancestros de
+    // la selección actual. Si el productor ya está trabajando dentro del
+    // grupo (entró con doble click o desde el panel de capas), un click
+    // selecciona hermanos al mismo nivel; si no, selecciona el grupo externo.
+    // Tener el grupo seleccionado NO cuenta como estar dentro: así un
+    // click-arrastre sobre el grupo recién seleccionado lo mueve entero.
+    let depth = 0;
+    if (selectedId && selectedId !== "tpl_root") {
+      const selChain = ancestorGroups(definition, selectedId);
+      while (depth < chain.length && selChain.includes(chain[depth])) depth++;
+    }
+    return chain[depth] ?? rawId;
+  };
+  // TemplateLayerView llama onSelect y luego onLayerPointerDown en el mismo
+  // pointerdown (salvo cuando la capa ya está en multi-select, donde solo
+  // llama onLayerPointerDown). Guardamos el target resuelto en el select
+  // para que el drag use exactamente el mismo sin re-resolver contra un
+  // lastClickRef que acabamos de actualizar.
+  const pendingTargetRef = useRef<{ raw: string; target: string; t: number } | null>(null);
+  const handleLayerSelect = (id: string, opts?: { additive?: boolean }) => {
+    const now = Date.now();
+    const last = lastClickRef.current;
+    lastClickRef.current = { id, t: now };
+    const isDouble = !!last && last.id === id && now - last.t < 350;
+    const target = isDouble ? id : resolveGroupTarget(id);
+    pendingTargetRef.current = { raw: id, target, t: now };
+    onSelect(target, opts);
+  };
+  const handleLayerPointerDown = (e: ReactPointerEvent<HTMLDivElement>, layerId: string) => {
+    const pending = pendingTargetRef.current;
+    pendingTargetRef.current = null;
+    if (pending && pending.raw === layerId && Date.now() - pending.t < 100) {
+      startMove(e, pending.target);
+      return;
+    }
+    startMove(e, resolveGroupTarget(layerId));
+  };
 
   const startMove = (e: ReactPointerEvent<HTMLDivElement>, layerId: string) => {
     if (isPreview) return; // read-only
@@ -198,6 +263,7 @@ export function TemplateCanvas({
       startMouseY: e.clientY,
       startBounds,
       aspectRatio: startBounds.w / Math.max(1, startBounds.h),
+      lockAspect: !!layer.lockAspect,
     };
     (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
   };
@@ -223,7 +289,7 @@ export function TemplateCanvas({
         y: ["top", "centerY", "bottom"],
       };
     } else {
-      const aspectLock = e.shiftKey;
+      const aspectLock = e.shiftKey || drag.lockAspect;
       nextBounds = applyResize(drag.startBounds, drag.handle, dx, dy, aspectLock, drag.aspectRatio);
       activeEdges = edgesForHandle(drag.handle);
     }
@@ -234,7 +300,11 @@ export function TemplateCanvas({
     // para colocar libremente sin atracción.
     const parent = findParent(definition, drag.layerId);
     const parentIsStack = parent?.layout.mode === "stack";
-    const snapDisabled = parentIsStack || e.altKey;
+    // Capas dentro de un grupo trabajan en coordenadas locales del frame;
+    // los targets de snap están en coordenadas del canvas, así que ahí no
+    // aplicamos snap (sí grilla, que es invariante a la traslación entera).
+    const parentIsNested = parent != null && parent.id !== "tpl_root";
+    const snapDisabled = parentIsStack || parentIsNested || e.altKey;
 
     let snapped: Bounds;
     let nextGuides: Guide[];
@@ -251,6 +321,18 @@ export function TemplateCanvas({
       );
       snapped = result.snapped;
       nextGuides = result.guides;
+    }
+    // Snap a la grilla: solo al mover, cuando no hubo snap a otra capa y el
+    // productor no está forzando libre con Alt.
+    if (showGrid && drag.kind === "move" && !parentIsStack && !e.altKey && nextGuides.length === 0) {
+      const g = Math.max(2, gridSize);
+      const gx = Math.round(snapped.x / g) * g;
+      const gy = Math.round(snapped.y / g) * g;
+      snapped = {
+        ...snapped,
+        x: Math.abs(gx - snapped.x) <= snapThresholdWorld ? gx : snapped.x,
+        y: Math.abs(gy - snapped.y) <= snapThresholdWorld ? gy : snapped.y,
+      };
     }
 
     // Round to keep stored values clean.
@@ -432,8 +514,8 @@ export function TemplateCanvas({
                 layer={child}
                 selectedId={selectedId}
                 selectedIds={selectedIds}
-                onSelect={onSelect}
-                onLayerPointerDown={startMove}
+                onSelect={handleLayerSelect}
+                onLayerPointerDown={handleLayerPointerDown}
                 onLayerContextMenu={
                   isPreview || !onLayerContextMenu
                     ? undefined
@@ -449,7 +531,7 @@ export function TemplateCanvas({
                 bounds={
                   selectedParentIsStack && stackHandleBounds
                     ? stackHandleBounds
-                    : layerToBounds(selectedLayer)
+                    : absoluteBounds(renderTree, selectedLayer.id) ?? layerToBounds(selectedLayer)
                 }
                 scale={scale}
                 onHandlePointerDown={(e, handle) =>
@@ -472,6 +554,24 @@ export function TemplateCanvas({
                 }}
               />
             ))}
+
+            {/* Grilla: líneas cada gridSize unidades del canvas. El grosor se
+                compensa con 1/scale para que siempre mida ~1px en pantalla. */}
+            {showGrid && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  pointerEvents: "none",
+                  backgroundImage:
+                    `linear-gradient(to right, rgba(59,130,246,0.28) ${1 / scale}px, transparent ${1 / scale}px), ` +
+                    `linear-gradient(to bottom, rgba(59,130,246,0.28) ${1 / scale}px, transparent ${1 / scale}px)`,
+                  backgroundSize: `${Math.max(2, gridSize)}px ${Math.max(2, gridSize)}px`,
+                }}
+              />
+            )}
+
+            {showRulers && <Rulers baseW={baseW} baseH={baseH} scale={scale} />}
 
             {/* Zona segura: rectángulo punteado al 5% del canvas. Solo
                 indicador visual — no interfiere con drag ni con la
@@ -496,6 +596,103 @@ export function TemplateCanvas({
         </div>
       )}
     </div>
+  );
+}
+
+// Frames ancestros de una capa (excluyendo el root), del más externo al más
+// interno. Vacío si la capa cuelga directo del root.
+function ancestorGroups(root: TemplateDefinition, id: string): string[] {
+  const walk = (nodes: TemplateLayer[], path: string[]): string[] | null => {
+    for (const n of nodes) {
+      if (n.id === id) return path;
+      if (n.type === "frame") {
+        const inner = walk(n.children, [...path, n.id]);
+        if (inner) return inner;
+      }
+    }
+    return null;
+  };
+  return walk(root.children, []) ?? [];
+}
+
+// Bounds de una capa en coordenadas del canvas: suma las posiciones de sus
+// frames ancestros (solo padres en layout libre; en stack la posición la
+// decide flex y se resuelve por DOM en el caller).
+function absoluteBounds(root: TemplateDefinition, id: string): Bounds | null {
+  const walk = (nodes: TemplateLayer[], ox: number, oy: number): Bounds | null => {
+    for (const n of nodes) {
+      if (n.id === id) return { x: ox + n.position.x, y: oy + n.position.y, w: n.size.w, h: n.size.h };
+      if (n.type === "frame" && n.layout.mode === "free") {
+        const inner = walk(n.children, ox + n.position.x, oy + n.position.y);
+        if (inner) return inner;
+      }
+    }
+    return null;
+  };
+  return walk(root.children, 0, 0);
+}
+
+// Reglas arriba y a la izquierda del canvas, en unidades del canvas. Viven
+// dentro del stage escalado (offset negativo) para no calcular offsets de
+// pantalla; el host tiene 32px de padding, suficiente para ~18px de regla.
+function Rulers({ baseW, baseH, scale }: { baseW: number; baseH: number; scale: number }) {
+  const thicknessPx = 18;
+  const t = thicknessPx / scale;
+  const step = [10, 20, 25, 50, 100, 200, 250, 500, 1000].find((c) => c * scale >= 60) ?? 1000;
+  const minor = step / 5;
+  const font = 9 / scale;
+  const line = 1 / scale;
+  const color = "rgba(255,255,255,0.55)";
+  const bg = "rgba(24,24,27,0.92)";
+  const ticks = (len: number) => {
+    const out: number[] = [];
+    for (let v = 0; v <= len; v += minor) out.push(Math.round(v * 1000) / 1000);
+    return out;
+  };
+  const isMajor = (v: number) => Math.abs(v / step - Math.round(v / step)) < 1e-6;
+  return (
+    <>
+      <svg
+        style={{ position: "absolute", left: 0, top: -t, width: baseW, height: t, pointerEvents: "none", overflow: "visible" }}
+        viewBox={`0 0 ${baseW} ${t}`}
+      >
+        <rect x={0} y={0} width={baseW} height={t} fill={bg} />
+        {ticks(baseW).map((v) => (
+          <g key={v}>
+            <line x1={v} x2={v} y1={isMajor(v) ? t * 0.35 : t * 0.7} y2={t} stroke={color} strokeWidth={line} />
+            {isMajor(v) && (
+              <text x={v + 2 / scale} y={t * 0.55} fontSize={font} fill={color} fontFamily="ui-monospace, monospace">
+                {v}
+              </text>
+            )}
+          </g>
+        ))}
+      </svg>
+      <svg
+        style={{ position: "absolute", left: -t, top: 0, width: t, height: baseH, pointerEvents: "none", overflow: "visible" }}
+        viewBox={`0 0 ${t} ${baseH}`}
+      >
+        <rect x={0} y={0} width={t} height={baseH} fill={bg} />
+        {ticks(baseH).map((v) => (
+          <g key={v}>
+            <line y1={v} y2={v} x1={isMajor(v) ? t * 0.35 : t * 0.7} x2={t} stroke={color} strokeWidth={line} />
+            {isMajor(v) && (
+              <text
+                x={t * 0.55}
+                y={v + 2 / scale}
+                fontSize={font}
+                fill={color}
+                fontFamily="ui-monospace, monospace"
+                transform={`rotate(-90 ${t * 0.55} ${v + 2 / scale})`}
+                textAnchor="end"
+              >
+                {v}
+              </text>
+            )}
+          </g>
+        ))}
+      </svg>
+    </>
   );
 }
 

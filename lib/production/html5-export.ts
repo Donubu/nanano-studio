@@ -418,8 +418,11 @@ function composeKeyframesForLayer(
       const dy = y - baseY;
       parts.push(`translate(${round(dx)}px, ${round(dy)}px)`);
       if (rot !== 0) parts.push(`rotate(${round(rot)}deg)`);
-      if (sX !== 1 || sY !== 1) {
-        parts.push(sX === sY ? `scale(${roundDec(sX)})` : `scale(${roundDec(sX)}, ${roundDec(sY)})`);
+      // Flip estático del layer (mismo criterio que transformCss del editor).
+      const fX = sX * (layer.flipX ? -1 : 1);
+      const fY = sY * (layer.flipY ? -1 : 1);
+      if (fX !== 1 || fY !== 1) {
+        parts.push(fX === fY ? `scale(${roundDec(fX)})` : `scale(${roundDec(fX)}, ${roundDec(fY)})`);
       }
       kf.transform = parts.join(" ") || "none";
     }

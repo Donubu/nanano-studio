@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   TemplateDefinition,
   TemplateLayer,
+  FrameLayer,
   newRootFrame,
   newTextLayer,
   newImageLayer,
@@ -71,6 +72,15 @@ interface UseTemplateEditorResult {
   // true cuando la selección es exactamente un shape + un text fusionables.
   canMergeSelection: boolean;
   mergeSelectedIntoButton: () => void;
+  // Grupos: frame libre que envuelve la selección (mismo padre). Ungroup
+  // devuelve los hijos al padre del frame conservando su posición visual.
+  canGroupSelection: boolean;
+  groupSelected: () => void;
+  canUngroupSelection: boolean;
+  ungroupSelected: () => void;
+  // Mover la selección con las flechas (dx/dy en px del canvas).
+  nudgeSelected: (dx: number, dy: number) => void;
+  toggleVisible: (id: string) => void;
 
   addText: () => void;
   addImage: () => void;
@@ -124,6 +134,20 @@ const HISTORY_LIMIT = 50;
 // Rapid edits within this window are folded into the same undo entry: dragging
 // a slider should be one undo, not one per keystroke.
 const SNAPSHOT_MERGE_MS = 500;
+
+// Filtra `layers` a las que comparten padre con la primera. Las coordenadas
+// son locales al padre, así que alinear/distribuir solo tiene sentido entre
+// hermanos.
+function siblingsOf(definition: TemplateDefinition, layers: TemplateLayer[]): TemplateLayer[] {
+  if (layers.length === 0) return [];
+  const parentId = (findParent(definition, layers[0].id) ?? definition).id;
+  return layers.filter((l) => (findParent(definition, l.id) ?? definition).id === parentId);
+}
+
+function newLayerId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return `id_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+}
 
 export function useTemplateEditor({
   initial,
@@ -280,10 +304,10 @@ export function useTemplateEditor({
         .filter(
           (l): l is TemplateLayer => l != null && l.id !== "tpl_root",
         );
-      // Filtramos a root children solo. Si hay capas anidadas en frames,
-      // las ignoramos por ahora (no rompemos su layout local).
-      const rootChildIds = new Set(definition.children.map((c) => c.id));
-      const rootLayers = layers.filter((l) => rootChildIds.has(l.id));
+      // Solo alineamos capas que comparten padre (las coordenadas son
+      // locales a ese padre). Tomamos el padre de la primera seleccionada y
+      // filtramos las demás a ese mismo padre.
+      const rootLayers = siblingsOf(definition, layers);
       if (rootLayers.length < 2) return;
 
       const minX = Math.min(...rootLayers.map((l) => l.position.x));
@@ -329,6 +353,136 @@ export function useTemplateEditor({
     [selectedIds, definition, mutate]
   );
 
+  // Agrupar: envuelve la selección (2+ capas con el mismo padre, en layout
+  // libre) en un frame libre con el bounding box común. Las capas pasan a
+  // coordenadas locales del frame y conservan su orden z relativo; el frame
+  // ocupa la posición z del miembro más alto para no cambiar qué tapa a qué.
+  const groupCandidate = (() => {
+    if (selectedIds.length < 2) return null;
+    const layers = selectedIds
+      .map((id) => findLayer(definition, id))
+      .filter((l): l is TemplateLayer => l != null && l.id !== "tpl_root");
+    if (layers.length < 2) return null;
+    const parent = findParent(definition, layers[0].id) ?? definition;
+    if (parent.layout.mode !== "free") return null;
+    for (const l of layers) {
+      const pl = findParent(definition, l.id) ?? definition;
+      if (pl.id !== parent.id) return null;
+    }
+    return { layers, parent };
+  })();
+  const canGroupSelection = groupCandidate != null;
+
+  const groupSelected = useCallback(() => {
+    if (!groupCandidate) return;
+    const { layers, parent } = groupCandidate;
+    const ids = new Set(layers.map((l) => l.id));
+    const minX = Math.min(...layers.map((l) => l.position.x));
+    const minY = Math.min(...layers.map((l) => l.position.y));
+    const maxX = Math.max(...layers.map((l) => l.position.x + l.size.w));
+    const maxY = Math.max(...layers.map((l) => l.position.y + l.size.h));
+    const groupId = newLayerId();
+    mutate((d) => {
+      const p = parent.id === "tpl_root" ? d : (findLayer(d, parent.id) as FrameLayer | null);
+      if (!p || p.type !== "frame") return d;
+      const members = p.children.filter((c) => ids.has(c.id));
+      const insertAt = Math.max(...p.children.map((c, idx) => (ids.has(c.id) ? idx : -1)));
+      const group: FrameLayer = {
+        id: groupId,
+        type: "frame",
+        name: "Grupo",
+        position: { x: Math.round(minX), y: Math.round(minY) },
+        size: { w: Math.round(maxX - minX), h: Math.round(maxY - minY) },
+        background: { type: "transparent" },
+        layout: { mode: "free" },
+        children: members.map((c) => ({
+          ...c,
+          position: { x: c.position.x - Math.round(minX), y: c.position.y - Math.round(minY) },
+        })),
+      };
+      const rest = p.children.filter((c) => !ids.has(c.id));
+      // insertAt es el índice original del miembro más alto; tras quitar los
+      // miembros, la cantidad de no-miembros antes de esa posición es el
+      // índice de inserción correcto.
+      const before = p.children.slice(0, insertAt).filter((c) => !ids.has(c.id)).length;
+      const nextChildren = [...rest.slice(0, before), group, ...rest.slice(before)];
+      const nextParent: FrameLayer = { ...p, children: nextChildren };
+      return parent.id === "tpl_root"
+        ? (nextParent as TemplateDefinition)
+        : updateLayerInTree(d, parent.id, () => nextParent);
+    });
+    selectSingle(groupId);
+  }, [groupCandidate, mutate, selectSingle]);
+
+  // Desagrupar: la capa seleccionada es un frame (no root); sus hijos suben
+  // al padre del frame, sumando la posición del frame para que no se muevan.
+  const ungroupCandidate = (() => {
+    if (!selectedId || selectedId === "tpl_root") return null;
+    const l = findLayer(definition, selectedId);
+    if (!l || l.type !== "frame") return null;
+    const parent = findParent(definition, l.id) ?? definition;
+    if (parent.layout.mode !== "free" || l.layout.mode !== "free") return null;
+    return { frame: l, parent };
+  })();
+  const canUngroupSelection = ungroupCandidate != null;
+
+  const ungroupSelected = useCallback(() => {
+    if (!ungroupCandidate) return;
+    const { frame, parent } = ungroupCandidate;
+    const childIds = frame.children.map((c) => c.id);
+    mutate((d) => {
+      const p = parent.id === "tpl_root" ? d : (findLayer(d, parent.id) as FrameLayer | null);
+      if (!p || p.type !== "frame") return d;
+      const idx = p.children.findIndex((c) => c.id === frame.id);
+      if (idx === -1) return d;
+      const lifted = frame.children.map((c) => ({
+        ...c,
+        position: { x: c.position.x + frame.position.x, y: c.position.y + frame.position.y },
+      }));
+      const nextChildren = [...p.children.slice(0, idx), ...lifted, ...p.children.slice(idx + 1)];
+      const nextParent: FrameLayer = { ...p, children: nextChildren };
+      return parent.id === "tpl_root"
+        ? (nextParent as TemplateDefinition)
+        : updateLayerInTree(d, parent.id, () => nextParent);
+    });
+    setSelectedIds(childIds);
+    setSelectedId(childIds[childIds.length - 1] ?? null);
+  }, [ungroupCandidate, mutate]);
+
+  const nudgeSelected = useCallback(
+    (dx: number, dy: number) => {
+      const ids = (selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : []).filter(
+        (id) => id !== "tpl_root",
+      );
+      if (ids.length === 0) return;
+      mutate((d) => {
+        let next = d;
+        for (const id of ids) {
+          const l = findLayer(next, id);
+          if (!l || l.locked) continue;
+          const parent = findParent(next, id);
+          if (parent && parent.layout.mode === "stack") continue;
+          next = updateLayerInTree(next, id, (cur) => ({
+            ...cur,
+            position: { x: cur.position.x + dx, y: cur.position.y + dy },
+          }));
+        }
+        return next;
+      });
+    },
+    [selectedIds, selectedId, mutate],
+  );
+
+  const toggleVisible = useCallback(
+    (id: string) => {
+      if (id === "tpl_root") return;
+      mutate((d) =>
+        updateLayerInTree(d, id, (l) => ({ ...l, visible: l.visible === false ? undefined : false })),
+      );
+    },
+    [mutate],
+  );
+
   // Fusión shape + text → un solo TextLayer con fondo (botón / badge). Aplica
   // cuando la selección es exactamente un shape fusionable y un text sin
   // fondo propio, hermanos en el mismo padre. La caja resultante es la del
@@ -369,8 +523,7 @@ export function useTemplateEditor({
         .filter(
           (l): l is TemplateLayer => l != null && l.id !== "tpl_root",
         );
-      const rootChildIds = new Set(definition.children.map((c) => c.id));
-      const rootLayers = layers.filter((l) => rootChildIds.has(l.id));
+      const rootLayers = siblingsOf(definition, layers);
       if (rootLayers.length < 3) return;
 
       const sorted = [...rootLayers].sort((a, b) => {
@@ -655,6 +808,12 @@ export function useTemplateEditor({
     distributeSelected,
     canMergeSelection,
     mergeSelectedIntoButton,
+    canGroupSelection,
+    groupSelected,
+    canUngroupSelection,
+    ungroupSelected,
+    nudgeSelected,
+    toggleVisible,
     addText,
     addImage,
     addShape,
