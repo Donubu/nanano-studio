@@ -1943,6 +1943,7 @@ export default function ProducirPage() {
                 topAccessory={variantsStripNode}
                 rightAccessory={
                   <DatasetPanel
+                    embedded
                     detectedVariables={detectedVariables}
                     dataset={dataset}
                     selectedRowIdx={selectedRowIdx}
