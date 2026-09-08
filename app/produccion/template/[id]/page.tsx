@@ -96,18 +96,23 @@ export default function TemplateDetailPage() {
     }
   }, [templateId, router, fetchBrandKits]);
 
+  // Deps por valor (id/rol), no por identidad del objeto session: next-auth
+  // devuelve un objeto nuevo en cada revalidación (foco de ventana) y eso
+  // re-disparaba el fetch sin que nada hubiera cambiado.
+  const sessionUserId = session?.user?.id;
+  const sessionRole = session?.user?.role;
   useEffect(() => {
     if (sessionStatus === "loading") return;
-    if (!session?.user) {
+    if (!sessionUserId) {
       router.push("/login");
       return;
     }
-    if (session.user.role !== "admin") {
+    if (sessionRole !== "admin") {
       router.push("/");
       return;
     }
     fetchTemplate();
-  }, [fetchTemplate, session, sessionStatus, router]);
+  }, [fetchTemplate, sessionUserId, sessionRole, sessionStatus, router]);
 
   const handleSaveName = async () => {
     if (!template || !nameInput.trim() || nameInput.trim() === template.name) {

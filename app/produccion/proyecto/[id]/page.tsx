@@ -67,18 +67,23 @@ export default function ProductionProjectPage() {
     }
   }, [projectId, router]);
 
+  // Deps por valor (id/rol), no por identidad del objeto session: next-auth
+  // devuelve un objeto nuevo en cada revalidación (foco de ventana) y eso
+  // re-disparaba el fetch sin que nada hubiera cambiado.
+  const sessionUserId = session?.user?.id;
+  const sessionRole = session?.user?.role;
   useEffect(() => {
     if (sessionStatus === "loading") return;
-    if (!session?.user) {
+    if (!sessionUserId) {
       router.push("/login");
       return;
     }
-    if (session.user.role !== "admin") {
+    if (sessionRole !== "admin") {
       router.push("/");
       return;
     }
     fetchProject();
-  }, [fetchProject, session, sessionStatus, router]);
+  }, [fetchProject, sessionUserId, sessionRole, sessionStatus, router]);
 
   const handleSaveTitle = async () => {
     if (!project || !titleInput.trim() || titleInput.trim() === project.title) {

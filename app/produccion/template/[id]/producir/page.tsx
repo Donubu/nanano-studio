@@ -374,8 +374,13 @@ export default function ProducirPage() {
     setBrandKits(parsed);
   }, []);
 
+  // Spinner de página completa SOLO en la carga inicial. Un refetch posterior
+  // (p. ej. porque la sesión se revalidó) no debe desmontar toda la UI: eso
+  // mataba el estado de cualquier modal abierto — el de Adaptar con IA
+  // perdía la propuesta si la sesión se refrescaba durante la espera.
+  const initialLoadDoneRef = useRef(false);
   const fetchAll = useCallback(async () => {
-    setLoading(true);
+    if (!initialLoadDoneRef.current) setLoading(true);
     try {
       const tplRes = await fetch(`/api/production/templates/${templateId}`);
       if (!tplRes.ok) {
@@ -444,22 +449,28 @@ export default function ProducirPage() {
     } catch (err) {
       console.error("Error cargando datos:", err);
     } finally {
+      initialLoadDoneRef.current = true;
       setLoading(false);
     }
   }, [templateId, router, fetchAdaptationCount, fetchBrandKits]);
 
+  // Deps por valor (id/rol), no por identidad del objeto session: next-auth
+  // devuelve un objeto nuevo en cada revalidación (foco de ventana, polling)
+  // y eso re-disparaba fetchAll sin que nada hubiera cambiado.
+  const sessionUserId = session?.user?.id;
+  const sessionRole = session?.user?.role;
   useEffect(() => {
     if (sessionStatus === "loading") return;
-    if (!session?.user) {
+    if (!sessionUserId) {
       router.push("/login");
       return;
     }
-    if (session.user.role !== "admin") {
+    if (sessionRole !== "admin") {
       router.push("/");
       return;
     }
     fetchAll();
-  }, [fetchAll, session, sessionStatus, router]);
+  }, [fetchAll, sessionUserId, sessionRole, sessionStatus, router]);
 
   // El brand kit ACTIVO viene de template.brand_kit_id. Si no apunta a ningún
   // kit válido, queda vacío (EMPTY_KIT_CONTENT). El cascade default+default
@@ -4035,6 +4046,26 @@ function AddVariantModal({
 // y permite aceptar / regenerar / cancelar. La propuesta aceptada se aplica
 // vía PUT al template (con linked_to_template_id=null porque deja de heredar
 // del master — el contenido es distinto intencionalmente).
+// Llamadas al Banner Designer en curso o recién terminadas, por id de
+// orientación target. Vive fuera del componente para sobrevivir a un
+// remount del modal (la página puede desmontar hijos si refetchea; antes
+// eso dejaba el fetch huérfano y el modal volvía vacío sin error). El modal
+// se suscribe al job al montar y lo descarta al cerrar / aceptar / regenerar.
+interface AdaptJobResult {
+  ok: boolean;
+  proposal?: TemplateDefinition;
+  rationale?: string | null;
+  cost?: number | null;
+  error?: string;
+}
+interface AdaptJob {
+  promise: Promise<AdaptJobResult>;
+  result?: AdaptJobResult;
+  instructions: string;
+  withReference: boolean;
+}
+const adaptJobs = new Map<number, AdaptJob>();
+
 function AiAdaptModal({
   templateId,
   target,
@@ -4123,61 +4154,111 @@ function AiAdaptModal({
     }
   }, []);
 
+  // Aplica el resultado de un job al estado del modal. Se usa tanto al
+  // terminar un fetch iniciado por esta instancia como al re-montar sobre
+  // un job que otra instancia dejó corriendo.
+  const applyJobResult = useCallback((r: AdaptJobResult) => {
+    setLoading(false);
+    if (!r.ok) {
+      setError(r.error ?? "Error desconocido del Banner Designer");
+      setProposal(null);
+      return;
+    }
+    setError(null);
+    setProposal(r.proposal ?? null);
+    setRationale(r.rationale ?? null);
+    setCost(r.cost ?? null);
+  }, []);
+
   const callAgent = useCallback(async () => {
     setLoading(true);
     setError(null);
     setProposal(null);
     setRationale(null);
-    try {
-      const filesParam =
-        useReference && referenceUrl != null
-          ? [
-              {
-                filename: referenceMime === "image/webp" ? "master-reference.webp" : "master-reference.jpg",
-                publicUrl: referenceUrl,
-                mimeType: referenceMime,
-              },
-            ]
-          : undefined;
-      const res = await fetch(
-        `/api/production/templates/${target.id}/ai/adapt-orientation`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            instructions: instructions.trim() || undefined,
-            files: filesParam,
-          }),
-        },
-      );
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(body?.error || `Error ${res.status} del Banner Designer`);
-        return;
-      }
-      // Respuesta 2xx sin proposal (proxy que devolvió otra cosa, JSON
-      // truncado, etc.): antes quedaba en silencio — el modal volvía al
-      // estado inicial sin propuesta ni error. Lo hacemos visible.
-      if (!body || typeof body !== "object" || body.proposal?.type !== "frame") {
-        console.error("adapt-orientation: respuesta sin proposal", res.status, body);
-        setError(
-          "El Banner Designer respondió pero no llegó una propuesta válida. Revisa el panel de costos IA del proyecto: si la invocación figura como exitosa, reintenta con Regenerar.",
+    const filesParam =
+      useReference && referenceUrl != null
+        ? [
+            {
+              filename: referenceMime === "image/webp" ? "master-reference.webp" : "master-reference.jpg",
+              publicUrl: referenceUrl,
+              mimeType: referenceMime,
+            },
+          ]
+        : undefined;
+    const promise: Promise<AdaptJobResult> = (async () => {
+      try {
+        const res = await fetch(
+          `/api/production/templates/${target.id}/ai/adapt-orientation`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              instructions: instructions.trim() || undefined,
+              files: filesParam,
+            }),
+          },
         );
-        return;
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          return { ok: false, error: body?.error || `Error ${res.status} del Banner Designer` };
+        }
+        // Respuesta 2xx sin proposal (proxy que devolvió otra cosa, JSON
+        // truncado, etc.): lo hacemos visible en vez de quedar en silencio.
+        if (!body || typeof body !== "object" || body.proposal?.type !== "frame") {
+          console.error("adapt-orientation: respuesta sin proposal", res.status, body);
+          return {
+            ok: false,
+            error:
+              "El Banner Designer respondió pero no llegó una propuesta válida. Revisa el panel de costos IA del proyecto: si la invocación figura como exitosa, reintenta con Regenerar.",
+          };
+        }
+        return {
+          ok: true,
+          proposal: body.proposal as TemplateDefinition,
+          rationale: typeof body.rationale === "string" ? body.rationale : null,
+          cost:
+            typeof body.tokenUsage?.estimatedCost === "number"
+              ? body.tokenUsage.estimatedCost
+              : null,
+        };
+      } catch (e) {
+        return { ok: false, error: `Error de red: ${(e as Error).message}` };
       }
-      setProposal(body.proposal as TemplateDefinition);
-      setRationale(typeof body.rationale === "string" ? body.rationale : null);
-      setCost(
-        typeof body.tokenUsage?.estimatedCost === "number"
-          ? body.tokenUsage.estimatedCost
-          : null,
-      );
-    } catch (e) {
-      setError(`Error de red: ${(e as Error).message}`);
-    } finally {
-      setLoading(false);
+    })();
+    const job: AdaptJob = {
+      promise,
+      instructions,
+      withReference: filesParam != null,
+    };
+    adaptJobs.set(target.id, job);
+    const result = await promise;
+    job.result = result;
+    // Si el modal se re-montó mientras esperábamos, esta instancia ya no
+    // existe y React ignora estos setState; la instancia nueva se enganchó
+    // al job en su effect de montaje y aplica el resultado por su cuenta.
+    applyJobResult(result);
+  }, [target.id, instructions, referenceUrl, referenceMime, useReference, applyJobResult]);
+
+  // Al montar: si hay un job para este target (en curso o terminado y no
+  // consumido), lo retomamos. Cubre el remount del modal durante la espera.
+  useEffect(() => {
+    const job = adaptJobs.get(target.id);
+    if (!job) return;
+    let alive = true;
+    setInstructions((cur) => cur || job.instructions);
+    if (job.result) {
+      applyJobResult(job.result);
+      return;
     }
-  }, [target.id, instructions, referenceUrl, referenceMime, useReference]);
+    setLoading(true);
+    job.promise.then((r) => {
+      if (alive) applyJobResult(r);
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target.id]);
 
   // Captura + upload del master ocurre en background al abrir el modal —
   // el productor puede ir escribiendo instructions mientras tanto. La
@@ -4201,10 +4282,18 @@ function AiAdaptModal({
     setAccepting(true);
     try {
       await onAccept(proposal, applyToAllLinked);
+      adaptJobs.delete(target.id);
     } finally {
       setAccepting(false);
     }
   };
+
+  // Cerrar descarta el job (no queremos que una propuesta vieja reaparezca
+  // la próxima vez que el productor abra el modal para este formato).
+  const handleClose = useCallback(() => {
+    adaptJobs.delete(target.id);
+    onClose();
+  }, [target.id, onClose]);
 
   // Escala para el preview side-by-side: cada lado ocupa ~50% del ancho del
   // modal. Calculamos el alto manteniendo aspect.
@@ -4219,7 +4308,7 @@ function AiAdaptModal({
     <div
       className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-6"
       onClick={(e) => {
-        if (e.target === e.currentTarget && !loading && !accepting) onClose();
+        if (e.target === e.currentTarget && !loading && !accepting) handleClose();
       }}
     >
       <div className="bg-background border border-border/50 rounded-xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col">
@@ -4234,7 +4323,7 @@ function AiAdaptModal({
               </p>
             </div>
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose} disabled={loading || accepting}>
+          <Button variant="ghost" size="icon" onClick={handleClose} disabled={loading || accepting}>
             <X className="h-4 w-4" />
           </Button>
         </div>
@@ -4400,7 +4489,7 @@ function AiAdaptModal({
             <Button
               variant="ghost"
               size="sm"
-              onClick={onClose}
+              onClick={handleClose}
               disabled={loading || accepting}
             >
               Cancelar
