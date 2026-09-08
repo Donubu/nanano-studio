@@ -51,6 +51,19 @@ export default auth((req) => {
     return NextResponse.redirect(new URL("/login", req.url));
   }
 
+  // Módulo de producción apagado (sin NEXT_PUBLIC_PRODUCTION_ENABLED=1): sus
+  // páginas van al home y su API responde 404, como si no existiera.
+  const productionEnabled = process.env.NEXT_PUBLIC_PRODUCTION_ENABLED === "1";
+  if (!productionEnabled) {
+    const path = req.nextUrl.pathname;
+    if (path === "/produccion" || path.startsWith("/produccion/")) {
+      return NextResponse.redirect(new URL("/", req.url));
+    }
+    if (path.startsWith("/api/production")) {
+      return NextResponse.json({ error: "No encontrado" }, { status: 404 });
+    }
+  }
+
   // Rutas de administración: solo rol admin. Los API routes además re-validan
   // sesión/rol con auth() en Node; esto corta el acceso ya en el Edge.
   const pathname = req.nextUrl.pathname;

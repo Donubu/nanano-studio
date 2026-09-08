@@ -90,6 +90,7 @@ import {CreateProjectDialog} from "./create-project-dialog";
 import {CreditBadge} from "./credit-badge";
 import ClientProductionProjects from "./client-production-projects";
 import ClientProductionSection from "@/components/dashboard/client-production-section";
+import { PRODUCTION_ENABLED } from "@/lib/production/feature-flag";
 import {ImageModelSelector} from "./image-model-selector";
 import {AudioSettings} from "./audio-settings";
 import {MusicSettings} from "./music-settings";
@@ -432,6 +433,10 @@ export function ChatInterface() {
     // Generation type for new conversations
     const [newConversationType, setNewConversationType] = useState<GenerationType>("text");
     const [showNewConversationModal, setShowNewConversationModal] = useState(false);
+    // Diálogo de crear proyecto: se abre desde la opción "Crear proyecto…" del
+    // selector de proyectos del sidebar y desde el botón de la vista de cliente.
+    const [createProjectOpen, setCreateProjectOpen] = useState(false);
+    const canCreateProjects = session?.user?.role === "admin" || !!session?.user?.canCreateProjects;
 
     // Solo admin puede crear conversaciones de tipo "texto". Si un no-admin abre
     // el modal con "text" preseleccionado (default o auto-select), lo movemos al
@@ -3492,16 +3497,20 @@ export function ChatInterface() {
 
                         <div className="flex items-center justify-between mb-1">
                             <label className="text-xs text-muted-foreground">Proyecto</label>
-                            {(session?.user?.role === "admin" || session?.user?.canCreateProjects) && (
-                                <CreateProjectDialog onProjectCreated={() => fetchProjects(selectedClientId ?? undefined)} />
-                            )}
                         </div>
                         <select
                             className="w-full bg-muted border border-border/50 rounded-lg px-3 py-2 text-sm"
                             value={selectedProjectId || ""}
-                            onChange={(e) =>
-                                setSelectedProjectId(e.target.value ? Number(e.target.value) : null)
-                            }
+                            onChange={(e) => {
+                                // "Crear proyecto…" vive dentro del selector para
+                                // que la acción quede en el mismo contexto que la
+                                // lista; no cambia la selección, abre el diálogo.
+                                if (e.target.value === "__new__") {
+                                    setCreateProjectOpen(true);
+                                    return;
+                                }
+                                setSelectedProjectId(e.target.value ? Number(e.target.value) : null);
+                            }}
                         >
                             <option value="">Selecciona un proyecto</option>
                             {projects.map((p) => (
@@ -3509,6 +3518,9 @@ export function ChatInterface() {
                                     {p.title}
                                 </option>
                             ))}
+                            {canCreateProjects && (
+                                <option value="__new__">＋ Crear proyecto…</option>
+                            )}
                         </select>
                         {selectedProjectId && (
                             <Button
@@ -3525,7 +3537,7 @@ export function ChatInterface() {
                     )}
 
                     {/* Producción projects (admin-only in MVP) */}
-                    {selectedClientId && session?.user?.role === "admin" && (
+                    {PRODUCTION_ENABLED && selectedClientId && session?.user?.role === "admin" && (
                         <ClientProductionProjects clientId={selectedClientId} />
                     )}
 
@@ -4843,14 +4855,28 @@ export function ChatInterface() {
                                     ) : null;
                                 })()}
 
-                                <p className="text-muted-foreground mb-8">
-                                    Elige un proyecto para comenzar a generar contenido
-                                </p>
+                                <div className="flex items-center justify-between gap-4 mb-8">
+                                    <p className="text-muted-foreground">
+                                        Elige un proyecto para comenzar a generar contenido
+                                    </p>
+                                    {canCreateProjects && (
+                                        <Button size="sm" className="gap-1.5 shrink-0" onClick={() => setCreateProjectOpen(true)}>
+                                            <Plus className="h-4 w-4" />
+                                            Crear proyecto
+                                        </Button>
+                                    )}
+                                </div>
 
                                 {projects.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center py-16">
-                                        <FolderKanban className="h-16 w-16 text-muted-foreground/30 mb-4"/>
+                                    <div className="flex flex-col items-center justify-center py-16 gap-3">
+                                        <FolderKanban className="h-16 w-16 text-muted-foreground/30 mb-1"/>
                                         <p className="text-muted-foreground">No hay proyectos en este cliente</p>
+                                        {canCreateProjects && (
+                                            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setCreateProjectOpen(true)}>
+                                                <Plus className="h-4 w-4" />
+                                                Crear el primero
+                                            </Button>
+                                        )}
                                     </div>
                                 ) : (
                                     <div className="bg-card rounded-xl border border-border/50 overflow-hidden">
@@ -4939,7 +4965,9 @@ export function ChatInterface() {
                                 {/* Producción projects (admin-only in MVP) */}
                                 {session?.user?.role === "admin" && (
                                     <div className="mt-8">
-                                        <ClientProductionSection clientId={selectedClientId} />
+                                        {PRODUCTION_ENABLED && (
+                                            <ClientProductionSection clientId={selectedClientId} />
+                                        )}
                                     </div>
                                 )}
                             </>
@@ -5492,6 +5520,17 @@ export function ChatInterface() {
             )}
 
             {/* New Conversation Modal */}
+            {canCreateProjects && (
+                <CreateProjectDialog
+                    open={createProjectOpen}
+                    onOpenChange={setCreateProjectOpen}
+                    defaultClientId={selectedClientId}
+                    onProjectCreated={async (projectId) => {
+                        await fetchProjects(selectedClientId ?? undefined);
+                        setSelectedProjectId(projectId);
+                    }}
+                />
+            )}
             <Dialog open={showNewConversationModal} onOpenChange={setShowNewConversationModal}>
                 <DialogContent className="sm:max-w-lg">
                     <DialogHeader>

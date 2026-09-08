@@ -26,11 +26,31 @@ interface Template {
 }
 
 interface CreateProjectDialogProps {
-  onProjectCreated: () => void;
+  onProjectCreated: (projectId: number) => void;
+  // Cliente preseleccionado (p. ej. el cliente activo en el chat).
+  defaultClientId?: number | null;
+  // Modo controlado: el padre decide cuándo abrir (p. ej. desde una opción
+  // del selector de proyectos). Con `open` definido no se renderiza trigger.
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  // Apariencia del trigger en modo no controlado.
+  variant?: "icon" | "button";
 }
 
-export function CreateProjectDialog({ onProjectCreated }: CreateProjectDialogProps) {
-  const [open, setOpen] = useState(false);
+export function CreateProjectDialog({
+  onProjectCreated,
+  defaultClientId,
+  open: controlledOpen,
+  onOpenChange,
+  variant = "icon",
+}: CreateProjectDialogProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = (v: boolean) => {
+    if (!isControlled) setUncontrolledOpen(v);
+    onOpenChange?.(v);
+  };
   const [clients, setClients] = useState<Client[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [saving, setSaving] = useState(false);
@@ -44,6 +64,10 @@ export function CreateProjectDialog({ onProjectCreated }: CreateProjectDialogPro
 
   useEffect(() => {
     if (!open) return;
+    // Cliente por defecto: el activo en el contexto desde donde se abrió.
+    if (defaultClientId) {
+      setForm((f) => (f.client_id ? f : { ...f, client_id: String(defaultClientId) }));
+    }
     // Fetch clients and templates when dialog opens
     fetch("/api/clients").then(r => r.json()).then(setClients).catch(() => {});
     fetch("/api/admin/templates").then(r => r.json()).then((data) => {
@@ -94,7 +118,7 @@ export function CreateProjectDialog({ onProjectCreated }: CreateProjectDialogPro
 
       setOpen(false);
       setForm({ title: "", description: "", client_id: "", template_id: "" });
-      onProjectCreated();
+      onProjectCreated(project.id as number);
     } catch {
       setError("Error al crear proyecto");
     } finally {
@@ -104,14 +128,23 @@ export function CreateProjectDialog({ onProjectCreated }: CreateProjectDialogPro
 
   return (
     <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setError(""); }}>
-      <DialogTrigger asChild>
-        <button
-          className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-          title="Crear proyecto"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-      </DialogTrigger>
+      {!isControlled && (
+        <DialogTrigger asChild>
+          {variant === "button" ? (
+            <Button size="sm" className="gap-1.5">
+              <Plus className="h-4 w-4" />
+              Crear proyecto
+            </Button>
+          ) : (
+            <button
+              className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+              title="Crear proyecto"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Nuevo Proyecto</DialogTitle>

@@ -15,6 +15,7 @@ import Image from "next/image";
 import { formatDateLocal } from "@/lib/utils";
 import ClientCreditsSection from "@/components/dashboard/client-credits-section";
 import ClientProductionSection from "@/components/dashboard/client-production-section";
+import { PRODUCTION_ENABLED } from "@/lib/production/feature-flag";
 import ClientBrandKitsSection from "@/components/dashboard/client-brand-kits-section";
 
 interface ClientDetail {
@@ -204,6 +205,7 @@ export default function ClientDetailPage() {
         >
           Información
         </button>
+        {PRODUCTION_ENABLED && (
         <button
           type="button"
           onClick={() => setActiveTab("production")}
@@ -215,6 +217,7 @@ export default function ClientDetailPage() {
         >
           Producción
         </button>
+        )}
         <button
           type="button"
           onClick={() => setActiveTab("brand-kits")}
@@ -229,7 +232,7 @@ export default function ClientDetailPage() {
       </div>
 
       {activeTab === "production" ? (
-        <ClientProductionSection clientId={Number(clientId)} />
+        PRODUCTION_ENABLED ? <ClientProductionSection clientId={Number(clientId)} /> : null
       ) : activeTab === "brand-kits" ? (
         <ClientBrandKitsSection clientId={Number(clientId)} />
       ) : (
