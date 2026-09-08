@@ -26,7 +26,9 @@ import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { z } from "zod";
 import { parseBody } from "@/lib/api-utils";
 import { TemplateDefinition } from "@/lib/production/types";
-import { BrandKit, BrandKitContent, EMPTY_KIT_CONTENT, brandKitFromApi, mergeKits } from "@/lib/production/brand-kit";
+import { EMPTY_KIT_CONTENT } from "@/lib/production/brand-kit";
+import { resolveTemplateBrandKit } from "@/lib/production/project-brand-kit";
+import { checkProductionAiQuota, quotaBlockedBody } from "@/lib/production/ai-rate-limit";
 import {
   runAdaptOrientation,
   brandKitForAgent,
@@ -43,23 +45,11 @@ interface TemplateRow extends RowDataPacket {
   base_width: number;
   base_height: number;
   definition_json: string;
+  brand_kit_id: number | null;
 }
 
 interface ProjectRow extends RowDataPacket {
   client_id: number;
-}
-
-interface BrandKitRow extends RowDataPacket {
-  id: number;
-  client_id: number;
-  production_project_id: number | null;
-  name: string;
-  colors_json: unknown;
-  typography_json: unknown;
-  logos_json: unknown;
-  spacing_json: unknown;
-  rules_text: string | null;
-  is_default: number;
 }
 
 // `files` permite mandar imágenes de referencia al agente. El cliente las
@@ -109,7 +99,7 @@ export async function POST(
     // 1. Target template
     const [targetRows] = await pool.execute<TemplateRow[]>(
       `SELECT id, production_project_id, design_id, linked_to_template_id,
-              name, base_width, base_height, definition_json
+              name, base_width, base_height, definition_json, brand_kit_id
          FROM production_templates
         WHERE id = ? AND deleted_at IS NULL`,
       [targetId],
@@ -134,7 +124,7 @@ export async function POST(
     // OTRA orientación.
     const [principalRows] = await pool.execute<TemplateRow[]>(
       `SELECT id, production_project_id, design_id, linked_to_template_id,
-              name, base_width, base_height, definition_json
+              name, base_width, base_height, definition_json, brand_kit_id
          FROM production_templates
         WHERE design_id = ? AND linked_to_template_id IS NULL AND deleted_at IS NULL
         ORDER BY id ASC LIMIT 1`,
@@ -167,32 +157,28 @@ export async function POST(
       );
     }
 
-    // 3. Brand kit cascada: client-wide default + project-scoped default.
+    // 3. Tope de uso + brand kit efectivo del target (explícito → fork del
+    // proyecto → kit de la marca). Mismo resolver que usa el editor.
+    const quota = await checkProductionAiQuota({
+      projectId: target.production_project_id,
+      userId: Number(session.user.id),
+    });
+    if (!quota.ok) {
+      return NextResponse.json(quotaBlockedBody(quota), { status: 429 });
+    }
     const [projRows] = await pool.execute<ProjectRow[]>(
       "SELECT client_id FROM production_projects WHERE id = ?",
       [target.production_project_id],
     );
-    let mergedKit: BrandKitContent = EMPTY_KIT_CONTENT;
-    if (projRows.length > 0) {
-      const clientId = projRows[0].client_id;
-      const [kitRows] = await pool.execute<BrandKitRow[]>(
-        `SELECT id, client_id, production_project_id, name,
-                colors_json, typography_json, logos_json, spacing_json,
-                rules_text, is_default
-           FROM production_brand_kits
-          WHERE client_id = ?
-            AND (production_project_id IS NULL OR production_project_id = ?)`,
-        [clientId, target.production_project_id],
-      );
-      const parsedKits: BrandKit[] = kitRows.map((r) => brandKitFromApi(r));
-      const clientWide = parsedKits.filter((k) => k.production_project_id === null);
-      const projectScoped = parsedKits.filter((k) => k.production_project_id != null);
-      const baseClient = clientWide.find((k) => k.is_default) ?? clientWide[0];
-      const baseProject = projectScoped.find((k) => k.is_default) ?? projectScoped[0];
-      mergedKit = mergeKits(
-        ...[baseClient, baseProject].filter((x): x is BrandKit => !!x),
-      );
-    }
+    const resolvedKit =
+      projRows.length > 0
+        ? await resolveTemplateBrandKit({
+            brandKitId: target.brand_kit_id ?? master.brand_kit_id,
+            clientId: projRows[0].client_id,
+            productionProjectId: target.production_project_id,
+          })
+        : null;
+    const mergedKit = resolvedKit?.content ?? EMPTY_KIT_CONTENT;
 
     // 4. Llamar al agente
     const targetDims = { w: target.base_width, h: target.base_height };

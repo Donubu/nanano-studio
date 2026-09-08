@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
+import { getProductionAiLimits, getProductionAiUsage } from "@/lib/production/ai-rate-limit";
 
 /**
  * GET /api/production/projects/[id]/ai-costs
@@ -15,6 +16,7 @@ import { RowDataPacket } from "mysql2";
  *
  * Respuesta:
  *   {
+ *     quota:  { daily_usd_per_project, used_today_usd, hourly_calls_per_user, calls_last_hour },
  *     total:  { invocations, errors, cost_usd, input_tokens, output_tokens },
  *     period: { days, invocations, errors, cost_usd },
  *     by_operation: [{ operation, invocations, errors, cost_usd, avg_cost_usd }],
@@ -133,7 +135,16 @@ export async function GET(
       [projectId]
     );
 
+    const limits = getProductionAiLimits();
+    const usage = await getProductionAiUsage(projectId, Number(session.user.id));
+
     return NextResponse.json({
+      quota: {
+        daily_usd_per_project: limits.dailyUsdPerProject,
+        used_today_usd: usage.usedTodayUsd,
+        hourly_calls_per_user: limits.hourlyCallsPerUser,
+        calls_last_hour: usage.callsLastHour,
+      },
       total: {
         invocations: num(totals?.invocations),
         errors: num(totals?.errors),

@@ -214,6 +214,9 @@ export default function ProductionTemplatesList({ productionProjectId, clientId 
           name,
           base_width: source.definition.size.w,
           base_height: source.definition.size.h,
+          // Mismo kit que usó el agente. Si viene null, el POST resuelve el
+          // heredado del proyecto (fork o kit de la marca).
+          brand_kit_id: source.brandKitId ?? undefined,
           definition: masterDef,
           variants: source.variants.map((v) => ({
             width: v.dims.w,

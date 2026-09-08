@@ -12,6 +12,12 @@ import { formatDateLocal } from "@/lib/utils";
  */
 
 interface AiCostsResponse {
+  quota: {
+    daily_usd_per_project: number;
+    used_today_usd: number;
+    hourly_calls_per_user: number;
+    calls_last_hour: number;
+  };
   total: {
     invocations: number;
     errors: number;
@@ -123,6 +129,18 @@ export function AiCostsSummary({
         <span className="text-xs text-muted-foreground hidden sm:inline">
           · últimos {data.period.days} días: {usd(data.period.cost_usd)} ({data.period.invocations})
         </span>
+        {data.quota.daily_usd_per_project > 0 && (
+          <span
+            className={`text-xs hidden md:inline ${
+              data.quota.used_today_usd >= data.quota.daily_usd_per_project
+                ? "text-red-400"
+                : "text-muted-foreground"
+            }`}
+            title="Presupuesto diario de IA del proyecto (PRODUCTION_AI_DAILY_USD_PER_PROJECT)"
+          >
+            · hoy {usd(data.quota.used_today_usd)} de {usd(data.quota.daily_usd_per_project)}
+          </span>
+        )}
         {data.total.errors > 0 && (
           <span
             className={`ml-auto flex items-center gap-1 text-xs ${

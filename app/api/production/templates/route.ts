@@ -4,6 +4,7 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { z } from "zod";
 import { parseBody } from "@/lib/api-utils";
+import { resolveProjectBrandKit } from "@/lib/production/project-brand-kit";
 import {
   DEFAULT_TEMPLATE_DEFINITION,
   DEFAULT_TEMPLATE_HEIGHT,
@@ -190,12 +191,11 @@ export async function POST(request: NextRequest) {
 
     // Resolución del brand_kit_id efectivo:
     //   - Si el cliente pasó uno explícito, ese gana.
-    //   - Si no, buscamos el default client-wide (is_default=1, scope=NULL)
-    //     del cliente dueño del proyecto. Así los templates nuevos heredan
-    //     automáticamente el kit que el admin marcó como por defecto en el
-    //     dashboard del cliente.
-    //   - Si ni siquiera hay default, queda NULL — el editor maneja ese
-    //     caso mostrando vacío y dejando al productor elegir uno.
+    //   - Si no, el template hereda el kit del proyecto: fork project-scoped
+    //     si existe, si no el kit de la marca (client-wide). Mismo resolver
+    //     que usan las rutas de IA, así el editor muestra lo que el agente usó.
+    //   - Si el cliente no tiene ningún kit, queda NULL — el editor muestra
+    //     vacío y deja al productor elegir uno.
     let effectiveBrandKitId: number | null = brand_kit_id ?? null;
     if (effectiveBrandKitId == null) {
       interface ProjectClientRow extends RowDataPacket {
@@ -206,21 +206,8 @@ export async function POST(request: NextRequest) {
         [production_project_id]
       );
       if (pcRows.length > 0) {
-        interface BrandKitIdRow extends RowDataPacket {
-          id: number;
-        }
-        const [dkRows] = await pool.execute<BrandKitIdRow[]>(
-          `SELECT id FROM production_brand_kits
-            WHERE client_id = ?
-              AND production_project_id IS NULL
-              AND is_default = 1
-              AND deleted_at IS NULL
-            LIMIT 1`,
-          [pcRows[0].client_id]
-        );
-        if (dkRows.length > 0) {
-          effectiveBrandKitId = dkRows[0].id;
-        }
+        const resolved = await resolveProjectBrandKit(pcRows[0].client_id, production_project_id);
+        effectiveBrandKitId = resolved?.id ?? null;
       }
     }
 

@@ -24,7 +24,9 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { z } from "zod";
 import { parseBody } from "@/lib/api-utils";
-import { loadMergedBrandKit } from "@/lib/production/project-brand-kit";
+import { EMPTY_KIT_CONTENT } from "@/lib/production/brand-kit";
+import { resolveProjectBrandKit } from "@/lib/production/project-brand-kit";
+import { checkProductionAiQuota, quotaBlockedBody } from "@/lib/production/ai-rate-limit";
 import {
   runGenerateFromPrompt,
   brandKitForAgent,
@@ -88,10 +90,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 });
     }
 
-    const mergedKit = await loadMergedBrandKit(
+    const quota = await checkProductionAiQuota({
+      projectId: production_project_id,
+      userId: Number(session.user.id),
+    });
+    if (!quota.ok) {
+      return NextResponse.json(quotaBlockedBody(quota), { status: 429 });
+    }
+
+    const resolvedKit = await resolveProjectBrandKit(
       projRows[0].client_id,
       production_project_id,
     );
+    const mergedKit = resolvedKit?.content ?? EMPTY_KIT_CONTENT;
 
     const masterDims = master_dims ?? DEFAULT_MASTER;
     const secondaryAspects = secondary_aspects ?? DEFAULT_VARIANTS;
@@ -147,6 +158,9 @@ export async function POST(request: NextRequest) {
       tokenUsage: result.tokenUsage,
       conversationId: result.conversationId,
       invocation_id: inv.insertId,
+      // Kit con el que el agente resolvió los tokens. El cliente lo manda en
+      // el POST del template para que el editor muestre exactamente eso.
+      brand_kit_id: resolvedKit?.id ?? null,
     });
   } catch (error) {
     console.error("Error en generate-from-prompt:", error);

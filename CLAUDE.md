@@ -268,18 +268,28 @@ La respuesta de `/api/practicante/run` incluye:
   `conversation_id`, `created_by`, `created_at`.
 - **Acumulación**: el dashboard de costos del proyecto suma `estimated_cost`
   de las invocaciones del proyecto y lo expone junto a los costos de GCP.
-- **Rate limiting**: opcional, por proyecto/día. Se chequea contra la suma
-  acumulada de `estimated_cost` del día actual.
+- **Rate limiting**: `lib/production/ai-rate-limit.ts`, aplicado en las 4
+  rutas de IA (429 con `code: PRODUCTION_AI_QUOTA_EXCEEDED`). Dos topes leídos
+  de `production_ai_invocations`: presupuesto diario por proyecto en USD
+  (`PRODUCTION_AI_DAILY_USD_PER_PROJECT`, default 10) y llamadas por usuario
+  en la última hora (`PRODUCTION_AI_HOURLY_CALLS_PER_USER`, default 20).
+  0 desactiva el tope. El panel "Costos IA" del proyecto muestra el uso del día.
 
 ### Endpoints que invocan al agente
-Por crear (estos NO existen aún):
-- `POST /api/production/templates/[id]/ai/adapt-orientation`
-  - Body: `{ target_template_id: number, instructions?: string }`.
-  - Resuelve master + target + brand_kit, llama al agente, valida, retorna
-    `{ proposal: TemplateDefinition, rationale: string, cost: number }`.
-- `POST /api/production/designs/ai/generate`
-  - Body: `{ production_project_id: number, intent: string, tone?: string, master_dims?: {w,h}, secondary_aspects?: [{w,h}], instructions?: string }`.
-  - Genera master + variantes, retorna lo mismo + variantes.
+- `POST /api/production/templates/[id]/ai/adapt-orientation` — `ADAPT_ORIENTATION` (id = target; el master se resuelve por design).
+- `POST /api/production/templates/[id]/ai/animate` — `ANIMATE_TEMPLATE`.
+- `POST /api/production/ai/generate-from-reference` — `GENERATE_FROM_REFERENCE` (1-3 imágenes).
+- `POST /api/production/ai/generate-from-prompt` — `GENERATE_FROM_PROMPT` (solo texto).
+Todos registran en `production_ai_invocations`, pasan por el rate limiting y
+normalizan la respuesta con `lib/production/composites.ts` (colapsa pares
+shape+text en un TextLayer con fondo).
+
+### Brand kit: tokens de marca heredados por proyecto
+`lib/production/project-brand-kit.ts` es el único resolver. Orden: kit
+explícito del template → fork project-scoped → kit client-wide de la marca →
+null. Lo usan la creación de templates (POST) y las 4 rutas de IA, así el
+editor muestra los mismos tokens que el agente usó. Un fork es un snapshot:
+no se mezcla con el kit de la marca.
 
 ### UI integration points (planeados)
 - Botón ✨ "Adaptar con IA" en cada mini preview no-master del `VariantsStrip`

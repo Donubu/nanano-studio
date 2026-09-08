@@ -51,6 +51,9 @@ export type PickerSource =
       kind: "ai-reference";
       definition: TemplateDefinition;
       variants: AiVariant[];
+      // Kit con el que el agente resolvió los tokens; se persiste en el
+      // template para que el editor muestre exactamente lo mismo.
+      brandKitId: number | null;
     }
   // Generación IA desde texto (sin imágenes). Misma forma que ai-reference;
   // viene de /api/production/ai/generate-from-prompt.
@@ -58,6 +61,7 @@ export type PickerSource =
       kind: "ai-prompt";
       definition: TemplateDefinition;
       variants: AiVariant[];
+      brandKitId: number | null;
     };
 
 interface AiVariant {
@@ -492,6 +496,7 @@ function ReferenceUploadTab({
         kind: "ai-reference",
         definition: proposal.definition,
         variants: proposal.variants,
+        brandKitId: typeof body.brand_kit_id === "number" ? body.brand_kit_id : null,
       });
     } catch (e) {
       setError(`Error de red: ${(e as Error).message}`);
@@ -737,6 +742,7 @@ function PromptTab({
         kind: "ai-prompt",
         definition: proposal.definition,
         variants: proposal.variants,
+        brandKitId: typeof body.brand_kit_id === "number" ? body.brand_kit_id : null,
       });
     } catch (e) {
       setError(`Error de red: ${(e as Error).message}`);
