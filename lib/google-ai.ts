@@ -352,6 +352,76 @@ function extractTextFromParts(parts?: Part[]): string {
     .join("");
 }
 
+// Motivos por los que Google descarta la respuesta (candidate.finishReason o
+// promptFeedback.blockReason). En estos casos el stream termina sin parts y, si
+// no los detectamos, la generación queda como un mensaje vacío "exitoso".
+const BLOCKING_REASONS = new Set([
+  "SAFETY",
+  "IMAGE_SAFETY",
+  "PROHIBITED_CONTENT",
+  "IMAGE_PROHIBITED_CONTENT",
+  "IMAGE_OTHER",
+  "RECITATION",
+  "BLOCKLIST",
+  "SPII",
+  "OTHER",
+  "BLOCKED_REASON_UNSPECIFIED",
+]);
+
+export class ContentBlockedError extends Error {
+  reason: string;
+  constructor(reason: string, message: string) {
+    super(message);
+    this.name = "ContentBlockedError";
+    this.reason = reason;
+  }
+}
+
+function describeBlockReason(reason: string): string {
+  switch (reason) {
+    case "PROHIBITED_CONTENT":
+    case "IMAGE_PROHIBITED_CONTENT":
+      return "por contenido prohibido (típicamente personajes o marcas con derechos, o personas reales, en el prompt o en las referencias)";
+    case "SAFETY":
+    case "IMAGE_SAFETY":
+      return "por su filtro de seguridad";
+    case "RECITATION":
+      return "por reproducir contenido protegido";
+    case "BLOCKLIST":
+      return "por términos bloqueados";
+    case "SPII":
+      return "por datos personales sensibles";
+    default:
+      return "sin especificar el motivo";
+  }
+}
+
+// Devuelve un error si Google bloqueó la generación; null si la respuesta es válida.
+// - promptFeedback.blockReason: el prompt fue rechazado antes de generar.
+// - finishReason bloqueante sin output útil: la respuesta fue descartada. Si hubo
+//   imágenes (o texto en modo texto) se considera parcial y no se marca como error.
+function buildBlockedError(input: {
+  promptFeedback?: { blockReason?: string };
+  finishReason?: string;
+  imageCount: number;
+  textLength: number;
+  imageMode: boolean;
+}): ContentBlockedError | null {
+  const { promptFeedback, finishReason, imageCount, textLength, imageMode } = input;
+  const reason = promptFeedback?.blockReason || finishReason;
+  if (!reason || !BLOCKING_REASONS.has(reason)) return null;
+  if (!promptFeedback?.blockReason) {
+    const hasOutput = imageCount > 0 || (!imageMode && textLength > 0);
+    if (hasOutput) return null;
+  }
+  const what = imageMode ? "la imagen" : "la respuesta";
+  // "content filter" en inglés para que classifyError lo categorice como content_policy.
+  return new ContentBlockedError(
+    reason,
+    `Google bloqueó ${what} ${describeBlockReason(reason)} (content filter: ${reason}). Prueba con otro modelo o ajusta el prompt y las imágenes de referencia.`
+  );
+}
+
 // Extraer texto de thoughts
 function extractThoughtsFromParts(parts?: Part[]): string {
   if (!parts) return "";
@@ -437,6 +507,18 @@ export async function sendMessage(
     }
   } else {
     images = extractImagesFromParts(parts);
+  }
+
+  const blocked = buildBlockedError({
+    promptFeedback: response.promptFeedback,
+    finishReason: candidates[0]?.finishReason,
+    imageCount: images.length,
+    textLength: text.length,
+    imageMode: !!settings.imageConfig,
+  });
+  if (blocked) {
+    console.warn(`[Google AI] generateContent bloqueado: ${blocked.reason} (model=${modelId})`);
+    throw blocked;
   }
 
   // Extract grounding metadata
@@ -553,10 +635,16 @@ export async function sendMessageStream(
 
         let fullText = "";
         const allImages: GeneratedImage[] = [];
+        let imageCount = 0;
+        let finishReason: string | undefined;
+        let promptFeedback: { blockReason?: string } | undefined;
         let usageMetadata: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined;
         let groundingData: GroundingData | undefined;
 
         for await (const chunk of responseStream) {
+          if (chunk.promptFeedback?.blockReason) promptFeedback = chunk.promptFeedback;
+          if (chunk.candidates?.[0]?.finishReason) finishReason = chunk.candidates[0].finishReason;
+
           // Extraer texto del primer candidato
           const parts = chunk.candidates?.[0]?.content?.parts;
 
@@ -589,6 +677,7 @@ export async function sendMessageStream(
           for (const candidate of candidates) {
             const chunkImages = extractImagesFromParts(candidate.content?.parts);
             if (chunkImages.length > 0) {
+              imageCount += chunkImages.length;
               if (callbacks.onImage) {
                 // Stream mode: dispatch each image immediately, don't accumulate in memory
                 for (const img of chunkImages) {
@@ -634,6 +723,21 @@ export async function sendMessageStream(
               console.log(`[Google AI] Thoughts tokens: ${meta.thoughtsTokenCount}, total: ${meta.totalTokenCount}`);
             }
           }
+        }
+
+        // Si Google descartó la respuesta (safety, contenido prohibido, etc.) el stream
+        // termina sin parts: lanzar error en vez de completar con un mensaje vacío.
+        // No es retriable (isRetriableError no lo matchea), así que sale directo a onError.
+        const blocked = buildBlockedError({
+          promptFeedback,
+          finishReason,
+          imageCount,
+          textLength: fullText.length,
+          imageMode: !!settings.imageConfig,
+        });
+        if (blocked) {
+          console.warn(`[Google AI] generateContentStream bloqueado: ${blocked.reason} (model=${modelId})`);
+          throw blocked;
         }
 
         // Dispatch grounding callback after stream completes
