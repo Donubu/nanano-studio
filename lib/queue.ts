@@ -46,6 +46,7 @@ export interface StreamJobData {
       mimeType: string;
       name?: string;
       type: string;
+      sourceUrl?: string; // referencia en GCS: el worker la descarga antes de llamar al modelo
     }>;
   }>;
 

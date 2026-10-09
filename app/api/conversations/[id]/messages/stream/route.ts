@@ -4,6 +4,7 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { sendMessageStream, sendMessage, ChatMessage, isConfigured, Labels, GeneratedImage, GroundingData, generateConversationTitle, AttachedFile } from "@/lib/google-ai";
 import { uploadToS3, generateFileName, isS3Configured } from "@/lib/s3";
+import { validateSourceUrls } from "@/lib/attached-files";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
 import { isRedisConfigured, createRedisConnection } from "@/lib/redis";
 import { getStreamQueue, jobChannel, StreamJobEvent, hasActiveWorkers } from "@/lib/queue";
@@ -176,7 +177,17 @@ export async function POST(
 
     // Log de archivos recibidos
     if (files && files.length > 0) {
-      console.log("[Stream] Files received:", files.map(f => ({ name: f.name, type: f.type, mimeType: f.mimeType })));
+      console.log("[Stream] Files received:", files.map(f => ({ name: f.name, type: f.type, mimeType: f.mimeType, byRef: !!f.sourceUrl && !f.dataUrl })));
+    }
+
+    // Adjuntos por referencia (sourceUrl sin dataUrl): solo se aceptan URLs de
+    // nuestro bucket; se descargan en el server justo antes de llamar al modelo.
+    const sourceUrlError = validateSourceUrls(files);
+    if (sourceUrlError) {
+      return new Response(JSON.stringify({ error: sourceUrlError }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     // Obtener conversación con configuración, nombre del proyecto y costos del modelo
@@ -589,6 +600,7 @@ export async function POST(
                     mimeType: f.mimeType,
                     name: f.name,
                     type: f.type as string,
+                    sourceUrl: f.sourceUrl,
                   })),
                 })),
                 labels: {

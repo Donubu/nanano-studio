@@ -24,6 +24,40 @@ async function urlToDataUrl(url: string): Promise<string> {
   });
 }
 
+/** Imágenes que ya viven en nuestro bucket: se mandan por URL y el server las descarga. */
+function isOwnStorageUrl(url: string): boolean {
+  return /^https:\/\/storage\.googleapis\.com\//.test(url);
+}
+
+function guessImageMime(url: string): string {
+  const ext = url.split("?")[0].split(".").pop()?.toLowerCase();
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (ext === "webp") return "image/webp";
+  return "image/png";
+}
+
+/**
+ * Texto de error para una respuesta no-ok. Si el body no es JSON (ej. el
+ * proxy respondió "Bad Gateway" en texto plano) lo dice explícitamente en vez
+ * de dejar el detalle vacío (bajo HTTP/2 statusText viene vacío).
+ */
+async function readHttpError(res: Response): Promise<{ detail: string; code: string }> {
+  let detail = res.statusText;
+  let code = "";
+  try {
+    const err = await res.json();
+    detail = err.error || JSON.stringify(err);
+    code = err.code || "";
+  } catch {
+    if (!detail) {
+      detail = res.status === 502 || res.status === 503 || res.status === 504
+        ? "Bad Gateway (el proxy cortó la conexión; revisa el tamaño de las referencias o reintenta)"
+        : `HTTP ${res.status}`;
+    }
+  }
+  return { detail, code };
+}
+
 interface UseCanvasExecutionOptions {
   conversationId: number;
   nodes: Node[];
@@ -1228,8 +1262,8 @@ async function executeTextNode(
   });
 
   if (!res.ok) {
-    let detail = res.statusText;
-    try { const err = await res.json(); detail = err.error || JSON.stringify(err); } catch {}
+    const { detail, code } = await readHttpError(res);
+    if (code === "CLIENT_QUOTA_EXCEEDED") throw new Error(detail);
     throw new Error(`${res.status}: ${detail}`);
   }
 
@@ -1311,10 +1345,22 @@ async function executeNanoBananaNode(
     body.system_instruction_override = scriptContext;
   }
 
-  // Pass all reference images as file attachments — convert URLs to base64
+  // Referencias: las que ya están en GCS van solo por URL (sourceUrl) y el
+  // server las descarga; así el request pesa KB y no decenas de MB de base64
+  // (que el proxy cortaba a los 60s con un 502). Cualquier otra URL se
+  // convierte a base64 como antes.
   if (referenceImageUrls.length > 0) {
     const files = await Promise.all(
       referenceImageUrls.map(async (url, i) => {
+        if (isOwnStorageUrl(url)) {
+          return {
+            dataUrl: "",
+            sourceUrl: url,
+            mimeType: guessImageMime(url),
+            name: `reference-${i}.png`,
+            type: "image" as const,
+          };
+        }
         try {
           const dataUrl = await urlToDataUrl(url);
           return {
@@ -1339,8 +1385,8 @@ async function executeNanoBananaNode(
   });
 
   if (!res.ok) {
-    let detail = res.statusText;
-    try { const err = await res.json(); detail = err.error || JSON.stringify(err); } catch {}
+    const { detail, code } = await readHttpError(res);
+    if (code === "CLIENT_QUOTA_EXCEEDED") throw new Error(detail);
     throw new Error(`NanoBanana ${res.status}: ${detail}`);
   }
 
@@ -1432,13 +1478,7 @@ async function executeImageNode(
   });
 
   if (!res.ok) {
-    let detail = res.statusText;
-    let code = "";
-    try {
-      const err = await res.json();
-      detail = err.error || JSON.stringify(err);
-      code = err.code || "";
-    } catch {}
+    const { detail, code } = await readHttpError(res);
     // Cuota mensual: mensaje sin prefijos técnicos para no confundir con error de API
     if (code === "CLIENT_QUOTA_EXCEEDED") {
       throw new Error(detail);
@@ -1539,13 +1579,7 @@ async function executeVideoNode(
   });
 
   if (!res.ok) {
-    let detail = res.statusText;
-    let code = "";
-    try {
-      const err = await res.json();
-      detail = err.error || JSON.stringify(err);
-      code = err.code || "";
-    } catch {}
+    const { detail, code } = await readHttpError(res);
     if (code === "CLIENT_QUOTA_EXCEEDED") {
       throw new Error(detail);
     }

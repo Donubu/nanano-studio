@@ -120,6 +120,7 @@ async function processStreamJob(job: Job<StreamJobData>): Promise<void> {
         mimeType: f.mimeType,
         name: f.name,
         type: f.type as "image" | "document" | "audio",
+        sourceUrl: f.sourceUrl,
       })),
     }));
 

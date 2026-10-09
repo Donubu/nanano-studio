@@ -215,3 +215,16 @@ export async function deleteFromS3(key: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * true si la URL apunta a nuestro propio bucket (GCS_BASE_URL o
+ * storage.googleapis.com/<bucket>). Se usa para permitir que el server
+ * descargue referencias por URL sin abrir un SSRF a hosts arbitrarios.
+ */
+export function isOwnStorageUrl(url: string): boolean {
+  if (!url || typeof url !== "string") return false;
+  const bucket = getBucket();
+  const bases = [getBaseUrl()];
+  if (bucket) bases.push(`https://storage.googleapis.com/${bucket}`);
+  return bases.some((base) => base && url.startsWith(`${base}/`));
+}

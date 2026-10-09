@@ -1,4 +1,5 @@
 import { GoogleGenAI, Content, Part, GenerateContentConfig } from "@google/genai";
+import { resolveAttachedFiles } from "./attached-files";
 
 // Determinar si usar Vertex AI o Gemini API
 const isVertexAI = process.env.GOOGLE_GENAI_USE_VERTEXAI === "true";
@@ -445,6 +446,7 @@ export async function sendMessage(
   tokenCount: { input: number; output: number };
   groundingData?: GroundingData;
 }> {
+  await resolveAttachedFiles(messages);
   const contents = convertToGoogleFormat(messages);
   const client = getClient(backend);
 
@@ -578,6 +580,7 @@ export async function sendMessageStream(
   backend?: string
 ): Promise<void> {
   try {
+    await resolveAttachedFiles(messages);
     const contents = convertToGoogleFormat(messages);
     const client = getClient(backend);
 
