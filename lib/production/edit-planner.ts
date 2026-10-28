@@ -21,7 +21,7 @@ const SYSTEM_INSTRUCTION = `Eres el asistente de diseño dentro del editor de ba
 Operaciones ("op"):
 - set_text {id, content}: cambia el texto de una capa de texto.
 - update {id, x?, y?, w?, h?, font_size?, font_weight?, color?, background_color?, align?, hidden?, icon_name?, focal_x?, focal_y?, fit?, text_style?, gradient_colors?, gradient_angle?, outline_color?, outline_width?, outline2_color?, outline2_width?, extrude_color?, extrude_depth?, texture_prompt?}: mueve, redimensiona o cambia estilo de una capa existente. background_color en un texto lo vuelve botón/badge. En imágenes, focal_x/focal_y (0-100, porcentaje del ancho y alto DE LA FOTO) es el punto que queda visible cuando la foto se recorta para llenar su caja (fit "cover"); "contain" la muestra completa sin recortar.
-- add {kind, x, y, w, h, content?, font_size?, font_weight?, color?, background_color?, align?, icon_name?, image_prompt?, skin_prompt?, skin_kind?}: agrega una capa. kind: ${ADD_KINDS.join(", ")}. "button" y "badge" son textos con fondo (pastilla y círculo). Para "image" incluye image_prompt si hay que generarla; una imagen que cubre todo el formato queda de fondo.
+- add {kind, x, y, w, h, content?, font_size?, font_weight?, color?, background_color?, align?, icon_name?, image_prompt?, skin_prompt?, skin_kind?}: agrega una capa. kind: ${ADD_KINDS.join(", ")}. "button" y "badge" son textos con fondo (pastilla y círculo). "logo" pone la imagen REAL del logo de la marca (brand.logo.available); x,y,w,h es el espacio donde va (el logo conserva su proporción adentro). Para cualquier pedido de logo usa add kind logo; nunca dibujes un logo con formas y texto. Si brand.logo.available es false, no lo inventes: explica en rationale que falta cargarlo. Para "image" incluye image_prompt si hay que generarla; una imagen que cubre todo el formato queda de fondo.
 - Texto gráfico (en update o add de textos, sin fondo o con fondo): para "titular más gráfico", "con volumen", "3D", "dorado", "tipo sticker", "con degradado", "con brillo", "con textura de X", "menos plano". El texto sigue editable. Para "más gráfico" o "menos plano" sin más detalle prefiere los estilos actuales (soft, subtle_gradient, duotone); volume, gold y sticker solo si los piden con esas palabras.
   · text_style: estilo rápido completo: ${TEXT_PRESETS.map((p) => `"${p.id}" (${p.label})`).join(", ")}. "none" deja el texto plano.
   · Efectos sueltos (se aplican encima del estilo rápido): gradient_colors (2-3 colores, de arriba hacia abajo con gradient_angle 180), outline_color/outline_width (contorno por fuera de la letra, px), outline2_color/outline2_width (segundo contorno, por fuera del primero), extrude_color/extrude_depth (volumen 3D, px; ~6% de la letra). Ancho 0 quita el efecto.
@@ -157,6 +157,8 @@ export interface EditPlanRequest {
   brandGuide?: BrandGuide | null;
   // Fotos de capas de imagen (ya descargadas), para que el modelo las vea.
   layerImages?: { layerId: string; mimeType: string; data: string }[];
+  // Logo real de la marca, si hay (para "add kind logo").
+  logo?: { aspect: number } | null;
 }
 
 export async function requestEditPlan(
@@ -169,6 +171,7 @@ export async function requestEditPlan(
     background: req.tree.background?.type === "color" ? req.tree.background.value : null,
     layers: req.tree.children.map((l) => describe(l, req.tree.size)),
     brand: {
+      logo: req.logo ? { available: true, aspect: Math.round(req.logo.aspect * 100) / 100 } : { available: false },
       colors: req.brandKit.colors.map((c) => ({ token: makeRef("color", c.name), label: c.label, value: c.value })),
       fonts: req.brandKit.fonts.map((f) => ({ token: makeRef("font", f.name), family: f.fontFamily })),
     },

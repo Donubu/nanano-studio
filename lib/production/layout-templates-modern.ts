@@ -3,6 +3,8 @@
 // slot de letra chica para legales en todas. Mismo formato que
 // layout-templates.ts (tres orientaciones con su propia composición).
 //
+// Todas llevan un slot "logo" (imagen, se llena sola con el logo de la marca).
+//
 // Colores de muestra por ROL, todos distintos entre sí: el planificador
 // recolorea por valor exacto (from → to), así cada rol se cambia por
 // separado (fondo, texto, marca, acento, texto sobre color).
@@ -54,6 +56,12 @@ function img(id: string, name: string, [x, y, w, h]: Box, cornerRadius?: number)
   return { id, type: "image", name, position: { x, y }, size: { w, h }, src: null, fit: "cover", ...(cornerRadius ? { cornerRadius } : {}) };
 }
 
+// Logo de la marca: se llena solo al instanciar (layout-plan.ts) con el logo
+// del brand kit o de la ficha del cliente; "contain" respeta su proporción.
+function logo([x, y, w, h]: Box): ImageLayer {
+  return { id: "logo", type: "image", name: "Logo", position: { x, y }, size: { w, h }, src: null, fit: "contain", focalX: 0, focalY: 0 };
+}
+
 function rect(id: string, name: string, [x, y, w, h]: Box, fill: string, cornerRadius = 0): ShapeLayer {
   return { id, type: "shape", name, position: { x, y }, size: { w, h }, shape: "rect", fill, cornerRadius };
 }
@@ -94,6 +102,7 @@ const editorialSplit: LayoutTemplate = {
   aspects: {
     horizontal: root(1920, 1080, PAPER, [
       img("hero", "Imagen", [800, 0, 1120, 1080]),
+      logo([96, 56, 220, 72]),
       kicker([96, 150, 620, 40], BRAND, 26),
       t("title", "Titular", [96, 210, 640, 330], "Titular corto y potente", { fontSize: 104, fontWeight: 800, lineHeight: 0.98 }),
       t("subtitle", "Bajada", [96, 560, 600, 110], "Una frase que explica el beneficio principal.", { fontSize: 32, color: MUTED, lineHeight: 1.35 }),
@@ -103,6 +112,7 @@ const editorialSplit: LayoutTemplate = {
     ]),
     square: root(1080, 1080, PAPER, [
       img("hero", "Imagen", [0, 0, 1080, 520]),
+      logo([72, 52, 180, 60]),
       kicker([72, 568, 600, 36], BRAND, 22),
       t("title", "Titular", [72, 612, 936, 180], "Titular corto y potente", { fontSize: 72, fontWeight: 800, lineHeight: 1 }),
       t("subtitle", "Bajada", [72, 800, 600, 72], "Una frase que explica el beneficio principal.", { fontSize: 24, color: MUTED, lineHeight: 1.35 }),
@@ -112,6 +122,7 @@ const editorialSplit: LayoutTemplate = {
     ]),
     vertical: root(1080, 1920, PAPER, [
       img("hero", "Imagen", [0, 0, 1080, 1000]),
+      logo([72, 72, 240, 80]),
       kicker([72, 1056, 800, 44], BRAND, 28),
       t("title", "Titular", [72, 1110, 936, 320], "Titular corto y potente", { fontSize: 104, fontWeight: 800, lineHeight: 0.98 }),
       t("subtitle", "Bajada", [72, 1450, 900, 120], "Una frase que explica el beneficio principal.", { fontSize: 36, color: MUTED, lineHeight: 1.35 }),
@@ -132,6 +143,7 @@ const colorBlock: LayoutTemplate = {
     horizontal: root(1920, 1080, PAPER, [
       img("hero", "Imagen", [820, 0, 1100, 1080]),
       rect("block", "Bloque de color", [0, 0, 820, 1080], BRAND),
+      logo([96, 56, 220, 70]),
       t("title", "Titular", [96, 140, 660, 420], "TITULAR EN BLOQUE", {
         fontSize: 120,
         fontWeight: 900,
@@ -155,6 +167,7 @@ const colorBlock: LayoutTemplate = {
     square: root(1080, 1080, PAPER, [
       img("hero", "Imagen", [0, 0, 1080, 560]),
       rect("block", "Bloque de color", [0, 560, 1080, 520], BRAND),
+      logo([72, 52, 180, 60]),
       t("title", "Titular", [72, 600, 936, 200], "TITULAR EN BLOQUE", {
         fontSize: 84,
         fontWeight: 900,
@@ -178,6 +191,7 @@ const colorBlock: LayoutTemplate = {
     vertical: root(1080, 1920, PAPER, [
       img("hero", "Imagen", [0, 0, 1080, 1040]),
       rect("block", "Bloque de color", [0, 1040, 1080, 880], BRAND),
+      logo([72, 72, 240, 80]),
       t("title", "Titular", [72, 1100, 936, 360], "TITULAR EN BLOQUE", {
         fontSize: 120,
         fontWeight: 900,
@@ -223,6 +237,7 @@ const priceBand: LayoutTemplate = {
         letterSpacing: 2,
       }),
       rect("band", "Franja", [0, 780, 1920, 300], BRAND),
+      logo([1680, 64, 176, 176]),
       t("title", "Nombre", [96, 808, 900, 110], "Nombre del producto", { fontSize: 64, fontWeight: 800, color: ON_COLOR, lineHeight: 1.05 }),
       t("subtitle", "Bajada", [96, 922, 900, 60], "Detalle clave en una línea", { fontSize: 28, color: ON_COLOR_SOFT }),
       t("price", "Precio", [1060, 808, 520, 150], "DESDE $0.000*", {
@@ -250,6 +265,7 @@ const priceBand: LayoutTemplate = {
         letterSpacing: 2,
       }),
       rect("band", "Franja", [0, 700, 1080, 380], BRAND),
+      logo([860, 52, 148, 148]),
       t("title", "Nombre", [72, 732, 936, 100], "Nombre del producto", { fontSize: 52, fontWeight: 800, color: ON_COLOR, lineHeight: 1.05 }),
       t("subtitle", "Bajada", [72, 836, 936, 50], "Detalle clave en una línea", { fontSize: 24, color: ON_COLOR_SOFT }),
       t("price", "Precio", [72, 900, 560, 100], "DESDE $0.000*", {
@@ -277,6 +293,7 @@ const priceBand: LayoutTemplate = {
         letterSpacing: 2,
       }),
       rect("band", "Franja", [0, 1150, 1080, 770], BRAND),
+      logo([880, 72, 128, 128]),
       t("title", "Nombre", [72, 1200, 936, 200], "Nombre del producto", { fontSize: 88, fontWeight: 800, color: ON_COLOR, lineHeight: 1.02 }),
       t("subtitle", "Bajada", [72, 1410, 936, 90], "Detalle clave en una línea", { fontSize: 34, color: ON_COLOR_SOFT }),
       t("price", "Precio", [72, 1530, 640, 150], "DESDE $0.000*", {
@@ -303,7 +320,7 @@ const typeHero: LayoutTemplate = {
     "Titular gigante de 2 líneas que ocupa casi todo el ancho sobre fondo oscuro; foto recortada como apoyo, precio en acento y botón. Deportiva/bold, lanzamientos y campañas de marca. Titular de máximo 2-3 palabras por línea.",
   aspects: {
     horizontal: root(1920, 1080, DARK, [
-      t("title", "Titular", [96, 96, 1728, 560], "TITULAR\nGIGANTE", {
+      t("title", "Titular", [96, 96, 1400, 560], "TITULAR\nGIGANTE", {
         fontSize: 230,
         fontWeight: 900,
         color: ON_COLOR,
@@ -312,13 +329,14 @@ const typeHero: LayoutTemplate = {
         textTransform: "uppercase",
       }),
       img("hero", "Imagen", [1240, 680, 584, 356]),
+      logo([1624, 96, 200, 80]),
       t("subtitle", "Bajada", [96, 680, 1000, 80], "Una línea que aterriza la idea.", { fontSize: 32, color: SOFT_GREY }),
       t("price", "Precio", [96, 770, 1000, 100], "$0.000", { fontSize: 80, fontWeight: 900, color: ACCENT, lineHeight: 1 }),
       button([96, 890, 300, 80], ACCENT, ON_COLOR, 28, "Comprar"),
       legal([96, 1004, 1100, 32], SOFT_GREY, 14),
     ]),
     square: root(1080, 1080, DARK, [
-      t("title", "Titular", [72, 72, 936, 420], "TITULAR\nGIGANTE", {
+      t("title", "Titular", [72, 148, 936, 360], "TITULAR\nGIGANTE", {
         fontSize: 150,
         fontWeight: 900,
         color: ON_COLOR,
@@ -327,13 +345,14 @@ const typeHero: LayoutTemplate = {
         textTransform: "uppercase",
       }),
       img("hero", "Imagen", [560, 520, 448, 460]),
+      logo([848, 72, 160, 56]),
       t("subtitle", "Bajada", [72, 520, 460, 120], "Una línea que aterriza la idea.", { fontSize: 30, color: SOFT_GREY, lineHeight: 1.3 }),
       t("price", "Precio", [72, 660, 460, 90], "$0.000", { fontSize: 64, fontWeight: 900, color: ACCENT, lineHeight: 1 }),
       button([72, 780, 300, 80], ACCENT, ON_COLOR, 26, "Comprar"),
       legal([72, 1004, 936, 32], SOFT_GREY, 14),
     ]),
     vertical: root(1080, 1920, DARK, [
-      t("title", "Titular", [72, 96, 936, 720], "TITULAR\nGIGANTE", {
+      t("title", "Titular", [72, 200, 936, 620], "TITULAR\nGIGANTE", {
         fontSize: 190,
         fontWeight: 900,
         color: ON_COLOR,
@@ -342,6 +361,7 @@ const typeHero: LayoutTemplate = {
         textTransform: "uppercase",
       }),
       img("hero", "Imagen", [72, 860, 936, 560]),
+      logo([72, 96, 240, 80]),
       t("subtitle", "Bajada", [72, 1460, 936, 100], "Una línea que aterriza la idea.", { fontSize: 38, color: SOFT_GREY }),
       t("price", "Precio", [72, 1580, 936, 110], "$0.000", { fontSize: 90, fontWeight: 900, color: ACCENT, lineHeight: 1 }),
       button([72, 1710, 420, 100], ACCENT, ON_COLOR, 36, "Comprar"),
@@ -361,6 +381,7 @@ const framedPhoto: LayoutTemplate = {
     horizontal: root(1920, 1080, BRAND, [
       img("hero", "Imagen", [40, 40, 1840, 1000], 24),
       rect("shade", "Degradado", [40, 40, 1840, 1000], "linear-gradient(90deg, rgba(0,0,0,0.68), rgba(0,0,0,0) 62%)", 24),
+      logo([120, 100, 220, 72]),
       t("title", "Titular", [120, 260, 900, 300], "Titular sobre la foto", { fontSize: 110, fontWeight: 800, color: ON_COLOR, lineHeight: 1 }),
       t("subtitle", "Bajada", [120, 580, 800, 100], "Bajada breve que suma un dato.", { fontSize: 34, color: ON_COLOR_SOFT, lineHeight: 1.3 }),
       t("price", "Precio", [120, 700, 700, 90], "Desde $0.000", { fontSize: 64, fontWeight: 800, color: ON_COLOR, lineHeight: 1 }),
@@ -370,6 +391,7 @@ const framedPhoto: LayoutTemplate = {
     square: root(1080, 1080, BRAND, [
       img("hero", "Imagen", [32, 32, 1016, 1016], 20),
       rect("shade", "Degradado", [32, 32, 1016, 1016], "linear-gradient(0deg, rgba(0,0,0,0.72), rgba(0,0,0,0) 62%)", 20),
+      logo([88, 88, 180, 60]),
       t("title", "Titular", [88, 560, 904, 190], "Titular sobre la foto", { fontSize: 80, fontWeight: 800, color: ON_COLOR, lineHeight: 1 }),
       t("subtitle", "Bajada", [88, 760, 904, 60], "Bajada breve que suma un dato.", { fontSize: 26, color: ON_COLOR_SOFT }),
       t("price", "Precio", [88, 830, 600, 70], "Desde $0.000", { fontSize: 52, fontWeight: 800, color: ON_COLOR, lineHeight: 1 }),
@@ -379,6 +401,7 @@ const framedPhoto: LayoutTemplate = {
     vertical: root(1080, 1920, BRAND, [
       img("hero", "Imagen", [40, 40, 1000, 1840], 24),
       rect("shade", "Degradado", [40, 40, 1000, 1840], "linear-gradient(0deg, rgba(0,0,0,0.72), rgba(0,0,0,0) 55%)", 24),
+      logo([100, 100, 240, 80]),
       t("title", "Titular", [100, 1060, 880, 300], "Titular sobre la foto", { fontSize: 110, fontWeight: 800, color: ON_COLOR, lineHeight: 1 }),
       t("subtitle", "Bajada", [100, 1380, 880, 110], "Bajada breve que suma un dato.", { fontSize: 36, color: ON_COLOR_SOFT, lineHeight: 1.3 }),
       t("price", "Precio", [100, 1510, 880, 100], "Desde $0.000", { fontSize: 76, fontWeight: 800, color: ON_COLOR, lineHeight: 1 }),
@@ -399,6 +422,7 @@ const quietLuxury: LayoutTemplate = {
     horizontal: root(1920, 1080, DARK, [
       img("hero", "Imagen", [0, 0, 1920, 1080]),
       rect("shade", "Velo", [0, 0, 1920, 1080], "linear-gradient(90deg, rgba(10,10,12,0.72), rgba(10,10,12,0.1) 70%)"),
+      logo([120, 96, 220, 72]),
       kicker([120, 600, 800, 36], CHAMPAGNE, 22),
       t("title", "Titular", [120, 650, 980, 200], "Un titular sereno y elegante", {
         fontFamily: SERIF,
@@ -421,6 +445,7 @@ const quietLuxury: LayoutTemplate = {
     square: root(1080, 1080, DARK, [
       img("hero", "Imagen", [0, 0, 1080, 1080]),
       rect("shade", "Velo", [0, 0, 1080, 1080], "linear-gradient(0deg, rgba(10,10,12,0.78), rgba(10,10,12,0.05) 65%)"),
+      logo([72, 72, 180, 60]),
       kicker([72, 600, 900, 32], CHAMPAGNE, 20),
       t("title", "Titular", [72, 644, 936, 180], "Un titular sereno y elegante", {
         fontFamily: SERIF,
@@ -444,6 +469,7 @@ const quietLuxury: LayoutTemplate = {
     vertical: root(1080, 1920, DARK, [
       img("hero", "Imagen", [0, 0, 1080, 1920]),
       rect("shade", "Velo", [0, 0, 1080, 1920], "linear-gradient(0deg, rgba(10,10,12,0.8), rgba(10,10,12,0.05) 55%)"),
+      logo([72, 96, 240, 80]),
       kicker([72, 1300, 900, 40], CHAMPAGNE, 24),
       t("title", "Titular", [72, 1352, 936, 260], "Un titular sereno y elegante", {
         fontFamily: SERIF,

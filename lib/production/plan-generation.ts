@@ -17,6 +17,7 @@ import { expandPlan, ensureTextContrast, LayoutPlan } from "./layout-plan";
 import { requestLayoutPlans, LAYOUT_PLANNER_AGENT_NAME, LAYOUT_PLANNER_MODEL } from "./layout-planner";
 import { LayoutFixUsage } from "./layout-fixer";
 import { topPieceImages } from "./brand-pieces";
+import { resolveBrandLogo } from "./project-brand-kit";
 
 export const DEFAULT_MASTER_DIMS = { w: 1920, h: 1080 };
 export const DEFAULT_VARIANT_DIMS = [
@@ -82,9 +83,10 @@ export async function generateFromPlans(
     usage = (e as { usage?: LayoutFixUsage }).usage;
   }
 
+  const logo = plans.length > 0 ? await resolveBrandLogo(p.brandKit, p.clientId) : null;
   const proposals = plans
     .map((plan) => {
-      const raw = expandPlan(plan, masterDims, variantDims);
+      const raw = expandPlan(plan, masterDims, variantDims, logo?.src ?? null);
       if (!raw) return null;
       const resolve = (c: string) => resolveColor(c, p.brandKit, c);
       const expanded = {

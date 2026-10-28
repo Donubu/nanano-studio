@@ -55,7 +55,13 @@ export interface CatalogEntry {
   texts: TemplateSlot[];
   images: { id: string; name: string; full_bleed: boolean }[];
   colors: string[];
+  // Lleva el logo de la marca (slot "logo", se llena solo).
+  has_logo?: boolean;
 }
+
+// Slot de imagen reservado para el logo: no se genera con IA, se llena con
+// el logo de la marca al instanciar.
+export const LOGO_SLOT_ID = "logo";
 
 const ASPECTS: AspectKey[] = ["horizontal", "square", "vertical"];
 // Mismo ancho de glifo que layout-lint.ts: estimación, no layout real.
@@ -121,6 +127,7 @@ export function describeTemplate(t: LayoutTemplate): CatalogEntry {
           line_chars: Math.min(prev?.line_chars ?? Infinity, cap.perLine),
         });
       }
+      if (l.type === "image" && l.id === LOGO_SLOT_ID) return;
       if (l.type === "image" && !images.has(l.id)) {
         images.set(l.id, {
           id: l.id,
@@ -137,6 +144,7 @@ export function describeTemplate(t: LayoutTemplate): CatalogEntry {
     texts: [...texts.values()],
     images: [...images.values()],
     colors: [...colors],
+    ...(ASPECTS.some((a) => t.aspects[a].children.some((l) => l.id === LOGO_SLOT_ID)) ? { has_logo: true } : {}),
   };
 }
 
@@ -182,9 +190,11 @@ function applyToLayer(
   return l;
 }
 
-function instantiateAspect(def: TemplateDefinition, plan: LayoutPlan): TemplateDefinition {
+function instantiateAspect(def: TemplateDefinition, plan: LayoutPlan, logoSrc: string | null): TemplateDefinition {
   const collapsed = collapseShapeTextPairs(def).definition;
   const hidden = new Set(plan.hidden);
+  // Sin logo cargado, el slot se quita (no queda un recuadro vacío).
+  if (!logoSrc) hidden.add(LOGO_SLOT_ID);
   const ctx = {
     texts: new Map(plan.texts.map((t) => [t.id, t.content])),
     colors: new Map(plan.colors.map((c) => [normColor(c.from), c.to])),
@@ -195,7 +205,8 @@ function instantiateAspect(def: TemplateDefinition, plan: LayoutPlan): TemplateD
     nodes
       .filter((n) => !hidden.has(n.id))
       .map((n) => {
-        const next = applyToLayer(n, ctx);
+        const next =
+          n.type === "image" && n.id === LOGO_SLOT_ID && logoSrc ? { ...n, src: logoSrc } : applyToLayer(n, ctx);
         return next.type === "frame" ? { ...next, children: mapChildren(next.children) } : next;
       });
   const bg = collapsed.background;
@@ -232,11 +243,13 @@ export function expandPlan(
   plan: LayoutPlan,
   masterDims: { w: number; h: number },
   variantDims: { w: number; h: number }[],
+  // Logo de la marca (token {logo.x} o URL) para el slot "logo".
+  logoSrc: string | null = null,
 ): ExpandedPlan | null {
   const t = findLayoutTemplate(plan.template_id);
   if (!t) return null;
   const build = (dims: { w: number; h: number }) => {
-    const def = instantiateAspect(t.aspects[aspectFor(t, dims)], plan);
+    const def = instantiateAspect(t.aspects[aspectFor(t, dims)], plan, logoSrc);
     return def.size.w === dims.w && def.size.h === dims.h ? def : adaptTree(def, dims);
   };
   return {

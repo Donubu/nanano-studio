@@ -8,6 +8,7 @@ import {
   TemplateDefinition,
   TemplateLayer,
   TextLayer,
+  ImageLayer,
   newTextLayer,
   newImageLayer,
   newShapeLayer,
@@ -31,7 +32,7 @@ export const EDIT_OPS = [
   "set_skin",
 ] as const;
 export type EditOpKind = (typeof EDIT_OPS)[number];
-export const ADD_KINDS = ["text", "button", "badge", "image", "shape", "icon"] as const;
+export const ADD_KINDS = ["text", "button", "badge", "image", "shape", "icon", "logo"] as const;
 export type AddKind = (typeof ADD_KINDS)[number];
 export const SKIN_KINDS = ["button", "badge", "none"] as const;
 
@@ -89,6 +90,9 @@ export interface EditOp {
 export interface EditOpsOptions {
   resolveColor?: (c: string) => string;
   accent?: string;
+  // Logo real de la marca (project-brand-kit.ts resolveBrandLogo): src es un
+  // token {logo.x} o una URL; aspect = ancho / alto de la imagen.
+  logo?: { src: string; aspect: number } | null;
 }
 
 export interface SkinRequest {
@@ -268,6 +272,7 @@ const KIND_LABEL: Record<AddKind, string> = {
   image: "Imagen",
   shape: "Forma",
   icon: "Ícono",
+  logo: "Logo",
 };
 
 function layerName(op: EditOp, l: TemplateLayer): string {
@@ -306,6 +311,26 @@ function newLayer(
     case "icon":
       l = newIconLayer(cx, cy, op.icon_name && isValidIconName(op.icon_name) ? op.icon_name : "Star");
       break;
+    case "logo": {
+      if (!opts.logo) return null;
+      // La caja que pide el modelo es el espacio disponible: el logo entra
+      // ahí con su proporción real, anclado arriba a la izquierda.
+      const aspect = opts.logo.aspect > 0 ? opts.logo.aspect : 1;
+      const maxW = finite(op.w) && op.w > 0 ? op.w : Math.min(frame.w, frame.h) * 0.2;
+      const maxH = finite(op.h) && op.h > 0 ? op.h : maxW / aspect;
+      const w = Math.min(maxW, maxH * aspect);
+      const h = w / aspect;
+      const logo: ImageLayer = {
+        ...newImageLayer(cx, cy),
+        id: makeId(),
+        name: "Logo",
+        src: opts.logo.src,
+        fit: "contain",
+        position: { x: finite(op.x) ? op.x : cx - w / 2, y: finite(op.y) ? op.y : cy - h / 2 },
+        size: { w, h },
+      };
+      return clampBox(logo, frame);
+    }
     default:
       return null;
   }
@@ -507,7 +532,11 @@ export function applyEditOps(
       case "add": {
         const l = newLayer(op, def.size, children, makeId, opts);
         if (!l) {
-          skipped.push(`add: tipo "${op.kind ?? "?"}" no soportado`);
+          skipped.push(
+            op.kind === "logo"
+              ? "add: la marca no tiene logo cargado (brand kit o ficha del cliente)"
+              : `add: tipo "${op.kind ?? "?"}" no soportado`,
+          );
           continue;
         }
         // Fondos y fotos grandes van atrás; el resto, arriba de todo.

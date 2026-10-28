@@ -243,6 +243,10 @@ fuente del conocimiento de marca (ver "Guía de marca").
   slot `legal` y `cta`, colores de muestra distintos por rol (el planificador
   recolorea por valor) y pasan el lint en las tres orientaciones (test). Un
   marco simétrico (foto enmarcada) se conserva al adaptar (`insetFrameRatio`).
+- Logo: `resolveBrandLogo` (project-brand-kit.ts) usa el primer logo del brand
+  kit (token) o, si no hay, `clients.logo`. Las plantillas modernas tienen slot
+  de imagen `logo` que se llena solo al instanciar (o se quita si no hay logo);
+  "Pídele a la IA" tiene `add kind logo` con la imagen real y su proporción.
 - Dirección de arte (`lib/production/art-direction.ts`): direcciones vigentes,
   reglas de composición y lista de lo que se ve anticuado (estrellas de oferta,
   biseles, brillos plásticos, dorado/3D sin pedido). Se inyecta en el

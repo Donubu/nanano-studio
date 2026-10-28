@@ -23,7 +23,9 @@ import {
   BrandKit,
   BrandKitContent,
   brandKitFromApi,
+  makeRef,
 } from "@/lib/production/brand-kit";
+import { imageSize } from "@/lib/production/image-size";
 
 interface BrandKitRow extends RowDataPacket {
   id: number;
@@ -97,4 +99,54 @@ export async function resolveTemplateBrandKit(params: {
     if (kit) return { id: kit.id, scope: "template", content: kit.content, kit };
   }
   return resolveProjectBrandKit(params.clientId, params.productionProjectId);
+}
+
+// ---------------------------------------------------------------------------
+// Logo de la marca para la IA de producción
+// ---------------------------------------------------------------------------
+//
+// El primero del brand kit (como token {logo.x}, así el editor lo resuelve
+// igual que la IA); si el kit no tiene, el logo de la ficha del cliente
+// (clients.logo, URL directa). `aspect` = ancho / alto real de la imagen,
+// para que la capa del logo tenga su proporción.
+
+export interface BrandLogo {
+  src: string;
+  url: string;
+  aspect: number;
+}
+
+interface ClientLogoRow extends RowDataPacket {
+  logo: string | null;
+}
+
+// Proporción de la imagen (ancho / alto), o null si no se pudo medir.
+async function imageAspect(url: string): Promise<number | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000), cache: "force-cache" });
+    if (!res.ok) return null;
+    const size = imageSize(new Uint8Array(await res.arrayBuffer()));
+    return size && size.w > 0 && size.h > 0 ? size.w / size.h : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveBrandLogo(kit: BrandKitContent | null, clientId: number): Promise<BrandLogo | null> {
+  let src: string | null = null;
+  let url: string | null = null;
+  const fromKit = kit?.logos.find((l) => l.src);
+  if (fromKit) {
+    // El editor resuelve el token con el mismo kit.
+    src = makeRef("logo", fromKit.name);
+    url = fromKit.src;
+  } else {
+    const [rows] = await pool.execute<ClientLogoRow[]>("SELECT logo FROM clients WHERE id = ?", [clientId]);
+    const logo = rows[0]?.logo?.trim();
+    if (logo && /^https:\/\//i.test(logo)) src = url = logo;
+  }
+  if (!src || !url) return null;
+  // Si no se puede medir (el CDN puede no responder a este servidor), se
+  // asume cuadrado: la capa usa fit "contain" igual.
+  return { src, url, aspect: (await imageAspect(url)) ?? 1 };
 }

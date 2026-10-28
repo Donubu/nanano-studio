@@ -17,6 +17,7 @@ import { RowDataPacket } from "mysql2";
 import { callPracticante } from "@/lib/practicante-client";
 import { brandGuidePrompt, parseBrandGuide, brandGuideError, BrandGuide } from "@/lib/production/brand-guide";
 import { importPieceImages } from "@/lib/production/brand-pieces";
+import { syncBrandAssets } from "@/lib/production/brand-assets";
 
 export const maxDuration = 300;
 
@@ -115,8 +116,21 @@ export async function POST(
       "UPDATE clients SET brand_guide_json = ?, brand_guide_synced_at = NOW() WHERE id = ?",
       [JSON.stringify(synced), id],
     );
+    // Kit de marca (logos oficiales): sin modelo y en segundos; si falla, la
+    // guía queda igual sincronizada.
+    let assets: Awaited<ReturnType<typeof syncBrandAssets>> | null = null;
+    try {
+      assets = await syncBrandAssets({
+        clientId: id,
+        clientSlug: row.slug,
+        userEmail: session.user.email ?? process.env.PRACTICANTE_USER_EMAIL ?? "",
+        userId: Number(session.user.id),
+      });
+    } catch (e) {
+      console.warn("[brand-guide] kit de marca no sincronizado:", (e as Error).message);
+    }
     const updated = await loadRow(id);
-    return NextResponse.json({ ...toBody(updated!), tokenUsage: res.tokenUsage ?? null });
+    return NextResponse.json({ ...toBody(updated!), tokenUsage: res.tokenUsage ?? null, assets });
   } catch (error) {
     console.error("Error sincronizando guía de marca:", error);
     return NextResponse.json(

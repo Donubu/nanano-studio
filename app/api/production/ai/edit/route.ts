@@ -27,7 +27,7 @@ import { z } from "zod";
 import { parseBody } from "@/lib/api-utils";
 import { TemplateDefinition } from "@/lib/production/types";
 import { EMPTY_KIT_CONTENT, resolveColor, BrandKitContent } from "@/lib/production/brand-kit";
-import { resolveTemplateBrandKit } from "@/lib/production/project-brand-kit";
+import { resolveTemplateBrandKit, resolveBrandLogo } from "@/lib/production/project-brand-kit";
 import { checkProductionAiQuota, quotaBlockedBody } from "@/lib/production/ai-rate-limit";
 import { loadClientBrandGuide } from "@/lib/production/plan-generation";
 import { applyEditOps } from "@/lib/production/edit-ops";
@@ -164,9 +164,11 @@ export async function POST(request: NextRequest) {
       const layerImages = await loadLayerImages(tree, selectedIds);
       const photoSizes: Record<string, { w: number; h: number }> = {};
       for (const li of layerImages) if (li.size) photoSizes[li.layerId] = li.size;
+      const logo = await resolveBrandLogo(kit, clientId);
       const plan = await requestEditPlan({
         tree,
         instruction,
+        logo,
         selectedIds,
         layerImages,
         brandKit: kit,
@@ -177,6 +179,7 @@ export async function POST(request: NextRequest) {
       const result = applyEditOps(tree, plan.ops, undefined, photoSizes, {
         resolveColor: (c) => resolveColor(c, kit, c),
         accent: kit.colors[0]?.value,
+        logo,
       });
       body = {
         definition: result.definition,

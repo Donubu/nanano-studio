@@ -63,3 +63,37 @@ describe("foto enmarcada al adaptar", () => {
     }
   });
 });
+
+describe("logo de la marca", () => {
+  const plan = { template_id: "price-band", texts: [], hidden: [], colors: [], image_prompts: [], rationale: "" };
+
+  it("las plantillas con slot de logo lo anuncian y no piden imagen para él", () => {
+    const entry = describeTemplate(MODERN_TEMPLATES.find((t) => t.id === "price-band")!);
+    expect(entry.has_logo).toBe(true);
+    expect(entry.images.map((i) => i.id)).not.toContain("logo");
+  });
+
+  it("se llena con el logo al instanciar y se quita si la marca no tiene", async () => {
+    const { expandPlan } = await import("../layout-plan");
+    const withLogo = expandPlan(plan as never, { w: 1920, h: 1080 }, [{ w: 1080, h: 1080 }], "{logo.primary}")!;
+    const logo = withLogo.definition.children.find((c) => c.id === "logo");
+    expect(logo?.type === "image" && logo.src).toBe("{logo.primary}");
+    expect(withLogo.variants[0].definition.children.some((c) => c.id === "logo")).toBe(true);
+    const without = expandPlan(plan as never, { w: 1920, h: 1080 }, [], null)!;
+    expect(without.definition.children.some((c) => c.id === "logo")).toBe(false);
+  });
+
+  it("'Pídele a la IA' inserta el logo real con su proporción, o avisa si no hay", async () => {
+    const { applyEditOps } = await import("../edit-ops");
+    const def = MODERN_TEMPLATES[0].aspects.horizontal;
+    const r = applyEditOps(def, [{ op: "add", kind: "logo", x: 96, y: 64, w: 300, h: 300 }], () => "nuevo", {}, {
+      logo: { src: "https://static.example.com/logo.png", aspect: 2 },
+    });
+    const l = r.definition.children.find((c) => c.id === "nuevo")!;
+    expect(l.type).toBe("image");
+    expect(l.size).toEqual({ w: 300, h: 150 });
+    const none = applyEditOps(def, [{ op: "add", kind: "logo" }]);
+    expect(none.applied).toBe(0);
+    expect(none.skipped[0]).toContain("no tiene logo");
+  });
+});

@@ -42,6 +42,30 @@ export default function ClientBrandGuideSection({ clientId }: { clientId: number
   const [state, setState] = useState<GuideState | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [assetsBusy, setAssetsBusy] = useState(false);
+  const [assetsMsg, setAssetsMsg] = useState<string | null>(null);
+
+  const syncAssets = async () => {
+    setAssetsBusy(true);
+    setAssetsMsg(null);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/brand-assets`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAssetsMsg(body?.error || `Error ${res.status}`);
+        return;
+      }
+      setAssetsMsg(
+        body.logosAdded || body.colorsAdded
+          ? `Kit de marca actualizado: ${body.logosAdded} logo(s) y ${body.colorsAdded} color(es) nuevos.`
+          : "El kit de marca ya estaba al día.",
+      );
+    } catch (e) {
+      setAssetsMsg(`Error de red: ${(e as Error).message}`);
+    } finally {
+      setAssetsBusy(false);
+    }
+  };
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/clients/${clientId}/brand-guide`);
@@ -107,6 +131,17 @@ export default function ClientBrandGuideSection({ clientId }: { clientId: number
           {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           {g ? "Re-sincronizar" : "Sincronizar desde Practicante"}
         </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={syncAssets}
+          disabled={assetsBusy || !state?.slug}
+          className="gap-1 shrink-0"
+          title="Trae los logos oficiales del kit de marca de Practicante al brand kit (sin costo)"
+        >
+          {assetsBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Traer logos
+        </Button>
       </div>
 
       {!state?.slug && (
@@ -121,6 +156,7 @@ export default function ClientBrandGuideSection({ clientId }: { clientId: number
         </p>
       )}
       {error && <p className="text-xs text-red-400">{error}</p>}
+      {assetsMsg && <p className="text-xs text-muted-foreground">{assetsMsg}</p>}
 
       {g && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
