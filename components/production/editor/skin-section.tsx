@@ -13,7 +13,7 @@ import { requestSkin } from "@/lib/production/skin-client";
 
 const KIND_OPTIONS: { value: SkinKind; label: string; hint: string }[] = [
   { value: "button", label: "Botón", hint: "Se estira a lo ancho sin deformar los extremos" },
-  { value: "badge", label: "Sello o sticker", hint: "Mantiene su forma y proporción" },
+  { value: "badge", label: "Etiqueta", hint: "Etiqueta, sello o sticker: mantiene su forma y proporción" },
 ];
 
 export function SkinSection({
@@ -105,8 +105,8 @@ export function SkinSection({
         rows={2}
         placeholder={
           kind === "badge"
-            ? "Ej: estrella de oferta roja con borde blanco y brillo"
-            : "Ej: botón 3D amarillo con brillo y borde oscuro"
+            ? "Ej: etiqueta plana rectangular, color de marca, esquinas apenas redondeadas"
+            : "Ej: botón plano color de marca, esquinas redondeadas, sombra muy suave"
         }
         className="w-full bg-muted border border-border/50 rounded px-2 py-1 text-xs"
       />

@@ -27,19 +27,53 @@ export interface BrandGuide {
     logo: { ancho_min_px: number | null; area_seguridad: string; usos_prohibidos: string[] };
     estilo_fotografico: string;
   };
+  // Estrategia y negocio: qué comunicar (posicionamiento, público, mensajes,
+  // productos, campañas vigentes). Opcional: los snapshots sincronizados
+  // antes de 2026-10-28 no lo traen.
+  estrategia?: {
+    posicionamiento: string;
+    publico_objetivo: string;
+    propuesta_valor: string;
+    mensajes_clave: string[];
+    productos: { nombre: string; descripcion: string }[];
+    campanas_vigentes: string[];
+  };
+  // Lo que dicen las métricas de la marca (campañas y piezas anteriores):
+  // qué mensajes, CTA, formatos y estilos rinden. Opcional.
+  desempeno?: {
+    periodo: string;
+    aprendizajes: string[];
+    mensajes_destacados: Evidencia[];
+    mensajes_a_evitar: Evidencia[];
+    ctas_destacados: Evidencia[];
+    formatos_destacados: { formato: string; canal: string; resultado: string }[];
+    estilos_visuales: string[];
+  };
+  // Textos legales obligatorios y restricciones de claims. Opcional.
+  legales?: {
+    textos_obligatorios: string[];
+    restricciones: string[];
+  };
   reglas: string[];
   fuentes: string[];
 }
 
+export interface Evidencia {
+  texto: string;
+  // Métrica que lo respalda, ej. "CTR 1,8% vs 0,9% promedio (Meta, sep 2026)".
+  resultado: string;
+}
+
 export function brandGuidePrompt(slug: string): { message: string; promptSuffix: string } {
   return {
-    message: `Necesito la guía de marca completa del cliente con slug "${slug}" para diseñar banners. Revisa su brandbook y todo lo que tengas de la marca (estrategia, productos, campañas) y devuélvemelo en el JSON pedido.`,
+    message: `Necesito la guía de marca completa del cliente con slug "${slug}" para diseñar banners. Revisa su brandbook, su estrategia, productos y campañas, y sus métricas de campañas y piezas anteriores, y devuélvemelo en el JSON pedido.`,
     promptSuffix: JSON.stringify({
       operation: "BRAND_GUIDE",
       client_slug: slug,
       instructions: [
         `Consulta el brandbook del cliente "${slug}" y cualquier otro conocimiento de esa marca (estrategia, productos, campañas, reglas de marca medibles).`,
-        "Resume lo que sirve para diseñar piezas digitales: voz, tratamiento, vocabulario, reglas visuales y de logo.",
+        "Resume lo que sirve para diseñar y escribir piezas digitales: voz, tratamiento, vocabulario, estrategia (posicionamiento, público, propuesta de valor, mensajes clave, productos y campañas vigentes), reglas visuales y de logo, y legales.",
+        "En 'desempeno' resume lo que dicen las métricas: qué mensajes, CTA, formatos y estilos visuales rindieron mejor o peor, cada uno con la métrica que lo respalda. Si no hay métricas, déjalo vacío.",
         "Si un dato no está en el material de la marca, déjalo vacío. No inventes.",
         "Responde SOLO con un objeto JSON con esta forma exacta (sin markdown):",
       ],
@@ -59,6 +93,27 @@ export function brandGuidePrompt(slug: string): { message: string; promptSuffix:
           tipografias: [{ nombre: "string", uso: "string" }],
           logo: { ancho_min_px: "number | null", area_seguridad: "string", usos_prohibidos: ["string"] },
           estilo_fotografico: "string",
+        },
+        estrategia: {
+          posicionamiento: "string — cómo quiere ser percibida la marca, 1-2 frases",
+          publico_objetivo: "string — a quién le habla",
+          propuesta_valor: "string — por qué elegirla",
+          mensajes_clave: ["string — ideas que la marca repite"],
+          productos: [{ nombre: "string", descripcion: "string — beneficio principal" }],
+          campanas_vigentes: ["string — campaña o promoción activa y su mensaje"],
+        },
+        desempeno: {
+          periodo: "string — período de las métricas consideradas",
+          aprendizajes: ["string — conclusión accionable para piezas nuevas"],
+          mensajes_destacados: [{ texto: "string", resultado: "string — métrica que lo respalda" }],
+          mensajes_a_evitar: [{ texto: "string", resultado: "string" }],
+          ctas_destacados: [{ texto: "string", resultado: "string" }],
+          formatos_destacados: [{ formato: "string — ej. 300x250", canal: "string", resultado: "string" }],
+          estilos_visuales: ["string — estilo que rinde mejor y su métrica"],
+        },
+        legales: {
+          textos_obligatorios: ["string — legal que debe ir en las piezas"],
+          restricciones: ["string — claims o palabras que no se pueden usar"],
         },
         reglas: ["do's & don'ts, una por ítem"],
         fuentes: ["documentos o tools consultados"],
@@ -88,6 +143,15 @@ export function parseBrandGuide(raw: string): BrandGuide | null {
   const voz = obj(data.voz);
   const visual = obj(data.visual);
   const logo = obj(visual.logo);
+  const estrategia = obj(data.estrategia);
+  const desempeno = obj(data.desempeno);
+  const legales = obj(data.legales);
+  const evidencias = (v: unknown, max: number) =>
+    (Array.isArray(v) ? v : [])
+      .map((x) => obj(x))
+      .map((x) => ({ texto: str(x.texto, 200), resultado: str(x.resultado, 200) }))
+      .filter((x) => x.texto)
+      .slice(0, max);
   const guide: BrandGuide = {
     marca: str(data.marca, 120),
     voz: {
@@ -118,12 +182,66 @@ export function parseBrandGuide(raw: string): BrandGuide | null {
       },
       estilo_fotografico: str(visual.estilo_fotografico, 600),
     },
+    estrategia: {
+      posicionamiento: str(estrategia.posicionamiento, 600),
+      publico_objetivo: str(estrategia.publico_objetivo, 600),
+      propuesta_valor: str(estrategia.propuesta_valor, 400),
+      mensajes_clave: strs(estrategia.mensajes_clave, 12, 200),
+      productos: (Array.isArray(estrategia.productos) ? estrategia.productos : [])
+        .map((x) => obj(x))
+        .map((x) => ({ nombre: str(x.nombre, 80), descripcion: str(x.descripcion, 200) }))
+        .filter((x) => x.nombre)
+        .slice(0, 20),
+      campanas_vigentes: strs(estrategia.campanas_vigentes, 10, 300),
+    },
+    desempeno: {
+      periodo: str(desempeno.periodo, 120),
+      aprendizajes: strs(desempeno.aprendizajes, 15, 300),
+      mensajes_destacados: evidencias(desempeno.mensajes_destacados, 10),
+      mensajes_a_evitar: evidencias(desempeno.mensajes_a_evitar, 10),
+      ctas_destacados: evidencias(desempeno.ctas_destacados, 10),
+      formatos_destacados: (Array.isArray(desempeno.formatos_destacados) ? desempeno.formatos_destacados : [])
+        .map((x) => obj(x))
+        .map((x) => ({ formato: str(x.formato, 40), canal: str(x.canal, 60), resultado: str(x.resultado, 200) }))
+        .filter((x) => x.formato)
+        .slice(0, 10),
+      estilos_visuales: strs(desempeno.estilos_visuales, 10, 300),
+    },
+    legales: {
+      textos_obligatorios: strs(legales.textos_obligatorios, 10, 400),
+      restricciones: strs(legales.restricciones, 20, 300),
+    },
     reglas: strs(data.reglas, 40, 300),
     fuentes: strs(data.fuentes, 20, 200),
   };
   const hasContent =
-    guide.voz.tono || guide.reglas.length > 0 || guide.visual.colores.length > 0 || guide.voz.palabras_usar.length > 0;
+    guide.voz.tono ||
+    guide.reglas.length > 0 ||
+    guide.visual.colores.length > 0 ||
+    guide.voz.palabras_usar.length > 0 ||
+    !!guide.estrategia?.posicionamiento ||
+    (guide.desempeno?.aprendizajes.length ?? 0) > 0;
   return hasContent ? guide : null;
+}
+
+// Error explícito del agente ({"error": "client_not_found" | ...}).
+const ERROR_LABELS: Record<string, string> = {
+  client_not_found: "Practicante no tiene un cliente con ese slug",
+  no_brand_material: "El cliente no tiene material de marca cargado en practicante",
+};
+
+export function brandGuideError(raw: string): string | null {
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    const data = obj(JSON.parse(raw.slice(start, end + 1)));
+    const code = str(data.error, 60);
+    if (!code) return null;
+    return ERROR_LABELS[code] ?? `Practicante respondió: ${code}`;
+  } catch {
+    return null;
+  }
 }
 
 // Versión compacta para el contexto del modelo: sin vacíos ni fuentes.

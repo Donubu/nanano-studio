@@ -26,6 +26,7 @@ import { checkProductionAiQuota, quotaBlockedBody } from "@/lib/production/ai-ra
 import { IMAGE_MODEL, generateImage, imageCostPerImage } from "@/lib/production/image-generator";
 import { pickKeyColor, processSkinImage } from "@/lib/production/skin-image";
 import { defaultSkinGeometry } from "@/lib/production/skin";
+import { SKIN_STYLE_DEFAULT } from "@/lib/production/art-direction";
 import type { LayerSkin } from "@/lib/production/types";
 
 export const maxDuration = 120;
@@ -53,7 +54,7 @@ function skinPrompt(kind: "button" | "badge", description: string, colors: strin
   const what =
     kind === "button"
       ? "a single call-to-action BUTTON shape for a display advertising banner (a wide pill or rounded rectangle)"
-      : "a single promotional BADGE / sticker shape for a display advertising banner (for example a starburst, seal, ribbon or round sticker)";
+      : "a single promotional TAG / label shape for a display advertising banner (for example a clean rounded rectangle tag, a pill label, a circle or a simple geometric sticker)";
   const stretch =
     kind === "button"
       ? " The button's left and right ends must match in style and its middle section must be uniform horizontally, so it can be stretched wider without distortion. Front view, no perspective."
@@ -62,6 +63,7 @@ function skinPrompt(kind: "button" | "badge", description: string, colors: strin
     `Design ${what}. Style: ${description}.`,
     colors.length > 0 ? `Use these colors: ${colors.join(", ")}.` : "",
     `The shape must be completely EMPTY: absolutely no text, letters, numbers, prices, symbols, icons or logos on it — real text is added on top later.${stretch}`,
+    SKIN_STYLE_DEFAULT,
     "Centered, filling about 90% of the canvas.",
     `Place it on a perfectly flat, uniform, solid ${key.name} (${key.hex}) background: no gradient, texture, shadow, glow or reflection on the background, and no ${key.name} anywhere on the shape itself.`,
   ]

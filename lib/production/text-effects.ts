@@ -11,6 +11,7 @@
 
 import type { CSSProperties } from "react";
 import type { DropShadow, TextLayer } from "./types";
+import { TEXTURE_STYLE_DEFAULT } from "./art-direction";
 
 type TextStyle = TextLayer["style"];
 
@@ -101,5 +102,5 @@ export function textEffectLayers(style: TextStyle, shadow?: DropShadow): TextEff
 
 // Prompt del generador para una textura que va dentro de las letras.
 export function texturePrompt(description: string): string {
-  return `Seamless full-frame texture or material: ${description}. Evenly lit, rich detail across the whole image, no single subject, no borders.`;
+  return `Seamless full-frame texture or material: ${description}. Evenly lit, detail across the whole image, no single subject, no borders. ${TEXTURE_STYLE_DEFAULT}`;
 }

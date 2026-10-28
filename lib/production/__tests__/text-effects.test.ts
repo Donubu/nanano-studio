@@ -111,3 +111,24 @@ describe("Pídele a la IA · texto gráfico", () => {
     expect(r.textures).toEqual([{ layer_id: "t", prompt: "gold foil" }]);
   });
 });
+
+describe("estilos actuales", () => {
+  it("degradado sutil: dos tonos cercanos del mismo color", () => {
+    const l = applyTextPreset(title(), "subtle_gradient", "#FFCC00");
+    expect(l.style.fill).toEqual({
+      type: "gradient",
+      value: `linear-gradient(180deg, ${mixColor("#FFCC00", "#FFFFFF", 0.2)}, ${mixColor("#FFCC00", "#000000", 0.12)})`,
+    });
+  });
+
+  it("duotono usa el color de marca como segundo tono", () => {
+    const l = applyTextPreset(title(), "duotone", "#FFCC00", "#E11D48");
+    expect(l.style.fill).toEqual({ type: "gradient", value: "linear-gradient(90deg, #FFCC00, #E11D48)" });
+  });
+
+  it("sombra suave no agrega efectos de copias", () => {
+    const l = applyTextPreset(title(), "soft", "#FFCC00");
+    expect(hasTextEffects(l.style)).toBe(false);
+    expect(l.shadow?.blur).toBe(30);
+  });
+});

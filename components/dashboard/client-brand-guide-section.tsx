@@ -188,6 +188,110 @@ export default function ClientBrandGuideSection({ clientId }: { clientId: number
               <p className="text-xs">{g.visual.estilo_fotografico}</p>
             </Row>
           )}
+          {g.estrategia?.posicionamiento && (
+            <Row label="Posicionamiento">
+              <p className="text-xs">{g.estrategia.posicionamiento}</p>
+            </Row>
+          )}
+          {g.estrategia?.publico_objetivo && (
+            <Row label="Público">
+              <p className="text-xs">{g.estrategia.publico_objetivo}</p>
+            </Row>
+          )}
+          {g.estrategia?.propuesta_valor && (
+            <Row label="Propuesta de valor">
+              <p className="text-xs">{g.estrategia.propuesta_valor}</p>
+            </Row>
+          )}
+          {(g.estrategia?.mensajes_clave.length ?? 0) > 0 && (
+            <Row label="Mensajes clave">
+              <Chips items={g.estrategia!.mensajes_clave} />
+            </Row>
+          )}
+          {(g.estrategia?.productos.length ?? 0) > 0 && (
+            <Row label="Productos">
+              <ul className="list-disc pl-4 text-xs space-y-0.5">
+                {g.estrategia!.productos.map((p, i) => (
+                  <li key={i}>
+                    {p.nombre}
+                    {p.descripcion ? ` — ${p.descripcion}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </Row>
+          )}
+          {(g.estrategia?.campanas_vigentes.length ?? 0) > 0 && (
+            <Row label="Campañas vigentes">
+              <ul className="list-disc pl-4 text-xs space-y-0.5">
+                {g.estrategia!.campanas_vigentes.map((t, i) => (
+                  <li key={i}>{t}</li>
+                ))}
+              </ul>
+            </Row>
+          )}
+          {(g.desempeno?.aprendizajes.length ?? 0) > 0 && (
+            <div className="md:col-span-2">
+              <Row label={`Aprendizajes de métricas${g.desempeno!.periodo ? ` (${g.desempeno!.periodo})` : ""}`}>
+                <ul className="list-disc pl-4 text-xs space-y-0.5">
+                  {g.desempeno!.aprendizajes.map((t, i) => (
+                    <li key={i}>{t}</li>
+                  ))}
+                </ul>
+              </Row>
+            </div>
+          )}
+          {[
+            { label: "Mensajes que rinden", items: g.desempeno?.mensajes_destacados ?? [] },
+            { label: "CTA que rinden", items: g.desempeno?.ctas_destacados ?? [] },
+            { label: "Mensajes a evitar", items: g.desempeno?.mensajes_a_evitar ?? [] },
+          ]
+            .filter((b) => b.items.length > 0)
+            .map((b) => (
+              <Row key={b.label} label={b.label}>
+                <ul className="list-disc pl-4 text-xs space-y-0.5">
+                  {b.items.map((e, i) => (
+                    <li key={i}>
+                      {e.texto}
+                      {e.resultado && <span className="text-muted-foreground"> — {e.resultado}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </Row>
+            ))}
+          {(g.desempeno?.formatos_destacados.length ?? 0) > 0 && (
+            <Row label="Formatos que rinden">
+              <ul className="list-disc pl-4 text-xs space-y-0.5">
+                {g.desempeno!.formatos_destacados.map((f, i) => (
+                  <li key={i}>
+                    {f.formato}
+                    {f.canal ? ` · ${f.canal}` : ""}
+                    {f.resultado && <span className="text-muted-foreground"> — {f.resultado}</span>}
+                  </li>
+                ))}
+              </ul>
+            </Row>
+          )}
+          {(g.desempeno?.estilos_visuales.length ?? 0) > 0 && (
+            <Row label="Estilos que rinden">
+              <Chips items={g.desempeno!.estilos_visuales} />
+            </Row>
+          )}
+          {((g.legales?.textos_obligatorios.length ?? 0) > 0 || (g.legales?.restricciones.length ?? 0) > 0) && (
+            <div className="md:col-span-2">
+              <Row label="Legales">
+                <ul className="list-disc pl-4 text-xs space-y-0.5">
+                  {g.legales!.textos_obligatorios.map((t, i) => (
+                    <li key={`o${i}`}>{t}</li>
+                  ))}
+                  {g.legales!.restricciones.map((t, i) => (
+                    <li key={`r${i}`} className="text-amber-300/90">
+                      {t}
+                    </li>
+                  ))}
+                </ul>
+              </Row>
+            </div>
+          )}
           {g.reglas.length > 0 && (
             <div className="md:col-span-2">
               <Row label="Reglas">

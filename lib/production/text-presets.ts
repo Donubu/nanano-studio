@@ -1,17 +1,22 @@
 // Estilos rápidos de texto gráfico (panel de propiedades y "Pídele a la
 // IA"): combinaciones de los efectos de text-effects.ts con medidas
 // proporcionales a la letra. Puro.
+//
+// Orden = recomendación: primero los actuales (sombra suave, degradados
+// sutiles); sticker, 3D y dorado quedan al final porque se ven anticuados
+// fuera de contexto (ver art-direction.ts).
 
 import type { TextLayer } from "./types";
 import { effectiveFontSize } from "./layout-lint";
 
 export const TEXT_PRESETS = [
   { id: "none", label: "Plano" },
-  { id: "volume", label: "Volumen 3D" },
+  { id: "soft", label: "Sombra suave" },
+  { id: "subtle_gradient", label: "Degradado sutil" },
+  { id: "duotone", label: "Duotono" },
   { id: "sticker", label: "Sticker" },
-  { id: "gradient", label: "Degradado" },
+  { id: "volume", label: "Retro 3D" },
   { id: "gold", label: "Dorado" },
-  { id: "glow", label: "Brillo" },
 ] as const;
 export type TextPresetId = (typeof TEXT_PRESETS)[number]["id"];
 
@@ -45,7 +50,7 @@ function luminance(c: string): number {
 }
 
 // `resolvedColor`: el color del texto ya resuelto (los tokens no se pueden
-// aclarar ni oscurecer); `accent`: color de marca para el brillo.
+// aclarar ni oscurecer); `accent`: color de marca (duotono, sticker).
 export function applyTextPreset(
   layer: TextLayer,
   id: TextPresetId,
@@ -77,12 +82,25 @@ export function applyTextPreset(
       shadow = { x: 0, y: r1(fs * 0.05), blur: r1(fs * 0.06), color: "rgba(0,0,0,0.35)" };
       break;
     }
-    case "gradient":
+    case "soft":
+      // Separa el texto de la foto sin que se note el efecto.
+      shadow = { x: 0, y: r1(fs * 0.04), blur: r1(fs * 0.3), color: "rgba(0,0,0,0.35)" };
+      break;
+    case "subtle_gradient":
       style = {
         ...base,
-        fill: { type: "gradient", value: `linear-gradient(180deg, ${mixColor(resolvedColor, "#FFFFFF", 0.55)}, ${resolvedColor})` },
+        fill: {
+          type: "gradient",
+          value: `linear-gradient(180deg, ${mixColor(resolvedColor, "#FFFFFF", 0.2)}, ${mixColor(resolvedColor, "#000000", 0.12)})`,
+        },
       };
       break;
+    case "duotone": {
+      const second =
+        accent && accent.toUpperCase() !== resolvedColor.toUpperCase() ? accent : mixColor(resolvedColor, "#FFFFFF", 0.5);
+      style = { ...base, fill: { type: "gradient", value: `linear-gradient(90deg, ${resolvedColor}, ${second})` } };
+      break;
+    }
     case "gold":
       style = {
         ...base,
@@ -91,10 +109,6 @@ export function applyTextPreset(
         extrude: { color: "#6B4000", depth: r1(fs * 0.05), angle: 70 },
       };
       shadow = { x: 0, y: r1(fs * 0.03), blur: r1(fs * 0.08), color: "rgba(0,0,0,0.4)" };
-      break;
-    case "glow":
-      style = { ...base, color: "#FFFFFF" };
-      shadow = { x: 0, y: 0, blur: r1(fs * 0.35), color: accent ?? resolvedColor };
       break;
   }
   return { ...layer, style, shadow };

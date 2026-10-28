@@ -15,6 +15,7 @@ import { describeCatalog, sanitizePlan, LayoutPlan } from "./layout-plan";
 import { LAYOUT_TEMPLATES } from "./layout-templates";
 import { LAYOUT_FIXER_MODEL, LayoutFixUsage } from "./layout-fixer";
 import { BrandGuide, brandGuideForModel } from "./brand-guide";
+import { artDirectionGuide } from "./art-direction";
 
 export const LAYOUT_PLANNER_MODEL = process.env.PRODUCTION_AI_PLANNER_MODEL || LAYOUT_FIXER_MODEL;
 export const LAYOUT_PLANNER_AGENT_NAME = "layout-planner";
@@ -25,7 +26,7 @@ Recibes:
 - "brief": qué debe comunicar la pieza, tono e instrucciones del productor.
 - "catalog": las plantillas disponibles. Cada una trae sus slots de texto (id, nombre, placeholder y max_chars aproximado que cabe), sus slots de imagen y los colores que usa.
 - "brand": colores y fuentes de la marca, como tokens. Puede venir vacío.
-- "brand_guide" (opcional): la guía de marca del brandbook (voz, tratamiento, palabras a usar y a evitar, ejemplos, reglas visuales). Si viene, MANDA sobre tus preferencias: escribe en esa voz y con ese tratamiento, usa su vocabulario, nunca uses sus palabras prohibidas, respeta sus reglas, y para colores sin token de marca usa los hex de la guía. El nombre de la marca va escrito exactamente como en brand_guide.marca (si no cabe, no lo uses en ese slot).
+- "brand_guide" (opcional): la guía de marca del brandbook (voz, tratamiento, palabras a usar y a evitar, ejemplos, reglas visuales). Si viene, MANDA sobre tus preferencias: escribe en esa voz y con ese tratamiento, usa su vocabulario, nunca uses sus palabras prohibidas, respeta sus reglas, y para colores sin token de marca usa los hex de la guía. El nombre de la marca va escrito exactamente como en brand_guide.marca (si no cabe, no lo uses en ese slot). Si trae "estrategia", alinea el mensaje con su posicionamiento, público y mensajes clave, y nombra productos o campañas tal como vienen. Si trae "desempeno" (métricas de la marca), apóyate en lo que rinde (mensajes, CTA y estilos destacados, aprendizajes) y no repitas lo que está en mensajes_a_evitar. Si trae "legales", nunca uses un claim de sus restricciones y, si la plantilla tiene un slot de texto legal o de letra chica, pon ahí el texto obligatorio.
 - Opcionalmente, imágenes de referencia: úsalas para elegir la plantilla cuya composición más se parezca, y para sacar paleta, tono y copy.
 
 Devuelve "proposals": entre 1 y 3 propuestas, cada una con una plantilla DISTINTA (salvo que el brief pida algo muy específico). Ordénalas de mejor a peor.
@@ -36,8 +37,12 @@ Por propuesta:
 - hidden: ids de slots que sobran para este brief (por ejemplo un badge de descuento si no hay descuento). Nunca ocultes el titular.
 - colors: para cada color de la plantilla que quieras cambiar, {from: color de la plantilla, to: nuevo}. Si la marca tiene colores, usa sus tokens exactos (ej. "{color.primary}"); si no, hex. Cuida el contraste del texto sobre su fondo.
 - heading_font / body_font: token de fuente de la marca si existe (ej. "{font.heading}"); si no, omítelos.
-- image_prompts: para cada slot de imagen, un prompt EN INGLÉS para un generador de imágenes: sujeto, encuadre, luz y estilo, sin texto ni logos dentro de la imagen. Si el slot es full_bleed, pide espacio negativo donde va el texto.
-- rationale: una frase en español de Chile explicando por qué esa plantilla y ese enfoque.`;
+- image_prompts: para cada slot de imagen, un prompt EN INGLÉS para un generador de imágenes: sujeto, encuadre, luz y estilo, sin texto ni logos dentro de la imagen. Si el slot es full_bleed, pide espacio negativo donde va el texto. El estilo de la foto sigue la dirección de arte elegida.
+- rationale: una frase en español de Chile explicando por qué esa plantilla y ese enfoque; nombra la dirección de arte elegida.
+
+Si das varias propuestas, que cada una explore una dirección de arte distinta cuando el brief lo permita.
+
+${artDirectionGuide()}`;
 
 function responseSchema() {
   return {

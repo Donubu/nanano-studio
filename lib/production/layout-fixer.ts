@@ -22,6 +22,7 @@ import {
   hasLintErrors,
 } from "./layout-lint";
 import { LayerPatch, applyLayerPatches } from "./layout-patch";
+import { COMPOSITION_RULES } from "./art-direction";
 
 export const LAYOUT_FIXER_MODEL =
   process.env.PRODUCTION_AI_LAYOUT_MODEL || "gemini-3.8-flash";
@@ -70,6 +71,9 @@ Reglas:
 5. En formatos muy chicos o muy alargados puedes ocultar (hidden: true) elementos secundarios: bajadas, textos legales, decoraciones. Nunca ocultes el titular, el CTA, el precio ni el logo.
 6. Formatos alargados (tiras): distribuye en fila (horizontal) o columna (vertical) siguiendo el orden de lectura del original.
 7. Cambia solo lo necesario. No cambies textos ni colores. Si una capa está bien, no la incluyas.
+
+En "recompose", además, compón con este criterio:
+${COMPOSITION_RULES.map((r) => `- ${r}`).join("\n")}
 
 Responde solo con el JSON pedido: "patches" (una entrada por capa a cambiar, con su id y solo los campos que cambian) y "rationale" (una frase en español de Chile, tuteo, que explique qué corregiste).`;
 

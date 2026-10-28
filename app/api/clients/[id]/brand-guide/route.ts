@@ -15,7 +15,7 @@ import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { callPracticante } from "@/lib/practicante-client";
-import { brandGuidePrompt, parseBrandGuide, BrandGuide } from "@/lib/production/brand-guide";
+import { brandGuidePrompt, parseBrandGuide, brandGuideError, BrandGuide } from "@/lib/production/brand-guide";
 
 export const maxDuration = 300;
 
@@ -83,6 +83,10 @@ export async function POST(
     });
     const guide = parseBrandGuide(res.response ?? "");
     if (!guide) {
+      const agentError = brandGuideError(res.response ?? "");
+      if (agentError) {
+        return NextResponse.json({ error: `${agentError} ("${row.slug}").` }, { status: 404 });
+      }
       const preview = (res.response ?? "").replace(/\s+/g, " ").slice(0, 300);
       return NextResponse.json(
         {

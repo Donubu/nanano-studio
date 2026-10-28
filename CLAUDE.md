@@ -237,6 +237,12 @@ fuente del conocimiento de marca (ver "Guía de marca").
   y la sombra no tapa un `background-clip:text`). Estilos rápidos en
   `text-presets.ts` (panel "Efectos" y `text_style` en "Pídele a la IA"). Las
   texturas se generan con `generate-images` (`purpose: "texture"`, JPEG 512 px).
+- Dirección de arte (`lib/production/art-direction.ts`): direcciones vigentes,
+  reglas de composición y lista de lo que se ve anticuado (estrellas de oferta,
+  biseles, brillos plásticos, dorado/3D sin pedido). Se inyecta en el
+  planificador, "Pídele a la IA", la recomposición (solo composición) y en los
+  prompts de fotos, pieles y texturas. Es un borrador editable por el equipo
+  creativo; la guía de marca manda sobre ella.
 - Guía de marca del lado de practicante: especificación del agente en
   `docs/practicante-agente-guia-de-marca.md`.
 - Animación vs. ediciones: los keyframes de posición/tamaño son absolutos;

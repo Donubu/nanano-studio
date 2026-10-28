@@ -11,6 +11,7 @@ import { BrandGuide, brandGuideForModel } from "./brand-guide";
 import { ICON_NAMES } from "./icon-catalog";
 import { EDIT_OPS, ADD_KINDS, SKIN_KINDS, EditOp } from "./edit-ops";
 import { TEXT_PRESETS } from "./text-presets";
+import { artDirectionGuide } from "./art-direction";
 
 export const EDIT_PLANNER_MODEL = process.env.PRODUCTION_AI_EDIT_MODEL || LAYOUT_FIXER_MODEL;
 export const EDIT_PLANNER_AGENT_NAME = "edit-planner";
@@ -21,7 +22,7 @@ Operaciones ("op"):
 - set_text {id, content}: cambia el texto de una capa de texto.
 - update {id, x?, y?, w?, h?, font_size?, font_weight?, color?, background_color?, align?, hidden?, icon_name?, focal_x?, focal_y?, fit?, text_style?, gradient_colors?, gradient_angle?, outline_color?, outline_width?, outline2_color?, outline2_width?, extrude_color?, extrude_depth?, texture_prompt?}: mueve, redimensiona o cambia estilo de una capa existente. background_color en un texto lo vuelve botón/badge. En imágenes, focal_x/focal_y (0-100, porcentaje del ancho y alto DE LA FOTO) es el punto que queda visible cuando la foto se recorta para llenar su caja (fit "cover"); "contain" la muestra completa sin recortar.
 - add {kind, x, y, w, h, content?, font_size?, font_weight?, color?, background_color?, align?, icon_name?, image_prompt?, skin_prompt?, skin_kind?}: agrega una capa. kind: ${ADD_KINDS.join(", ")}. "button" y "badge" son textos con fondo (pastilla y círculo). Para "image" incluye image_prompt si hay que generarla; una imagen que cubre todo el formato queda de fondo.
-- Texto gráfico (en update o add de textos, sin fondo o con fondo): para "titular más gráfico", "con volumen", "3D", "dorado", "tipo sticker", "con degradado", "con brillo", "con textura de X", "menos plano". El texto sigue editable.
+- Texto gráfico (en update o add de textos, sin fondo o con fondo): para "titular más gráfico", "con volumen", "3D", "dorado", "tipo sticker", "con degradado", "con brillo", "con textura de X", "menos plano". El texto sigue editable. Para "más gráfico" o "menos plano" sin más detalle prefiere los estilos actuales (soft, subtle_gradient, duotone); volume, gold y sticker solo si los piden con esas palabras.
   · text_style: estilo rápido completo: ${TEXT_PRESETS.map((p) => `"${p.id}" (${p.label})`).join(", ")}. "none" deja el texto plano.
   · Efectos sueltos (se aplican encima del estilo rápido): gradient_colors (2-3 colores, de arriba hacia abajo con gradient_angle 180), outline_color/outline_width (contorno por fuera de la letra, px), outline2_color/outline2_width (segundo contorno, por fuera del primero), extrude_color/extrude_depth (volumen 3D, px; ~6% de la letra). Ancho 0 quita el efecto.
   · texture_prompt EN INGLÉS: material o textura dentro de las letras (gold foil, turquoise water, wood); se genera aparte.
@@ -29,7 +30,7 @@ Operaciones ("op"):
 - remove {id}: quita una capa.
 - set_background {color}: color de fondo de la pieza.
 - generate_image {id, image_prompt}: genera con IA la imagen de una capa de imagen existente.
-- set_skin {id, skin_prompt, skin_kind?, background_color?}: le pone a un texto (botón, badge, precio, promo) una PIEL GRÁFICA: una imagen generada con forma, volumen, brillo o textura que va detrás del texto, que sigue vivo encima. Úsala cuando pidan un botón o una promo "más gráfica", "con volumen", "tipo sticker", "3D", "con brillo", "menos plana", "como sello". skin_prompt es OBLIGATORIO: EN INGLÉS, describe solo la forma y el estilo visual (forma, colores, material, borde, brillo, sombra), nunca el texto. skin_kind: "button" (pastilla/botón que se estira a lo ancho) o "badge" (sello, estrella, cinta, sticker: mantiene su proporción); "none" quita la piel. background_color = color principal de la piel si el productor pide uno distinto al actual. "add" de kind button/badge también acepta skin_prompt y skin_kind.
+- set_skin {id, skin_prompt, skin_kind?, background_color?}: le pone a un texto (botón, badge, precio, promo) una PIEL GRÁFICA: una imagen generada con forma, volumen, brillo o textura que va detrás del texto, que sigue vivo encima. Úsala cuando pidan un botón o una promo "más gráfica", "con volumen", "tipo sticker", "3D", "con brillo", "menos plana", "como sello". Si el pedido no dice el estilo, describe una pieza actual (etiqueta plana, color sólido, bordes limpios), no una estrella, sello dentado ni botón con brillo plástico. skin_prompt es OBLIGATORIO: EN INGLÉS, describe solo la forma y el estilo visual (forma, colores, material, borde, brillo, sombra), nunca el texto. skin_kind: "button" (pastilla/botón que se estira a lo ancho) o "badge" (sello, estrella, cinta, sticker: mantiene su proporción); "none" quita la piel. background_color = color principal de la piel si el productor pide uno distinto al actual. "add" de kind button/badge también acepta skin_prompt y skin_kind.
 - frame_subject {id, subject_x, subject_y, target_x?, target_y?}: reencuadra una foto para que su sujeto quede en un punto de la pieza. subject_x/subject_y = dónde está el sujeto DENTRO DE LA FOTO adjunta (0-100 del ancho y alto de la foto; mira la imagen). target_x/target_y = dónde debe quedar en la pieza (0-100 del formato; default 50/50 = centro). El editor calcula zoom, posición y punto focal exactos: úsala siempre para "centra a la persona", "que se vea el producto", "corre la foto"; no calcules x/y/focal a mano.
 
 Imágenes adjuntas: las fotos de las capas de imagen vienen como imágenes, cada una precedida por el texto "Capa <id>". Míralas para entender qué muestran (dónde está la persona o el producto, qué tan clara u oscura es cada zona) antes de reencuadrar, poner texto encima o elegir colores. Para reencuadrar usa frame_subject con la posición del sujeto que ves en la foto. Si el sujeto debe quedar al lado del texto, elige un target que no choque con los textos (por ejemplo target_x 70 si los textos están a la izquierda).
@@ -38,13 +39,16 @@ Reglas:
 1. Haz exactamente lo que se pide, nada más. Si piden "una imagen" o "una foto" y no hay capa de imagen adecuada, agrégala con add kind image + image_prompt; si ya hay una capa de imagen que calza, usa generate_image.
 2. Si hay capas seleccionadas ("selected"), "esto", "este texto", "la imagen" se refieren a ellas.
 3. Coordenadas en px, origen arriba a la izquierda. Todo lo nuevo dentro del formato y del margen de seguridad, sin tapar el titular ni el CTA salvo que lo pidan. Busca espacio libre mirando las cajas existentes.
-4. Textos en español de Chile (tuteo), cortos y publicitarios. Precios en formato chileno ($9.990). Si hay brand_guide, respeta su voz, vocabulario y reglas, y escribe el nombre de la marca tal cual.
+4. Textos en español de Chile (tuteo), cortos y publicitarios. Precios en formato chileno ($9.990). Si hay brand_guide, respeta su voz, vocabulario, reglas, estrategia (posicionamiento, mensajes clave), lo que rinde según sus métricas (desempeno) y sus restricciones legales, y escribe el nombre de la marca y de sus productos tal cual.
 5. Colores: tokens de "brand" (ej. "{color.primary}") cuando existan; si no, hex. En toda capa nueva de texto, ícono o forma indica "color" pensando en lo que tiene detrás (sobre una foto oscura, claro; sobre fondo claro, oscuro).
 6. image_prompt EN INGLÉS para un generador de imágenes: sujeto, encuadre, luz y estilo; sin texto, letras ni logos dentro de la imagen. Si la imagen va de fondo, pide espacio negativo donde está el texto.
 7. icon_name solo de esta lista: ${ICON_NAMES.join(", ")}.
 8. Si el pedido no se puede hacer con estas operaciones, devuelve ops vacío y explícalo en rationale.
 
-"rationale": una frase en español de Chile explicando qué hiciste.`;
+"rationale": una frase en español de Chile explicando qué hiciste.
+
+${artDirectionGuide()}
+Al editar, sigue la dirección que ya tiene la pieza; no la cambies salvo que lo pidan.`;
 
 const RESPONSE_SCHEMA = {
   type: "object",

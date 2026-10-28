@@ -27,10 +27,12 @@ import sharp from "sharp";
 import { uploadToS3 } from "@/lib/s3";
 import { checkProductionAiQuota, quotaBlockedBody } from "@/lib/production/ai-rate-limit";
 import { IMAGE_RATIOS } from "@/lib/production/layout-plan";
+import { PHOTO_STYLE } from "@/lib/production/art-direction";
 
 export const maxDuration = 180;
 
-const PHOTO_SUFFIX = "\n\nPhotographic advertising image. No text, letters, logos or watermarks anywhere in the image.";
+const PHOTO_SUFFIX = `\n\nPhotographic advertising image. ${PHOTO_STYLE} No text, letters, logos or watermarks anywhere in the image.`;
+const TEXTURE_SUFFIX = "\n\nNo text, letters, logos or watermarks anywhere in the image.";
 
 const bodySchema = z.object({
   production_project_id: z.number().int().positive(),
@@ -84,7 +86,10 @@ export async function POST(request: NextRequest) {
     const images = await Promise.all(
       jobs.map(async (job) => {
         try {
-          let img = await generateImage(`${job.prompt}${PHOTO_SUFFIX}`, job.ratio);
+          let img = await generateImage(
+            `${job.prompt}${job.purpose === "texture" ? TEXTURE_SUFFIX : PHOTO_SUFFIX}`,
+            job.ratio,
+          );
           if (job.purpose === "texture") {
             const data = await sharp(img.data).resize(512, 512, { fit: "cover" }).jpeg({ quality: 80 }).toBuffer();
             img = { data, mimeType: "image/jpeg" };
