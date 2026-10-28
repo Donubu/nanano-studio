@@ -285,7 +285,15 @@ export function buildReferenceDefinition(
       if (isLogo && children.some((c) => c.id === LOGO_SLOT_ID)) return;
       const id = isLogo ? LOGO_SLOT_ID : images === 0 ? "hero" : `img-${images + 1}`;
       if (!isLogo) images++;
-      children.push({ id, type: "image", name: isLogo ? "Logo" : images === 1 ? "Imagen" : `Imagen ${images}`, ...box, src: crop, fit: "cover" });
+      children.push({
+        id,
+        type: "image",
+        name: isLogo ? "Logo" : images === 1 ? "Imagen" : `Imagen ${images}`,
+        ...box,
+        src: crop,
+        // El logo recortado nunca se corta; la foto llena su caja.
+        fit: isLogo ? "contain" : "cover",
+      });
       return;
     }
     if (b.role === "icon") {

@@ -24,6 +24,7 @@ import {
 import { LayerPatch, applyLayerPatches } from "./layout-patch";
 import { COMPOSITION_RULES } from "./art-direction";
 import { ensureTextContrast } from "./layout-plan";
+import { keepLayerAspect } from "./reflow";
 
 export const LAYOUT_FIXER_MODEL =
   process.env.PRODUCTION_AI_LAYOUT_MODEL || "gemini-3.8-flash";
@@ -300,6 +301,12 @@ export async function runLayoutFix(p: RunLayoutFixParams): Promise<RunLayoutFixR
     const u = (e as { usage?: LayoutFixUsage }).usage;
     if (u) track(u);
     throw Object.assign(e as Error, { usage, passes, issuesBefore });
+  }
+  // El modelo cambia w y h por separado: lo que tiene proporción fija
+  // (logos, íconos, badges redondos) la recupera respecto del original.
+  if (p.sourceTree) {
+    const src = new Map(p.sourceTree.children.map((c) => [c.id, c]));
+    current = { ...current, children: current.children.map((c) => (src.has(c.id) ? keepLayerAspect(c, src.get(c.id)!) : c)) };
   }
   return {
     tree: p.resolveColor ? ensureTextContrast(current, p.resolveColor) : current,

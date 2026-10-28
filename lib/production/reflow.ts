@@ -338,7 +338,10 @@ export function keepLayerAspect(l: TemplateLayer, orig: TemplateLayer): Template
   // formato, pero no cambiar de forma (una pastilla horizontal que queda
   // parada parte el texto y deja de verse como botón).
   const pill = orig.type === "text" && !!orig.style.backgroundColor && !roundBadge && !sticker;
-  if (orig.type !== "icon" && !roundBadge && !ellipse && !pill && !sticker) return l;
+  // El logo nunca cambia de proporción (un recorte de logo en una caja de
+  // otra proporción se corta: "ENACO" quedaba "NACO").
+  const logo = orig.type === "image" && (orig.id === "logo" || /^logo\b/i.test(orig.name ?? ""));
+  if (orig.type !== "icon" && !roundBadge && !ellipse && !pill && !sticker && !logo) return l;
   const ratio = l.size.w / Math.max(1, l.size.h);
   const tolerance = pill ? Math.log(1.4) : 0.03;
   if (Math.abs(Math.log(ratio / ratio0)) < tolerance) return l;
