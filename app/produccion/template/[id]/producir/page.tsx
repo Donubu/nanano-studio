@@ -801,9 +801,12 @@ export default function ProducirPage() {
   }, [editingAdaptation, orientations, principalOrientation]);
 
   // Save de la orientación activa: PUT al endpoint del template
-  // correspondiente. Si la orientación es la base, el server propaga el
-  // cambio a las orientaciones linked (definition reflowed). Después
-  // refrescamos las orientaciones para que el strip muestre lo nuevo.
+  // correspondiente. Si la orientación es el master, el server propaga el
+  // cambio a las orientaciones linked (definition reflowed). Si es una
+  // linked, el server la diferencia (deja de heredar) y guarda solo ahí:
+  // el master manda al resto, y el resto al editarse genera su propia
+  // versión. Después refrescamos las orientaciones para que el strip
+  // muestre lo nuevo (incluido el ícono de diferenciada).
   // Cuando lo guardado es la principal (master del design), encolamos
   // también la regeneración del thumbnail_url para que el listado de
   // /produccion/proyecto/[id] muestre el preview cacheado.
@@ -824,9 +827,18 @@ export default function ProducirPage() {
           `Save master failed: ${res.status}${body?.error ? ` — ${body.error}` : ""}`
         );
       }
-      // Refrescamos todas las orientaciones — la base puede haber empujado
-      // cambios a las linked. Si solo se editó una orientación linked /
-      // distinta, solo esa cambia.
+      const saved = (await res.json().catch(() => null)) as
+        | { differentiated?: boolean }
+        | null;
+      if (saved?.differentiated) {
+        setAiSuccessToast(
+          "Esta orientación ahora es independiente · ya no recibe cambios del master",
+        );
+        window.setTimeout(() => setAiSuccessToast(null), 3500);
+      }
+      // Refrescamos todas las orientaciones — el master puede haber empujado
+      // cambios a las linked. Si se editó una linked, solo esa cambia (y
+      // pasa a diferenciada).
       // IMPORTANTE: no leemos `orientations` del closure ni lo agregamos a
       // las deps de este useCallback. Si lo hiciéramos, el handler cambia
       // identidad tras cada setOrientations, lo que invalida flushSave del
@@ -1544,7 +1556,7 @@ export default function ProducirPage() {
   // Acepta una propuesta del Banner Designer.
   //   - applyToAllLinked = false  → PUT con linked_to_template_id=null.
   //     La propuesta queda solo en esta orientación. Diferenciada del master.
-  //   - applyToAllLinked = true   → PUT sin tocar linked_to_template_id.
+  //   - applyToAllLinked = true   → PUT con propagate_to_group=true.
   //     El backend propaga (reflowed) al master + todas las linked variants
   //     del grupo. Útil cuando la propuesta IA es lo suficientemente buena
   //     como para volverse el nuevo "canónico" del concepto.
@@ -1557,7 +1569,11 @@ export default function ProducirPage() {
       applyToAllLinked: boolean,
     ) => {
       const body: Record<string, unknown> = { definition };
-      if (!applyToAllLinked) {
+      if (applyToAllLinked) {
+        // Opt-in explícito: sin esto el server diferencia la linked al
+        // guardarle una definition (regla "el master manda al resto").
+        body.propagate_to_group = true;
+      } else {
         body.linked_to_template_id = null;
       }
       const res = await fetch(`/api/production/templates/${targetId}`, {
@@ -4104,7 +4120,9 @@ function VariantsStrip({
               >
                 {displayName}
                 {/* Marca "diferenciada": orientación que NO es la principal
-                    y NO está vinculada al master. Sus cambios viven aisladas.
+                    y NO está vinculada al master. Sus cambios viven aislados.
+                    Se llega acá con el botón Unlink o automáticamente al
+                    editar una linked (el server la diferencia al guardar).
                     Las linked al master no muestran nada — ese es el estado
                     por defecto. */}
                 {!isPrincipal && m.linked_to_template_id == null && (

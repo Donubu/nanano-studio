@@ -95,6 +95,10 @@ export async function PUT(
       status: z.enum(["draft", "published", "archived"]).optional(),
       thumbnail_url: z.string().url().max(1000).nullable().optional(),
       definition: z.unknown().optional(),
+      // Opt-in explícito: al guardar una orientación linked, empujar la
+      // definition al master y al resto del grupo (comportamiento antiguo,
+      // "sync bidireccional"). Sin esto, editar una linked la diferencia.
+      propagate_to_group: z.boolean().optional(),
     });
     const parsed = await parseBody(request, schema);
     if (parsed.error) return parsed.error;
@@ -117,9 +121,8 @@ export async function PUT(
     const current = currentRows[0];
 
     // Re-link: si el cliente cambia linked_to_template_id de NULL a un valor,
-    // copiamos la definition de la fuente reflowed a las dims de este template
-    // y forzamos definition_changed (para propagar a siblings que dependen de
-    // esta cadena, aunque por ahora cada link apunta al master MIN(id)).
+    // copiamos la definition de la fuente reflowed a las dims de este template.
+    // No propaga a nadie: la fuente ya tiene ese contenido.
     const requestedLink = parsed.data.linked_to_template_id;
     const isRelinking =
       requestedLink !== undefined &&
@@ -184,6 +187,30 @@ export async function PUT(
       values.push(JSON.stringify(effectiveDefinition));
       updates.push("version = version + 1");
     }
+
+    // linked_to_template_id POST-update según lo que pidió el cliente. Si el
+    // cliente lo está seteando a NULL en este mismo PUT (aceptar propuesta IA
+    // "solo este formato", diferenciar) no debemos tratarla como linked.
+    const effectiveLink =
+      parsed.data.linked_to_template_id !== undefined
+        ? parsed.data.linked_to_template_id
+        : current.linked_to_template_id;
+
+    // Regla de herencia: el master manda al resto; una orientación linked que
+    // se edita a mano genera su propia versión. Es decir: guardar una
+    // definition explícita sobre una linked la DIFERENCIA (linked → NULL) en
+    // el mismo UPDATE, salvo que el cliente pida propagate_to_group.
+    // Si el cliente manda linked_to_template_id explícito junto con la
+    // definition, respetamos su intención (re-link con contenido o detach)
+    // y no aplicamos la regla automática.
+    const autoDifferentiate =
+      clientSentDefinition &&
+      parsed.data.linked_to_template_id === undefined &&
+      current.linked_to_template_id != null &&
+      parsed.data.propagate_to_group !== true;
+    if (autoDifferentiate) {
+      updates.push("linked_to_template_id = NULL");
+    }
     if (updates.length === 0) {
       return NextResponse.json({ success: true });
     }
@@ -197,41 +224,26 @@ export async function PUT(
       return NextResponse.json({ error: "Template no encontrado" }, { status: 404 });
     }
 
-    // Propagación de definition a las orientaciones linked del mismo grupo.
-    // Un grupo linked es: el master (linked_to_template_id IS NULL dentro de
-    // un design) + todas las orientaciones que apuntan a él. Editar CUALQUIER
-    // miembro del grupo propaga al resto (excluyendo diferenciadas, que están
-    // fuera del grupo por definición).
+    // Propagación de definition a las orientaciones linked del grupo.
+    // Un grupo linked es: el master (principal del design, sin link) + todas
+    // las orientaciones que apuntan a él. Solo el master propaga hacia abajo
+    // (a las linked; las diferenciadas quedan fuera). Una linked editada a
+    // mano se diferenció arriba y no propaga. Excepción opt-in:
+    // propagate_to_group=true sobre una linked replica el comportamiento
+    // antiguo (empuja al master + resto del grupo), usado por "aplicar
+    // propuesta IA a todas las linkeadas".
     //
-    // Resolvemos el masterId del grupo:
-    //   - si current.linked_to_template_id != null → masterId = ese.
-    //   - si current.linked_to_template_id == null y es el principal del design
-    //     (MIN id sin link) → masterId = current.id.
-    //   - si current.linked_to_template_id == null pero NO es el principal →
-    //     es una orientación diferenciada (standalone). No propaga.
-    if (definitionChanged) {
+    // Un re-link (definition copiada de la fuente) nunca propaga.
+    if (definitionChanged && clientSentDefinition && !autoDifferentiate) {
       const newDef = effectiveDefinition;
-      // Caller editó esta orientación. Solo propagamos si pertenece al grupo
-      // linked. Si es el master, su id es la fuente. Si es una linked variant,
-      // su linked_to_template_id apunta al master.
-      //
-      // IMPORTANTE: usamos el linked_to_template_id POST-update, no el de
-      // `current` (que es pre-update). Si el cliente está SETEANDO
-      // linked_to_template_id a NULL en este mismo PUT (típico al aceptar
-      // una propuesta de IA o al diferenciar), no debemos propagar como si
-      // todavía estuviera linkeado — la intención del cliente es detach.
-      const effectiveLink =
-        parsed.data.linked_to_template_id !== undefined
-          ? parsed.data.linked_to_template_id
-          : current.linked_to_template_id;
       let masterId: number | null = null;
       if (effectiveLink != null) {
+        // Linked + propagate_to_group explícito.
         masterId = effectiveLink;
       } else if (current.design_id != null) {
-        // linked_to_template_id es null post-update. Verificamos si current
-        // es el principal (MIN id sin link) — si lo es, ES el master del grupo
-        // y propaga. Si no, es una orientación diferenciada (standalone) y
-        // NO propaga.
+        // Sin link. Es el master del grupo solo si es el principal del design
+        // (MIN id sin link). Si no, es una diferenciada (standalone) y NO
+        // propaga.
         const [minRows] = await pool.execute<RowDataPacket[]>(
           `SELECT MIN(id) AS min_id
              FROM production_templates
@@ -243,9 +255,6 @@ export async function PUT(
         );
         const minIdExcludingCurrent =
           (minRows[0] as { min_id: number | null })?.min_id ?? null;
-        // current es el principal si no hay otro template del design sin
-        // link con id menor. Si minIdExcludingCurrent es null o > current.id,
-        // current es el menor → es el principal.
         const isPrincipal =
           minIdExcludingCurrent === null || minIdExcludingCurrent > id;
         if (isPrincipal) {
@@ -254,9 +263,8 @@ export async function PUT(
       }
 
       if (masterId !== null) {
-        // Trae master (si no es current) + todas las linked variants. Excluye
-        // current (ya lo actualizamos arriba). Excluye diferenciadas
-        // (linked_to_template_id IS NULL y id != masterId).
+        // Master (si no es current) + todas las linked variants. Excluye
+        // current (ya actualizado) y diferenciadas (sin link, id != masterId).
         const [siblings] = await pool.execute<LinkedRow[]>(
           `SELECT id, base_width, base_height
              FROM production_templates
@@ -280,7 +288,12 @@ export async function PUT(
       }
     }
 
-    return NextResponse.json({ success: true });
+    // `differentiated` avisa al cliente que esta orientación dejó de heredar
+    // del master en este mismo save (linked → independiente).
+    return NextResponse.json({
+      success: true,
+      differentiated: autoDifferentiate,
+    });
   } catch (error) {
     console.error("Error actualizando template:", error);
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });

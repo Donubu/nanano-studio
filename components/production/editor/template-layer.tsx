@@ -21,6 +21,19 @@ import { SmartText } from "./smart-text";
 // Resolver lucide por nombre. El zod schema garantiza que solo lleguen nombres
 // del catálogo, pero como defensa por si la BD tiene basura vieja, caemos a
 // "HelpCircle" cuando el nombre no existe en el bundle de lucide.
+//
+// OJO: los íconos de lucide-react son `forwardRef(...)`, o sea OBJETOS con
+// $$typeof, no funciones. Chequear `typeof === "function"` hacía que TODOS
+// los nombres válidos cayeran al fallback y cada ícono se viera como "?".
+function isRenderableComponent(v: unknown): boolean {
+  if (typeof v === "function") return true;
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    "$$typeof" in (v as Record<string, unknown>)
+  );
+}
+
 function getLucideIcon(name: string): React.ComponentType<{
   size?: number;
   color?: string;
@@ -28,7 +41,7 @@ function getLucideIcon(name: string): React.ComponentType<{
   className?: string;
 }> {
   const Comp = (LucideIcons as Record<string, unknown>)[name];
-  if (Comp && typeof Comp === "function") {
+  if (isRenderableComponent(Comp)) {
     return Comp as React.ComponentType<{
       size?: number;
       color?: string;
