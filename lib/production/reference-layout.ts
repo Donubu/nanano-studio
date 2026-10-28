@@ -4,7 +4,9 @@
 // real, con capas editables. Las plantillas del catálogo no alcanzan a
 // parecerse a una referencia arbitraria; esto sí. Puro.
 
-import type { ImageLayer, ShapeLayer, TemplateDefinition, TemplateLayer, TextLayer } from "./types";
+import type { IconLayer, ImageLayer, ShapeLayer, TemplateDefinition, TemplateLayer, TextLayer } from "./types";
+import { GOOGLE_FONTS } from "./google-fonts";
+import { isValidIconName } from "./icon-catalog";
 import { CANONICAL_SIZES, type AspectKey } from "./layout-templates";
 import { LOGO_SLOT_ID } from "./layout-plan";
 import { formatChileanPrices } from "./layout-plan";
@@ -20,6 +22,7 @@ export const REFERENCE_ROLES = [
   "logo",
   "image",
   "shape",
+  "icon",
 ] as const;
 export type ReferenceRole = (typeof REFERENCE_ROLES)[number];
 export const REFERENCE_SHAPES = ["rect", "rounded", "pill", "circle"] as const;
@@ -39,6 +42,28 @@ export interface ReferenceBlock {
   weight?: number;
   uppercase?: boolean;
   image_prompt?: string;
+  // Familia de Google Fonts más parecida a la de la referencia (lista del
+  // editor, google-fonts.ts).
+  font_family?: string;
+  // Degradado de un shape: 2-3 colores y ángulo CSS (180 = de arriba abajo).
+  gradient_colors?: string[];
+  gradient_angle?: number;
+  // Ícono del catálogo (role icon).
+  icon_name?: string;
+}
+
+const FONT_BY_NAME = new Map(GOOGLE_FONTS.map((f) => [f.family.toLowerCase(), f]));
+const FONT_FALLBACK: Record<string, string> = {
+  "sans-serif": "system-ui, sans-serif",
+  serif: "Georgia, serif",
+  display: "system-ui, sans-serif",
+  handwriting: "cursive",
+  monospace: "monospace",
+};
+
+export function fontStack(family: string | undefined): string | undefined {
+  const f = family ? FONT_BY_NAME.get(family.trim().toLowerCase()) : undefined;
+  return f ? `${f.family}, ${FONT_FALLBACK[f.category] ?? "sans-serif"}` : undefined;
 }
 
 export interface ReferenceLayout {
@@ -47,8 +72,40 @@ export interface ReferenceLayout {
   blocks: ReferenceBlock[];
 }
 
-const HEX = /^#[0-9a-f]{6}$/i;
-const hex = (v: unknown) => (typeof v === "string" && HEX.test(v.trim()) ? v.trim().toUpperCase() : undefined);
+// Colores del modelo: #RRGGBB, pero también #RGB, rgb()/rgba() y nombres
+// básicos (a veces responde "white" o "#FFF"; descartarlos dejaba los textos
+// en el gris oscuro por defecto).
+const NAMED: Record<string, string> = {
+  white: "#FFFFFF",
+  black: "#000000",
+  red: "#FF0000",
+  blue: "#0000FF",
+  yellow: "#FFFF00",
+  green: "#008000",
+  gray: "#808080",
+  grey: "#808080",
+  orange: "#FFA500",
+};
+// `alpha`: conserva la transparencia (#RRGGBBAA): en un degradado, un tramo
+// transparente es el velo que funde con la foto.
+export function normalizeHex(v: unknown, alpha = false): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const t = v.trim().toLowerCase();
+  if (NAMED[t]) return NAMED[t];
+  if (alpha && t === "transparent") return "#00000000";
+  let m = /^#([0-9a-f]{6})([0-9a-f]{2})?$/.exec(t);
+  if (m) return `#${m[1]}${alpha && m[2] ? m[2] : ""}`.toUpperCase();
+  m = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/.exec(t);
+  if (m) return `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}`.toUpperCase();
+  m = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([\d.]+))?/.exec(t);
+  if (m) {
+    const h = (n: number) => Math.round(Math.min(255, n)).toString(16).padStart(2, "0");
+    const a = alpha && m[4] != null ? h(Number(m[4]) * 255) : "";
+    return `#${h(Number(m[1]))}${h(Number(m[2]))}${h(Number(m[3]))}${a}`.toUpperCase();
+  }
+  return undefined;
+}
+const hex = normalizeHex;
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const MAX_BLOCKS = 16;
 
@@ -79,10 +136,16 @@ export function sanitizeReferenceLayout(raw: unknown): ReferenceLayout | null {
       weight: num(o.weight) ?? undefined,
       uppercase: o.uppercase === true,
       image_prompt: typeof o.image_prompt === "string" ? o.image_prompt.trim().slice(0, 800) : undefined,
+      font_family: typeof o.font_family === "string" && FONT_BY_NAME.has(o.font_family.trim().toLowerCase()) ? o.font_family.trim() : undefined,
+      gradient_colors: Array.isArray(o.gradient_colors)
+        ? o.gradient_colors.map((c) => normalizeHex(c, true)).filter((c): c is string => !!c).slice(0, 3)
+        : undefined,
+      gradient_angle: num(o.gradient_angle) ?? undefined,
+      icon_name: typeof o.icon_name === "string" && isValidIconName(o.icon_name) ? o.icon_name : undefined,
     });
     if (blocks.length >= MAX_BLOCKS) break;
   }
-  if (!blocks.some((b) => b.role !== "shape" && b.role !== "image")) return null;
+  if (!blocks.some((b) => b.role !== "shape" && b.role !== "image" && b.role !== "icon")) return null;
   return { aspect, background: hex(r.background) ?? "#FFFFFF", blocks };
 }
 
@@ -97,6 +160,7 @@ const ROLE_NAME: Record<ReferenceRole, string> = {
   logo: "Logo",
   image: "Imagen",
   shape: "Forma",
+  icon: "Ícono",
 };
 
 const DEFAULT_WEIGHT: Partial<Record<ReferenceRole, number>> = {
@@ -127,6 +191,19 @@ function fitFont(text: string, w: number, h: number, uppercase: boolean, padded:
   return Math.max(8, Math.floor(Math.min(innerH / (lines * 1.15), innerW / (longest * glyph))));
 }
 
+// Fuente del texto: en copia íntegra, la que se ve en la referencia; si no,
+// la de la marca (titular/precio/CTA con la de títulos) y, sin marca, la de
+// la referencia.
+function fontFor(b: ReferenceBlock, opts: BuildReferenceOptions): string {
+  const fromRef = fontStack(b.font_family);
+  if (!opts.integral && opts.fonts) {
+    const bold = (b.weight ?? DEFAULT_WEIGHT[b.role] ?? 500) >= 700;
+    const brand = bold ? (opts.fonts.heading ?? opts.fonts.body) : (opts.fonts.body ?? opts.fonts.heading);
+    if (brand) return brand;
+  }
+  return fromRef ?? "Inter, system-ui, sans-serif";
+}
+
 function isLight(c: string): boolean {
   const m = /^#([0-9a-f]{6})$/i.exec(c);
   if (!m) return false;
@@ -155,9 +232,20 @@ function containingShape(blocks: ReferenceBlock[], logo: ReferenceBlock): number
   );
 }
 
+export interface BuildReferenceOptions {
+  // Copia íntegra: textos, fuentes y colores tal cual; las fotos y el logo
+  // son recortes de la propia referencia (crops, por índice de bloque).
+  integral?: boolean;
+  crops?: Map<number, string>;
+  // Fuentes de la marca (tokens o familias): en modo normal mandan sobre la
+  // fuente que se ve en la referencia.
+  fonts?: { heading?: string; body?: string };
+}
+
 export function buildReferenceDefinition(
   layout: ReferenceLayout,
   logo: { src: string; aspect: number } | null,
+  opts: BuildReferenceOptions = {},
 ): BuiltReference {
   const { w: W, h: H } = CANONICAL_SIZES[layout.aspect];
   const children: TemplateLayer[] = [];
@@ -169,7 +257,7 @@ export function buildReferenceDefinition(
   const skip = new Set<number>();
   const logoBoxes = new Map<number, { x: number; y: number; w: number; h: number }>();
   layout.blocks.forEach((b, i) => {
-    if (b.role !== "logo" || !logo) return;
+    if (b.role !== "logo" || !logo || opts.crops?.has(i)) return;
     const aspect = logo.aspect > 0 ? logo.aspect : 1;
     const si = containingShape(layout.blocks, b);
     let area = pct(b, W, H);
@@ -190,6 +278,32 @@ export function buildReferenceDefinition(
       position: { x: Math.round((b.x / 100) * W), y: Math.round((b.y / 100) * H) },
       size: { w: Math.max(4, Math.round((b.w / 100) * W)), h: Math.max(4, Math.round((b.h / 100) * H)) },
     };
+    const crop = opts.crops?.get(i);
+    if ((b.role === "logo" || b.role === "image") && crop) {
+      // Recorte de la referencia: la foto o el logo exactos.
+      const isLogo = b.role === "logo";
+      if (isLogo && children.some((c) => c.id === LOGO_SLOT_ID)) return;
+      const id = isLogo ? LOGO_SLOT_ID : images === 0 ? "hero" : `img-${images + 1}`;
+      if (!isLogo) images++;
+      children.push({ id, type: "image", name: isLogo ? "Logo" : images === 1 ? "Imagen" : `Imagen ${images}`, ...box, src: crop, fit: "cover" });
+      return;
+    }
+    if (b.role === "icon") {
+      if (!b.icon_name) return;
+      const side = Math.min(box.size.w, box.size.h);
+      const icon: IconLayer = {
+        id: `icon-${i + 1}`,
+        type: "icon",
+        name: `Ícono ${b.icon_name}`,
+        position: { x: box.position.x + (box.size.w - side) / 2, y: box.position.y + (box.size.h - side) / 2 },
+        size: { w: side, h: side },
+        iconName: b.icon_name,
+        color: b.color ?? "#111111",
+        strokeWidth: 2,
+      };
+      children.push(icon);
+      return;
+    }
     if (b.role === "logo") {
       const lb = logoBoxes.get(i);
       if (!logo || !lb || children.some((c) => c.id === LOGO_SLOT_ID)) return;
@@ -220,7 +334,10 @@ export function buildReferenceDefinition(
         name: "Forma",
         ...box,
         shape: b.shape === "circle" ? "ellipse" : "rect",
-        fill: b.background_color ?? b.color ?? "#E5E7EB",
+        fill:
+          (b.gradient_colors?.length ?? 0) >= 2
+            ? `linear-gradient(${Math.round(b.gradient_angle ?? 180)}deg, ${b.gradient_colors!.join(", ")})`
+            : b.background_color ?? b.color ?? "#E5E7EB",
         cornerRadius: radiusFor(b.shape, box.size.w, box.size.h),
       };
       children.push(shape);
@@ -236,7 +353,7 @@ export function buildReferenceDefinition(
       ...box,
       content,
       style: {
-        fontFamily: "Inter, system-ui, sans-serif",
+        fontFamily: fontFor(b, opts),
         fontSize: { min: Math.max(8, Math.round(fs * 0.45)), max: fs },
         fontWeight: Math.max(300, Math.min(900, Math.round((b.weight ?? DEFAULT_WEIGHT[b.role] ?? 500) / 100) * 100)),
         color: b.color ?? "#111111",
@@ -261,7 +378,7 @@ export function buildReferenceDefinition(
         box.position.y < c.position.y + c.size.h &&
         c.position.y < box.position.y + box.size.h,
     );
-    if (!withBg && overPhoto && isLight(text.style.color)) {
+    if (!opts.integral && !withBg && overPhoto && isLight(text.style.color)) {
       text.shadow = { x: 0, y: Math.max(1, Math.round(fs * 0.04)), blur: Math.round(fs * 0.35), color: "rgba(0,0,0,0.55)" };
     }
     children.push(text);

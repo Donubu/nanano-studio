@@ -51,3 +51,38 @@ export async function imageCostPerImage(): Promise<number> {
   );
   return Number(rows[0]?.cost_image_1k ?? FALLBACK_COST_PER_IMAGE);
 }
+
+// Quita de una foto los textos, logos y gráficos superpuestos (cintillos,
+// cajas de precio, sellos) y reconstruye el fondo. Lo usa la copia íntegra
+// desde referencia: el recorte de la foto trae impresos los textos originales,
+// que ahora van como capas editables encima.
+export async function cleanPhotoOverlays(
+  input: { data: Buffer; mimeType: string },
+  ratio: string,
+): Promise<{ data: Buffer; mimeType: string }> {
+  const response = await withRetry(
+    () =>
+      getClient("gemini").models.generateContent({
+        model: IMAGE_MODEL,
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { inlineData: { mimeType: input.mimeType, data: input.data.toString("base64") } },
+              {
+                text: "Remove ALL text, letters, numbers, logos, watermarks and graphic overlays (colored bands, ribbons, price boxes, badges, buttons, frames) from this photo, reconstructing what is behind them naturally. Keep the photo itself identical: same framing, subject, colors, light and perspective. Return only the cleaned photo.",
+              },
+            ],
+          },
+        ],
+        config: {
+          responseModalities: ["IMAGE"],
+          imageConfig: { aspectRatio: ratio, imageSize: "1K" },
+        },
+      }),
+    "productionCleanPhoto",
+  );
+  const part = response.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
+  if (!part?.inlineData?.data) throw new Error("El generador no devolvió la foto limpia");
+  return { data: Buffer.from(part.inlineData.data, "base64"), mimeType: part.inlineData.mimeType || "image/png" };
+}

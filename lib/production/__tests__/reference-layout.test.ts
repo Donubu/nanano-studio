@@ -83,3 +83,70 @@ describe("referencia por bloques", () => {
     expect(cx).toBeCloseTo(0.3 * 1080, -1);
   });
 });
+
+describe("referencia · tipografía, degradados, íconos y copia íntegra", () => {
+  const raw = {
+    aspect: "square",
+    background: "#ffffff",
+    blocks: [
+      { role: "image", x: 0, y: 0, w: 100, h: 60, image_prompt: "house" },
+      { role: "shape", x: 0, y: 40, w: 100, h: 20, gradient_colors: ["#000000", "#00000000", "#123456"], gradient_angle: 0 },
+      { role: "headline", x: 5, y: 62, w: 90, h: 12, text: "PUERTA DEL SOL", font_family: "Playfair Display", weight: 700 },
+      { role: "icon", x: 5, y: 80, w: 6, h: 6, icon_name: "MapPin", color: "#d31215" },
+      { role: "icon", x: 15, y: 80, w: 6, h: 6, icon_name: "NoExiste" },
+      { role: "logo", x: 80, y: 85, w: 15, h: 10 },
+    ],
+  };
+
+  it("usa la fuente de la referencia, el degradado y los íconos válidos", () => {
+    const layout = sanitizeReferenceLayout(raw)!;
+    const d = buildReferenceDefinition(layout, null).definition;
+    const title = d.children.find((c) => c.name === "Titular");
+    expect(title?.type === "text" && title.style.fontFamily).toBe("Playfair Display, Georgia, serif");
+    const shade = d.children.find((c) => c.type === "shape");
+    expect(shade?.type === "shape" && shade.fill).toBe("linear-gradient(0deg, #000000, #00000000, #123456)");
+    const icons = d.children.filter((c) => c.type === "icon");
+    expect(icons).toHaveLength(1);
+    expect(icons[0].type === "icon" && icons[0].iconName).toBe("MapPin");
+  });
+
+  it("en modo normal la fuente de la marca manda", () => {
+    const d = buildReferenceDefinition(sanitizeReferenceLayout(raw)!, null, {
+      fonts: { heading: "{font.heading}", body: "{font.body}" },
+    }).definition;
+    const title = d.children.find((c) => c.name === "Titular");
+    expect(title?.type === "text" && title.style.fontFamily).toBe("{font.heading}");
+  });
+
+  it("copia íntegra: fotos y logo son recortes de la referencia, y manda su fuente", () => {
+    const crops = new Map<number, string>([
+      [0, "https://bucket/ref-photo.jpg"],
+      [5, "https://bucket/ref-logo.png"],
+    ]);
+    const built = buildReferenceDefinition(sanitizeReferenceLayout(raw)!, { src: "brand-logo", aspect: 1 }, {
+      integral: true,
+      crops,
+      fonts: { heading: "{font.heading}" },
+    });
+    const d = built.definition;
+    const hero = d.children.find((c) => c.id === "hero");
+    expect(hero?.type === "image" && hero.src).toBe("https://bucket/ref-photo.jpg");
+    const logo = d.children.find((c) => c.id === "logo");
+    expect(logo?.type === "image" && logo.src).toBe("https://bucket/ref-logo.png");
+    const title = d.children.find((c) => c.name === "Titular");
+    expect(title?.type === "text" && title.style.fontFamily).toBe("Playfair Display, Georgia, serif");
+  });
+});
+
+describe("normalizeHex", () => {
+  it("acepta los formatos que devuelve el modelo", async () => {
+    const { normalizeHex } = await import("../reference-layout");
+    expect(normalizeHex("#fff")).toBe("#FFFFFF");
+    expect(normalizeHex("white")).toBe("#FFFFFF");
+    expect(normalizeHex("rgb(230, 0, 9)")).toBe("#E60009");
+    expect(normalizeHex("#E60000FF")).toBe("#E60000");
+    expect(normalizeHex("azul")).toBeUndefined();
+    expect(normalizeHex("rgba(0,0,0,0.5)", true)).toBe("#00000080");
+    expect(normalizeHex("transparent", true)).toBe("#00000000");
+  });
+});

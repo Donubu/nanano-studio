@@ -415,6 +415,9 @@ function ReferenceUploadTab({
 }) {
   const [files, setFiles] = useState<UploadedReference[]>([]);
   const [intent, setIntent] = useState("");
+  // Copia íntegra: la misma pieza en capas editables (textos, fuentes, colores
+  // y fotos de la referencia), sin adaptarla a la marca.
+  const [integral, setIntegral] = useState(false);
   const [instructions, setInstructions] = useState("");
   const [uploading, setUploading] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -517,6 +520,7 @@ function ReferenceUploadTab({
             })),
             intent: intent.trim() || undefined,
             instructions: instructions.trim() || undefined,
+            integral,
           }),
         },
       );
@@ -676,10 +680,28 @@ function ReferenceUploadTab({
         </div>
       </div>
 
+      <label className="flex items-start gap-2 text-xs cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={integral}
+          onChange={(e) => setIntegral(e.target.checked)}
+          disabled={generating}
+          className="accent-violet-500 mt-0.5"
+        />
+        <span>
+          <span className="font-medium">Copia íntegra</span>
+          <span className="block text-[11px] text-muted-foreground">
+            Recrea la misma pieza en capas editables: mismos textos, fuentes, colores, fotos y logo (recortados de
+            la referencia). Sirve para pasar un JPG o una pieza aprobada a template.
+          </span>
+        </span>
+      </label>
+
       <div className="flex items-center justify-between">
         <p className="text-[11px] text-muted-foreground">
-          La IA toma paleta, jerarquía y composición de las referencias y propone
-          hasta 3 diseños con el brand kit del cliente. No copia logos ni texto literal.
+          {integral
+            ? "Copia íntegra: la misma pieza en capas editables, con sus textos, fuentes, colores, fotos y logo."
+            : "La IA replica composición, tipografía y colores de la referencia con los textos y el logo de tu marca, y suma 2 alternativas del catálogo."}
         </p>
         {hasProposal && (
           <Button
@@ -884,7 +906,11 @@ function ProposalChooser({
               </div>
               <p className="text-[11px] font-medium flex items-center gap-1">
                 {i === selected && <Check className="h-3 w-3 text-violet-400" />}
-                {p.template_id === "reference" ? "Fiel a la referencia" : tpl?.name ?? "Propuesta"}
+                {p.template_id === "reference"
+                  ? "Fiel a la referencia"
+                  : p.template_id === "reference-integral"
+                    ? "Copia íntegra"
+                    : tpl?.name ?? "Propuesta"}
               </p>
               {p.rationale && (
                 <p className="text-[10px] text-muted-foreground line-clamp-3">{p.rationale}</p>

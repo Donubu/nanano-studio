@@ -11,6 +11,7 @@
 //     reference_files: [{ filename, publicUrl, mimeType }],  // 1-3
 //     intent?: string,
 //     instructions?: string,
+//     integral?: boolean,          // copia íntegra de la referencia
 //     master_dims?: { w, h },         // default 1920x1080
 //     secondary_aspects?: [{ w, h }], // default [1080x1080, 1080x1920]
 //   }
@@ -48,6 +49,9 @@ const bodySchema = z.object({
     .max(3),
   intent: z.string().max(2000).optional(),
   instructions: z.string().max(2000).optional(),
+  // Copia íntegra: la misma pieza en capas (textos, fuentes, colores y fotos
+  // de la referencia), sin adaptarla a la marca.
+  integral: z.boolean().optional(),
   master_dims: z
     .object({
       w: z.number().int().positive().max(10000),
@@ -132,6 +136,7 @@ export async function POST(request: NextRequest) {
       images,
       masterDims: master_dims,
       variantDims: secondary_aspects,
+      integral: parsed.data.integral === true,
     });
     return NextResponse.json(result.body, { status: result.status });
   } catch (error) {
