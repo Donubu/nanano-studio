@@ -102,6 +102,8 @@ interface UseTemplateEditorResult {
   duplicateLayer: (id: string) => void;
 
   undo: () => void;
+  // Cambio arbitrario deshacible (lo usa "Pídele a la IA").
+  mutate: (mutator: (d: TemplateDefinition) => TemplateDefinition) => void;
   redo: () => void;
   canUndo: boolean;
   canRedo: boolean;
@@ -836,6 +838,8 @@ export function useTemplateEditor({
     duplicateLayer,
     undo,
     redo,
+    // Cambio arbitrario deshacible (lo usa "Pídele a la IA").
+    mutate,
     canUndo: past.length > 0,
     canRedo: future.length > 0,
     saveNow,

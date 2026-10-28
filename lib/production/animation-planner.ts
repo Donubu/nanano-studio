@@ -2,19 +2,13 @@
 // devuelve una coreografía por capa (animation-plan.ts) con JSON schema
 // forzado; el motor la traduce a tracks. Server-only.
 
-import { ThinkingLevel } from "@google/genai";
-import { getClient, withRetry } from "@/lib/google-ai";
+import { generateJson } from "./gemini-json";
 import type { TemplateDefinition } from "./types";
 import { describeTree, LAYOUT_FIXER_MODEL, LayoutFixUsage } from "./layout-fixer";
 import { ENTRANCES, EMPHASES, AnimationPlan, sanitizeAnimationPlan } from "./animation-plan";
 
 export const ANIMATION_PLANNER_MODEL = process.env.PRODUCTION_AI_ANIMATION_MODEL || LAYOUT_FIXER_MODEL;
 export const ANIMATION_PLANNER_AGENT_NAME = "animation-planner";
-
-const PRICING: Record<string, { input: number; output: number }> = {
-  "gemini-3.8-flash": { input: 0.75, output: 3.75 },
-};
-const FALLBACK_PRICING = PRICING["gemini-3.8-flash"];
 
 const SYSTEM_INSTRUCTION = `Eres motion designer de banners publicitarios (display HTML5 y redes). Recibes las capas de un banner y la intención del productor, y decides la coreografía: qué capa entra, cómo, cuándo y si después tiene un énfasis.
 
@@ -76,37 +70,15 @@ export async function requestAnimationPlan(
     banner: describeTree(req.resolvedTree),
   };
   const model = ANIMATION_PLANNER_MODEL;
-  const response = await withRetry(
-    () =>
-      getClient("gemini").models.generateContent({
-        model,
-        contents: [{ role: "user", parts: [{ text: JSON.stringify(context) }] }],
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          responseMimeType: "application/json",
-          responseJsonSchema: RESPONSE_SCHEMA,
-          temperature: 0.6,
-          maxOutputTokens: 4096,
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        },
-      }),
-    "productionAnimationPlan",
-  );
-  const um = response.usageMetadata;
-  const inputTokens = um?.promptTokenCount ?? 0;
-  const outputTokens = (um?.candidatesTokenCount ?? 0) + (um?.thoughtsTokenCount ?? 0);
-  const p = PRICING[model] ?? FALLBACK_PRICING;
-  const usage: LayoutFixUsage = {
-    inputTokens,
-    outputTokens,
-    estimatedCost: (inputTokens * p.input + outputTokens * p.output) / 1_000_000,
-  };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(response.text ?? "");
-  } catch (e) {
-    throw Object.assign(new Error(`JSON inválido de Gemini: ${(e as Error).message}`), { usage });
-  }
+  const { data: parsed, usage } = await generateJson({
+    model,
+    systemInstruction: SYSTEM_INSTRUCTION,
+    schema: RESPONSE_SCHEMA,
+    parts: [{ text: JSON.stringify(context) }],
+    temperature: 0.6,
+    maxOutputTokens: 4096,
+    operationName: "productionAnimationPlan",
+  });
   const plan = sanitizeAnimationPlan(parsed, req.resolvedTree);
   if (!plan) throw Object.assign(new Error("Gemini no devolvió una coreografía válida"), { usage });
   return { plan, usage, model };

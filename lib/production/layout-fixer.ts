@@ -9,8 +9,8 @@
 //
 // Server-only: usa el cliente de Gemini de lib/google-ai.ts.
 
-import { ThinkingLevel, type Part } from "@google/genai";
-import { getClient, withRetry } from "@/lib/google-ai";
+import type { Part } from "@google/genai";
+import { generateJson, GeminiUsage } from "./gemini-json";
 import { TemplateDefinition, TemplateLayer } from "./types";
 import {
   LintIssue,
@@ -27,17 +27,7 @@ export const LAYOUT_FIXER_MODEL =
   process.env.PRODUCTION_AI_LAYOUT_MODEL || "gemini-3.8-flash";
 export const LAYOUT_FIXER_AGENT_NAME = "layout-fixer";
 
-// USD por millón de tokens. Los tokens de razonamiento se cobran como salida.
-const PRICING: Record<string, { input: number; output: number }> = {
-  "gemini-3.8-flash": { input: 0.75, output: 3.75 },
-};
-const FALLBACK_PRICING = PRICING["gemini-3.8-flash"];
-
-export interface LayoutFixUsage {
-  inputTokens: number;
-  outputTokens: number;
-  estimatedCost: number;
-}
+export type LayoutFixUsage = GeminiUsage;
 
 export interface LayoutFixRequest {
   // Árbol adaptado con tokens resueltos: es lo que el modelo "ve" en números.
@@ -155,11 +145,6 @@ function parseImage(image: LayoutFixRequest["image"]): Part | null {
   };
 }
 
-function costOf(model: string, input: number, output: number): number {
-  const p = PRICING[model] ?? FALLBACK_PRICING;
-  return (input * p.input + output * p.output) / 1_000_000;
-}
-
 function sanitizePatches(raw: unknown): LayerPatch[] {
   if (!Array.isArray(raw)) return [];
   const out: LayerPatch[] = [];
@@ -205,47 +190,16 @@ export async function requestLayoutFix(req: LayoutFixRequest): Promise<LayoutFix
   parts.push({ text: JSON.stringify(context) });
 
   const model = LAYOUT_FIXER_MODEL;
-  const response = await withRetry(
-    () =>
-      getClient("gemini").models.generateContent({
-        model,
-        contents: [{ role: "user", parts }],
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          responseMimeType: "application/json",
-          responseJsonSchema: RESPONSE_SCHEMA,
-          temperature: 0.2,
-          maxOutputTokens: 4096,
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          abortSignal: req.abortSignal,
-        },
-      }),
-    "productionLayoutFix",
-    undefined,
-    req.abortSignal,
-  );
-
-  const um = response.usageMetadata;
-  const inputTokens = um?.promptTokenCount ?? 0;
-  const outputTokens = (um?.candidatesTokenCount ?? 0) + (um?.thoughtsTokenCount ?? 0);
-  const usage: LayoutFixUsage = {
-    inputTokens,
-    outputTokens,
-    estimatedCost: costOf(model, inputTokens, outputTokens),
-  };
-
-  const text = response.text ?? "";
-  if (!text.trim()) {
-    const reason =
-      response.promptFeedback?.blockReason ?? response.candidates?.[0]?.finishReason ?? "sin texto";
-    throw Object.assign(new Error(`Gemini no devolvió correcciones (${reason})`), { usage });
-  }
-  let parsed: { patches?: unknown; rationale?: unknown };
-  try {
-    parsed = JSON.parse(text);
-  } catch (e) {
-    throw Object.assign(new Error(`JSON inválido de Gemini: ${(e as Error).message}`), { usage });
-  }
+  const { data: parsed, usage } = await generateJson<{ patches?: unknown; rationale?: unknown }>({
+    model,
+    systemInstruction: SYSTEM_INSTRUCTION,
+    schema: RESPONSE_SCHEMA,
+    parts,
+    temperature: 0.2,
+    maxOutputTokens: 4096,
+    operationName: "productionLayoutFix",
+    abortSignal: req.abortSignal,
+  });
   return {
     patches: sanitizePatches(parsed.patches),
     rationale: typeof parsed.rationale === "string" ? parsed.rationale : "",

@@ -8,8 +8,8 @@
 //
 // Server-only: usa el cliente de Gemini de lib/google-ai.ts.
 
-import { ThinkingLevel, type Part } from "@google/genai";
-import { getClient, withRetry } from "@/lib/google-ai";
+import type { Part } from "@google/genai";
+import { generateJson } from "./gemini-json";
 import { BrandKitContent, makeRef } from "./brand-kit";
 import { describeCatalog, sanitizePlan, LayoutPlan } from "./layout-plan";
 import { LAYOUT_TEMPLATES } from "./layout-templates";
@@ -18,11 +18,6 @@ import { BrandGuide, brandGuideForModel } from "./brand-guide";
 
 export const LAYOUT_PLANNER_MODEL = process.env.PRODUCTION_AI_PLANNER_MODEL || LAYOUT_FIXER_MODEL;
 export const LAYOUT_PLANNER_AGENT_NAME = "layout-planner";
-
-const PRICING: Record<string, { input: number; output: number }> = {
-  "gemini-3.8-flash": { input: 0.75, output: 3.75 },
-};
-const FALLBACK_PRICING = PRICING["gemini-3.8-flash"];
 
 const SYSTEM_INSTRUCTION = `Eres director de arte de una agencia de publicidad chilena. Diseñas banners eligiendo una plantilla de un catálogo y completándola: no dibujas capas, decides contenido, jerarquía y color.
 
@@ -139,45 +134,15 @@ export async function requestLayoutPlans(req: PlanRequest): Promise<PlanResponse
   parts.push({ text: JSON.stringify(context) });
 
   const model = LAYOUT_PLANNER_MODEL;
-  const response = await withRetry(
-    () =>
-      getClient("gemini").models.generateContent({
-        model,
-        contents: [{ role: "user", parts }],
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          responseMimeType: "application/json",
-          responseJsonSchema: responseSchema(),
-          temperature: 0.8,
-          maxOutputTokens: 8192,
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        },
-      }),
-    "productionLayoutPlan",
-  );
-
-  const um = response.usageMetadata;
-  const inputTokens = um?.promptTokenCount ?? 0;
-  const outputTokens = (um?.candidatesTokenCount ?? 0) + (um?.thoughtsTokenCount ?? 0);
-  const p = PRICING[model] ?? FALLBACK_PRICING;
-  const usage: LayoutFixUsage = {
-    inputTokens,
-    outputTokens,
-    estimatedCost: (inputTokens * p.input + outputTokens * p.output) / 1_000_000,
-  };
-
-  const text = response.text ?? "";
-  if (!text.trim()) {
-    const reason =
-      response.promptFeedback?.blockReason ?? response.candidates?.[0]?.finishReason ?? "sin texto";
-    throw Object.assign(new Error(`Gemini no devolvió propuestas (${reason})`), { usage });
-  }
-  let parsed: { proposals?: unknown };
-  try {
-    parsed = JSON.parse(text);
-  } catch (e) {
-    throw Object.assign(new Error(`JSON inválido de Gemini: ${(e as Error).message}`), { usage });
-  }
+  const { data: parsed, usage } = await generateJson<{ proposals?: unknown }>({
+    model,
+    systemInstruction: SYSTEM_INSTRUCTION,
+    schema: responseSchema(),
+    parts,
+    temperature: 0.8,
+    maxOutputTokens: 8192,
+    operationName: "productionLayoutPlan",
+  });
   const plans = (Array.isArray(parsed.proposals) ? parsed.proposals : [])
     .map(sanitizePlan)
     .filter((x): x is LayoutPlan => x !== null);

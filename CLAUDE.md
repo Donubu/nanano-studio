@@ -209,13 +209,22 @@ fuente del conocimiento de marca (ver "Guía de marca").
 - `POST /api/production/templates/[id]/ai/adapt-orientation` — `adaptTree` del
   master + `runLayoutFix` en modo `recompose` (puede reubicar todo), con la
   captura del master como imagen del original.
+- `POST /api/production/ai/edit` — barra "Pídele a la IA" del editor (master,
+  orientaciones y ajustes manuales): instrucción en lenguaje natural →
+  operaciones (`lib/production/edit-ops.ts`: set_text, update, add, remove,
+  set_background, generate_image) aplicadas como un cambio deshacible; las
+  imágenes pedidas se generan con `generate-images`.
 - `POST /api/production/templates/[id]/ai/animate` — Gemini devuelve una
   coreografía por capa (entrada, inicio, duración, énfasis) y
   `lib/production/animation-plan.ts` la traduce a tracks; se valida con
   `validateAnimationConfig`.
 Ninguna escribe a la BD el resultado: el usuario ve un preview y acepta.
+Todas las llamadas pasan por `lib/production/gemini-json.ts` (reintenta una vez
+si Gemini responde vacío o con JSON inválido). En los schemas, evita campos de
+texto libre que no hagan falta (Gemini a veces entra en bucle en ellos y no
+respeta `maxLength`) y `maxItems` en arrays de objetos grandes (da 400).
 Modelos por env: `PRODUCTION_AI_LAYOUT_MODEL`, `PRODUCTION_AI_PLANNER_MODEL`,
-`PRODUCTION_AI_ANIMATION_MODEL`, `PRODUCTION_AI_IMAGE_MODEL`.
+`PRODUCTION_AI_ANIMATION_MODEL`, `PRODUCTION_AI_EDIT_MODEL`, `PRODUCTION_AI_IMAGE_MODEL`.
 
 ### Cost tracking y rate limiting
 - Cada invocación (un lote cuenta como una) queda en `production_ai_invocations`

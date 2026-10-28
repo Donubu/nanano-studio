@@ -21,6 +21,7 @@ import { EditorToolbar } from "./editor-toolbar";
 import { PreviewThumbnails, ThumbnailPreset } from "./preview-thumbnails";
 import { LayerContextMenu, LayerContextMenuPosition } from "./layer-context-menu";
 import { TimelinePanel } from "./timeline-panel";
+import { AiEditBar } from "./ai-edit-bar";
 
 interface Props {
   initial: TemplateDefinition;
@@ -106,13 +107,16 @@ export function TemplateEditor({
     loop: editor.definition.animation?.loop,
   });
 
-  // Snapshot del árbol en el instante actual del playhead. Cuando
-  // currentTime es 0, applyAnimationAtTime devuelve la def original
-  // (misma referencia), así que no rompemos memos del renderer mientras
-  // el productor edita sin animación activa.
+  // Snapshot del árbol en el instante actual del playhead. Sin animación,
+  // applyAnimationAtTime devuelve la def original (misma referencia). Con
+  // timeline colapsado, sin reproducir y en t=0 mostramos la pieza en
+  // reposo (sin animar): en t=0 las entradas tienen opacidad 0 y el canvas
+  // quedaba negro, como si no hubiera nada que editar.
+  const showRestState =
+    timeline.timelineCollapsed && !timeline.isPlaying && timeline.currentTime === 0;
   const canvasDefinition = useMemo(
-    () => applyAnimationAtTime(editor.definition, timeline.currentTime),
-    [editor.definition, timeline.currentTime],
+    () => (showRestState ? editor.definition : applyAnimationAtTime(editor.definition, timeline.currentTime)),
+    [editor.definition, timeline.currentTime, showRestState],
   );
 
   // Tolerancia para "playhead está sobre un keyframe": 16ms ≈ 1 frame a
@@ -538,6 +542,29 @@ export function TemplateEditor({
             </div>
           )}
           {topBanner}
+          {projectId != null && !previewSize && (
+            <AiEditBar
+              definition={editor.definition}
+              selectedIds={editor.selectedIds}
+              projectId={projectId}
+              templateId={templateId}
+              onApply={(next) => editor.mutate(() => next)}
+              onImages={(srcById) =>
+                editor.mutate((d) => {
+                  const put = (nodes: TemplateLayer[]): TemplateLayer[] =>
+                    nodes.map((n) =>
+                      n.type === "image" && srcById[n.id]
+                        ? { ...n, src: srcById[n.id] }
+                        : n.type === "frame"
+                          ? { ...n, children: put(n.children) }
+                          : n,
+                    );
+                  return { ...d, children: put(d.children) };
+                })
+              }
+              onUndo={editor.undo}
+            />
+          )}
           {previewSize && (
             <div className="flex items-center justify-center gap-2 px-3 py-1.5 text-xs bg-blue-500/10 text-blue-300 border-b border-blue-500/20">
               <span>
