@@ -528,6 +528,28 @@ export function TemplateCanvas({
               />
             ))}
 
+            {/* Marco del formato. Lo que sangra (fotos agrandadas, capas
+                corridas) se dibuja fuera del stage y tapaba el borde: no se
+                sabía dónde terminaba la pieza. Encima de las capas y debajo
+                de los handles: borde doble (claro + oscuro, se lee sobre
+                cualquier foto) y un velo que atenúa todo lo que queda
+                afuera. No captura eventos ni sale en la exportación. */}
+            <div
+              aria-hidden
+              style={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+                width: baseW,
+                height: baseH,
+                pointerEvents: "none",
+                boxShadow:
+                  `0 0 0 ${1 / scale}px rgba(255,255,255,0.75), ` +
+                  `0 0 0 ${2 / scale}px rgba(0,0,0,0.6), ` +
+                  `0 0 0 ${100000}px rgba(12,14,20,0.6)`,
+              }}
+            />
+
             {/* Resize handles overlay for the selected layer (hidden in preview) */}
             {!isPreview && selectedLayer && selectedLayer.id !== "tpl_root" && !selectedLayer.locked && (
               <SelectionHandles
