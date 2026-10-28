@@ -471,7 +471,8 @@ function renderIcon(layer: IconLayer, parentMode: "free" | "stack", common: Comm
       <Icon
         size={iconSize}
         color={layer.color}
-        strokeWidth={layer.strokeWidth ?? 2}
+        // Tope del schema (0.5-4): datos viejos traen trazos inflados.
+        strokeWidth={Math.min(4, Math.max(0.5, layer.strokeWidth ?? 2))}
       />
     </div>
   );

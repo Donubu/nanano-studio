@@ -72,11 +72,10 @@ export function scaleLayerStyle(layer: TemplateLayer, scale: number): TemplateLa
     };
   }
   if (layer.type === "icon") {
-    return {
-      ...layer,
-      shadow,
-      strokeWidth: layer.strokeWidth != null ? layer.strokeWidth * scale : layer.strokeWidth,
-    };
+    // strokeWidth de lucide va en unidades del viewBox (24), no en px: ya
+    // escala con el tamaño del SVG. Multiplicarlo lo engrosa en cada
+    // adaptación hasta que el ícono queda como un cuadrado relleno.
+    return { ...layer, shadow };
   }
   if (layer.type === "frame") {
     return {
