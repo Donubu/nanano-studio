@@ -9,7 +9,7 @@ import { LAYOUT_FIXER_MODEL, LayoutFixUsage } from "./layout-fixer";
 import { BrandKitContent, makeRef } from "./brand-kit";
 import { BrandGuide, brandGuideForModel } from "./brand-guide";
 import { ICON_NAMES } from "./icon-catalog";
-import { EDIT_OPS, ADD_KINDS, EditOp } from "./edit-ops";
+import { EDIT_OPS, ADD_KINDS, SKIN_KINDS, EditOp } from "./edit-ops";
 
 export const EDIT_PLANNER_MODEL = process.env.PRODUCTION_AI_EDIT_MODEL || LAYOUT_FIXER_MODEL;
 export const EDIT_PLANNER_AGENT_NAME = "edit-planner";
@@ -19,10 +19,11 @@ const SYSTEM_INSTRUCTION = `Eres el asistente de diseño dentro del editor de ba
 Operaciones ("op"):
 - set_text {id, content}: cambia el texto de una capa de texto.
 - update {id, x?, y?, w?, h?, font_size?, font_weight?, color?, background_color?, align?, hidden?, icon_name?, focal_x?, focal_y?, fit?}: mueve, redimensiona o cambia estilo de una capa existente. background_color en un texto lo vuelve botón/badge. En imágenes, focal_x/focal_y (0-100, porcentaje del ancho y alto DE LA FOTO) es el punto que queda visible cuando la foto se recorta para llenar su caja (fit "cover"); "contain" la muestra completa sin recortar.
-- add {kind, x, y, w, h, content?, font_size?, font_weight?, color?, background_color?, align?, icon_name?, image_prompt?}: agrega una capa. kind: ${ADD_KINDS.join(", ")}. "button" y "badge" son textos con fondo (pastilla y círculo). Para "image" incluye image_prompt si hay que generarla; una imagen que cubre todo el formato queda de fondo.
+- add {kind, x, y, w, h, content?, font_size?, font_weight?, color?, background_color?, align?, icon_name?, image_prompt?, skin_prompt?, skin_kind?}: agrega una capa. kind: ${ADD_KINDS.join(", ")}. "button" y "badge" son textos con fondo (pastilla y círculo). Para "image" incluye image_prompt si hay que generarla; una imagen que cubre todo el formato queda de fondo.
 - remove {id}: quita una capa.
 - set_background {color}: color de fondo de la pieza.
 - generate_image {id, image_prompt}: genera con IA la imagen de una capa de imagen existente.
+- set_skin {id, skin_prompt, skin_kind?, background_color?}: le pone a un texto (botón, badge, precio, promo) una PIEL GRÁFICA: una imagen generada con forma, volumen, brillo o textura que va detrás del texto, que sigue vivo encima. Úsala cuando pidan un botón o una promo "más gráfica", "con volumen", "tipo sticker", "3D", "con brillo", "menos plana", "como sello". skin_prompt es OBLIGATORIO: EN INGLÉS, describe solo la forma y el estilo visual (forma, colores, material, borde, brillo, sombra), nunca el texto. skin_kind: "button" (pastilla/botón que se estira a lo ancho) o "badge" (sello, estrella, cinta, sticker: mantiene su proporción); "none" quita la piel. background_color = color principal de la piel si el productor pide uno distinto al actual. "add" de kind button/badge también acepta skin_prompt y skin_kind.
 - frame_subject {id, subject_x, subject_y, target_x?, target_y?}: reencuadra una foto para que su sujeto quede en un punto de la pieza. subject_x/subject_y = dónde está el sujeto DENTRO DE LA FOTO adjunta (0-100 del ancho y alto de la foto; mira la imagen). target_x/target_y = dónde debe quedar en la pieza (0-100 del formato; default 50/50 = centro). El editor calcula zoom, posición y punto focal exactos: úsala siempre para "centra a la persona", "que se vea el producto", "corre la foto"; no calcules x/y/focal a mano.
 
 Imágenes adjuntas: las fotos de las capas de imagen vienen como imágenes, cada una precedida por el texto "Capa <id>". Míralas para entender qué muestran (dónde está la persona o el producto, qué tan clara u oscura es cada zona) antes de reencuadrar, poner texto encima o elegir colores. Para reencuadrar usa frame_subject con la posición del sujeto que ves en la foto. Si el sujeto debe quedar al lado del texto, elige un target que no choque con los textos (por ejemplo target_x 70 si los textos están a la izquierda).
@@ -65,6 +66,8 @@ const RESPONSE_SCHEMA = {
           hidden: { type: "boolean" },
           icon_name: { type: "string" },
           image_prompt: { type: "string", maxLength: 800 },
+          skin_prompt: { type: "string", maxLength: 400 },
+          skin_kind: { type: "string", enum: [...SKIN_KINDS] },
           focal_x: { type: "number" },
           focal_y: { type: "number" },
           fit: { type: "string", enum: ["cover", "contain"] },
@@ -101,6 +104,7 @@ function describe(l: TemplateLayer, frame: { w: number; h: number }): Record<str
     if (fs != null) out.font_size = r(fs);
     out.color = l.style.color;
     if (l.style.backgroundColor) out.background_color = l.style.backgroundColor;
+    if (l.skin) out.skin = { kind: l.skin.mode === "fit" ? "badge" : "button", prompt: l.skin.prompt ?? "" };
   }
   if (l.type === "shape") out.fill = l.fill;
   if (l.type === "icon") {
@@ -163,6 +167,13 @@ export async function requestEditPlan(
   });
   const ops = (Array.isArray(parsed.ops) ? parsed.ops : [])
     .filter((o): o is EditOp => !!o && typeof o === "object" && (EDIT_OPS as readonly string[]).includes((o as EditOp).op))
-    .slice(0, 20);
+    .slice(0, 20)
+    // A veces el modelo pide la piel sin describirla: el pedido del
+    // productor sirve de descripción (el generador entiende español).
+    .map((o) =>
+      o.op === "set_skin" && o.skin_kind !== "none" && !o.skin_prompt?.trim()
+        ? { ...o, skin_prompt: req.instruction.slice(0, 400) }
+        : o,
+    );
   return { ops, rationale: typeof parsed.rationale === "string" ? parsed.rationale : "", usage, model };
 }

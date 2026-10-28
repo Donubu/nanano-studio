@@ -22,50 +22,14 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { z } from "zod";
 import { parseBody } from "@/lib/api-utils";
-import { getClient, withRetry } from "@/lib/google-ai";
+import { IMAGE_MODEL, generateImage, imageCostPerImage } from "@/lib/production/image-generator";
 import { uploadToS3 } from "@/lib/s3";
 import { checkProductionAiQuota, quotaBlockedBody } from "@/lib/production/ai-rate-limit";
 import { IMAGE_RATIOS } from "@/lib/production/layout-plan";
 
 export const maxDuration = 180;
 
-const IMAGE_MODEL = process.env.PRODUCTION_AI_IMAGE_MODEL || "gemini-3.1-flash-image-preview";
-// Fallback si el modelo no está en la tabla `models`.
-const FALLBACK_COST_PER_IMAGE = 0.067;
-
-async function generateOne(prompt: string, ratio: string): Promise<{ data: Buffer; mimeType: string }> {
-  const response = await withRetry(
-    () =>
-      getClient("gemini").models.generateContent({
-        model: IMAGE_MODEL,
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                text: `${prompt}\n\nPhotographic advertising image. No text, letters, logos or watermarks anywhere in the image.`,
-              },
-            ],
-          },
-        ],
-        config: {
-          responseModalities: ["IMAGE"],
-          imageConfig: { aspectRatio: ratio, imageSize: "1K" },
-        },
-      }),
-    "productionImage",
-  );
-  const part = response.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
-  if (!part?.inlineData?.data) {
-    const reason =
-      response.promptFeedback?.blockReason ?? response.candidates?.[0]?.finishReason ?? "sin imagen";
-    throw new Error(`El generador no devolvió imagen (${reason})`);
-  }
-  return {
-    data: Buffer.from(part.inlineData.data, "base64"),
-    mimeType: part.inlineData.mimeType || "image/png",
-  };
-}
+const PHOTO_SUFFIX = "\n\nPhotographic advertising image. No text, letters, logos or watermarks anywhere in the image.";
 
 const bodySchema = z.object({
   production_project_id: z.number().int().positive(),
@@ -83,9 +47,6 @@ const bodySchema = z.object({
 
 interface ProjectRow extends RowDataPacket {
   client_id: number;
-}
-interface ModelRow extends RowDataPacket {
-  cost_image_1k: string | null;
 }
 
 export async function POST(request: NextRequest) {
@@ -113,17 +74,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(quotaBlockedBody(quota), { status: 429 });
     }
 
-    const [modelRows] = await pool.execute<ModelRow[]>(
-      "SELECT cost_image_1k FROM models WHERE model_id = ? LIMIT 1",
-      [IMAGE_MODEL],
-    );
-    const costPerImage = Number(modelRows[0]?.cost_image_1k ?? FALLBACK_COST_PER_IMAGE);
+    const costPerImage = await imageCostPerImage();
 
     const startedAt = Date.now();
     const images = await Promise.all(
       jobs.map(async (job) => {
         try {
-          const img = await generateOne(job.prompt, job.ratio);
+          const img = await generateImage(`${job.prompt}${PHOTO_SUFFIX}`, job.ratio);
           const ext = img.mimeType.includes("jpeg") ? "jpg" : "png";
           const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
           const up = await uploadToS3(img.data, fileName, img.mimeType, `templates/${clientId}/ai`);

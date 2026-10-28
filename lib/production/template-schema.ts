@@ -115,9 +115,22 @@ const textStyleSchema = z.object({
     .optional(),
 });
 
+const edgesSchema = z.tuple([z.number().min(0), z.number().min(0), z.number().min(0), z.number().min(0)]);
+
+const layerSkinSchema = z.object({
+  src: z.string().min(1).max(2000),
+  imageW: z.number().positive().max(10000),
+  imageH: z.number().positive().max(10000),
+  mode: z.enum(["slice", "fit"]),
+  slice: edgesSchema.optional(),
+  inset: z.tuple([z.number().min(0).max(0.45), z.number().min(0).max(0.45), z.number().min(0).max(0.45), z.number().min(0).max(0.45)]),
+  prompt: z.string().max(1000).optional(),
+});
+
 const textLayerSchema = baseLayerSchema.extend({
   type: z.literal("text"),
   content: z.string().max(5000),
+  skin: layerSkinSchema.nullable().optional(),
   style: textStyleSchema,
 });
 

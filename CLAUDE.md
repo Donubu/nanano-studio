@@ -212,12 +212,24 @@ fuente del conocimiento de marca (ver "Guía de marca").
 - `POST /api/production/ai/edit` — barra "Pídele a la IA" del editor (master,
   orientaciones y ajustes manuales): instrucción en lenguaje natural →
   operaciones (`lib/production/edit-ops.ts`: set_text, update, add, remove,
-  set_background, generate_image, frame_subject) aplicadas como un cambio
+  set_background, generate_image, frame_subject, set_skin) aplicadas como un cambio
   deshacible; las imágenes pedidas se generan con `generate-images`. El modelo
   VE las fotos de las capas (hasta 3, desde nuestro bucket) y para reencuadrar
   solo indica dónde está el sujeto en la foto y dónde lo quiere; `frameSubject`
   calcula zoom (≤1.6×), posición y focal exactos con el tamaño real de la foto
   (`image-size.ts`).
+- `POST /api/production/ai/generate-skin` — "piel gráfica" de un texto
+  (botón o sello): Nano Banana dibuja la forma vacía sobre un color clave
+  plano, `lib/production/skin-image.ts` quita el fondo (flood fill desde el
+  borde; la clave oscurecida pasa a sombra negra semitransparente) y queda
+  como PNG con transparencia en `TextLayer.skin`. El texto sigue vivo encima.
+  Modos (`lib/production/skin.ts`): `slice` (botón, 9-slice: los extremos no
+  se estiran) y `fit` (sello, proporción fija). Se dibuja con celdas
+  `background-image` (html-to-image las embebe en JPG; el export HTML5 inlinea
+  cada piel una vez como variable CSS). `backgroundColor` queda con el color
+  promedio de la piel para que contraste, roles y proporciones sigan
+  funcionando. Se pide desde el panel (sección "Piel gráfica") o con la op
+  `set_skin` de "Pídele a la IA".
 - Animación vs. ediciones: los keyframes de posición/tamaño son absolutos;
   `followBaseChanges` (reflow.ts) los desplaza en cada `mutate` del editor
   cuando cambia la base de una capa, y borra tracks de capas eliminadas.

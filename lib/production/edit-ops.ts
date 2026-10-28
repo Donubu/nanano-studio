@@ -16,11 +16,22 @@ import {
 } from "./types";
 import { newButtonLayer, newBadgeLayer } from "./preset-layers";
 import { isValidIconName } from "./icon-catalog";
+import { removeSkin, type SkinKind } from "./skin";
 
-export const EDIT_OPS = ["set_text", "update", "add", "remove", "set_background", "generate_image", "frame_subject"] as const;
+export const EDIT_OPS = [
+  "set_text",
+  "update",
+  "add",
+  "remove",
+  "set_background",
+  "generate_image",
+  "frame_subject",
+  "set_skin",
+] as const;
 export type EditOpKind = (typeof EDIT_OPS)[number];
 export const ADD_KINDS = ["text", "button", "badge", "image", "shape", "icon"] as const;
 export type AddKind = (typeof ADD_KINDS)[number];
+export const SKIN_KINDS = ["button", "badge", "none"] as const;
 
 export interface EditOp {
   op: EditOpKind;
@@ -52,7 +63,17 @@ export interface EditOp {
   target_y?: number;
   // Para "generate_image" y para "add" de kind image.
   image_prompt?: string;
+  // Piel gráfica (skin.ts) para "set_skin" y para "add" de button/badge:
+  // descripción del estilo y tipo ("none" la quita).
+  skin_prompt?: string;
+  skin_kind?: (typeof SKIN_KINDS)[number];
   name?: string;
+}
+
+export interface SkinRequest {
+  layer_id: string;
+  kind: SkinKind;
+  prompt: string;
 }
 
 export interface ImageRequest {
@@ -63,6 +84,7 @@ export interface ImageRequest {
 export interface EditResult {
   definition: TemplateDefinition;
   images: ImageRequest[];
+  skins: SkinRequest[];
   applied: number;
   skipped: string[];
 }
@@ -82,6 +104,26 @@ function mapLayers(nodes: TemplateLayer[], id: string, fn: (l: TemplateLayer) =>
     out.push(n.type === "frame" ? { ...n, children: mapLayers(n.children, id, fn) } : n);
   }
   return out;
+}
+
+function findLayer(nodes: TemplateLayer[], id: string): TemplateLayer | null {
+  for (const n of nodes) {
+    if (n.id === id) return n;
+    if (n.type === "frame") {
+      const f = findLayer(n.children, id);
+      if (f) return f;
+    }
+  }
+  return null;
+}
+
+// Tipo de piel: el que indica el modelo, o por la forma de la capa (casi
+// cuadrada = sello; ancha = botón).
+function skinKindFor(l: TemplateLayer, op: EditOp): SkinKind {
+  if (op.skin_kind === "button" || op.skin_kind === "badge") return op.skin_kind;
+  if (op.kind === "badge") return "badge";
+  if (op.kind === "button") return "button";
+  return l.size.w / Math.max(1, l.size.h) < 1.6 ? "badge" : "button";
 }
 
 function exists(nodes: TemplateLayer[], id: string): boolean {
@@ -314,6 +356,7 @@ export function applyEditOps(
   let children = def.children;
   let background = def.background;
   const images: ImageRequest[] = [];
+  const skins: SkinRequest[] = [];
   const skipped: string[] = [];
   let applied = 0;
 
@@ -371,6 +414,26 @@ export function applyEditOps(
         children = mapLayers(children, op.id!, (l) => l);
         images.push({ layer_id: op.id!, prompt: op.image_prompt.trim() });
         break;
+      case "set_skin": {
+        const target = findLayer(children, op.id!);
+        if (target?.type !== "text") {
+          skipped.push(`set_skin: "${op.id}" no es un texto`);
+          continue;
+        }
+        if (op.skin_kind === "none") {
+          children = mapLayers(children, op.id!, removeSkin);
+          break;
+        }
+        if (!op.skin_prompt?.trim()) {
+          skipped.push(`set_skin: falta la descripción para "${op.id}"`);
+          continue;
+        }
+        // Un color pedido para la piel queda como fondo de la capa: es el
+        // color que se le pasa al generador.
+        children = mapLayers(children, op.id!, (l) => applyStyle(l, { op: "update", background_color: op.background_color }));
+        skins.push({ layer_id: op.id!, kind: skinKindFor(target, op), prompt: op.skin_prompt.trim() });
+        break;
+      }
       case "add": {
         const l = newLayer(op, def.size, children, makeId);
         if (!l) {
@@ -383,10 +446,13 @@ export function applyEditOps(
         if (l.type === "image" && op.image_prompt?.trim()) {
           images.push({ layer_id: l.id, prompt: op.image_prompt.trim() });
         }
+        if (l.type === "text" && op.skin_prompt?.trim() && op.skin_kind !== "none") {
+          skins.push({ layer_id: l.id, kind: skinKindFor(l, op), prompt: op.skin_prompt.trim() });
+        }
         break;
       }
     }
     applied++;
   }
-  return { definition: { ...def, background, children }, images, applied, skipped };
+  return { definition: { ...def, background, children }, images, skins, applied, skipped };
 }

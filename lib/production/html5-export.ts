@@ -103,6 +103,7 @@ export async function buildHtml5Document(opts: BuildHtml5Options): Promise<strin
   });
   if (inlineImages) {
     html = await inlineRemoteImages(html);
+    html = await inlineBackgroundImages(html);
   }
   return html;
 }
@@ -509,6 +510,39 @@ async function inlineRemoteImages(html: string): Promise<string> {
     const replacement = cache.get(src) ?? src;
     return `${pre}${replacement}${post}`;
   });
+}
+
+// Pieles gráficas (skin.ts): se dibujan como background-image en hasta 9
+// celdas con la misma URL. Se inlinea cada imagen UNA vez como variable CSS
+// en <head> y las celdas la referencian, así el peso del banner no se
+// multiplica por celda.
+const BG_URL_RE = /url\((?:&quot;|")([^"&)]+)(?:&quot;|")\)/g;
+
+async function inlineBackgroundImages(html: string): Promise<string> {
+  const srcs = new Set<string>();
+  for (const m of html.matchAll(BG_URL_RE)) if (!m[1].startsWith("data:")) srcs.add(m[1]);
+  if (srcs.size === 0) return html;
+  const vars = new Map<string, string>();
+  const decls: string[] = [];
+  await Promise.all(
+    [...srcs].map(async (src, i) => {
+      try {
+        const res = await fetch(src, { cache: "force-cache" });
+        if (!res.ok) return;
+        const dataUrl = await blobToDataUrl(await res.blob());
+        vars.set(src, `--nx-img-${i}`);
+        decls.push(`--nx-img-${i}:url("${dataUrl}")`);
+      } catch (err) {
+        console.warn("HTML5 export: no se pudo inlinear piel", src, err);
+      }
+    }),
+  );
+  if (vars.size === 0) return html;
+  const body = html.replace(BG_URL_RE, (whole, src: string) => {
+    const v = vars.get(src);
+    return v ? `var(${v})` : whole;
+  });
+  return body.replace("</head>", `<style>:root{${decls.join(";")}}</style>\n</head>`);
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {

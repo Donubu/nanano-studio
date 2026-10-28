@@ -92,10 +92,12 @@ describe("adaptTree — tira extrema (recomposición lineal)", () => {
     expect(title.size.h).toBeLessThanOrEqual(90);
     expect(fontOf(title)).toBeGreaterThanOrEqual(7);
     expect(fontOf(title)).toBeLessThanOrEqual(90);
-    // El badge conserva su forma (escala uniforme) y su fondo.
+    // La pastilla se arma desde su texto: conserva su fondo y no cambia de
+    // forma (menos de 1.4× de proporción) y su letra se lee.
     const price = out.children.find((c) => c.id === "price") as TextLayer;
     expect(price.style.backgroundColor).toBe("#FACC15");
-    expect(Math.abs(price.size.w / price.size.h - 400 / 140)).toBeLessThan(0.05);
+    expect(Math.abs(Math.log(price.size.w / price.size.h / (400 / 140)))).toBeLessThan(Math.log(1.4));
+    expect(fontOf(price)).toBeGreaterThanOrEqual(10);
   });
 
   it("skyscraper 160×600: columna, imagen y badge no exceden el ancho", () => {
@@ -185,5 +187,27 @@ describe("adaptTree para producción", () => {
     const out = adaptTree(piece(), { w: 728, h: 90 });
     const row = out.children.filter((c) => c.visible !== false && c.id !== "bg").sort((a, b) => a.position.x - b.position.x);
     expect(row.at(-1)!.id).toBe("cta");
+  });
+});
+
+describe("adaptTree — botones en tiras", () => {
+  it("un CTA ancho del Vertical se arma desde su texto en 160×600 y se lee", () => {
+    const vertical: TemplateDefinition = {
+      id: "tpl_root",
+      type: "frame",
+      position: { x: 0, y: 0 },
+      size: { w: 1080, h: 1920 },
+      layout: { mode: "free" },
+      children: [
+        { id: "title", type: "text", content: "VUELA SIN LÍMITES", position: { x: 80, y: 1280 }, size: { w: 920, h: 120 }, style: { fontSize: { min: 40, max: 76 }, fontWeight: 800, color: "#fff" } },
+        { id: "cta", type: "text", content: "COMPRAR", position: { x: 80, y: 1620 }, size: { w: 920, h: 120 }, style: { fontSize: { min: 9, max: 52 }, fontWeight: 800, color: "#111", backgroundColor: "#FACC15" } },
+      ],
+    };
+    const out = adaptTree(vertical, { w: 160, h: 600 });
+    const cta = out.children.find((c) => c.id === "cta") as TextLayer;
+    expect(cta.visible).not.toBe(false);
+    expect(fontOf(cta)).toBeGreaterThanOrEqual(10);
+    expect(cta.position.x).toBeGreaterThanOrEqual(0);
+    expect(cta.position.x + cta.size.w).toBeLessThanOrEqual(160);
   });
 });

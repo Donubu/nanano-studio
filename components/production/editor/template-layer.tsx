@@ -13,8 +13,10 @@ import {
   StackLayout,
   StackAlign,
   StackJustify,
+  LayerSkin,
   isFontSizeRange,
 } from "@/lib/production/types";
+import { skinLayout } from "@/lib/production/skin";
 import { ensureGoogleFontLoaded } from "@/lib/production/google-fonts";
 import { SmartText } from "./smart-text";
 
@@ -324,6 +326,7 @@ function renderFrame(
 function renderText(layer: TextLayer, parentMode: "free" | "stack", common: CommonProps) {
   const { style } = layer;
   if (style.fontFamily) ensureGoogleFontLoaded(style.fontFamily);
+  if (layer.skin?.src) return renderSkinnedText(layer, layer.skin, parentMode, common);
   // Vertical align: implementado vía display: flex en el contenedor de texto.
   // Default top (alineación original). El textAlign sigue siendo CSS horizontal
   // normal — el contenedor solo posiciona el bloque dentro de la caja.
@@ -391,6 +394,75 @@ function renderText(layer: TextLayer, parentMode: "free" | "stack", common: Comm
   return (
     <div style={css} {...common}>
       {layer.content}
+    </div>
+  );
+}
+
+// Texto con piel gráfica: la capa es un contenedor con las celdas de la piel
+// detrás y el texto vivo encima, en la zona de texto de la piel. El texto se
+// dibuja con el mismo renderText (sin fondo plano ni sombra de caja) para
+// conservar auto-fit, alineación y efectos.
+function renderSkinnedText(
+  layer: TextLayer,
+  skin: LayerSkin,
+  parentMode: "free" | "stack",
+  common: CommonProps,
+) {
+  const { cells, content } = skinLayout(skin, layer.size);
+  const base = baseLayerStyle(layer, parentMode);
+  // La sombra sigue la silueta de la piel (drop-shadow), no la caja.
+  const filters = [
+    base.filter,
+    layer.shadow
+      ? `drop-shadow(${layer.shadow.x}px ${layer.shadow.y}px ${layer.shadow.blur}px ${layer.shadow.color})`
+      : undefined,
+  ].filter(Boolean);
+  const style: CSSProperties = {
+    ...base,
+    boxShadow: undefined,
+    filter: filters.length > 0 ? filters.join(" ") : undefined,
+  };
+  const inner: TextLayer = {
+    ...layer,
+    skin: null,
+    shadow: undefined,
+    rotation: undefined,
+    scale: undefined,
+    scaleX: undefined,
+    scaleY: undefined,
+    blur: undefined,
+    opacity: undefined,
+    flipX: undefined,
+    flipY: undefined,
+    position: { x: content.x, y: content.y },
+    size: { w: content.w, h: content.h },
+    style: { ...layer.style, backgroundColor: undefined, backgroundCornerRadius: undefined },
+  };
+  const passive: CommonProps = {
+    onPointerDown: () => {},
+    onContextMenu: () => {},
+    className: "pointer-events-none",
+  };
+  return (
+    <div style={style} {...common}>
+      {cells.map((c, i) => (
+        <div
+          key={i}
+          style={{
+            position: "absolute",
+            left: c.x,
+            top: c.y,
+            width: c.w,
+            height: c.h,
+            backgroundImage: `url("${skin.src}")`,
+            backgroundSize: `${c.bgW}px ${c.bgH}px`,
+            backgroundPosition: `${c.bgX}px ${c.bgY}px`,
+            backgroundRepeat: "no-repeat",
+            pointerEvents: "none",
+          }}
+        />
+      ))}
+      {renderText(inner, "free", passive)}
     </div>
   );
 }

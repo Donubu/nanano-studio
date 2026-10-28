@@ -122,6 +122,7 @@ const ANIMATED_PROP_LABELS: Record<AnimatableProperty, string> = {
 };
 import { ClientImagePicker } from "@/components/production/editor/client-image-picker";
 import { GOOGLE_FONTS } from "@/lib/production/google-fonts";
+import { SkinSection } from "./skin-section";
 
 // Pesos numéricos → nombres legibles. CSS acepta los keywords pero el motor
 // de fuentes mapea cada uno a un weight numérico estándar. Mostramos siempre
@@ -788,6 +789,7 @@ export function PropertiesPanel({
   onUpdateRoot,
   brandKit = EMPTY_KIT_CONTENT,
   clientId = null,
+  projectId,
   onCollapse,
   onMerge,
   canMerge,
@@ -863,6 +865,8 @@ export function PropertiesPanel({
             onUpdate={onUpdateLayer}
             brandKit={brandKit}
             clientId={clientId}
+            projectId={projectId}
+            frame={definition.size}
             animatedProps={animatedProps}
           />
         )}
@@ -1056,12 +1060,16 @@ function LayerProps({
   onUpdate,
   brandKit,
   clientId,
+  projectId,
+  frame,
   animatedProps,
 }: {
   layer: TemplateLayer;
   onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
   brandKit: BrandKitContent;
   clientId: number | null;
+  projectId?: number;
+  frame: { w: number; h: number };
   animatedProps: AnimatedPropertySet;
 }) {
   // Propiedades animadas que NO tienen UI propia en el panel (opacity,
@@ -1153,6 +1161,18 @@ function LayerProps({
 
       {layer.type === "text" && (
         <TextProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} animatedProps={animatedProps} />
+      )}
+      {layer.type === "text" && (
+        <Section title="Piel gráfica">
+          <SkinSection
+            key={layer.id}
+            layer={layer}
+            onUpdate={onUpdate}
+            brandKit={brandKit}
+            projectId={projectId}
+            frame={frame}
+          />
+        </Section>
       )}
       {layer.type === "image" && (
         <ImageProps

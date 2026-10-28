@@ -13,10 +13,11 @@
 //     selected_ids?: string[],
 //   }
 //
-// Devuelve { definition, images: [{ layer_id, prompt }], rationale, skipped,
-// tokenUsage, invocation_id }. NO persiste: el editor aplica el resultado
+// Devuelve { definition, images: [{ layer_id, prompt }], skins: [{ layer_id,
+// kind, prompt, colors }], rationale, skipped, tokenUsage, invocation_id }. NO persiste: el editor aplica el resultado
 // como un cambio deshacible y lo guarda con su autosave normal. Las imágenes
-// las genera el cliente con /api/production/ai/generate-images.
+// las genera el cliente con /api/production/ai/generate-images y las pieles
+// con /api/production/ai/generate-skin.
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
@@ -25,7 +26,7 @@ import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { z } from "zod";
 import { parseBody } from "@/lib/api-utils";
 import { TemplateDefinition } from "@/lib/production/types";
-import { EMPTY_KIT_CONTENT } from "@/lib/production/brand-kit";
+import { EMPTY_KIT_CONTENT, resolveColor, BrandKitContent } from "@/lib/production/brand-kit";
 import { resolveTemplateBrandKit } from "@/lib/production/project-brand-kit";
 import { checkProductionAiQuota, quotaBlockedBody } from "@/lib/production/ai-rate-limit";
 import { loadClientBrandGuide } from "@/lib/production/plan-generation";
@@ -91,6 +92,24 @@ function asRootTree(raw: unknown): TemplateDefinition | null {
   const t = raw as Partial<TemplateDefinition>;
   if (t.type !== "frame" || !Array.isArray(t.children) || !t.size || !t.layout) return null;
   return t as TemplateDefinition;
+}
+
+// Color de fondo de la capa (resuelto) para la piel que se va a generar.
+function skinColors(def: TemplateDefinition, layerId: string, kit: BrandKitContent): string[] {
+  const find = (nodes: TemplateLayer[]): TemplateLayer | null => {
+    for (const n of nodes) {
+      if (n.id === layerId) return n;
+      if (n.type === "frame") {
+        const f = find(n.children);
+        if (f) return f;
+      }
+    }
+    return null;
+  };
+  const l = find(def.children);
+  if (l?.type !== "text" || !l.style.backgroundColor) return [];
+  const c = resolveColor(l.style.backgroundColor, kit, "");
+  return /^#[0-9a-f]{3,8}$/i.test(c) ? [c] : [];
 }
 
 export async function POST(request: NextRequest) {
@@ -159,6 +178,7 @@ export async function POST(request: NextRequest) {
       body = {
         definition: result.definition,
         images: result.images,
+        skins: result.skins.map((sk) => ({ ...sk, colors: skinColors(result.definition, sk.layer_id, kit) })),
         applied: result.applied,
         skipped: result.skipped,
         rationale: plan.rationale,

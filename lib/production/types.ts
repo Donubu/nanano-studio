@@ -115,9 +115,30 @@ export interface FontSizeRange {
   max: number;
 }
 
+// Piel gráfica de un texto (botón, sello, sticker): una imagen generada que
+// se dibuja detrás del texto vivo. El texto sigue editable, con variables y
+// auto-fit; la piel solo reemplaza el fondo plano. Ver lib/production/skin.ts.
+//   - "slice": botón/pastilla. Estiramiento 9-slice: las esquinas mantienen
+//     su forma y solo crece el centro, así un CTA se ensancha sin deformarse.
+//   - "fit": sello/sticker. La imagen entera, siempre con su proporción.
+export interface LayerSkin {
+  src: string;
+  imageW: number;
+  imageH: number;
+  mode: "slice" | "fit";
+  // [top, right, bottom, left] en px de la imagen: bordes que no se estiran.
+  slice?: [number, number, number, number];
+  // Zona del texto dentro de la piel: [top, right, bottom, left] como
+  // fracción del ancho/alto de la imagen.
+  inset: [number, number, number, number];
+  // Descripción con la que se generó (para regenerar).
+  prompt?: string;
+}
+
 export interface TextLayer extends BaseLayer {
   type: "text";
   content: string;
+  skin?: LayerSkin | null;
   style: {
     fontFamily?: string;
     // Tres formas válidas:

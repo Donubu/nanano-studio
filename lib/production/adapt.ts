@@ -42,7 +42,7 @@ import {
 import { reflowForPreview, reflowAnimation, keepLayerAspect } from "./reflow";
 import { scaleLayerStyle, scaleLayerUniform, scaleLayoutConfig } from "./scale";
 import { inferRoles, companionIcons, coversFrame, ROLE_PRIORITY, LayerRole } from "./layer-roles";
-import { effectiveFontSize } from "./layout-lint";
+import { effectiveFontSize, safeMargin } from "./layout-lint";
 
 // Diferencia relativa de aspect ratio a partir de la cual el reflow por
 // constraints deja de tener sentido y pasamos a recomposición lineal.
@@ -249,6 +249,12 @@ function linearize(master: TemplateDefinition, size: { w: number; h: number }): 
       // billboard queda desproporcionado; un badge o un producto sí pueden
       // ocupar casi todo el alto.
       const cross = (horizontal ? STRIP_CROSS_H : STRIP_CROSS_V)[roleOf(item)] ?? 0.85;
+      if (isPillText(item)) {
+        const p = horizontal
+          ? composeButton(item, availW * 0.35, availH * cross)
+          : composeButton(item, availW * cross, availH * 0.12);
+        return { ...p, font: numericFont(p.layer as TextLayer) };
+      }
       const s = horizontal
         ? Math.min((availH * cross) / item.size.h, (availW * 0.6) / item.size.w)
         : Math.min((availW * cross) / item.size.w, (availH * 0.4) / item.size.h);
@@ -362,9 +368,37 @@ export function coverFrame(
 // Formatos parecidos: textos secundarios que quedaron ilegibles (y su ícono
 // acompañante) e íconos diminutos se ocultan. Titular, CTA, badge y logo no:
 // si quedan chicos los marca el lint y los corrige "Revisar con IA".
+// Titular, CTA y badge no se ocultan: si quedan bajo la letra mínima, crecen
+// hasta alcanzarla (centrados, dentro del margen de seguridad y hasta 30% del
+// alto). Un CTA de 920×120 del Vertical escalado a 160×600 quedaba en 6 px.
+const GROW_ROLES = new Set<LayerRole>(["headline", "cta", "badge"]);
+
+function growToLegible(l: TemplateLayer, frame: { w: number; h: number }, minFont: number): TemplateLayer {
+  if (l.type !== "text") return l;
+  const fs = effectiveFontSize(l);
+  if (fs == null || fs <= 0 || fs >= minFont) return l;
+  const m = safeMargin(frame);
+  const f = Math.min(minFont / fs, (frame.w - 2 * m) / l.size.w, (frame.h * 0.3) / l.size.h);
+  if (f <= 1.02) return l;
+  const w = l.size.w * f;
+  const h = l.size.h * f;
+  const c = center(l);
+  const x = Math.min(Math.max(m, c.x - w / 2), frame.w - m - w);
+  const y = Math.min(Math.max(m, c.y - h / 2), frame.h - m - h);
+  return { ...scaleLayerStyle(l, f), position: { x, y }, size: { w, h } };
+}
+
 function hideIllegible(def: TemplateDefinition, roles: Map<string, LayerRole>, master: TemplateDefinition): TemplateDefinition {
   const minFont = minLegibleFont(def.size);
   const hide = new Set<string>();
+  let grown = false;
+  const children = def.children.map((l) => {
+    if (l.visible === false || !GROW_ROLES.has(roles.get(l.id) as LayerRole)) return l;
+    const next = growToLegible(l, def.size, minFont);
+    if (next !== l) grown = true;
+    return next;
+  });
+  if (grown) def = { ...def, children };
   for (const l of def.children) {
     if (l.visible === false) continue;
     const role = roles.get(l.id);
@@ -398,6 +432,30 @@ function composeTextRow(item: TextLayer, availH: number, availW: number) {
 function composeTextColumn(item: TextLayer, availW: number, availH: number) {
   const fit = bestTextFit(item, availW * 0.9, availH * 0.5);
   return { layer: restyleText(item, fit.fs, fit.w, fit.h), w: fit.w, h: fit.h };
+}
+
+// Botón o pastilla (texto con fondo que no es círculo ni sello): en una tira
+// su caja sale del texto más el aire, no de la caja del master. Escalar la
+// caja de un CTA de 920×120 con letra de 52 px a una columna de 160 dejaba
+// la letra en 6 px y casi todo el botón vacío.
+function isPillText(l: TemplateLayer): l is TextLayer {
+  if (l.type !== "text" || !l.style.backgroundColor || l.skin?.mode === "fit") return false;
+  const round = (l.style.backgroundCornerRadius ?? 0) >= Math.min(l.size.w, l.size.h) * 0.45;
+  return !(round && l.size.w / Math.max(1, l.size.h) < 1.6);
+}
+
+const BUTTON_PAD_X = 0.9; // por lado, en unidades de la fuente
+const BUTTON_PAD_Y = 0.45;
+
+function composeButton(item: TextLayer, maxW: number, maxH: number) {
+  const lh = item.style.lineHeight ?? 1.2;
+  const lines = textLines(item);
+  const unitW = estimateWidth(item, lines, 1);
+  const unitH = lines.length * lh;
+  const fs = Math.max(MIN_FONT, Math.min(maxW / (unitW + 2 * BUTTON_PAD_X), maxH / (unitH + 2 * BUTTON_PAD_Y)));
+  const w = Math.min(maxW, fs * (unitW + 2 * BUTTON_PAD_X));
+  const h = Math.min(maxH, fs * (unitH + 2 * BUTTON_PAD_Y));
+  return { layer: restyleText(item, fs, w, h), w, h };
 }
 
 // Mayor fuente posible para el texto dentro de maxW × maxH probando 1..4

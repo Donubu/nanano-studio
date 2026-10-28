@@ -332,11 +332,13 @@ export function keepLayerAspect(l: TemplateLayer, orig: TemplateLayer): Template
     (orig.style.backgroundCornerRadius ?? 0) >= Math.min(orig.size.w, orig.size.h) * 0.45 &&
     Math.abs(ratio0 - 1) < 0.15;
   const ellipse = orig.type === "shape" && orig.shape === "ellipse";
+  // Sello/sticker con piel gráfica: la imagen no se deforma nunca.
+  const sticker = orig.type === "text" && orig.skin?.mode === "fit";
   // Botones y badges en pastilla: pueden ensancharse o angostarse con el
   // formato, pero no cambiar de forma (una pastilla horizontal que queda
   // parada parte el texto y deja de verse como botón).
-  const pill = orig.type === "text" && !!orig.style.backgroundColor && !roundBadge;
-  if (orig.type !== "icon" && !roundBadge && !ellipse && !pill) return l;
+  const pill = orig.type === "text" && !!orig.style.backgroundColor && !roundBadge && !sticker;
+  if (orig.type !== "icon" && !roundBadge && !ellipse && !pill && !sticker) return l;
   const ratio = l.size.w / Math.max(1, l.size.h);
   const tolerance = pill ? Math.log(1.4) : 0.03;
   if (Math.abs(Math.log(ratio / ratio0)) < tolerance) return l;

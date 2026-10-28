@@ -22,6 +22,7 @@ import { PreviewThumbnails, ThumbnailPreset } from "./preview-thumbnails";
 import { LayerContextMenu, LayerContextMenuPosition } from "./layer-context-menu";
 import { TimelinePanel } from "./timeline-panel";
 import { AiEditBar } from "./ai-edit-bar";
+import { applySkin } from "@/lib/production/skin";
 
 interface Props {
   initial: TemplateDefinition;
@@ -558,6 +559,19 @@ export function TemplateEditor({
                     nodes.map((n) =>
                       n.type === "image" && srcById[n.id]
                         ? { ...n, src: srcById[n.id] }
+                        : n.type === "frame"
+                          ? { ...n, children: put(n.children) }
+                          : n,
+                    );
+                  return { ...d, children: put(d.children) };
+                })
+              }
+              onSkins={(skinById) =>
+                editor.mutate((d) => {
+                  const put = (nodes: TemplateLayer[]): TemplateLayer[] =>
+                    nodes.map((n) =>
+                      skinById[n.id]
+                        ? applySkin(n, skinById[n.id].skin, skinById[n.id].averageColor, d.size)
                         : n.type === "frame"
                           ? { ...n, children: put(n.children) }
                           : n,

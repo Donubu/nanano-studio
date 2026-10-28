@@ -12,6 +12,8 @@ import { Loader2, Sparkles, Undo2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TemplateDefinition, TemplateLayer } from "@/lib/production/types";
 import { nearestImageRatio } from "@/lib/production/layout-plan";
+import { requestSkin, type GeneratedSkin } from "@/lib/production/skin-client";
+import type { SkinKind } from "@/lib/production/skin";
 
 interface Props {
   definition: TemplateDefinition;
@@ -23,6 +25,8 @@ interface Props {
   onApply: (next: TemplateDefinition) => void;
   // Pone la URL generada en cada capa de imagen (por id).
   onImages: (srcById: Record<string, string>) => void;
+  // Pone la piel gráfica generada en cada texto (por id).
+  onSkins: (skinById: Record<string, GeneratedSkin>) => void;
   onUndo: () => void;
 }
 
@@ -45,10 +49,11 @@ export function AiEditBar({
   disabled,
   onApply,
   onImages,
+  onSkins,
   onUndo,
 }: Props) {
   const [instruction, setInstruction] = useState("");
-  const [busy, setBusy] = useState<"edit" | "images" | null>(null);
+  const [busy, setBusy] = useState<"edit" | "images" | "skins" | null>(null);
   const [message, setMessage] = useState<{ text: string; tone: "ok" | "error"; undo?: boolean } | null>(null);
 
   const selection = selectedIds.filter((id) => id !== "tpl_root");
@@ -78,6 +83,7 @@ export function AiEditBar({
         return;
       }
       const images = (body.images ?? []) as { layer_id: string; prompt: string }[];
+      const skins = (body.skins ?? []) as { layer_id: string; kind: SkinKind; prompt: string; colors: string[] }[];
       if ((body.applied ?? 0) === 0) {
         setMessage({ text: body.rationale || "La IA no propuso cambios.", tone: "error" });
         return;
@@ -112,6 +118,35 @@ export function AiEditBar({
         if (!imgRes.ok || failed.length > 0) {
           setMessage({
             text: `${body.rationale || "Listo."} · ${imgBody.error || failed[0]?.error || "No se pudo generar la imagen"}`,
+            tone: "error",
+            undo: true,
+          });
+        }
+      }
+
+      if (skins.length > 0) {
+        setBusy("skins");
+        const results = await Promise.allSettled(
+          skins.slice(0, 3).map(async (sk) => {
+            const layer = findLayer(next.children, sk.layer_id);
+            if (!layer) throw new Error("La capa ya no existe");
+            const generated = await requestSkin({
+              projectId,
+              kind: sk.kind,
+              description: sk.prompt,
+              colors: sk.colors,
+              box: layer.size,
+            });
+            return [sk.layer_id, generated] as const;
+          }),
+        );
+        const skinById: Record<string, GeneratedSkin> = {};
+        for (const r of results) if (r.status === "fulfilled") skinById[r.value[0]] = r.value[1];
+        if (Object.keys(skinById).length > 0) onSkins(skinById);
+        const failed = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+        if (failed) {
+          setMessage({
+            text: `${body.rationale || "Listo."} · No se pudo generar la piel: ${(failed.reason as Error).message}`,
             tone: "error",
             undo: true,
           });
@@ -159,7 +194,13 @@ export function AiEditBar({
           className="text-xs px-2.5 py-1 rounded bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-40 flex items-center gap-1 shrink-0"
         >
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-          {busy === "images" ? "Generando imagen…" : busy === "edit" ? "Pensando…" : "Pedir"}
+          {busy === "images"
+            ? "Generando imagen…"
+            : busy === "skins"
+              ? "Generando piel…"
+              : busy === "edit"
+                ? "Pensando…"
+                : "Pedir"}
         </button>
       </div>
       {message && (

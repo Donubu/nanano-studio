@@ -68,7 +68,8 @@ export function inferRoles(def: TemplateDefinition): Map<string, LayerRole> {
     if (coversFrame(l, def.size)) role = "background";
     else if (LOGO_NAME.test(l.name ?? "")) role = "logo";
     else if (l.type === "text") {
-      if (l.style.backgroundColor) {
+      if (l.skin?.mode === "fit") role = "badge";
+      else if (l.style.backgroundColor) {
         const ratio = l.size.w / Math.max(1, l.size.h);
         const round = (l.style.backgroundCornerRadius ?? 0) >= Math.min(l.size.w, l.size.h) * 0.45;
         // Círculo/cuadrado con fondo = badge; pastilla ancha = CTA.
