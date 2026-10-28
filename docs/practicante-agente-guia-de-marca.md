@@ -3,6 +3,13 @@
 Contrato entre nanano (Puerto Studio, módulo de producción de banners) y los
 agentes de cliente de Practicante.
 
+Respuesta de Practicante: `practicante/docs/api-nanano-marca.md` (2026-10-28).
+Confirma lo siguiente:
+- deriva al agente del cliente por `client_slug`, sin pasar por el orquestador;
+- agrega sola las reglas de este contrato;
+- agrega el error `agent_forbidden`;
+- una `BRAND_GUIDE` tarda entre 30 s y 2 min y cuesta entre USD 0,5 y 1.
+
 ## Contexto
 
 - En Practicante **cada cliente tiene su agente**, con acceso a toda la
@@ -52,11 +59,18 @@ responderlas; nanano las va a ir conectando.
 
 - **nanano no manda `agentName`.** Identifica a la marca por `client_slug`, el
   mismo slug que `Client.slug` en Practicante (los nombres de cliente no
-  coinciden entre plataformas). **Practicante debe derivar el pedido al agente
-  de ese cliente**: vía el orquestador o resolviendo slug → agente.
-  - Si prefieren que nanano llame directo al agente, nanano necesita saber el
-    `agentName` de cada cliente. En ese caso agreguen un modo de resolverlo, por
-    ejemplo `agentName: "client:<slug>"`.
+  coinciden entre plataformas). Practicante deriva el pedido al agente
+  principal activo de ese cliente, o al agente compartido que lo atiende (por
+  ejemplo, los malls de Grupo Marina van al Especialista Grupo Marina). La
+  respuesta trae en `delegatedTo` qué agente contestó.
+  - También existe `context.agentName: "client:<slug>"`, que da el mismo
+    resultado.
+- Practicante agrega sola las reglas de este contrato. Las `instructions` del
+  `promptSuffix` son redundantes, pero no molestan.
+- No sirve con `dryRun: true`: las tools devuelven datos simulados. Las
+  operaciones de marca solo leen, así que se prueban con `dryRun: false`.
+- Timeout síncrono: 5 min. Existe `"async": true` + `GET
+  /api/external/jobs/<jobId>`; nanano hoy usa el modo síncrono.
 - `promptSuffix` es un JSON con `operation`, `client_slug`, `instructions` y
   `schema`. El agente debe responder siguiendo ese `schema`.
 - nanano lee solo el texto final (`response`). Tolera texto o fences
@@ -275,16 +289,32 @@ Si no se puede responder, devolver solo:
 { "error": "client_not_found", "client_slug": "<slug>" }
 ```
 
-Códigos:
-- `client_not_found`: no hay cliente con ese slug.
-- `no_brand_material`: el cliente existe pero no tiene información de marca.
+Todos llegan con HTTP 200, `status: "completed"` y el error dentro de
+`response`. Los resuelve Practicante sin llamar al modelo, así que no tienen
+costo.
 
-nanano ya muestra estos dos errores al sincronizar la guía.
+| Código | Cuándo | Qué muestra nanano |
+|---|---|---|
+| `client_not_found` | No hay cliente con ese slug | "Practicante no tiene un cliente con ese slug" |
+| `no_brand_material` | El cliente no tiene agente activo o el agente no encontró material | "El cliente no tiene un agente activo o material de marca…" |
+| `agent_forbidden` | El usuario de `X-User-Email` no tiene permiso sobre el agente | "El usuario de la integración no tiene acceso… (se da el permiso en practicante → usuarios)" |
+
+Errores del llamado en sí (HTTP distinto de 200):
+- `401` / `403`: API key o usuario bloqueado.
+- `429 cost_limit`: el usuario llegó a su tope de costo.
+- `500 execution_error`.
+
+nanano los muestra como "Practicante respondió <código>".
+
+Slugs con agente activo en producción (2026-10-28): `agrosuper`,
+`banco-falabella`, `cmr-loyalty`, `enaco`, `grupo-marina`, `lipigas`,
+`mall-marina`, `mall-curico`, `mall-concepcion`, `meds`, `mora-pavic`. Con
+agente inactivo, y por lo tanto `no_brand_material`: `dreams`, `mitta`, `smu`,
+`teleton`.
 
 ## Checklist del lado de Practicante
 
-- [ ] Derivar los pedidos de nanano al agente del cliente según `client_slug`,
-      o exponer cómo resolver slug → `agentName`.
+- [x] Derivar los pedidos de nanano al agente del cliente según `client_slug`.
 - [ ] Que cada agente de cliente responda `BRAND_GUIDE` con el schema de
       arriba, incluyendo `estrategia`, `desempeno` (con evidencia) y `legales`.
 - [ ] Confirmar que `Client.slug` coincide con el slug de la ficha del cliente

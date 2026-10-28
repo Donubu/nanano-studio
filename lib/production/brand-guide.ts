@@ -56,6 +56,8 @@ export interface BrandGuide {
   };
   reglas: string[];
   fuentes: string[];
+  // Trazabilidad de la última sincronización (no va al modelo).
+  sync?: { agente: string; costo_usd: number | null; tools: string[] };
 }
 
 export interface Evidencia {
@@ -227,7 +229,9 @@ export function parseBrandGuide(raw: string): BrandGuide | null {
 // Error explícito del agente ({"error": "client_not_found" | ...}).
 const ERROR_LABELS: Record<string, string> = {
   client_not_found: "Practicante no tiene un cliente con ese slug",
-  no_brand_material: "El cliente no tiene material de marca cargado en practicante",
+  no_brand_material: "El cliente no tiene un agente activo o material de marca en practicante",
+  agent_forbidden:
+    "El usuario de la integración no tiene acceso al agente de este cliente en practicante (se da el permiso en practicante → usuarios)",
 };
 
 export function brandGuideError(raw: string): string | null {
@@ -260,7 +264,8 @@ export function brandGuideForModel(g: BrandGuide): Record<string, unknown> {
     if (v === "" || v == null) return undefined;
     return v;
   };
-  const { fuentes: _fuentes, ...rest } = g;
+  const { fuentes: _fuentes, sync: _sync, ...rest } = g;
   void _fuentes;
+  void _sync;
   return (prune(rest) as Record<string, unknown>) ?? {};
 }

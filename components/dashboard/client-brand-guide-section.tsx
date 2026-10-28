@@ -86,7 +86,14 @@ export default function ClientBrandGuideSection({ clientId }: { clientId: number
               </>
             ) : null}
             . La IA de producción la usa para escribir en la voz de la marca.
-            {state?.synced_at ? ` Última sincronización: ${formatDateLocal(state.synced_at)}.` : ""}
+            {state?.synced_at ? ` Última sincronización: ${formatDateLocal(state.synced_at)}` : ""}
+            {state?.synced_at && g?.sync?.agente ? ` por ${g.sync.agente}` : ""}
+            {state?.synced_at && g?.sync?.costo_usd != null ? ` (USD ${g.sync.costo_usd.toFixed(2)})` : ""}
+            {state?.synced_at ? "." : ""}
+          </p>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Cada sincronización lee brandbook, estrategia y métricas: tarda de 30 s a 2 min y cuesta ~USD 0,5–1 en
+            Practicante.
           </p>
         </div>
         <Button
@@ -109,7 +116,8 @@ export default function ClientBrandGuideSection({ clientId }: { clientId: number
       )}
       {syncing && (
         <p className="text-xs text-muted-foreground">
-          Practicante está revisando el brandbook; puede tardar un par de minutos.
+          El agente de la marca está revisando el brandbook, la estrategia y las métricas; puede tardar hasta 2
+          minutos.
         </p>
       )}
       {error && <p className="text-xs text-red-400">{error}</p>}

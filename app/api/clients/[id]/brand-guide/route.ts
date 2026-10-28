@@ -96,9 +96,19 @@ export async function POST(
       );
     }
 
+    // Qué agente respondió y cuánto costó (una sincronización lee brandbook,
+    // estrategia y métricas: ~30 s a 2 min y ~USD 0,5–1 según practicante).
+    const synced: BrandGuide = {
+      ...guide,
+      sync: {
+        agente: res.delegatedTo ?? "",
+        costo_usd: typeof res.tokenUsage?.estimatedCost === "number" ? res.tokenUsage.estimatedCost : null,
+        tools: (res.toolsUsed ?? []).slice(0, 20),
+      },
+    };
     await pool.execute(
       "UPDATE clients SET brand_guide_json = ?, brand_guide_synced_at = NOW() WHERE id = ?",
-      [JSON.stringify(guide), id],
+      [JSON.stringify(synced), id],
     );
     const updated = await loadRow(id);
     return NextResponse.json({ ...toBody(updated!), tokenUsage: res.tokenUsage ?? null });
