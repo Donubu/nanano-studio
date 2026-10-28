@@ -4,6 +4,7 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { z } from "zod";
 import { parseBody } from "@/lib/api-utils";
+import { normalizeClientSlug, CLIENT_SLUG_ERROR } from "@/lib/client-slug";
 
 interface ClientRow extends RowDataPacket {
   id: number;
@@ -29,8 +30,8 @@ export async function GET() {
     if (isAdmin) {
       // Admin ve todos los clientes incluyendo hidden
       const [rows] = await pool.execute<ClientRow[]>(
-        `SELECT c.id, c.name, c.logo, c.hidden, c.is_internal, c.default_project_id,
-          c.monthly_image_limit, c.monthly_video_limit, c.created_at,
+        `SELECT c.id, c.name, c.slug, c.logo, c.hidden, c.is_internal, c.default_project_id,
+          c.monthly_image_limit, c.monthly_video_limit, c.created_at, c.brand_guide_synced_at,
           (SELECT COUNT(*) FROM projects WHERE client_id = c.id) as project_count
          FROM clients c
          ORDER BY c.name ASC`
@@ -78,11 +79,22 @@ export async function POST(request: NextRequest) {
       logo: z.string().url().nullable().optional(),
       hidden: z.boolean().default(false),
       is_internal: z.boolean().default(false),
+      slug: z.string().max(64).nullable().optional(),
     });
 
     const parsed = await parseBody(request, createClientSchema);
     if (parsed.error) return parsed.error;
     const { name, logo, hidden, is_internal } = parsed.data;
+    const slug = normalizeClientSlug(parsed.data.slug);
+    if (slug === undefined) {
+      return NextResponse.json({ error: CLIENT_SLUG_ERROR }, { status: 400 });
+    }
+    if (slug) {
+      const [dup] = await pool.execute<RowDataPacket[]>("SELECT id FROM clients WHERE slug = ?", [slug]);
+      if (dup.length > 0) {
+        return NextResponse.json({ error: `El slug "${slug}" ya lo usa otro cliente` }, { status: 409 });
+      }
+    }
 
     // Solo 1 cliente puede ser interno
     if (is_internal) {
@@ -92,12 +104,12 @@ export async function POST(request: NextRequest) {
     }
 
     const [result] = await pool.execute<ResultSetHeader>(
-      "INSERT INTO clients (name, logo, hidden, is_internal) VALUES (?, ?, ?, ?)",
-      [name, logo || null, hidden ? 1 : 0, is_internal ? 1 : 0]
+      "INSERT INTO clients (name, slug, logo, hidden, is_internal) VALUES (?, ?, ?, ?, ?)",
+      [name, slug, logo || null, hidden ? 1 : 0, is_internal ? 1 : 0]
     );
 
     return NextResponse.json(
-      { id: result.insertId, name, logo, hidden, is_internal },
+      { id: result.insertId, name, slug, logo, hidden, is_internal },
       { status: 201 }
     );
   } catch (error) {

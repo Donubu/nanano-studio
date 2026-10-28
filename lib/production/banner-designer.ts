@@ -184,7 +184,7 @@ export interface AgentInvocationError {
   };
 }
 
-interface PracticanteRunResponse {
+export interface PracticanteRunResponse {
   jobId?: string;
   status?: string;
   response?: string;
@@ -212,10 +212,12 @@ interface PracticanteRunResponse {
 // patrón de fallback que el proxy /api/practicante/run (intenta primero con
 // el email del usuario; si retorna 404 user_not_found, reintenta con
 // PRACTICANTE_USER_EMAIL).
-async function callPracticante(payload: {
+// Sin agentName va al orquestador de practicante (lo usa la sincronización
+// de guía de marca, que necesita las tools brandbook_<slug> del cliente).
+export async function callPracticante(payload: {
   message: string;
   promptSuffix: string;
-  agentName: string;
+  agentName?: string;
   existingConversationId?: string;
   userEmail: string;
   files?: AgentReferenceFile[];
@@ -239,8 +241,7 @@ async function callPracticante(payload: {
     returnOnlyFinalText: true,
     context: {
       responseFormat: "json",
-      agentName: payload.agentName,
-      forceAgent: true,
+      ...(payload.agentName ? { agentName: payload.agentName, forceAgent: true } : {}),
       promptSuffix: payload.promptSuffix,
     },
   };

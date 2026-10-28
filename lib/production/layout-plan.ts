@@ -348,3 +348,75 @@ export function applyGeneratedImages(
     });
   return { ...def, children: map(def.children) };
 }
+
+// ---------------------------------------------------------------------------
+// Contraste mínimo tras el recolor
+// ---------------------------------------------------------------------------
+
+function hexToRgb(hex: string): [number, number, number] | null {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})([0-9a-f]{2})?$/i.exec(hex.trim());
+  if (!m) return null;
+  const h = m[1].length === 3 ? m[1].split("").map((c) => c + c).join("") : m[1];
+  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) as [number, number, number];
+}
+
+function luminance([r, g, b]: [number, number, number]): number {
+  const lin = (c: number) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+export function contrastRatio(a: string, b: string): number | null {
+  const ra = hexToRgb(a);
+  const rb = hexToRgb(b);
+  if (!ra || !rb) return null;
+  const la = luminance(ra);
+  const lb = luminance(rb);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+// WCAG AA para texto grande: los textos de banner casi siempre lo son.
+const MIN_CONTRAST = 3;
+
+// El recolor del plan puede dejar texto sobre un fondo del mismo tono (ej.
+// precio gris sobre la nueva pastilla azul). Para cada texto con fondo
+// propio, o apoyado directo sobre el fondo del root, si el contraste no
+// alcanza se pasa a blanco o negro (el que contraste más). `resolve` traduce
+// tokens de marca a hex; un color que no resuelve a hex se deja como está.
+export function ensureTextContrast(
+  def: TemplateDefinition,
+  resolve: (color: string) => string,
+): TemplateDefinition {
+  const rootBg = def.background?.type === "color" ? resolve(def.background.value) : null;
+  const hasImageBehind = (t: TemplateLayer, siblings: TemplateLayer[]) =>
+    siblings.some(
+      (s) =>
+        s !== t &&
+        (s.type === "image" || s.type === "shape") &&
+        s.visible !== false &&
+        s.position.x < t.position.x + t.size.w &&
+        t.position.x < s.position.x + s.size.w &&
+        s.position.y < t.position.y + t.size.h &&
+        t.position.y < s.position.y + s.size.h,
+    );
+  const fix = (nodes: TemplateLayer[], topLevel: boolean): TemplateLayer[] =>
+    nodes.map((l) => {
+      if (l.type === "frame") return { ...l, children: fix(l.children, false) };
+      if (l.type !== "text") return l;
+      const bg = l.style.backgroundColor
+        ? resolve(l.style.backgroundColor)
+        : topLevel && rootBg && !hasImageBehind(l, nodes)
+          ? rootBg
+          : null;
+      if (!bg) return l;
+      const fg = resolve(l.style.color);
+      const ratio = contrastRatio(fg, bg);
+      if (ratio == null || ratio >= MIN_CONTRAST) return l;
+      const white = contrastRatio("#ffffff", bg) ?? 0;
+      const black = contrastRatio("#111111", bg) ?? 0;
+      return { ...l, style: { ...l.style, color: white >= black ? "#FFFFFF" : "#111111" } };
+    });
+  return { ...def, children: fix(def.children, true) };
+}

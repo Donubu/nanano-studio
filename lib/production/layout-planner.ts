@@ -14,6 +14,7 @@ import { BrandKitContent, makeRef } from "./brand-kit";
 import { describeCatalog, sanitizePlan, LayoutPlan } from "./layout-plan";
 import { LAYOUT_TEMPLATES } from "./layout-templates";
 import { LAYOUT_FIXER_MODEL, LayoutFixUsage } from "./layout-fixer";
+import { BrandGuide, brandGuideForModel } from "./brand-guide";
 
 export const LAYOUT_PLANNER_MODEL = process.env.PRODUCTION_AI_PLANNER_MODEL || LAYOUT_FIXER_MODEL;
 export const LAYOUT_PLANNER_AGENT_NAME = "layout-planner";
@@ -29,6 +30,7 @@ Recibes:
 - "brief": qué debe comunicar la pieza, tono e instrucciones del productor.
 - "catalog": las plantillas disponibles. Cada una trae sus slots de texto (id, nombre, placeholder y max_chars aproximado que cabe), sus slots de imagen y los colores que usa.
 - "brand": colores y fuentes de la marca, como tokens. Puede venir vacío.
+- "brand_guide" (opcional): la guía de marca del brandbook (voz, tratamiento, palabras a usar y a evitar, ejemplos, reglas visuales). Si viene, MANDA sobre tus preferencias: escribe en esa voz y con ese tratamiento, usa su vocabulario, nunca uses sus palabras prohibidas, respeta sus reglas, y para colores sin token de marca usa los hex de la guía. El nombre de la marca va escrito exactamente como en brand_guide.marca (si no cabe, no lo uses en ese slot).
 - Opcionalmente, imágenes de referencia: úsalas para elegir la plantilla cuya composición más se parezca, y para sacar paleta, tono y copy.
 
 Devuelve "proposals": entre 1 y 3 propuestas, cada una con una plantilla DISTINTA (salvo que el brief pida algo muy específico). Ordénalas de mejor a peor.
@@ -104,6 +106,8 @@ export interface PlanRequest {
   tone?: string;
   instructions?: string;
   brandKit: BrandKitContent;
+  // Snapshot de practicante (clients.brand_guide_json), si el cliente lo tiene.
+  brandGuide?: BrandGuide | null;
   // Referencias ya descargadas (base64 sin prefijo).
   images?: { mimeType: string; data: string }[];
   count?: number;
@@ -126,6 +130,7 @@ export async function requestLayoutPlans(req: PlanRequest): Promise<PlanResponse
     },
     catalog: describeCatalog(),
     brand: brandForModel(req.brandKit),
+    ...(req.brandGuide ? { brand_guide: brandGuideForModel(req.brandGuide) } : {}),
   };
 
   const parts: Part[] = (req.images ?? []).map((img) => ({

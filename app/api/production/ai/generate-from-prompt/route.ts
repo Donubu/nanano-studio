@@ -91,6 +91,7 @@ export async function POST(request: NextRequest) {
     const result = await generateFromPlans({
       operation: "GENERATE_FROM_PROMPT",
       productionProjectId: production_project_id,
+      clientId: projRows[0].client_id,
       userId: Number(session.user.id),
       brandKit: mergedKit,
       brandKitId: resolvedKit?.id ?? null,

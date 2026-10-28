@@ -103,3 +103,15 @@ describe("imágenes de la propuesta", () => {
     expect(hero && hero.type === "image" && hero.src).toBe("https://x/9:16.png");
   });
 });
+
+describe("ensureTextContrast", () => {
+  it("pasa a blanco un texto oscuro que quedó sobre una pastilla azul", async () => {
+    const { ensureTextContrast, contrastRatio } = await import("../layout-plan");
+    expect(contrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 0);
+    const plan: LayoutPlan = { ...basePlan, colors: [{ from: "#FACC15", to: "#005EB8" }, { from: "#111111", to: "#4D4D4D" }] };
+    const out = expandPlan(plan, { w: 1920, h: 1080 }, [])!;
+    const fixed = ensureTextContrast(out.definition, (c) => c);
+    const price = all(fixed.children).find((l) => l.id === "price") as TextLayer;
+    expect(price.style.color).toBe("#FFFFFF");
+  });
+});

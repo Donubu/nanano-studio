@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
+import { normalizeClientSlug, CLIENT_SLUG_ERROR } from "@/lib/client-slug";
 
 interface ClientRow extends RowDataPacket {
   id: number;
@@ -24,7 +25,7 @@ export async function GET(
     const { id } = await params;
 
     const [rows] = await pool.execute<ClientRow[]>(
-      "SELECT id, name, logo, hidden, is_internal, default_project_id, created_at FROM clients WHERE id = ?",
+      "SELECT id, name, slug, logo, hidden, is_internal, default_project_id, created_at, brand_guide_synced_at FROM clients WHERE id = ?",
       [id]
     );
 
@@ -60,6 +61,19 @@ export async function PUT(
     const { id } = await params;
     const body = await request.json();
     const { name, logo, hidden, default_project_id, is_internal } = body;
+    const slug = body.slug === undefined ? undefined : normalizeClientSlug(body.slug);
+    if (body.slug !== undefined && slug === undefined) {
+      return NextResponse.json({ error: CLIENT_SLUG_ERROR }, { status: 400 });
+    }
+    if (slug) {
+      const [dup] = await pool.execute<ClientRow[]>(
+        "SELECT id FROM clients WHERE slug = ? AND id != ?",
+        [slug, id]
+      );
+      if (dup.length > 0) {
+        return NextResponse.json({ error: `El slug "${slug}" ya lo usa otro cliente` }, { status: 409 });
+      }
+    }
 
     const [existing] = await pool.execute<ClientRow[]>(
       "SELECT id FROM clients WHERE id = ?",
@@ -87,6 +101,10 @@ export async function PUT(
     if (name !== undefined) {
       updates.push("name = ?");
       values.push(name);
+    }
+    if (slug !== undefined) {
+      updates.push("slug = ?");
+      values.push(slug);
     }
     if (logo !== undefined) {
       updates.push("logo = ?");

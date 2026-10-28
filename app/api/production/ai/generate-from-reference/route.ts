@@ -141,6 +141,7 @@ export async function POST(request: NextRequest) {
     const result = await generateFromPlans({
       operation: "GENERATE_FROM_REFERENCE",
       productionProjectId: production_project_id,
+      clientId,
       userId: Number(session.user.id),
       brandKit: mergedKit,
       brandKitId: resolvedKit?.id ?? null,

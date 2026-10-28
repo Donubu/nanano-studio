@@ -17,6 +17,7 @@ import ClientCreditsSection from "@/components/dashboard/client-credits-section"
 import ClientProductionSection from "@/components/dashboard/client-production-section";
 import { PRODUCTION_ENABLED } from "@/lib/production/feature-flag";
 import ClientBrandKitsSection from "@/components/dashboard/client-brand-kits-section";
+import ClientBrandGuideSection from "@/components/dashboard/client-brand-guide-section";
 
 interface ClientDetail {
   id: number;
@@ -234,7 +235,10 @@ export default function ClientDetailPage() {
       {activeTab === "production" ? (
         PRODUCTION_ENABLED ? <ClientProductionSection clientId={Number(clientId)} /> : null
       ) : activeTab === "brand-kits" ? (
-        <ClientBrandKitsSection clientId={Number(clientId)} />
+        <div className="space-y-6">
+          <ClientBrandGuideSection clientId={Number(clientId)} />
+          <ClientBrandKitsSection clientId={Number(clientId)} />
+        </div>
       ) : (
         <>
 

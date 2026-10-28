@@ -10,9 +10,10 @@
 //   rationale, tokenUsage, invocation_id, brand_kit_id
 
 import pool from "@/lib/db";
-import { ResultSetHeader } from "mysql2";
-import { BrandKitContent, resolveTreeTokens } from "./brand-kit";
-import { expandPlan, LayoutPlan } from "./layout-plan";
+import { ResultSetHeader, RowDataPacket } from "mysql2";
+import { BrandGuide } from "./brand-guide";
+import { BrandKitContent, resolveTreeTokens, resolveColor } from "./brand-kit";
+import { expandPlan, ensureTextContrast, LayoutPlan } from "./layout-plan";
 import { requestLayoutPlans, LAYOUT_PLANNER_AGENT_NAME, LAYOUT_PLANNER_MODEL } from "./layout-planner";
 import { LayoutFixUsage } from "./layout-fixer";
 
@@ -22,9 +23,25 @@ export const DEFAULT_VARIANT_DIMS = [
   { w: 1080, h: 1920 },
 ];
 
+// Guía de marca sincronizada desde practicante (null si el cliente no tiene).
+export async function loadClientBrandGuide(clientId: number): Promise<BrandGuide | null> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    "SELECT brand_guide_json FROM clients WHERE id = ?",
+    [clientId],
+  );
+  const raw = rows[0]?.brand_guide_json;
+  if (raw == null) return null;
+  try {
+    return (typeof raw === "string" ? JSON.parse(raw) : raw) as BrandGuide;
+  } catch {
+    return null;
+  }
+}
+
 export interface PlanGenerationParams {
   operation: "GENERATE_FROM_PROMPT" | "GENERATE_FROM_REFERENCE";
   productionProjectId: number;
+  clientId: number;
   userId: number;
   brandKit: BrandKitContent;
   brandKitId: number | null;
@@ -48,6 +65,7 @@ export async function generateFromPlans(
   let error: string | null = null;
   try {
     const res = await requestLayoutPlans({
+      brandGuide: await loadClientBrandGuide(p.clientId),
       intent: p.intent,
       tone: p.tone,
       instructions: p.instructions,
@@ -63,8 +81,13 @@ export async function generateFromPlans(
 
   const proposals = plans
     .map((plan) => {
-      const expanded = expandPlan(plan, masterDims, variantDims);
-      if (!expanded) return null;
+      const raw = expandPlan(plan, masterDims, variantDims);
+      if (!raw) return null;
+      const resolve = (c: string) => resolveColor(c, p.brandKit, c);
+      const expanded = {
+        definition: ensureTextContrast(raw.definition, resolve),
+        variants: raw.variants.map((v) => ({ ...v, definition: ensureTextContrast(v.definition, resolve) })),
+      };
       return {
         template_id: plan.template_id,
         rationale: plan.rationale,

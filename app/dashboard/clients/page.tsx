@@ -28,6 +28,7 @@ import { formatDateLocal } from "@/lib/utils";
 interface Client {
   id: number;
   name: string;
+  slug: string | null;
   logo: string | null;
   hidden: boolean;
   is_internal: boolean;
@@ -51,7 +52,7 @@ export default function ClientsPage() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [deletingClient, setDeletingClient] = useState<Client | null>(null);
-  const [formData, setFormData] = useState({ name: "", logo: "", hidden: false, is_internal: false, default_project_id: null as number | null });
+  const [formData, setFormData] = useState({ name: "", slug: "", logo: "", hidden: false, is_internal: false, default_project_id: null as number | null });
   const [clientProjects, setClientProjects] = useState<ProjectOption[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -90,7 +91,7 @@ export default function ClientsPage() {
 
   const openCreateDialog = () => {
     setEditingClient(null);
-    setFormData({ name: "", logo: "", hidden: false, is_internal: false, default_project_id: null });
+    setFormData({ name: "", slug: "", logo: "", hidden: false, is_internal: false, default_project_id: null });
     setClientProjects([]);
     setError("");
     setIsDialogOpen(true);
@@ -99,7 +100,7 @@ export default function ClientsPage() {
   const openEditDialog = (e: React.MouseEvent, client: Client) => {
     e.stopPropagation();
     setEditingClient(client);
-    setFormData({ name: client.name, logo: client.logo || "", hidden: !!client.hidden, is_internal: !!client.is_internal, default_project_id: client.default_project_id });
+    setFormData({ name: client.name, slug: client.slug || "", logo: client.logo || "", hidden: !!client.hidden, is_internal: !!client.is_internal, default_project_id: client.default_project_id });
     setError("");
     fetchClientProjects(client.id);
     setIsDialogOpen(true);
@@ -433,6 +434,22 @@ export default function ClientsPage() {
                   required
                   className="bg-muted border-border/50"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Slug</label>
+                <Input
+                  type="text"
+                  placeholder="ej: lipigas"
+                  value={formData.slug}
+                  onChange={(e) =>
+                    setFormData({ ...formData, slug: e.target.value.toLowerCase() })
+                  }
+                  className="bg-muted border-border/50 font-mono"
+                />
+                <p className="text-xs text-muted-foreground">
+                  El mismo identificador que usa la marca en Practicante. Con él se trae su guía de marca.
+                </p>
               </div>
 
               <div className="flex items-center gap-2">
