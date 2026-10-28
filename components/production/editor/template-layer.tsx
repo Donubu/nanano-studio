@@ -17,6 +17,7 @@ import {
   isFontSizeRange,
 } from "@/lib/production/types";
 import { skinLayout } from "@/lib/production/skin";
+import { textEffectLayers, type TextEffectRender } from "@/lib/production/text-effects";
 import { ensureGoogleFontLoaded } from "@/lib/production/google-fonts";
 import { SmartText } from "./smart-text";
 
@@ -375,6 +376,14 @@ function renderText(layer: TextLayer, parentMode: "free" | "stack", common: Comm
         ? `${style.outline.width}px ${style.outline.color}`
         : undefined,
   };
+  // Efectos gráficos (degradado/textura, contorno doble, volumen): pila de
+  // copias del texto (text-effects.ts). Pueden asomar fuera de la caja.
+  const fx = textEffectLayers(style, layer.shadow);
+  if (fx) {
+    baseCss.textShadow = undefined;
+    baseCss.WebkitTextStroke = undefined;
+  }
+  const body = fx ? <EffectText content={layer.content} fx={fx} justifyContent={justifyContent} /> : undefined;
   // Smart text: el render busca el font-size más grande que entre en la caja.
   if (isFontSizeRange(style.fontSize)) {
     return (
@@ -382,19 +391,61 @@ function renderText(layer: TextLayer, parentMode: "free" | "stack", common: Comm
         content={layer.content}
         range={style.fontSize}
         style={baseCss}
+        allowOverflow={!!fx}
         {...common}
-      />
+      >
+        {body}
+      </SmartText>
     );
   }
   const css: CSSProperties = {
     ...baseCss,
     fontSize: style.fontSize,
-    overflow: "hidden",
+    overflow: fx ? "visible" : "hidden",
   };
   return (
     <div style={css} {...common}>
-      {layer.content}
+      {body ?? layer.content}
     </div>
+  );
+}
+
+// Texto con efectos: las copias de atrás repiten el layout del contenedor
+// (columna flex con la misma justificación) para calzar letra por letra con
+// la de adelante; heredan fuente, tamaño, interlineado y alineación.
+function EffectText({
+  content,
+  fx,
+  justifyContent,
+}: {
+  content: string;
+  fx: TextEffectRender;
+  justifyContent: CSSProperties["justifyContent"];
+}) {
+  return (
+    <>
+      {fx.behind.map((css, i) => (
+        <div
+          key={i}
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            flexDirection: "column",
+            justifyContent,
+            pointerEvents: "none",
+          }}
+        >
+          <div>
+            <span style={css}>{content}</span>
+          </div>
+        </div>
+      ))}
+      <div style={{ position: "relative" }}>
+        <span style={fx.main}>{content}</span>
+      </div>
+    </>
   );
 }
 

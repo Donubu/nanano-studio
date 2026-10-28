@@ -24,6 +24,8 @@ interface Props extends Omit<HTMLAttributes<HTMLDivElement>, "style" | "children
   range: FontSizeRange;
   style: CSSProperties;
   measurerExtraStyle?: CSSProperties;
+  // Efectos de texto (contornos, volumen) que asoman fuera de la caja.
+  allowOverflow?: boolean;
   children?: ReactNode;
 }
 
@@ -32,6 +34,7 @@ export function SmartText({
   range,
   style,
   measurerExtraStyle,
+  allowOverflow,
   children,
   ...rest
 }: Props) {
@@ -107,7 +110,7 @@ export function SmartText({
         ...style,
         fontSize,
         position: style.position ?? "relative",
-        overflow: "hidden",
+        overflow: allowOverflow ? "visible" : "hidden",
       }}
       {...rest}
     >

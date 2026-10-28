@@ -53,6 +53,12 @@ export function scaleLayerStyle(layer: TemplateLayer, scale: number): TemplateLa
         outline: layer.style.outline
           ? { color: layer.style.outline.color, width: layer.style.outline.width * scale }
           : layer.style.outline,
+        outline2: layer.style.outline2
+          ? { color: layer.style.outline2.color, width: layer.style.outline2.width * scale }
+          : layer.style.outline2,
+        extrude: layer.style.extrude
+          ? { ...layer.style.extrude, depth: layer.style.extrude.depth * scale }
+          : layer.style.extrude,
       },
     };
   }

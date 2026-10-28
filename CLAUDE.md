@@ -230,6 +230,15 @@ fuente del conocimiento de marca (ver "Guía de marca").
   promedio de la piel para que contraste, roles y proporciones sigan
   funcionando. Se pide desde el panel (sección "Piel gráfica") o con la op
   `set_skin` de "Pídele a la IA".
+- Texto gráfico (`lib/production/text-effects.ts`): `style.fill` (degradado o
+  textura dentro de las letras), `outline2` (segundo contorno) y `extrude`
+  (volumen 3D). Se dibuja como una pila de copias del texto: adelante el
+  relleno, detrás contornos, volumen y sombra (así el contorno queda por fuera
+  y la sombra no tapa un `background-clip:text`). Estilos rápidos en
+  `text-presets.ts` (panel "Efectos" y `text_style` en "Pídele a la IA"). Las
+  texturas se generan con `generate-images` (`purpose: "texture"`, JPEG 512 px).
+- Guía de marca del lado de practicante: especificación del agente en
+  `docs/practicante-agente-guia-de-marca.md`.
 - Animación vs. ediciones: los keyframes de posición/tamaño son absolutos;
   `followBaseChanges` (reflow.ts) los desplaza en cada `mutate` del editor
   cuando cambia la base de una capa, y borra tracks de capas eliminadas.

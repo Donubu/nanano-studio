@@ -14,7 +14,7 @@
 //   }
 //
 // Devuelve { definition, images: [{ layer_id, prompt }], skins: [{ layer_id,
-// kind, prompt, colors }], rationale, skipped, tokenUsage, invocation_id }. NO persiste: el editor aplica el resultado
+// kind, prompt, colors }], textures: [{ layer_id, prompt }], rationale, skipped, tokenUsage, invocation_id }. NO persiste: el editor aplica el resultado
 // como un cambio deshacible y lo guarda con su autosave normal. Las imágenes
 // las genera el cliente con /api/production/ai/generate-images y las pieles
 // con /api/production/ai/generate-skin.
@@ -174,11 +174,15 @@ export async function POST(request: NextRequest) {
       });
       usage = plan.usage;
       rationale = plan.rationale;
-      const result = applyEditOps(tree, plan.ops, undefined, photoSizes);
+      const result = applyEditOps(tree, plan.ops, undefined, photoSizes, {
+        resolveColor: (c) => resolveColor(c, kit, c),
+        accent: kit.colors[0]?.value,
+      });
       body = {
         definition: result.definition,
         images: result.images,
         skins: result.skins.map((sk) => ({ ...sk, colors: skinColors(result.definition, sk.layer_id, kit) })),
+        textures: result.textures,
         applied: result.applied,
         skipped: result.skipped,
         rationale: plan.rationale,

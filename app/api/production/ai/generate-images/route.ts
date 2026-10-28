@@ -23,6 +23,7 @@ import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { z } from "zod";
 import { parseBody } from "@/lib/api-utils";
 import { IMAGE_MODEL, generateImage, imageCostPerImage } from "@/lib/production/image-generator";
+import sharp from "sharp";
 import { uploadToS3 } from "@/lib/s3";
 import { checkProductionAiQuota, quotaBlockedBody } from "@/lib/production/ai-rate-limit";
 import { IMAGE_RATIOS } from "@/lib/production/layout-plan";
@@ -39,6 +40,9 @@ const bodySchema = z.object({
         slot_id: z.string().min(1).max(100),
         ratio: z.enum(IMAGE_RATIOS),
         prompt: z.string().trim().min(3).max(2000),
+        // "texture": relleno de letras (text-effects.ts); se guarda como JPEG
+        // de 512 px, que alcanza para texto y no infla el banner HTML5.
+        purpose: z.enum(["photo", "texture"]).optional(),
       }),
     )
     .min(1)
@@ -80,7 +84,11 @@ export async function POST(request: NextRequest) {
     const images = await Promise.all(
       jobs.map(async (job) => {
         try {
-          const img = await generateImage(`${job.prompt}${PHOTO_SUFFIX}`, job.ratio);
+          let img = await generateImage(`${job.prompt}${PHOTO_SUFFIX}`, job.ratio);
+          if (job.purpose === "texture") {
+            const data = await sharp(img.data).resize(512, 512, { fit: "cover" }).jpeg({ quality: 80 }).toBuffer();
+            img = { data, mimeType: "image/jpeg" };
+          }
           const ext = img.mimeType.includes("jpeg") ? "jpg" : "png";
           const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
           const up = await uploadToS3(img.data, fileName, img.mimeType, `templates/${clientId}/ai`);

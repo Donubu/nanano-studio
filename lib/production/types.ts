@@ -180,8 +180,24 @@ export interface TextLayer extends BaseLayer {
     // grande/headline. color suele ser blanco con texto oscuro, o negro con
     // texto claro — al revés que la sombra.
     outline?: { color: string; width: number } | null;
+    // Efectos gráficos del texto vivo (text-effects.ts). Con cualquiera de
+    // estos, el contorno pasa a dibujarse por fuera de la letra (copias
+    // detrás) en vez de comerse el relleno.
+    //   fill: relleno de las letras. "gradient" = CSS linear/radial-gradient
+    //     (acepta tokens); "texture" = imagen dentro de las letras. `color`
+    //     sigue siendo el color de referencia (contraste, lint, animación).
+    //   outline2: segundo contorno, por fuera del primero (efecto sticker).
+    //   extrude: volumen 3D, la letra repetida en profundidad hacia `angle`
+    //     (grados, 0 = derecha, 90 = abajo).
+    fill?: TextFill | null;
+    outline2?: { color: string; width: number } | null;
+    extrude?: { color: string; depth: number; angle: number } | null;
   };
 }
+
+export type TextFill =
+  | { type: "gradient"; value: string }
+  | { type: "texture"; src: string; prompt?: string };
 
 export function isFontSizeRange(v: unknown): v is FontSizeRange {
   return (

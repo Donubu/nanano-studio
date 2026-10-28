@@ -366,6 +366,12 @@ function resolveText(layer: TextLayer, kit: BrandKitContent): TextLayer {
       outline: s.outline
         ? { ...s.outline, color: resolveColor(s.outline.color, kit, "#000000") }
         : s.outline,
+      outline2: s.outline2
+        ? { ...s.outline2, color: resolveColor(s.outline2.color, kit, "#000000") }
+        : s.outline2,
+      extrude: s.extrude ? { ...s.extrude, color: resolveColor(s.extrude.color, kit, "#000000") } : s.extrude,
+      fill:
+        s.fill?.type === "gradient" ? { ...s.fill, value: resolveColor(s.fill.value, kit, s.fill.value) } : s.fill,
     },
   };
 }

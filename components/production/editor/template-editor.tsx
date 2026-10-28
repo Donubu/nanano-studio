@@ -579,6 +579,25 @@ export function TemplateEditor({
                   return { ...d, children: put(d.children) };
                 })
               }
+              onTextures={(texById) =>
+                editor.mutate((d) => {
+                  const put = (nodes: TemplateLayer[]): TemplateLayer[] =>
+                    nodes.map((n) =>
+                      n.type === "text" && texById[n.id]
+                        ? {
+                            ...n,
+                            style: {
+                              ...n.style,
+                              fill: { type: "texture" as const, src: texById[n.id].src, prompt: texById[n.id].prompt },
+                            },
+                          }
+                        : n.type === "frame"
+                          ? { ...n, children: put(n.children) }
+                          : n,
+                    );
+                  return { ...d, children: put(d.children) };
+                })
+              }
               onUndo={editor.undo}
             />
           )}

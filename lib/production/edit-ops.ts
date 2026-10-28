@@ -17,6 +17,7 @@ import {
 import { newButtonLayer, newBadgeLayer } from "./preset-layers";
 import { isValidIconName } from "./icon-catalog";
 import { removeSkin, type SkinKind } from "./skin";
+import { applyTextPreset, TEXT_PRESETS, type TextPresetId } from "./text-presets";
 
 export const EDIT_OPS = [
   "set_text",
@@ -67,7 +68,26 @@ export interface EditOp {
   // descripción del estilo y tipo ("none" la quita).
   skin_prompt?: string;
   skin_kind?: (typeof SKIN_KINDS)[number];
+  // Texto gráfico (text-effects.ts): estilo rápido y/o efectos sueltos.
+  text_style?: TextPresetId;
+  gradient_colors?: string[];
+  gradient_angle?: number;
+  outline_color?: string;
+  outline_width?: number;
+  outline2_color?: string;
+  outline2_width?: number;
+  extrude_color?: string;
+  extrude_depth?: number;
+  // Textura dentro de las letras (se genera aparte, como las imágenes).
+  texture_prompt?: string;
   name?: string;
+}
+
+// Para aplicar estilos de texto que aclaran u oscurecen el color (los
+// tokens de marca no se pueden mezclar sin resolver).
+export interface EditOpsOptions {
+  resolveColor?: (c: string) => string;
+  accent?: string;
 }
 
 export interface SkinRequest {
@@ -85,6 +105,7 @@ export interface EditResult {
   definition: TemplateDefinition;
   images: ImageRequest[];
   skins: SkinRequest[];
+  textures: ImageRequest[];
   applied: number;
   skipped: string[];
 }
@@ -141,7 +162,45 @@ function clampBox(l: TemplateLayer, frame: { w: number; h: number }): TemplateLa
   return { ...l, position: { x: Math.round(x), y: Math.round(y) }, size: { w: Math.round(w), h: Math.round(h) } };
 }
 
-function applyStyle(l: TemplateLayer, op: EditOp): TemplateLayer {
+const PRESET_IDS = new Set<string>(TEXT_PRESETS.map((p) => p.id));
+const px = (v: unknown, max: number) => (finite(v) ? Math.max(0, Math.min(max, v)) : undefined);
+
+// Efectos de texto de una op: primero el estilo rápido, después los efectos
+// sueltos encima (así "estilo sticker con contorno rojo" funciona).
+function applyTextEffects(t: TextLayer, op: EditOp, opts: EditOpsOptions): TextLayer {
+  let next = t;
+  if (op.text_style && PRESET_IDS.has(op.text_style)) {
+    const resolved = opts.resolveColor?.(t.style.color) ?? t.style.color;
+    next = applyTextPreset(next, op.text_style, resolved, opts.accent);
+  }
+  let style = next.style;
+  const stops = (op.gradient_colors ?? []).map(color).filter((c): c is string => !!c);
+  if (stops.length >= 2) {
+    const angle = finite(op.gradient_angle) ? Math.round(op.gradient_angle) : 180;
+    style = { ...style, color: stops[0], fill: { type: "gradient", value: `linear-gradient(${angle}deg, ${stops.slice(0, 3).join(", ")})` } };
+  }
+  const oc = color(op.outline_color);
+  const ow = px(op.outline_width, 20);
+  if (oc || ow != null) {
+    style = { ...style, outline: ow === 0 ? null : { color: oc ?? style.outline?.color ?? "#FFFFFF", width: ow ?? style.outline?.width ?? 2 } };
+  }
+  const o2c = color(op.outline2_color);
+  const o2w = px(op.outline2_width, 40);
+  if (o2c || o2w != null) {
+    style = { ...style, outline2: o2w === 0 ? null : { color: o2c ?? style.outline2?.color ?? "#111111", width: o2w ?? style.outline2?.width ?? 2 } };
+  }
+  const ec = color(op.extrude_color);
+  const ed = px(op.extrude_depth, 200);
+  if (ec || ed != null) {
+    style = {
+      ...style,
+      extrude: ed === 0 ? null : { color: ec ?? style.extrude?.color ?? "#000000", depth: ed ?? style.extrude?.depth ?? 4, angle: style.extrude?.angle ?? 60 },
+    };
+  }
+  return style === next.style ? next : { ...next, style };
+}
+
+function applyStyle(l: TemplateLayer, op: EditOp, opts: EditOpsOptions = {}): TemplateLayer {
   let next = l;
   if (finite(op.x) || finite(op.y) || finite(op.w) || finite(op.h)) {
     next = {
@@ -165,7 +224,11 @@ function applyStyle(l: TemplateLayer, op: EditOp): TemplateLayer {
     const bg = color(op.background_color);
     if (bg) style = { ...style, backgroundColor: bg };
     if (op.align) style = { ...style, align: op.align };
-    next = { ...t, style, ...(typeof op.content === "string" ? { content: op.content.slice(0, 500) } : {}) };
+    next = applyTextEffects(
+      { ...t, style, ...(typeof op.content === "string" ? { content: op.content.slice(0, 500) } : {}) },
+      op,
+      opts,
+    );
   } else if (next.type === "image") {
     const pct = (v: number) => Math.round(Math.max(0, Math.min(100, v)));
     if (finite(op.focal_x)) next = { ...next, focalX: pct(op.focal_x) };
@@ -218,6 +281,7 @@ function newLayer(
   frame: { w: number; h: number },
   siblings: TemplateLayer[],
   makeId: () => string,
+  opts: EditOpsOptions = {},
 ): TemplateLayer | null {
   const cx = frame.w / 2;
   const cy = frame.h / 2;
@@ -244,7 +308,7 @@ function newLayer(
     default:
       return null;
   }
-  const placed = clampBox(applyStyle({ ...l, id: makeId(), name: layerName(op, l) }, op), frame);
+  const placed = clampBox(applyStyle({ ...l, id: makeId(), name: layerName(op, l) }, op, opts), frame);
   if (!color(op.color) && (placed.type === "icon" || (placed.type === "text" && !placed.style.backgroundColor))) {
     const inherited = nearestTextColor(siblings, { ...placed.position, ...placed.size });
     if (inherited) {
@@ -352,11 +416,13 @@ export function applyEditOps(
   makeId: () => string = () => crypto.randomUUID(),
   // Dimensiones reales de las fotos por id de capa (para frame_subject).
   photoSizes: Record<string, { w: number; h: number }> = {},
+  opts: EditOpsOptions = {},
 ): EditResult {
   let children = def.children;
   let background = def.background;
   const images: ImageRequest[] = [];
   const skins: SkinRequest[] = [];
+  const textures: ImageRequest[] = [];
   const skipped: string[] = [];
   let applied = 0;
 
@@ -374,9 +440,12 @@ export function applyEditOps(
         break;
       case "update":
         children = mapLayers(children, op.id!, (l) => {
-          const next = applyStyle(l, op);
+          const next = applyStyle(l, op, opts);
           return next === l ? l : clampBox(next, def.size);
         });
+        if (op.texture_prompt?.trim() && findLayer(children, op.id!)?.type === "text") {
+          textures.push({ layer_id: op.id!, prompt: op.texture_prompt.trim() });
+        }
         break;
       case "remove":
         children = mapLayers(children, op.id!, () => null);
@@ -435,7 +504,7 @@ export function applyEditOps(
         break;
       }
       case "add": {
-        const l = newLayer(op, def.size, children, makeId);
+        const l = newLayer(op, def.size, children, makeId, opts);
         if (!l) {
           skipped.push(`add: tipo "${op.kind ?? "?"}" no soportado`);
           continue;
@@ -446,6 +515,9 @@ export function applyEditOps(
         if (l.type === "image" && op.image_prompt?.trim()) {
           images.push({ layer_id: l.id, prompt: op.image_prompt.trim() });
         }
+        if (l.type === "text" && op.texture_prompt?.trim()) {
+          textures.push({ layer_id: l.id, prompt: op.texture_prompt.trim() });
+        }
         if (l.type === "text" && op.skin_prompt?.trim() && op.skin_kind !== "none") {
           skins.push({ layer_id: l.id, kind: skinKindFor(l, op), prompt: op.skin_prompt.trim() });
         }
@@ -454,5 +526,5 @@ export function applyEditOps(
     }
     applied++;
   }
-  return { definition: { ...def, background, children }, images, skins, applied, skipped };
+  return { definition: { ...def, background, children }, images, skins, textures, applied, skipped };
 }

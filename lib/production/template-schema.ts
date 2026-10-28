@@ -113,6 +113,18 @@ const textStyleSchema = z.object({
     })
     .nullable()
     .optional(),
+  fill: z
+    .discriminatedUnion("type", [
+      z.object({ type: z.literal("gradient"), value: z.string().min(1).max(1000) }),
+      z.object({ type: z.literal("texture"), src: z.string().min(1).max(2000), prompt: z.string().max(1000).optional() }),
+    ])
+    .nullable()
+    .optional(),
+  outline2: z.object({ color: cssColorSchema, width: z.number().min(0).max(40) }).nullable().optional(),
+  extrude: z
+    .object({ color: cssColorSchema, depth: z.number().min(0).max(200), angle: z.number().min(-360).max(360) })
+    .nullable()
+    .optional(),
 });
 
 const edgesSchema = z.tuple([z.number().min(0), z.number().min(0), z.number().min(0), z.number().min(0)]);

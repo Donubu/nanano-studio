@@ -60,6 +60,7 @@ import {
   parseRef,
   makeRef,
   ColorToken,
+  resolveColor,
 } from "@/lib/production/brand-kit";
 import type { AnimatableProperty } from "@/lib/production/animation";
 import { cn } from "@/lib/utils";
@@ -123,6 +124,8 @@ const ANIMATED_PROP_LABELS: Record<AnimatableProperty, string> = {
 import { ClientImagePicker } from "@/components/production/editor/client-image-picker";
 import { GOOGLE_FONTS } from "@/lib/production/google-fonts";
 import { SkinSection } from "./skin-section";
+import { TextureFillControl } from "./texture-fill-control";
+import { TEXT_PRESETS, applyTextPreset, mixColor } from "@/lib/production/text-presets";
 
 // Pesos numéricos → nombres legibles. CSS acepta los keywords pero el motor
 // de fuentes mapea cada uno a un weight numérico estándar. Mostramos siempre
@@ -1160,7 +1163,13 @@ function LayerProps({
       />
 
       {layer.type === "text" && (
-        <TextProps layer={layer} onUpdate={onUpdate} brandKit={brandKit} animatedProps={animatedProps} />
+        <TextProps
+          layer={layer}
+          onUpdate={onUpdate}
+          brandKit={brandKit}
+          animatedProps={animatedProps}
+          projectId={projectId}
+        />
       )}
       {layer.type === "text" && (
         <Section title="Piel gráfica">
@@ -1377,11 +1386,13 @@ function TextProps({
   onUpdate,
   brandKit,
   animatedProps,
+  projectId,
 }: {
   layer: TextLayer;
   onUpdate: (id: string, m: (l: TemplateLayer) => TemplateLayer) => void;
   brandKit: BrandKitContent;
   animatedProps: AnimatedPropertySet;
+  projectId?: number;
 }) {
   const updateStyle = (s: Partial<TextLayer["style"]>) =>
     onUpdate(layer.id, (l) =>
@@ -1463,12 +1474,18 @@ function TextProps({
           step={0.5}
           onChange={(v) => updateStyle({ letterSpacing: v })}
         />
-        <ColorRow
+        {/* Relleno: sólido (color) o degradado dentro de las letras. Con
+            degradado, `color` queda con el primer color (contraste, lint). */}
+        <FillRow
           label="Color"
-          value={layer.style.color}
+          value={layer.style.fill?.type === "gradient" ? layer.style.fill.value : layer.style.color}
           tokens={brandKit.colors}
           animated={animatedProps.has("color")}
-          onChange={(v) => updateStyle({ color: v })}
+          onChange={(v) => {
+            const g = parseGradient(v);
+            if (g) updateStyle({ fill: { type: "gradient", value: v }, color: g.colorA });
+            else updateStyle({ color: v, fill: layer.style.fill?.type === "gradient" ? null : layer.style.fill });
+          }}
         />
         {/* Alineación horizontal — text-align. Iconos lucide propios de texto
             (AlignLeft/Center/Right) en vez de flechas ASCII genéricas. */}
@@ -1528,6 +1545,32 @@ function TextProps({
           outline. Tres controles independientes; cada uno default "off" para
           no aplicar cambios visuales en capas existentes. */}
       <Section title="Efectos">
+        <div className="space-y-1">
+          <span className="text-[10px] text-muted-foreground">Estilos rápidos</span>
+          <div className="grid grid-cols-3 gap-1">
+            {TEXT_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() =>
+                  onUpdate(layer.id, (l) =>
+                    l.type === "text"
+                      ? applyTextPreset(
+                          l,
+                          p.id,
+                          resolveColor(l.style.color, brandKit, "#111111"),
+                          brandKit.colors[0]?.value,
+                        )
+                      : l,
+                  )
+                }
+                className="text-[10px] py-1 rounded border border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
         {/* Decoración: chips simples ninguna / underline / strike. Label
             oculto — los keywords del control son auto-explicativos. */}
         <div className="flex items-center gap-1 text-[10px]">
@@ -1640,6 +1683,90 @@ function TextProps({
             />
           </>
         )}
+        {/* Segundo contorno, por fuera del primero (efecto sticker). */}
+        <label className="flex items-center gap-1 cursor-pointer text-xs">
+          <input
+            type="checkbox"
+            checked={layer.style.outline2 != null}
+            onChange={(e) =>
+              updateStyle({ outline2: e.target.checked ? (layer.style.outline2 ?? { color: "#111111", width: 2 }) : null })
+            }
+          />
+          <span className="text-muted-foreground">Segundo contorno</span>
+        </label>
+        {layer.style.outline2 && (
+          <>
+            <ColorRow
+              label="Color"
+              value={layer.style.outline2.color}
+              tokens={brandKit.colors}
+              onChange={(v) => updateStyle({ outline2: { ...(layer.style.outline2 ?? { width: 2 }), color: v } })}
+            />
+            <NumberRow
+              label="Grosor"
+              value={layer.style.outline2.width}
+              min={0}
+              max={40}
+              step={0.5}
+              onChange={(v) =>
+                updateStyle({
+                  outline2: { ...(layer.style.outline2 ?? { color: "#111111" }), width: Math.max(0, Math.min(40, v)) },
+                })
+              }
+            />
+          </>
+        )}
+        {/* Volumen 3D: la letra repetida en profundidad. */}
+        <label className="flex items-center gap-1 cursor-pointer text-xs">
+          <input
+            type="checkbox"
+            checked={layer.style.extrude != null}
+            onChange={(e) =>
+              updateStyle({
+                extrude: e.target.checked
+                  ? (layer.style.extrude ?? {
+                      color: mixColor(resolveColor(layer.style.color, brandKit, "#111111"), "#000000", 0.55),
+                      depth: 4,
+                      angle: 60,
+                    })
+                  : null,
+              })
+            }
+          />
+          <span className="text-muted-foreground">Volumen 3D</span>
+        </label>
+        {layer.style.extrude && (
+          <>
+            <ColorRow
+              label="Color"
+              value={layer.style.extrude.color}
+              tokens={brandKit.colors}
+              onChange={(v) => updateStyle({ extrude: { ...layer.style.extrude!, color: v } })}
+            />
+            <NumberRow
+              label="Profund."
+              value={layer.style.extrude.depth}
+              min={0}
+              max={200}
+              step={0.5}
+              onChange={(v) => updateStyle({ extrude: { ...layer.style.extrude!, depth: Math.max(0, Math.min(200, v)) } })}
+            />
+            <div className="flex items-center gap-2 text-xs">
+              <span className="w-12 text-muted-foreground">Ángulo</span>
+              <input
+                type="range"
+                min={0}
+                max={360}
+                step={5}
+                value={layer.style.extrude.angle}
+                onChange={(e) => updateStyle({ extrude: { ...layer.style.extrude!, angle: Number(e.target.value) } })}
+                className="flex-1"
+              />
+              <span className="text-[10px] text-muted-foreground w-10 text-right">{layer.style.extrude.angle}°</span>
+            </div>
+          </>
+        )}
+        <TextureFillControl key={layer.id} layer={layer} projectId={projectId} onUpdate={onUpdate} />
       </Section>
       {/* Fondo del text layer — colapsa el patrón viejo de shape+text a una
           sola capa. Toggle "tiene fondo" + color + radius. Quitar el toggle

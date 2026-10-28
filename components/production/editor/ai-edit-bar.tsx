@@ -14,6 +14,7 @@ import type { TemplateDefinition, TemplateLayer } from "@/lib/production/types";
 import { nearestImageRatio } from "@/lib/production/layout-plan";
 import { requestSkin, type GeneratedSkin } from "@/lib/production/skin-client";
 import type { SkinKind } from "@/lib/production/skin";
+import { texturePrompt } from "@/lib/production/text-effects";
 
 interface Props {
   definition: TemplateDefinition;
@@ -27,6 +28,8 @@ interface Props {
   onImages: (srcById: Record<string, string>) => void;
   // Pone la piel gráfica generada en cada texto (por id).
   onSkins: (skinById: Record<string, GeneratedSkin>) => void;
+  // Pone la textura generada dentro de las letras de cada texto (por id).
+  onTextures: (srcById: Record<string, { src: string; prompt: string }>) => void;
   onUndo: () => void;
 }
 
@@ -50,6 +53,7 @@ export function AiEditBar({
   onApply,
   onImages,
   onSkins,
+  onTextures,
   onUndo,
 }: Props) {
   const [instruction, setInstruction] = useState("");
@@ -83,6 +87,7 @@ export function AiEditBar({
         return;
       }
       const images = (body.images ?? []) as { layer_id: string; prompt: string }[];
+      const textures = (body.textures ?? []) as { layer_id: string; prompt: string }[];
       const skins = (body.skins ?? []) as { layer_id: string; kind: SkinKind; prompt: string; colors: string[] }[];
       if ((body.applied ?? 0) === 0) {
         setMessage({ text: body.rationale || "La IA no propuso cambios.", tone: "error" });
@@ -93,15 +98,22 @@ export function AiEditBar({
       setInstruction("");
       setMessage({ text: body.rationale || "Listo.", tone: "ok", undo: true });
 
-      if (images.length > 0) {
+      if (images.length > 0 || textures.length > 0) {
         setBusy("images");
-        const jobs = images
-          .map((img) => {
+        const jobs = [
+          ...images.map((img) => {
             const layer = findLayer(next.children, img.layer_id);
             return layer
               ? { slot_id: img.layer_id, ratio: nearestImageRatio(layer.size.w, layer.size.h), prompt: img.prompt }
               : null;
-          })
+          }),
+          ...textures.map((t) => ({
+            slot_id: `texture:${t.layer_id}`,
+            ratio: "1:1" as const,
+            prompt: texturePrompt(t.prompt),
+            purpose: "texture" as const,
+          })),
+        ]
           .filter((j): j is NonNullable<typeof j> => j !== null)
           .slice(0, 6);
         const imgRes = await fetch("/api/production/ai/generate-images", {
@@ -112,8 +124,16 @@ export function AiEditBar({
         const imgBody = await imgRes.json().catch(() => ({}));
         const list = (imgBody.images ?? []) as { slot_id: string; url?: string; error?: string }[];
         const srcById: Record<string, string> = {};
-        for (const i of list) if (i.url) srcById[i.slot_id] = i.url;
+        const textureById: Record<string, { src: string; prompt: string }> = {};
+        for (const i of list) {
+          if (!i.url) continue;
+          if (i.slot_id.startsWith("texture:")) {
+            const id = i.slot_id.slice("texture:".length);
+            textureById[id] = { src: i.url, prompt: textures.find((t) => t.layer_id === id)?.prompt ?? "" };
+          } else srcById[i.slot_id] = i.url;
+        }
         if (Object.keys(srcById).length > 0) onImages(srcById);
+        if (Object.keys(textureById).length > 0) onTextures(textureById);
         const failed = list.filter((i) => i.error);
         if (!imgRes.ok || failed.length > 0) {
           setMessage({

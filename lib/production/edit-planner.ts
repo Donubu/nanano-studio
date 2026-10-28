@@ -10,6 +10,7 @@ import { BrandKitContent, makeRef } from "./brand-kit";
 import { BrandGuide, brandGuideForModel } from "./brand-guide";
 import { ICON_NAMES } from "./icon-catalog";
 import { EDIT_OPS, ADD_KINDS, SKIN_KINDS, EditOp } from "./edit-ops";
+import { TEXT_PRESETS } from "./text-presets";
 
 export const EDIT_PLANNER_MODEL = process.env.PRODUCTION_AI_EDIT_MODEL || LAYOUT_FIXER_MODEL;
 export const EDIT_PLANNER_AGENT_NAME = "edit-planner";
@@ -18,8 +19,13 @@ const SYSTEM_INSTRUCTION = `Eres el asistente de diseño dentro del editor de ba
 
 Operaciones ("op"):
 - set_text {id, content}: cambia el texto de una capa de texto.
-- update {id, x?, y?, w?, h?, font_size?, font_weight?, color?, background_color?, align?, hidden?, icon_name?, focal_x?, focal_y?, fit?}: mueve, redimensiona o cambia estilo de una capa existente. background_color en un texto lo vuelve botón/badge. En imágenes, focal_x/focal_y (0-100, porcentaje del ancho y alto DE LA FOTO) es el punto que queda visible cuando la foto se recorta para llenar su caja (fit "cover"); "contain" la muestra completa sin recortar.
+- update {id, x?, y?, w?, h?, font_size?, font_weight?, color?, background_color?, align?, hidden?, icon_name?, focal_x?, focal_y?, fit?, text_style?, gradient_colors?, gradient_angle?, outline_color?, outline_width?, outline2_color?, outline2_width?, extrude_color?, extrude_depth?, texture_prompt?}: mueve, redimensiona o cambia estilo de una capa existente. background_color en un texto lo vuelve botón/badge. En imágenes, focal_x/focal_y (0-100, porcentaje del ancho y alto DE LA FOTO) es el punto que queda visible cuando la foto se recorta para llenar su caja (fit "cover"); "contain" la muestra completa sin recortar.
 - add {kind, x, y, w, h, content?, font_size?, font_weight?, color?, background_color?, align?, icon_name?, image_prompt?, skin_prompt?, skin_kind?}: agrega una capa. kind: ${ADD_KINDS.join(", ")}. "button" y "badge" son textos con fondo (pastilla y círculo). Para "image" incluye image_prompt si hay que generarla; una imagen que cubre todo el formato queda de fondo.
+- Texto gráfico (en update o add de textos, sin fondo o con fondo): para "titular más gráfico", "con volumen", "3D", "dorado", "tipo sticker", "con degradado", "con brillo", "con textura de X", "menos plano". El texto sigue editable.
+  · text_style: estilo rápido completo: ${TEXT_PRESETS.map((p) => `"${p.id}" (${p.label})`).join(", ")}. "none" deja el texto plano.
+  · Efectos sueltos (se aplican encima del estilo rápido): gradient_colors (2-3 colores, de arriba hacia abajo con gradient_angle 180), outline_color/outline_width (contorno por fuera de la letra, px), outline2_color/outline2_width (segundo contorno, por fuera del primero), extrude_color/extrude_depth (volumen 3D, px; ~6% de la letra). Ancho 0 quita el efecto.
+  · texture_prompt EN INGLÉS: material o textura dentro de las letras (gold foil, turquoise water, wood); se genera aparte.
+  · Cuida el contraste con lo que hay detrás: un titular sobre foto oscura con degradado oscuro no se lee; un contorno o volumen oscuro ayuda sobre fotos claras.
 - remove {id}: quita una capa.
 - set_background {color}: color de fondo de la pieza.
 - generate_image {id, image_prompt}: genera con IA la imagen de una capa de imagen existente.
@@ -67,6 +73,16 @@ const RESPONSE_SCHEMA = {
           icon_name: { type: "string" },
           image_prompt: { type: "string", maxLength: 800 },
           skin_prompt: { type: "string", maxLength: 400 },
+          text_style: { type: "string", enum: TEXT_PRESETS.map((p) => p.id) },
+          gradient_colors: { type: "array", items: { type: "string" } },
+          gradient_angle: { type: "number" },
+          outline_color: { type: "string" },
+          outline_width: { type: "number" },
+          outline2_color: { type: "string" },
+          outline2_width: { type: "number" },
+          extrude_color: { type: "string" },
+          extrude_depth: { type: "number" },
+          texture_prompt: { type: "string", maxLength: 400 },
           skin_kind: { type: "string", enum: [...SKIN_KINDS] },
           focal_x: { type: "number" },
           focal_y: { type: "number" },
@@ -104,6 +120,13 @@ function describe(l: TemplateLayer, frame: { w: number; h: number }): Record<str
     if (fs != null) out.font_size = r(fs);
     out.color = l.style.color;
     if (l.style.backgroundColor) out.background_color = l.style.backgroundColor;
+    const fx = [
+      l.style.fill?.type === "gradient" ? "degradado" : l.style.fill?.type === "texture" ? "textura" : null,
+      l.style.outline ? "contorno" : null,
+      l.style.outline2 ? "contorno doble" : null,
+      l.style.extrude ? "volumen" : null,
+    ].filter(Boolean);
+    if (fx.length) out.effects = fx;
     if (l.skin) out.skin = { kind: l.skin.mode === "fit" ? "badge" : "button", prompt: l.skin.prompt ?? "" };
   }
   if (l.type === "shape") out.fill = l.fill;
