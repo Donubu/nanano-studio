@@ -65,3 +65,25 @@ describe("animation-plan", () => {
     expect(sanitizeAnimationPlan({ layers: [{ id: "x" }] }, def)).toBeNull();
   });
 });
+
+describe("followBaseChanges", () => {
+  it("mueve los keyframes de posición con la capa y borra tracks de capas eliminadas", async () => {
+    const { followBaseChanges } = await import("../reflow");
+    const plan = sanitizeAnimationPlan(
+      { duration_ms: 3000, loop: 1, layers: [
+        { id: "title", entrance: "slide-left", start_ms: 0, duration_ms: 500, emphasis: "none" },
+        { id: "cta", entrance: "fade", start_ms: 500, duration_ms: 500, emphasis: "none" },
+      ] },
+      def,
+    )!;
+    const animated = { ...def, animation: buildAnimationFromPlan(def, plan) };
+    const moved = {
+      ...animated,
+      children: [{ ...animated.children[0], position: { x: 120, y: 20 } }],
+    };
+    const out = followBaseChanges(animated, moved);
+    const x = out.animation!.tracks.find((t) => t.layerId === "title" && t.property === "position.x")!;
+    expect(x.keyframes.at(-1)!.value).toBe(120);
+    expect(out.animation!.tracks.some((t) => t.layerId === "cta")).toBe(false);
+  });
+});

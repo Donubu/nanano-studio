@@ -64,3 +64,60 @@ describe("capas nuevas sin color", () => {
     expect(icon && icon.type === "icon" && icon.color).toBe("#fff");
   });
 });
+
+import { frameSubject } from "../edit-ops";
+import { imageSize } from "../image-size";
+import type { ImageLayer } from "../types";
+
+// Dónde cae en la pieza el punto (sx%, sy%) de la foto, con la misma
+// fórmula de object-fit: cover + object-position.
+function subjectOnFrame(l: ImageLayer, photo: { w: number; h: number }, sx: number, sy: number) {
+  const s = Math.max(l.size.w / photo.w, l.size.h / photo.h);
+  const rw = photo.w * s;
+  const rh = photo.h * s;
+  return {
+    x: l.position.x + ((l.size.w - rw) * (l.focalX ?? 50)) / 100 + (sx / 100) * rw,
+    y: l.position.y + ((l.size.h - rh) * (l.focalY ?? 50)) / 100 + (sy / 100) * rh,
+  };
+}
+
+describe("frameSubject", () => {
+  const frame = { w: 1920, h: 1080 };
+  const bg: ImageLayer = { id: "bg", type: "image", src: "x", position: { x: 0, y: 0 }, size: { w: 1920, h: 1080 } };
+
+  it("centra al sujeto de un fondo 16:9 agrandando y moviendo la caja, sin destapar bordes", () => {
+    const photo = { w: 1408, h: 768 };
+    // Sujeto al 65%: llevarlo al centro necesita ~1.4× (dentro del tope 1.6×).
+    const out = frameSubject(bg, frame, photo, { x: 65, y: 55 }, { x: 50, y: 50 }) as ImageLayer;
+    const p = subjectOnFrame(out, photo, 65, 55);
+    expect(Math.abs(p.x - 960)).toBeLessThan(20);
+    expect(out.size.w).toBeLessThanOrEqual(1920 * 1.6);
+    expect(out.position.x).toBeLessThanOrEqual(0);
+    expect(out.position.x + out.size.w).toBeGreaterThanOrEqual(1920);
+    expect(out.position.y + out.size.h).toBeGreaterThanOrEqual(1080);
+  });
+
+  it("con el sujeto muy al borde se queda en el tope de zoom y lo acerca", () => {
+    const photo = { w: 1408, h: 768 };
+    const out = frameSubject(bg, frame, photo, { x: 90, y: 50 }, { x: 50, y: 50 }) as ImageLayer;
+    expect(out.size.w).toBeLessThanOrEqual(Math.round(1920 * 1.6));
+    expect(subjectOnFrame(out, photo, 90, 50).x).toBeLessThan(0.9 * 1920);
+  });
+
+  it("en un vertical con foto horizontal alcanza con el punto focal", () => {
+    const v = { w: 1080, h: 1920 };
+    const photo = { w: 1408, h: 768 };
+    const layer: ImageLayer = { ...bg, size: { w: 1080, h: 1920 } };
+    const out = frameSubject(layer, v, photo, { x: 75, y: 50 }, { x: 50, y: 50 }) as ImageLayer;
+    expect(out.size).toEqual({ w: 1080, h: 1920 });
+    expect(Math.abs(subjectOnFrame(out, photo, 75, 50).x - 540)).toBeLessThan(20);
+  });
+
+  it("lee el tamaño de un PNG desde la cabecera", () => {
+    const png = new Uint8Array(24);
+    png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    png.set([0, 0, 5, 128], 16); // 1408
+    png.set([0, 0, 3, 0], 20); // 768
+    expect(imageSize(png)).toEqual({ w: 1408, h: 768 });
+  });
+});

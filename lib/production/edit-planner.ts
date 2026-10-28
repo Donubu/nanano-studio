@@ -18,11 +18,14 @@ const SYSTEM_INSTRUCTION = `Eres el asistente de diseño dentro del editor de ba
 
 Operaciones ("op"):
 - set_text {id, content}: cambia el texto de una capa de texto.
-- update {id, x?, y?, w?, h?, font_size?, font_weight?, color?, background_color?, align?, hidden?, icon_name?}: mueve, redimensiona o cambia estilo de una capa existente. background_color en un texto lo vuelve botón/badge.
+- update {id, x?, y?, w?, h?, font_size?, font_weight?, color?, background_color?, align?, hidden?, icon_name?, focal_x?, focal_y?, fit?}: mueve, redimensiona o cambia estilo de una capa existente. background_color en un texto lo vuelve botón/badge. En imágenes, focal_x/focal_y (0-100, porcentaje del ancho y alto DE LA FOTO) es el punto que queda visible cuando la foto se recorta para llenar su caja (fit "cover"); "contain" la muestra completa sin recortar.
 - add {kind, x, y, w, h, content?, font_size?, font_weight?, color?, background_color?, align?, icon_name?, image_prompt?}: agrega una capa. kind: ${ADD_KINDS.join(", ")}. "button" y "badge" son textos con fondo (pastilla y círculo). Para "image" incluye image_prompt si hay que generarla; una imagen que cubre todo el formato queda de fondo.
 - remove {id}: quita una capa.
 - set_background {color}: color de fondo de la pieza.
 - generate_image {id, image_prompt}: genera con IA la imagen de una capa de imagen existente.
+- frame_subject {id, subject_x, subject_y, target_x?, target_y?}: reencuadra una foto para que su sujeto quede en un punto de la pieza. subject_x/subject_y = dónde está el sujeto DENTRO DE LA FOTO adjunta (0-100 del ancho y alto de la foto; mira la imagen). target_x/target_y = dónde debe quedar en la pieza (0-100 del formato; default 50/50 = centro). El editor calcula zoom, posición y punto focal exactos: úsala siempre para "centra a la persona", "que se vea el producto", "corre la foto"; no calcules x/y/focal a mano.
+
+Imágenes adjuntas: las fotos de las capas de imagen vienen como imágenes, cada una precedida por el texto "Capa <id>". Míralas para entender qué muestran (dónde está la persona o el producto, qué tan clara u oscura es cada zona) antes de reencuadrar, poner texto encima o elegir colores. Para reencuadrar usa frame_subject con la posición del sujeto que ves en la foto. Si el sujeto debe quedar al lado del texto, elige un target que no choque con los textos (por ejemplo target_x 70 si los textos están a la izquierda).
 
 Reglas:
 1. Haz exactamente lo que se pide, nada más. Si piden "una imagen" o "una foto" y no hay capa de imagen adecuada, agrégala con add kind image + image_prompt; si ya hay una capa de imagen que calza, usa generate_image.
@@ -62,6 +65,13 @@ const RESPONSE_SCHEMA = {
           hidden: { type: "boolean" },
           icon_name: { type: "string" },
           image_prompt: { type: "string", maxLength: 800 },
+          focal_x: { type: "number" },
+          focal_y: { type: "number" },
+          fit: { type: "string", enum: ["cover", "contain"] },
+          subject_x: { type: "number" },
+          subject_y: { type: "number" },
+          target_x: { type: "number" },
+          target_y: { type: "number" },
         },
         required: ["op"],
       },
@@ -97,7 +107,11 @@ function describe(l: TemplateLayer, frame: { w: number; h: number }): Record<str
     out.icon_name = l.iconName;
     out.color = l.color;
   }
-  if (l.type === "image") out.has_image = l.src != null;
+  if (l.type === "image") {
+    out.has_image = l.src != null;
+    out.fit = l.fit ?? "cover";
+    out.focal = { x: l.focalX ?? 50, y: l.focalY ?? 50 };
+  }
   if (l.type === "frame") out.children = l.children.map((c) => describe(c, l.size));
   return out;
 }
@@ -110,6 +124,8 @@ export interface EditPlanRequest {
   selectedIds: string[];
   brandKit: BrandKitContent;
   brandGuide?: BrandGuide | null;
+  // Fotos de capas de imagen (ya descargadas), para que el modelo las vea.
+  layerImages?: { layerId: string; mimeType: string; data: string }[];
 }
 
 export async function requestEditPlan(
@@ -132,7 +148,13 @@ export async function requestEditPlan(
     model,
     systemInstruction: SYSTEM_INSTRUCTION,
     schema: RESPONSE_SCHEMA,
-    parts: [{ text: JSON.stringify(context) }],
+    parts: [
+      ...(req.layerImages ?? []).flatMap((img) => [
+        { text: `Capa ${img.layerId}` },
+        { inlineData: { mimeType: img.mimeType, data: img.data } },
+      ]),
+      { text: JSON.stringify(context) },
+    ],
     temperature: 0.4,
     // Tope bajo: si el modelo entra en un bucle de texto, falla rápido y
     // generateJson reintenta, en vez de gastar 30 s escribiendo basura.

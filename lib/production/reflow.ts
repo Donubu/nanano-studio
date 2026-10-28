@@ -15,6 +15,7 @@ import { effectiveConstraints } from "./smart-constraints";
 import {
   AnimationConfig,
   AnimationTrack,
+  AnimatableProperty,
 } from "./animation";
 
 const MIN_SIZE = 8;
@@ -266,4 +267,55 @@ function applyAxisV(
       return { pos, size };
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Seguir a las capas que se movieron en una edición
+// ---------------------------------------------------------------------------
+
+const BASE_PROPS: Partial<Record<AnimatableProperty, (l: TemplateLayer) => number>> = {
+  "position.x": (l) => l.position.x,
+  "position.y": (l) => l.position.y,
+  "size.w": (l) => l.size.w,
+  "size.h": (l) => l.size.h,
+};
+
+// Los keyframes de posición/tamaño guardan valores absolutos. Si una edición
+// cambia la BASE de una capa animada (mover con el mouse, alinear, "Pídele a
+// la IA"), sin esto la animación la devuelve al lugar viejo al reproducir.
+// Desplaza los keyframes de esas propiedades en el mismo delta y quita los
+// tracks de capas que ya no existen. Compara `prev` contra `next` y opera
+// sobre next.animation, así no pisa keyframes que la misma edición cambió
+// (auto-keyframe edita el keyframe y deja la base igual: delta 0).
+export function followBaseChanges(prev: TemplateDefinition, next: TemplateDefinition): TemplateDefinition {
+  const anim = next.animation;
+  if (!anim || anim.tracks.length === 0 || prev === next) return next;
+  const before = indexLayersById(prev);
+  const after = indexLayersById(next);
+  let changed = false;
+  const tracks: AnimationTrack[] = [];
+  for (const tr of anim.tracks) {
+    const now = after.get(tr.layerId);
+    if (!now) {
+      changed = true;
+      continue;
+    }
+    const was = before.get(tr.layerId);
+    const read = BASE_PROPS[tr.property];
+    if (!was || !read) {
+      tracks.push(tr);
+      continue;
+    }
+    const delta = read(now) - read(was);
+    if (delta === 0) {
+      tracks.push(tr);
+      continue;
+    }
+    changed = true;
+    tracks.push({
+      ...tr,
+      keyframes: tr.keyframes.map((k) => (typeof k.value === "number" ? { ...k, value: k.value + delta } : k)),
+    });
+  }
+  return changed ? { ...next, animation: { ...anim, tracks } } : next;
 }

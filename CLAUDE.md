@@ -212,8 +212,15 @@ fuente del conocimiento de marca (ver "Guía de marca").
 - `POST /api/production/ai/edit` — barra "Pídele a la IA" del editor (master,
   orientaciones y ajustes manuales): instrucción en lenguaje natural →
   operaciones (`lib/production/edit-ops.ts`: set_text, update, add, remove,
-  set_background, generate_image) aplicadas como un cambio deshacible; las
-  imágenes pedidas se generan con `generate-images`.
+  set_background, generate_image, frame_subject) aplicadas como un cambio
+  deshacible; las imágenes pedidas se generan con `generate-images`. El modelo
+  VE las fotos de las capas (hasta 3, desde nuestro bucket) y para reencuadrar
+  solo indica dónde está el sujeto en la foto y dónde lo quiere; `frameSubject`
+  calcula zoom (≤1.6×), posición y focal exactos con el tamaño real de la foto
+  (`image-size.ts`).
+- Animación vs. ediciones: los keyframes de posición/tamaño son absolutos;
+  `followBaseChanges` (reflow.ts) los desplaza en cada `mutate` del editor
+  cuando cambia la base de una capa, y borra tracks de capas eliminadas.
 - `POST /api/production/templates/[id]/ai/animate` — Gemini devuelve una
   coreografía por capa (entrada, inicio, duración, énfasis) y
   `lib/production/animation-plan.ts` la traduce a tracks; se valida con

@@ -143,7 +143,10 @@ export function TemplateEditor({
         return;
       }
       const anim = editor.definition.animation;
-      if (!anim || anim.tracks.length === 0) {
+      // Con el timeline colapsado el canvas muestra la pieza en reposo
+      // (showRestState): editar ahí es editar la base, aunque el playhead
+      // esté en t=0 sobre el primer keyframe de las entradas.
+      if (!anim || anim.tracks.length === 0 || showRestState) {
         editor.updateLayer(id, layerMutator);
         return;
       }
@@ -200,7 +203,7 @@ export function TemplateEditor({
         return { ...updatedRoot, animation: nextAnim };
       });
     },
-    [editor, timeline.currentTime],
+    [editor, timeline.currentTime, showRestState],
   );
 
   const previewPresets: ThumbnailPreset[] = useMemo(

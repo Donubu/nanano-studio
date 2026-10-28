@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { followBaseChanges } from "./reflow";
 import {
   TemplateDefinition,
   TemplateLayer,
@@ -238,7 +239,8 @@ export function useTemplateEditor({
           });
           setFuture([]);
         }
-        return mutator(prev);
+        // La animación sigue a las capas que esta edición movió o borró.
+        return followBaseChanges(prev, mutator(prev));
       });
     },
     []

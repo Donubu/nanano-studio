@@ -32,6 +32,44 @@ import { loadClientBrandGuide } from "@/lib/production/plan-generation";
 import { applyEditOps } from "@/lib/production/edit-ops";
 import { requestEditPlan, EDIT_PLANNER_AGENT_NAME, EDIT_PLANNER_MODEL } from "@/lib/production/edit-planner";
 import type { LayoutFixUsage } from "@/lib/production/layout-fixer";
+import { downloadReference } from "@/lib/production/reference-images";
+import { imageSize } from "@/lib/production/image-size";
+import type { TemplateLayer, ImageLayer } from "@/lib/production/types";
+
+// Cuántas fotos de capas se le muestran al modelo (cada una cuesta ~1k
+// tokens). Primero las seleccionadas, después las más grandes.
+const MAX_LAYER_IMAGES = 3;
+
+async function loadLayerImages(tree: TemplateDefinition, selected: string[]) {
+  const images: ImageLayer[] = [];
+  const walk = (nodes: TemplateLayer[]) =>
+    nodes.forEach((n) => {
+      if (n.type === "image" && n.src) images.push(n);
+      if (n.type === "frame") walk(n.children);
+    });
+  walk(tree.children);
+  const pick = images
+    .sort((a, b) => {
+      const sa = selected.includes(a.id) ? 1 : 0;
+      const sb = selected.includes(b.id) ? 1 : 0;
+      return sb - sa || b.size.w * b.size.h - a.size.w * a.size.h;
+    })
+    .slice(0, MAX_LAYER_IMAGES);
+  const out = await Promise.all(
+    pick.map(async (l) => {
+      try {
+        const img = await downloadReference(l.src!);
+        const size = imageSize(Buffer.from(img.data, "base64"));
+        return { layerId: l.id, ...img, size };
+      } catch {
+        // Fotos fuera de nuestro bucket (o caídas) no se mandan; el modelo
+        // sigue teniendo la caja en números.
+        return null;
+      }
+    }),
+  );
+  return out.filter((x): x is NonNullable<typeof x> => x !== null);
+}
 
 const bodySchema = z.object({
   production_project_id: z.number().int().positive(),
@@ -103,16 +141,21 @@ export async function POST(request: NextRequest) {
     let error: string | null = null;
     let rationale: string | null = null;
     try {
+      const selectedIds = parsed.data.selected_ids ?? [];
+      const layerImages = await loadLayerImages(tree, selectedIds);
+      const photoSizes: Record<string, { w: number; h: number }> = {};
+      for (const li of layerImages) if (li.size) photoSizes[li.layerId] = li.size;
       const plan = await requestEditPlan({
         tree,
         instruction,
-        selectedIds: parsed.data.selected_ids ?? [],
+        selectedIds,
+        layerImages,
         brandKit: kit,
         brandGuide: await loadClientBrandGuide(clientId),
       });
       usage = plan.usage;
       rationale = plan.rationale;
-      const result = applyEditOps(tree, plan.ops);
+      const result = applyEditOps(tree, plan.ops, undefined, photoSizes);
       body = {
         definition: result.definition,
         images: result.images,
