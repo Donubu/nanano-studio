@@ -160,6 +160,10 @@ export function TemplateLayerView({
   onLayerContextMenu,
   parentMode = "free",
 }: Props) {
+  // Capa oculta: no se dibuja. No alcanza con display:none en el estilo
+  // base, porque textos, íconos y stacks lo pisan con display:flex (antes
+  // ocultar una capa no la ocultaba en el canvas, las previews ni el export).
+  if (layer.visible === false) return null;
   const isSelected = selectedId === layer.id;
   const isInMulti =
     !!selectedIds &&

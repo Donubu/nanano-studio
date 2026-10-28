@@ -23,6 +23,7 @@ import {
 } from "./types";
 
 export type LintIssueKind =
+  | "background_gap"
   | "out_of_bounds"
   | "outside_safe_area"
   | "overlap"
@@ -221,6 +222,23 @@ export function lintLayout(def: TemplateDefinition): LintIssue[] {
 
   const margin = safeMargin(frame);
   const frameBox: Box = { x: 0, y: 0, w: frame.w, h: frame.h };
+
+  // Fondo que casi cubre pero deja bandas (típico de una foto achicada para
+  // "caber"): se ve el color de fondo de la pieza en los bordes.
+  for (const l of def.children) {
+    if (!isVisibleLayer(l) || (l.type !== "image" && l.type !== "shape")) continue;
+    const b = boxOf(l);
+    const covered = intersection(b, frameBox) / (frame.w * frame.h);
+    const nearlyBg = b.w >= frame.w * 0.75 && b.h >= frame.h * 0.75;
+    if (nearlyBg && covered < 0.995) {
+      issues.push({
+        kind: "background_gap",
+        severity: "error",
+        layerIds: [l.id],
+        detail: `${label(l)} no cubre todo el formato: quedan bandas en los bordes`,
+      });
+    }
+  }
   const foreground = def.children.filter(
     (l) => isVisibleLayer(l) && !isBackgroundLayer(l, frame),
   );

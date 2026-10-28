@@ -192,7 +192,7 @@ function reflowChild(
       ),
     };
   }
-  return next;
+  return keepLayerAspect(next, layer);
 }
 
 function applyAxis(
@@ -318,4 +318,37 @@ export function followBaseChanges(prev: TemplateDefinition, next: TemplateDefini
     });
   }
   return changed ? { ...next, animation: { ...anim, tracks } } : next;
+}
+
+// Íconos, badges circulares y elipses conservan su proporción: los
+// constraints "scale"/"stretch" (y el ajuste por formato de adapt.ts) los
+// estiraban en un eje (un badge cuadrado de 220 quedaba de 391×220 al pasar
+// de 1080×1080 a 1920×1080). Se recorta el eje sobrante y se centra.
+export function keepLayerAspect(l: TemplateLayer, orig: TemplateLayer): TemplateLayer {
+  const ratio0 = orig.size.w / Math.max(1, orig.size.h);
+  const roundBadge =
+    orig.type === "text" &&
+    !!orig.style.backgroundColor &&
+    (orig.style.backgroundCornerRadius ?? 0) >= Math.min(orig.size.w, orig.size.h) * 0.45 &&
+    Math.abs(ratio0 - 1) < 0.15;
+  const ellipse = orig.type === "shape" && orig.shape === "ellipse";
+  // Botones y badges en pastilla: pueden ensancharse o angostarse con el
+  // formato, pero no cambiar de forma (una pastilla horizontal que queda
+  // parada parte el texto y deja de verse como botón).
+  const pill = orig.type === "text" && !!orig.style.backgroundColor && !roundBadge;
+  if (orig.type !== "icon" && !roundBadge && !ellipse && !pill) return l;
+  const ratio = l.size.w / Math.max(1, l.size.h);
+  const tolerance = pill ? Math.log(1.4) : 0.03;
+  if (Math.abs(Math.log(ratio / ratio0)) < tolerance) return l;
+  const w = ratio > ratio0 ? l.size.h * ratio0 : l.size.w;
+  const h = ratio > ratio0 ? l.size.h : l.size.w / ratio0;
+  const next = {
+    ...l,
+    position: { x: l.position.x + (l.size.w - w) / 2, y: l.position.y + (l.size.h - h) / 2 },
+    size: { w, h },
+  };
+  if (next.type === "text" && roundBadge) {
+    return { ...next, style: { ...next.style, backgroundCornerRadius: Math.min(w, h) / 2 } };
+  }
+  return next;
 }

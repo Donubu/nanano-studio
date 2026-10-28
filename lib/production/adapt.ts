@@ -20,6 +20,18 @@
 //      los textos sin fondo re-compuestos en una sola caja proporcional a su
 //      contenido. Es determinista y no cuesta tokens; el productor puede
 //      afinar después en el editor de la adaptación o pedir "Adaptar con IA".
+//
+// Reglas comunes a ambas (para que la pieza sirva en producción, no solo
+// "quepa"):
+//   - Fondos (foto/forma que cubre el formato, aunque sangre): se re-encuadran
+//     para CUBRIR el formato nuevo conservando su proporción, su zoom relativo
+//     y el centro de lo que se veía. Nunca quedan bandas del color de fondo.
+//   - Íconos, badges circulares y elipses conservan su proporción.
+//   - Lo que no alcanza a leerse se OCULTA por prioridad de rol
+//     (layer-roles.ts): primero íconos y bajadas (con su ícono acompañante),
+//     nunca titular ni CTA. Queda oculto, no borrado: se reactiva a mano.
+//   - Las tiras siguen un orden canónico (badge/logo → titular → bajada →
+//     CTA) y sueltan capas hasta que lo que queda se lee.
 
 import {
   TemplateDefinition,
@@ -27,8 +39,10 @@ import {
   TextLayer,
   isFontSizeRange,
 } from "./types";
-import { reflowForPreview, reflowAnimation } from "./reflow";
+import { reflowForPreview, reflowAnimation, keepLayerAspect } from "./reflow";
 import { scaleLayerStyle, scaleLayerUniform, scaleLayoutConfig } from "./scale";
+import { inferRoles, companionIcons, coversFrame, ROLE_PRIORITY, LayerRole } from "./layer-roles";
+import { effectiveFontSize } from "./layout-lint";
 
 // Diferencia relativa de aspect ratio a partir de la cual el reflow por
 // constraints deja de tener sentido y pasamos a recomposición lineal.
@@ -64,10 +78,18 @@ export function adaptTree(master: TemplateDefinition, size: { w: number; h: numb
     animation: undefined,
   };
   const reflowed = reflowForPreview(scaled, size);
-  const fitted: TemplateDefinition = {
-    ...reflowed,
-    children: fitChildren(reflowed.children, reflowed.size, scaled.size, indexById(scaled)),
-  };
+  const masterById = new Map(master.children.map((c) => [c.id, c]));
+  const fittedChildren = fitChildren(reflowed.children, reflowed.size, scaled.size, indexById(scaled)).map((c) => {
+    const orig = masterById.get(c.id);
+    if (!orig) return c;
+    if (coversFrame(orig, master.size)) return coverFrame(orig, master.size, size);
+    return keepLayerAspect(c, orig);
+  });
+  const fitted: TemplateDefinition = hideIllegible(
+    { ...reflowed, children: fittedChildren },
+    inferRoles(master),
+    master,
+  );
   return {
     ...fitted,
     animation: master.animation ? reflowAnimation(master.animation, master, fitted) : master.animation,
@@ -107,8 +129,8 @@ function fitChildren(
     //    formato solo por desborde.
     const maxW = Math.max(1, parent.w - 2 * margin);
     const maxH = Math.max(1, parent.h - 2 * margin);
-    const coversW = orig.size.w >= origParent.w * BACKGROUND_COVER && orig.size.w <= origParent.w * 1.05;
-    const coversH = orig.size.h >= origParent.h * BACKGROUND_COVER && orig.size.h <= origParent.h * 1.05;
+    const coversW = orig.size.w >= origParent.w * BACKGROUND_COVER;
+    const coversH = orig.size.h >= origParent.h * BACKGROUND_COVER;
     const kw = !coversW && l.size.w > maxW ? maxW / l.size.w : 1;
     const kh = !coversH && l.size.h > maxH ? maxH / l.size.h : 1;
     const k = Math.min(kw, kh);
@@ -149,6 +171,34 @@ function fitChildren(
 // Estrategia 2: recomposición lineal
 // ---------------------------------------------------------------------------
 
+// Orden canónico de una tira: marca/oferta a un lado, mensaje al medio, CTA
+// al final (derecha en horizontal, abajo en vertical).
+const STRIP_ORDER: LayerRole[] = ["logo", "badge", "headline", "secondary", "product", "icon", "cta"];
+
+// Fracción máxima del eje corto que ocupa cada rol. En tiras horizontales
+// es el alto (un CTA de todo el alto de un billboard es desproporcionado);
+// en verticales es el ancho (ahí el CTA sí va casi de lado a lado).
+const STRIP_CROSS_H: Partial<Record<LayerRole, number>> = {
+  cta: 0.5,
+  badge: 0.9,
+  logo: 0.7,
+  product: 0.95,
+  icon: 0.4,
+};
+const STRIP_CROSS_V: Partial<Record<LayerRole, number>> = {
+  cta: 0.9,
+  badge: 0.7,
+  logo: 0.7,
+  product: 0.95,
+  icon: 0.35,
+};
+// Un texto secundario no puede ser más grande que esto × el titular.
+const SECONDARY_MAX_RATIO = 0.6;
+
+function minLegibleFont(size: { w: number; h: number }): number {
+  return Math.min(size.w, size.h) < 120 ? 9 : 10;
+}
+
 function linearize(master: TemplateDefinition, size: { w: number; h: number }): TemplateDefinition {
   const W = size.w;
   const H = size.h;
@@ -158,51 +208,90 @@ function linearize(master: TemplateDefinition, size: { w: number; h: number }): 
   const gap = Math.max(4, Math.round(short * 0.12));
   const availW = Math.max(1, W - 2 * pad);
   const availH = Math.max(1, H - 2 * pad);
-
-  const visible = master.children.filter((c) => c.visible !== false);
-  const backgrounds = visible.filter((c) => isBackground(c, master.size));
-  const items = visible
-    .filter((c) => !isBackground(c, master.size))
-    .sort((a, b) => {
-      const ac = center(a);
-      const bc = center(b);
-      return horizontal ? ac.x - bc.x || ac.y - bc.y : ac.y - bc.y || ac.x - bc.x;
-    });
-
-  const bgOut: TemplateLayer[] = backgrounds.map((c) => ({
-    ...scaleLayerStyle(c, short / Math.min(master.size.w, master.size.h)),
-    position: { x: 0, y: 0 },
-    size: { w: W, h: H },
-  }));
-
-  // Medida ideal de cada ítem sobre el eje corto.
-  type Placed = { layer: TemplateLayer; w: number; h: number };
-  const placed: Placed[] = items.map((item) => {
-    if (item.type === "text" && !item.style.backgroundColor) {
-      return horizontal ? composeTextRow(item, availH, availW) : composeTextColumn(item, availW, availH);
-    }
-    const s = horizontal
-      ? Math.min((availH * 0.85) / item.size.h, (availW * 0.6) / item.size.w)
-      : Math.min((availW * 0.85) / item.size.w, (availH * 0.4) / item.size.h);
-    const scaled = scaleLayerUniform(item, s, 0, 0);
-    return { layer: scaled, w: scaled.size.w, h: scaled.size.h };
-  });
-
-  // Si el conjunto no cabe en el eje largo, todo se reduce por igual.
-  const along = (p: Placed) => (horizontal ? p.w : p.h);
-  const total = placed.reduce((acc, p) => acc + along(p), 0) + gap * Math.max(0, placed.length - 1);
   const availAlong = horizontal ? availW : availH;
-  const k = total > availAlong ? availAlong / total : 1;
+  const minFont = minLegibleFont(size);
+
+  const roles = inferRoles(master);
+  const roleOf = (l: TemplateLayer) => roles.get(l.id) ?? "decoration";
+  const visible = master.children.filter((c) => c.visible !== false);
+  const backgrounds = visible.filter((c) => roleOf(c) === "background");
+  const readingOrder = (a: TemplateLayer, b: TemplateLayer) => {
+    const ac = center(a);
+    const bc = center(b);
+    return horizontal ? ac.x - bc.x || ac.y - bc.y : ac.y - bc.y || ac.x - bc.x;
+  };
+  // Las decoraciones (formas sueltas) no entran en una tira.
+  let items = visible
+    .filter((c) => roleOf(c) !== "background" && roleOf(c) !== "decoration")
+    .sort((a, b) => STRIP_ORDER.indexOf(roleOf(a)) - STRIP_ORDER.indexOf(roleOf(b)) || readingOrder(a, b));
+
+  type Placed = { layer: TemplateLayer; w: number; h: number; font: number | null };
+  const place = (list: TemplateLayer[]) => {
+    // El titular va primero para que los secundarios se midan contra él.
+    let headlineFont: number | null = null;
+    const ordered = [...list].sort((a, b) => Number(roleOf(b) === "headline") - Number(roleOf(a) === "headline"));
+    const byId = new Map<string, Placed>();
+    for (const item of ordered) byId.set(item.id, placeOne(item));
+    function placeOne(item: TemplateLayer): Placed {
+      if (item.type === "text" && !item.style.backgroundColor) {
+        let p = horizontal ? composeTextRow(item, availH, availW) : composeTextColumn(item, availW, availH);
+        let font = numericFont(p.layer as TextLayer);
+        if (roleOf(item) === "headline") headlineFont = font;
+        else if (headlineFont && font > headlineFont * SECONDARY_MAX_RATIO) {
+          const r = (headlineFont * SECONDARY_MAX_RATIO) / font;
+          const fit = bestTextFitCapped(item, p.w, p.h, font * r);
+          p = { layer: restyleText(item, fit.fs, fit.w, fit.h), w: fit.w, h: fit.h };
+          font = fit.fs;
+        }
+        return { ...p, font };
+      }
+      // Tope por rol sobre el eje corto: un CTA de 85% del alto de un
+      // billboard queda desproporcionado; un badge o un producto sí pueden
+      // ocupar casi todo el alto.
+      const cross = (horizontal ? STRIP_CROSS_H : STRIP_CROSS_V)[roleOf(item)] ?? 0.85;
+      const s = horizontal
+        ? Math.min((availH * cross) / item.size.h, (availW * 0.6) / item.size.w)
+        : Math.min((availW * cross) / item.size.w, (availH * 0.4) / item.size.h);
+      const scaled = scaleLayerUniform(item, s, 0, 0);
+      return {
+        layer: scaled,
+        w: scaled.size.w,
+        h: scaled.size.h,
+        font: scaled.type === "text" ? numericFont(scaled) : null,
+      };
+    }
+    const placed: Placed[] = list.map((item) => byId.get(item.id)!);
+    const along = (p: Placed) => (horizontal ? p.w : p.h);
+    const total = placed.reduce((acc, p) => acc + along(p), 0) + gap * Math.max(0, placed.length - 1);
+    const k = total > availAlong ? availAlong / total : 1;
+    const smallest = Math.min(...placed.map((p) => (p.font == null ? Infinity : p.font * k)));
+    return { placed, k, smallest, along };
+  };
+
+  // Soltar capas por prioridad hasta que lo que queda se lea. Un texto
+  // secundario se lleva su ícono acompañante.
+  const hidden = new Set<string>();
+  let layout = place(items);
+  // Achicar todo parejo está bien mientras se lea; solo se suelta una capa
+  // si algo queda ilegible o hay que reducir a menos de la mitad.
+  while (items.length > 2 && (layout.k < 0.5 || layout.smallest < minFont)) {
+    const victim = [...items].sort(
+      (a, b) => ROLE_PRIORITY[roleOf(b)] - ROLE_PRIORITY[roleOf(a)] || a.size.w * a.size.h - b.size.w * b.size.h,
+    )[0];
+    const drop = new Set([victim.id, ...(roleOf(victim) === "secondary" ? companionIcons(master, victim.id) : [])]);
+    drop.forEach((id) => hidden.add(id));
+    items = items.filter((c) => !drop.has(c.id));
+    layout = place(items);
+  }
+  const { placed, k, along } = layout;
   const finalItems: Placed[] = placed.map((p) =>
-    k < 1
-      ? { layer: scaleLayerUniform(p.layer, k, 0, 0), w: p.w * k, h: p.h * k }
-      : p,
+    k < 1 ? { ...p, layer: scaleLayerUniform(p.layer, k, 0, 0), w: p.w * k, h: p.h * k } : p,
   );
   const finalTotal = finalItems.reduce((acc, p) => acc + along(p), 0) + gap * k * Math.max(0, finalItems.length - 1);
 
   // Colocación centrada en ambos ejes.
-  let cursor = (horizontal ? pad + (availW - finalTotal) / 2 : pad + (availH - finalTotal) / 2);
-  const children: TemplateLayer[] = [...bgOut];
+  let cursor = horizontal ? pad + (availW - finalTotal) / 2 : pad + (availH - finalTotal) / 2;
+  const children: TemplateLayer[] = backgrounds.map((c) => coverFrame(c, master.size, size));
   for (const p of finalItems) {
     const x = horizontal ? cursor : pad + (availW - p.w) / 2;
     const y = horizontal ? pad + (availH - p.h) / 2 : cursor;
@@ -215,6 +304,13 @@ function linearize(master: TemplateDefinition, size: { w: number; h: number }): 
       constraints: undefined,
     });
     cursor += along(p) + gap * k;
+  }
+  // Las que no entraron quedan ocultas (mismo id: la animación y el
+  // productor las siguen encontrando).
+  for (const c of visible) {
+    if (!hidden.has(c.id) && roleOf(c) !== "decoration") continue;
+    const s = Math.min(1, W / c.size.w, H / c.size.h);
+    children.push({ ...scaleLayerUniform(c, s, 0, 0), position: { x: 0, y: 0 }, visible: false, constraints: undefined });
   }
 
   const root: TemplateDefinition = {
@@ -229,9 +325,61 @@ function linearize(master: TemplateDefinition, size: { w: number; h: number }): 
   };
 }
 
-function isBackground(l: TemplateLayer, parent: { w: number; h: number }): boolean {
-  if (l.type !== "shape" && l.type !== "image") return false;
-  return l.size.w >= parent.w * BACKGROUND_COVER && l.size.h >= parent.h * BACKGROUND_COVER;
+// ---------------------------------------------------------------------------
+// Reglas comunes
+// ---------------------------------------------------------------------------
+
+// Re-encuadra un fondo para cubrir el formato nuevo. Conserva la proporción
+// de la caja (así la foto se recorta igual), el zoom relativo a "cubrir justo"
+// y el punto de la caja que estaba al centro del formato original.
+export function coverFrame(
+  orig: TemplateLayer,
+  origFrame: { w: number; h: number },
+  size: { w: number; h: number },
+): TemplateLayer {
+  if (orig.type !== "image") {
+    return { ...orig, position: { x: 0, y: 0 }, size: { w: size.w, h: size.h }, constraints: undefined };
+  }
+  const aspect = orig.size.w / Math.max(1, orig.size.h);
+  const minCover = (f: { w: number; h: number }) =>
+    f.w / f.h > aspect ? { w: f.w, h: f.w / aspect } : { w: f.h * aspect, h: f.h };
+  const zoom = Math.max(1, orig.size.w / minCover(origFrame).w);
+  const base = minCover(size);
+  const w = base.w * zoom;
+  const h = base.h * zoom;
+  const ux = clamp((origFrame.w / 2 - orig.position.x) / orig.size.w, 0, 1);
+  const uy = clamp((origFrame.h / 2 - orig.position.y) / orig.size.h, 0, 1);
+  const x = clamp(size.w / 2 - ux * w, size.w - w, 0);
+  const y = clamp(size.h / 2 - uy * h, size.h - h, 0);
+  return {
+    ...orig,
+    position: { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 },
+    size: { w: Math.ceil(w), h: Math.ceil(h) },
+    constraints: undefined,
+  };
+}
+
+// Formatos parecidos: textos secundarios que quedaron ilegibles (y su ícono
+// acompañante) e íconos diminutos se ocultan. Titular, CTA, badge y logo no:
+// si quedan chicos los marca el lint y los corrige "Revisar con IA".
+function hideIllegible(def: TemplateDefinition, roles: Map<string, LayerRole>, master: TemplateDefinition): TemplateDefinition {
+  const minFont = minLegibleFont(def.size);
+  const hide = new Set<string>();
+  for (const l of def.children) {
+    if (l.visible === false) continue;
+    const role = roles.get(l.id);
+    if (role === "secondary" && l.type === "text") {
+      const fs = effectiveFontSize(l);
+      if (fs != null && fs < minFont) {
+        hide.add(l.id);
+        companionIcons(master, l.id).forEach((id) => hide.add(id));
+      }
+    } else if (role === "icon" && Math.min(l.size.w, l.size.h) < 12) {
+      hide.add(l.id);
+    }
+  }
+  if (hide.size === 0) return def;
+  return { ...def, children: def.children.map((c) => (hide.has(c.id) ? { ...c, visible: false } : c)) };
 }
 
 function center(l: TemplateLayer) {
@@ -273,6 +421,15 @@ function bestTextFit(item: TextLayer, maxW: number, maxH: number): { fs: number;
     if (fs > best.fs) best = { fs, w: Math.min(maxW, unitW * fs), h: lines.length * fs * lh, lines };
   }
   return { fs: best.fs, w: best.w, h: best.h };
+}
+
+// Igual que bestTextFit pero con la fuente topada en `maxFs`: la caja se
+// achica a lo que ocupa el texto con esa fuente.
+function bestTextFitCapped(item: TextLayer, maxW: number, maxH: number, maxFs: number) {
+  const fit = bestTextFit(item, maxW, maxH);
+  if (fit.fs <= maxFs) return fit;
+  const k = maxFs / fit.fs;
+  return { fs: maxFs, w: fit.w * k, h: fit.h * k };
 }
 
 // Reparte `words` en `n` líneas con anchos parecidos (por caracteres).

@@ -126,3 +126,64 @@ describe("adaptTree — tira extrema (recomposición lineal)", () => {
     expect(out.children[0].id).toBe("bg");
   });
 });
+
+describe("adaptTree para producción", () => {
+  const W = 1920;
+  const H = 1080;
+  function piece(): TemplateDefinition {
+    return {
+      id: "tpl_root",
+      type: "frame",
+      position: { x: 0, y: 0 },
+      size: { w: W, h: H },
+      background: { type: "color", value: "#000" },
+      layout: { mode: "free" },
+      children: [
+        // Foto agrandada para reencuadrar: sangra por la derecha y arriba.
+        { id: "bg", type: "image", src: "x", position: { x: -400, y: -200 }, size: { w: 2880, h: 1620 } } as ImageLayer,
+        { id: "badge", type: "text", content: "-20%", position: { x: 80, y: 60 }, size: { w: 220, h: 220 }, style: { fontSize: 60, color: "#000", backgroundColor: "#FACC15", backgroundCornerRadius: 110 } } as TextLayer,
+        { id: "title", type: "text", content: "VUELA SIN LÍMITES", position: { x: 80, y: 380 }, size: { w: 1100, h: 160 }, style: { fontSize: 120, fontWeight: 800, color: "#fff" } } as TextLayer,
+        { id: "sub", type: "text", content: "Zapatillas ultra livianas para correr todo el año", position: { x: 80, y: 560 }, size: { w: 1000, h: 60 }, style: { fontSize: 36, color: "#fff" } } as TextLayer,
+        { id: "truck", type: "icon", iconName: "Truck", color: "#fff", position: { x: 700, y: 900 }, size: { w: 48, h: 48 } },
+        { id: "ship", type: "text", content: "Envío gratis a todo Chile", position: { x: 760, y: 905 }, size: { w: 500, h: 40 }, style: { fontSize: 30, color: "#fff" } } as TextLayer,
+        { id: "cta", type: "text", content: "COMPRAR", position: { x: 80, y: 880 }, size: { w: 560, h: 90 }, style: { fontSize: 48, fontWeight: 800, color: "#000", backgroundColor: "#FACC15", backgroundCornerRadius: 8 } } as TextLayer,
+      ],
+    };
+  }
+  const visibleIds = (d: TemplateDefinition) => d.children.filter((c) => c.visible !== false).map((c) => c.id);
+  const covers = (d: TemplateDefinition, id: string) => {
+    const l = d.children.find((c) => c.id === id)!;
+    return l.position.x <= 0.5 && l.position.y <= 0.5 && l.position.x + l.size.w >= d.size.w - 0.5 && l.position.y + l.size.h >= d.size.h - 0.5;
+  };
+
+  for (const size of [{ w: 300, h: 250 }, { w: 300, h: 600 }, { w: 728, h: 90 }, { w: 160, h: 600 }, { w: 970, h: 250 }]) {
+    it(`${size.w}×${size.h}: el fondo que sangra sigue cubriendo y conserva su proporción`, () => {
+      const out = adaptTree(piece(), size);
+      expect(covers(out, "bg")).toBe(true);
+      const bg = out.children.find((c) => c.id === "bg")!;
+      expect(bg.size.w / bg.size.h).toBeCloseTo(2880 / 1620, 1);
+    });
+  }
+
+  it("el badge circular sigue circular en formatos parecidos", () => {
+    const out = adaptTree(piece(), { w: 300, h: 250 });
+    const b = out.children.find((c) => c.id === "badge")!;
+    expect(b.size.w / b.size.h).toBeCloseTo(1, 1);
+  });
+
+  it("en una tira chica oculta primero lo secundario (con su ícono) y deja titular y CTA", () => {
+    const out = adaptTree(piece(), { w: 320, h: 50 });
+    const vis = visibleIds(out);
+    expect(vis).toContain("title");
+    expect(vis).toContain("cta");
+    expect(vis).not.toContain("truck");
+    // Ocultas, no borradas.
+    expect(out.children.some((c) => c.id === "ship" && c.visible === false)).toBe(true);
+  });
+
+  it("en un leaderboard el CTA va al final de la fila", () => {
+    const out = adaptTree(piece(), { w: 728, h: 90 });
+    const row = out.children.filter((c) => c.visible !== false && c.id !== "bg").sort((a, b) => a.position.x - b.position.x);
+    expect(row.at(-1)!.id).toBe("cta");
+  });
+});
