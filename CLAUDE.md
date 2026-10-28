@@ -200,6 +200,12 @@ fuente del conocimiento de marca (ver "Guía de marca").
   que `lib/production/layout-plan.ts` expande a master + variantes, con
   contraste mínimo (`ensureTextContrast`). Referencias como imagen nativa.
   Flujo en `lib/production/plan-generation.ts`; planificador en `layout-planner.ts`.
+- Con referencia, la primera propuesta es "Fiel a la referencia"
+  (`reference-planner.ts` + `reference-layout.ts`): Gemini describe la imagen
+  como bloques (rol, caja en %, colores, texto para la marca) y el motor los
+  arma como capas editables, con el master en la proporción de la referencia;
+  las del catálogo quedan como alternativas. En este modo no se mandan las
+  piezas reales de la marca (competían con la referencia).
 - `POST /api/production/ai/generate-images` — llena los slots de imagen de una
   propuesta con Nano Banana 2 (API Gemini; Imagen 4 no existe en la región
   `global` de Vertex), una imagen por slot y proporción.

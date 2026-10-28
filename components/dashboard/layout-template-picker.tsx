@@ -26,6 +26,7 @@ import {
   Loader2,
   MessageSquareText,
   Plus,
+  RefreshCw,
   Rocket,
   Sparkles,
   Trash2,
@@ -96,6 +97,11 @@ interface Props {
 
 type TabKey = "templates" | "clone" | "reference" | "prompt";
 
+interface GenerateState {
+  can: boolean;
+  busy: boolean;
+}
+
 export function LayoutTemplatePicker({
   open,
   productionProjectId,
@@ -106,6 +112,10 @@ export function LayoutTemplatePicker({
   const [tab, setTab] = useState<TabKey>("templates");
   const [pickedSource, setPickedSource] = useState<PickerSource>({ kind: "blank" });
   const [creating, setCreating] = useState(false);
+  // Pestañas con IA: el botón principal del pie primero genera las propuestas
+  // (la pestaña escucha generateTick) y recién con una propuesta elegida crea.
+  const [generateTick, setGenerateTick] = useState(0);
+  const [genState, setGenState] = useState<GenerateState>({ can: false, busy: false });
 
   // Templates existentes del proyecto para el tab "Clonar". Se cargan al
   // entrar al tab por primera vez para no pagar el fetch si el productor
@@ -151,6 +161,14 @@ export function LayoutTemplatePicker({
       setCreating(false);
     }
   };
+
+  const aiTab = tab === "prompt" || tab === "reference";
+  const aiPicked =
+    (tab === "prompt" && pickedSource.kind === "ai-prompt") ||
+    (tab === "reference" && pickedSource.kind === "ai-reference");
+  // En una pestaña con IA sin propuesta elegida, "Crear" creaba un canvas
+  // vacío sin avisar: el botón principal pasa a ser "Generar propuestas".
+  const needsGenerate = aiTab && !aiPicked;
 
   // Descripción del source actual para que el productor sepa qué va a crear
   // antes de pulsar el botón final.
@@ -318,6 +336,8 @@ export function LayoutTemplatePicker({
               productionProjectId={productionProjectId}
               pickedSource={pickedSource}
               onPicked={(source) => setPickedSource(source)}
+              generateTick={generateTick}
+              onGenerateState={setGenState}
             />
           )}
 
@@ -326,31 +346,46 @@ export function LayoutTemplatePicker({
               productionProjectId={productionProjectId}
               pickedSource={pickedSource}
               onPicked={(source) => setPickedSource(source)}
+              generateTick={generateTick}
+              onGenerateState={setGenState}
             />
           )}
         </div>
 
         <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-border/50 bg-muted/20">
           <span className="text-xs text-muted-foreground truncate">
-            {sourceLabel}
+            {needsGenerate
+              ? "Describe la pieza y genera las propuestas; después eliges una y la creas."
+              : !name.trim()
+                ? "Ponle un nombre al template (arriba) para crearlo."
+                : sourceLabel}
           </span>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={onClose} disabled={creating}>
               Cancelar
             </Button>
-            <Button
-              size="sm"
-              onClick={handleSubmit}
-              disabled={!name.trim() || creating}
-              className="gap-1"
-            >
-              {creating ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Sparkles className="h-4 w-4" />
-              )}
-              Crear
-            </Button>
+            {needsGenerate ? (
+              <Button
+                size="sm"
+                onClick={() => setGenerateTick((t) => t + 1)}
+                disabled={!genState.can || genState.busy}
+                className="gap-1"
+              >
+                {genState.busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                {genState.busy ? "Generando propuestas…" : "Generar propuestas"}
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                onClick={handleSubmit}
+                disabled={!name.trim() || creating}
+                className="gap-1"
+                title={!name.trim() ? "Ponle un nombre al template" : undefined}
+              >
+                {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                {aiTab ? "Crear con esta propuesta" : "Crear template"}
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -368,10 +403,15 @@ function ReferenceUploadTab({
   productionProjectId,
   pickedSource,
   onPicked,
+  generateTick,
+  onGenerateState,
 }: {
   productionProjectId: number;
   pickedSource: PickerSource;
   onPicked: (source: PickerSource) => void;
+  // El pie del picker pide generar incrementando este número.
+  generateTick: number;
+  onGenerateState: (s: GenerateState) => void;
 }) {
   const [files, setFiles] = useState<UploadedReference[]>([]);
   const [intent, setIntent] = useState("");
@@ -514,6 +554,7 @@ function ReferenceUploadTab({
   };
 
   const hasProposal = pickedSource.kind === "ai-reference";
+  useFooterGenerate(callAgent, generateTick, onGenerateState, files.length > 0 && !uploading && !generating, generating);
 
   return (
     <div className="space-y-4">
@@ -640,19 +681,18 @@ function ReferenceUploadTab({
           La IA toma paleta, jerarquía y composición de las referencias y propone
           hasta 3 diseños con el brand kit del cliente. No copia logos ni texto literal.
         </p>
-        <Button
-          size="sm"
-          onClick={callAgent}
-          disabled={files.length === 0 || uploading || generating}
-          className="gap-1 shrink-0"
-        >
-          {generating ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Sparkles className="h-4 w-4" />
-          )}
-          {hasProposal ? "Regenerar" : "Generar con IA"}
-        </Button>
+        {hasProposal && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={callAgent}
+            disabled={files.length === 0 || uploading || generating}
+            className="gap-1 shrink-0"
+          >
+            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Otras propuestas
+          </Button>
+        )}
       </div>
 
       {error && (
@@ -844,7 +884,7 @@ function ProposalChooser({
               </div>
               <p className="text-[11px] font-medium flex items-center gap-1">
                 {i === selected && <Check className="h-3 w-3 text-violet-400" />}
-                {tpl?.name ?? "Propuesta"}
+                {p.template_id === "reference" ? "Fiel a la referencia" : tpl?.name ?? "Propuesta"}
               </p>
               {p.rationale && (
                 <p className="text-[10px] text-muted-foreground line-clamp-3">{p.rationale}</p>
@@ -873,7 +913,7 @@ function ProposalChooser({
       )}
       {imagesError && <p className="text-[11px] text-red-300">{imagesError}</p>}
       <p className="text-[10px] text-muted-foreground">
-        Pulsa Crear abajo para instanciar la propuesta elegida con sus orientaciones 1:1 y 9:16.
+        Pulsa «Crear con esta propuesta» abajo para crearla con sus orientaciones 1:1 y 9:16.
       </p>
     </div>
   );
@@ -898,10 +938,15 @@ function PromptTab({
   productionProjectId,
   pickedSource,
   onPicked,
+  generateTick,
+  onGenerateState,
 }: {
   productionProjectId: number;
   pickedSource: PickerSource;
   onPicked: (source: PickerSource) => void;
+  // El pie del picker pide generar incrementando este número.
+  generateTick: number;
+  onGenerateState: (s: GenerateState) => void;
 }) {
   const [intent, setIntent] = useState("");
   const [tone, setTone] = useState("");
@@ -963,6 +1008,7 @@ function PromptTab({
   };
 
   const hasProposal = pickedSource.kind === "ai-prompt";
+  useFooterGenerate(callAgent, generateTick, onGenerateState, canGenerate, generating);
 
   return (
     <div className="space-y-4">
@@ -1022,19 +1068,18 @@ function PromptTab({
           brand kit del cliente, en 16:9 más 1:1 y 9:16. Las imágenes quedan como
           slots vacíos para que las subas después en el editor.
         </p>
-        <Button
-          size="sm"
-          onClick={callAgent}
-          disabled={!canGenerate}
-          className="gap-1 shrink-0"
-        >
-          {generating ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Sparkles className="h-4 w-4" />
-          )}
-          {hasProposal ? "Regenerar" : "Generar con IA"}
-        </Button>
+        {hasProposal && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={callAgent}
+            disabled={!canGenerate}
+            className="gap-1 shrink-0"
+          >
+            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Otras propuestas
+          </Button>
+        )}
       </div>
 
       {error && (
@@ -1247,4 +1292,28 @@ function LayerRect({ layer, scale }: { layer: TemplateLayer; scale: number }) {
   }
   // frame
   return null;
+}
+
+// Conecta el botón principal del pie con la pestaña con IA: reporta si se
+// puede generar y genera cuando el pie incrementa generateTick.
+function useFooterGenerate(
+  generate: () => void,
+  generateTick: number,
+  onGenerateState: (s: GenerateState) => void,
+  can: boolean,
+  busy: boolean,
+) {
+  const generateRef = useRef(generate);
+  // Valor del contador al montar la pestaña: al cambiar de pestaña no hay que
+  // generar por un clic que fue para la otra.
+  const mountedTick = useRef(generateTick);
+  useEffect(() => {
+    generateRef.current = generate;
+  });
+  useEffect(() => {
+    if (generateTick !== mountedTick.current) generateRef.current();
+  }, [generateTick]);
+  useEffect(() => {
+    onGenerateState({ can, busy });
+  }, [can, busy, onGenerateState]);
 }

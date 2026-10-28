@@ -18,6 +18,9 @@ import { requestLayoutPlans, LAYOUT_PLANNER_AGENT_NAME, LAYOUT_PLANNER_MODEL } f
 import { LayoutFixUsage } from "./layout-fixer";
 import { topPieceImages } from "./brand-pieces";
 import { resolveBrandLogo } from "./project-brand-kit";
+import { requestReferenceLayout } from "./reference-planner";
+import { buildReferenceDefinition, type ReferenceLayout } from "./reference-layout";
+import { adaptTree } from "./adapt";
 
 export const DEFAULT_MASTER_DIMS = { w: 1920, h: 1080 };
 export const DEFAULT_VARIANT_DIMS = [
@@ -65,27 +68,90 @@ export async function generateFromPlans(
   let plans: LayoutPlan[] = [];
   let usage: LayoutFixUsage | undefined;
   let error: string | null = null;
-  try {
-    const brandGuide = await loadClientBrandGuide(p.clientId);
-    const res = await requestLayoutPlans({
+  const fromReference = p.operation === "GENERATE_FROM_REFERENCE" && (p.images?.length ?? 0) > 0;
+  let referenceLayout: ReferenceLayout | null = null;
+  const addUsage = (u?: LayoutFixUsage) => {
+    if (!u) return;
+    usage = usage
+      ? {
+          inputTokens: usage.inputTokens + u.inputTokens,
+          outputTokens: usage.outputTokens + u.outputTokens,
+          estimatedCost: usage.estimatedCost + u.estimatedCost,
+        }
+      : u;
+  };
+  const brandGuide = await loadClientBrandGuide(p.clientId);
+  // Con referencia: una propuesta "Fiel a la referencia" (bloques medidos
+  // sobre la imagen) y 2 del catálogo como alternativas. Las piezas reales de
+  // la marca no van en este modo: competían con la referencia y el modelo
+  // terminaba copiando las piezas de la marca.
+  const [catalog, reference] = await Promise.allSettled([
+    requestLayoutPlans({
       brandGuide,
-      brandPieces: await topPieceImages(brandGuide),
+      brandPieces: fromReference ? [] : await topPieceImages(brandGuide),
       intent: p.intent,
       tone: p.tone,
       instructions: p.instructions,
       brandKit: p.brandKit,
       images: p.images,
-    });
-    plans = res.plans;
-    usage = res.usage;
-  } catch (e) {
-    error = (e as Error).message;
-    usage = (e as { usage?: LayoutFixUsage }).usage;
+      count: fromReference ? 2 : undefined,
+    }),
+    fromReference
+      ? requestReferenceLayout({
+          images: p.images!,
+          intent: p.intent,
+          instructions: p.instructions,
+          brandKit: p.brandKit,
+          brandGuide,
+        })
+      : Promise.resolve(null),
+  ]);
+  if (catalog.status === "fulfilled") {
+    plans = catalog.value.plans;
+    addUsage(catalog.value.usage);
+  } else {
+    error = (catalog.reason as Error).message;
+    addUsage((catalog.reason as { usage?: LayoutFixUsage }).usage);
   }
+  if (reference.status === "fulfilled" && reference.value) {
+    referenceLayout = reference.value.layout;
+    addUsage(reference.value.usage);
+  } else if (reference.status === "rejected") {
+    console.warn("[plan-generation] referencia sin bloques:", (reference.reason as Error).message);
+    addUsage((reference.reason as { usage?: LayoutFixUsage }).usage);
+  }
+  if (referenceLayout) error = null;
 
   // La plantilla nueva se crea con brand_kit_id = p.brandKitId: token solo si hay kit.
-  const logo = plans.length > 0 ? await resolveBrandLogo(p.brandKit, p.clientId, { useToken: p.brandKitId != null }) : null;
-  const proposals = plans
+  const logo =
+    plans.length > 0 || referenceLayout
+      ? await resolveBrandLogo(p.brandKit, p.clientId, { useToken: p.brandKitId != null })
+      : null;
+  const resolveC = (c: string) => resolveColor(c, p.brandKit, c);
+  const referenceProposal = (() => {
+    if (!referenceLayout) return null;
+    const built = buildReferenceDefinition(referenceLayout, logo?.src ?? null);
+    const fit = (dims: { w: number; h: number }) =>
+      ensureTextContrast(
+        built.definition.size.w === dims.w && built.definition.size.h === dims.h ? built.definition : adaptTree(built.definition, dims),
+        resolveC,
+      );
+    // El master va en la proporción de la referencia (una referencia cuadrada
+    // armada en 16:9 se ve estirada); las otras orientaciones salen de ahí.
+    const refDims = built.definition.size;
+    const sameAspect = (a: { w: number; h: number }) => Math.abs(a.w / a.h - refDims.w / refDims.h) < 0.05;
+    const otherDims = [masterDims, ...variantDims].filter((d) => !sameAspect(d));
+    const definition = fit(refDims);
+    return {
+      template_id: "reference",
+      rationale: "Fiel a la referencia: misma composición, jerarquía y colores, con los textos y el logo de la marca.",
+      image_prompts: built.imagePrompts,
+      definition,
+      variants: otherDims.map((dims) => ({ dims, definition: fit(dims) })),
+      preview: resolveTreeTokens(definition, p.brandKit),
+    };
+  })();
+  const catalogProposals = plans
     .map((plan) => {
       const raw = expandPlan(plan, masterDims, variantDims, logo?.src ?? null);
       if (!raw) return null;
@@ -104,6 +170,7 @@ export async function generateFromPlans(
       };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
+  const proposals = referenceProposal ? [referenceProposal, ...catalogProposals] : catalogProposals;
   if (!error && proposals.length === 0) error = "Ninguna propuesta se pudo armar";
 
   const [inv] = await pool.execute<ResultSetHeader>(

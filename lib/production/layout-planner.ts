@@ -137,9 +137,11 @@ export async function requestLayoutPlans(req: PlanRequest): Promise<PlanResponse
     ...(req.brandGuide ? { brand_guide: brandGuideForModel(req.brandGuide) } : {}),
   };
 
-  const parts: Part[] = (req.images ?? []).map((img) => ({
-    inlineData: { mimeType: img.mimeType, data: img.data },
-  }));
+  const parts: Part[] = [];
+  (req.images ?? []).forEach((img, i) => {
+    parts.push({ text: `Referencia ${i + 1} del productor (elige la plantilla cuya composición más se le parezca y toma su paleta y estilo):` });
+    parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
+  });
   for (const piece of req.brandPieces ?? []) {
     parts.push({ text: `Pieza real de la marca que rindió bien: ${piece.caption}` });
     parts.push({ inlineData: { mimeType: piece.mimeType, data: piece.data } });
