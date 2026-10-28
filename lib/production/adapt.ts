@@ -41,7 +41,7 @@ import {
 } from "./types";
 import { reflowForPreview, reflowAnimation, keepLayerAspect } from "./reflow";
 import { scaleLayerStyle, scaleLayerUniform, scaleLayoutConfig } from "./scale";
-import { inferRoles, companionIcons, coversFrame, ROLE_PRIORITY, LayerRole } from "./layer-roles";
+import { inferRoles, companionIcons, coversFrame, insetFrameRatio, ROLE_PRIORITY, LayerRole } from "./layer-roles";
 import { effectiveFontSize, safeMargin } from "./layout-lint";
 
 // Diferencia relativa de aspect ratio a partir de la cual el reflow por
@@ -343,6 +343,14 @@ export function coverFrame(
   origFrame: { w: number; h: number },
   size: { w: number; h: number },
 ): TemplateLayer {
+  // Marco simétrico: se conserva, proporcional al lado corto del formato.
+  const inset = insetFrameRatio(orig, origFrame);
+  if (inset != null) {
+    const m = Math.round(inset * Math.min(size.w, size.h));
+    const k = Math.min(size.w, size.h) / Math.min(origFrame.w, origFrame.h);
+    const styled = scaleLayerStyle(orig, k);
+    return { ...styled, position: { x: m, y: m }, size: { w: size.w - 2 * m, h: size.h - 2 * m }, constraints: undefined };
+  }
   if (orig.type !== "image") {
     return { ...orig, position: { x: 0, y: 0 }, size: { w: size.w, h: size.h }, constraints: undefined };
   }

@@ -41,6 +41,24 @@ export function coversFrame(l: TemplateLayer, frame: { w: number; h: number }): 
   return l.size.w >= frame.w * BACKGROUND_COVER && l.size.h >= frame.h * BACKGROUND_COVER;
 }
 
+// Foto o forma enmarcada a propósito (plantilla "Foto enmarcada"): los cuatro
+// márgenes casi iguales y chicos (≤8% del lado corto). Devuelve el margen como
+// fracción del lado corto, o null si no es un marco.
+export function insetFrameRatio(l: TemplateLayer, frame: { w: number; h: number }): number | null {
+  if (l.type !== "image" && l.type !== "shape") return null;
+  const short = Math.min(frame.w, frame.h);
+  const gaps = [
+    l.position.x,
+    l.position.y,
+    frame.w - (l.position.x + l.size.w),
+    frame.h - (l.position.y + l.size.h),
+  ];
+  const min = Math.min(...gaps);
+  const max = Math.max(...gaps);
+  if (min <= 0.5 || max > short * 0.08 || max - min > Math.max(2, short * 0.005)) return null;
+  return (min + max) / 2 / short;
+}
+
 function fontOf(t: TextLayer): number {
   const fs = t.style.fontSize;
   if (typeof fs === "number") return fs;

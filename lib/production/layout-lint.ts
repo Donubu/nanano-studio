@@ -21,6 +21,7 @@ import {
   TextLayer,
   isFontSizeRange,
 } from "./types";
+import { insetFrameRatio } from "./layer-roles";
 
 export type LintIssueKind =
   | "background_gap"
@@ -230,7 +231,8 @@ export function lintLayout(def: TemplateDefinition): LintIssue[] {
     const b = boxOf(l);
     const covered = intersection(b, frameBox) / (frame.w * frame.h);
     const nearlyBg = b.w >= frame.w * 0.75 && b.h >= frame.h * 0.75;
-    if (nearlyBg && covered < 0.995) {
+    // Un marco simétrico es diseño, no una banda.
+    if (nearlyBg && covered < 0.995 && insetFrameRatio(l, frame) == null) {
       issues.push({
         kind: "background_gap",
         severity: "error",

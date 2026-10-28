@@ -237,6 +237,12 @@ fuente del conocimiento de marca (ver "Guía de marca").
   y la sombra no tapa un `background-clip:text`). Estilos rápidos en
   `text-presets.ts` (panel "Efectos" y `text_style` en "Pídele a la IA"). Las
   texturas se generan con `generate-images` (`purpose: "texture"`, JPEG 512 px).
+- Catálogo: `layout-templates-modern.ts` (Franja de precio, Editorial
+  asimétrico, Bloque de color, Tipografía protagonista, Foto enmarcada, Lujo
+  sobrio) va primero; las clásicas siguen después. Todas las modernas tienen
+  slot `legal` y `cta`, colores de muestra distintos por rol (el planificador
+  recolorea por valor) y pasan el lint en las tres orientaciones (test). Un
+  marco simétrico (foto enmarcada) se conserva al adaptar (`insetFrameRatio`).
 - Dirección de arte (`lib/production/art-direction.ts`): direcciones vigentes,
   reglas de composición y lista de lo que se ve anticuado (estrellas de oferta,
   biseles, brillos plásticos, dorado/3D sin pedido). Se inyecta en el

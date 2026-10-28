@@ -24,6 +24,7 @@ import {
   ImageLayer,
   ShapeLayer,
 } from "./types";
+import { MODERN_TEMPLATES } from "./layout-templates-modern";
 
 export type AspectKey = "horizontal" | "square" | "vertical";
 
@@ -508,7 +509,10 @@ const eventPromo: LayoutTemplate = {
   },
 };
 
+// Primero las contemporáneas (layout-templates-modern.ts): el catálogo se le
+// muestra al planificador en este orden y la dirección de arte las prefiere.
 export const LAYOUT_TEMPLATES: LayoutTemplate[] = [
+  ...MODERN_TEMPLATES,
   heroCentered,
   split,
   badgePromo,
