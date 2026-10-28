@@ -17,6 +17,7 @@ import {
 import { newButtonLayer, newBadgeLayer } from "./preset-layers";
 import { isValidIconName } from "./icon-catalog";
 import { removeSkin, type SkinKind } from "./skin";
+import { formatChileanPrices } from "./layout-plan";
 import { applyTextPreset, TEXT_PRESETS, type TextPresetId } from "./text-presets";
 
 export const EDIT_OPS = [
@@ -225,7 +226,7 @@ function applyStyle(l: TemplateLayer, op: EditOp, opts: EditOpsOptions = {}): Te
     if (bg) style = { ...style, backgroundColor: bg };
     if (op.align) style = { ...style, align: op.align };
     next = applyTextEffects(
-      { ...t, style, ...(typeof op.content === "string" ? { content: op.content.slice(0, 500) } : {}) },
+      { ...t, style, ...(typeof op.content === "string" ? { content: formatChileanPrices(op.content.slice(0, 500)) } : {}) },
       op,
       opts,
     );
@@ -435,7 +436,7 @@ export function applyEditOps(
     switch (op.op) {
       case "set_text":
         children = mapLayers(children, op.id!, (l) =>
-          l.type === "text" && typeof op.content === "string" ? { ...l, content: op.content.slice(0, 500) } : l,
+          l.type === "text" && typeof op.content === "string" ? { ...l, content: formatChileanPrices(op.content.slice(0, 500)) } : l,
         );
         break;
       case "update":

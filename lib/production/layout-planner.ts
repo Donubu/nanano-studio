@@ -34,7 +34,7 @@ Devuelve "proposals": entre 1 y 3 propuestas, cada una con una plantilla DISTINT
 
 Por propuesta:
 - template_id: id exacto del catálogo.
-- texts: contenido para cada slot de texto que uses, en español de Chile (tuteo), corto y publicitario. Topes duros: max_chars en total y line_chars para la palabra más larga (una palabra más larga se corta feo; usa sinónimos o abreviaturas como "DCTO"). Precios en formato chileno ($9.990). CTA de 1 a 3 palabras.
+- texts: contenido para cada slot de texto que uses, en español de Chile (tuteo), corto y publicitario. Topes duros: max_chars en total y line_chars para la palabra más larga (una palabra más larga se corta feo; usa sinónimos o abreviaturas como "DCTO"). Precios en formato chileno ($9.990). CTA de 1 a 3 palabras. Datos verificables: ubicaciones (comuna, ciudad, región, sector, dirección), precios, descuentos, metrajes, dormitorios, fechas, plazos, beneficios, subsidios, stock y nombres de productos salen SOLO del brief, de brand_guide o de los textos que ya tiene la pieza. Si no están, no los pongas: escribe un texto sin ese dato (por ejemplo "Casas de 207 a 237 m²" en vez de inventar dónde quedan). Nunca completes una ubicación por deducción ni por el nombre del proyecto.
 - hidden: ids de slots que sobran para este brief (por ejemplo un badge de descuento si no hay descuento). Nunca ocultes el titular.
 - colors: para cada color de la plantilla que quieras cambiar, {from: color de la plantilla, to: nuevo}. Si la marca tiene colores, usa sus tokens exactos (ej. "{color.primary}"); si no, hex. Cuida el contraste del texto sobre su fondo.
 - heading_font / body_font: token de fuente de la marca si existe (ej. "{font.heading}"); si no, omítelos.

@@ -115,3 +115,21 @@ describe("ensureTextContrast", () => {
     expect(price.style.color).toBe("#FFFFFF");
   });
 });
+
+describe("formatChileanPrices", () => {
+  it("separa miles y deja el espacio después de UF", async () => {
+    const { formatChileanPrices } = await import("../layout-plan");
+    expect(formatChileanPrices("UF21776")).toBe("UF 21.776");
+    expect(formatChileanPrices("DESDE UF21776*")).toBe("DESDE UF 21.776*");
+    expect(formatChileanPrices("$9990 hoy")).toBe("$9.990 hoy");
+    expect(formatChileanPrices("$1234567")).toBe("$1.234.567");
+  });
+
+  it("no toca precios ya formateados ni decimales", async () => {
+    const { formatChileanPrices } = await import("../layout-plan");
+    expect(formatChileanPrices("DESDE UF 21.776*")).toBe("DESDE UF 21.776*");
+    expect(formatChileanPrices("UF 3.255,5")).toBe("UF 3.255,5");
+    expect(formatChileanPrices("$990")).toBe("$990");
+    expect(formatChileanPrices("Año 2026")).toBe("Año 2026");
+  });
+});

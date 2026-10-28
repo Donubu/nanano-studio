@@ -247,6 +247,17 @@ export function expandPlan(
 
 // Normaliza la respuesta cruda del modelo. Descarta planes con plantilla
 // inexistente; filtra ids que no son de esa plantilla.
+// Precios en formato chileno: "UF21776" → "UF 21.776", "$9990" → "$9.990".
+// El modelo a veces los comprime para que quepan en la línea; el auto-fit
+// del texto ya se encarga del espacio. Montos con decimales o ya
+// formateados no se tocan.
+export function formatChileanPrices(text: string): string {
+  const thousands = (digits: string) => digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return text
+    .replace(/\bUF\s*(\d{4,})(?![\d.,])/gi, (_, d: string) => `UF ${thousands(d)}`)
+    .replace(/\$\s*(\d{4,})(?![\d.,])/g, (_, d: string) => `$${thousands(d)}`);
+}
+
 export function sanitizePlan(raw: unknown): LayoutPlan | null {
   if (!raw || typeof raw !== "object") return null;
   const p = raw as Record<string, unknown>;
@@ -263,7 +274,10 @@ export function sanitizePlan(raw: unknown): LayoutPlan | null {
   return {
     template_id: t.id,
     texts: arr(p.texts)
-      .map((x) => ({ id: str((x as { id?: unknown }).id), content: str((x as { content?: unknown }).content).trim() }))
+      .map((x) => ({
+        id: str((x as { id?: unknown }).id),
+        content: formatChileanPrices(str((x as { content?: unknown }).content).trim()),
+      }))
       .filter((x) => textIds.has(x.id) && x.content.length > 0),
     hidden: arr(p.hidden).map(str).filter((id) => allIds.has(id)),
     colors: arr(p.colors)
