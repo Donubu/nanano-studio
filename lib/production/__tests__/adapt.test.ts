@@ -211,3 +211,38 @@ describe("adaptTree — botones en tiras", () => {
     expect(cta.position.x + cta.size.w).toBeLessThanOrEqual(160);
   });
 });
+
+describe("adaptTree — cambio de orientación con precio grande", () => {
+  // Caso real (Enaco): master 16:9 con el precio como texto más grande.
+  const master: TemplateDefinition = {
+    id: "tpl_root",
+    type: "frame",
+    position: { x: 0, y: 0 },
+    size: { w: 1920, h: 1080 },
+    layout: { mode: "free" },
+    children: [
+      { id: "photo", type: "image", name: "Imagen producto", src: "x", position: { x: 960, y: 0 }, size: { w: 960, h: 1080 } },
+      { id: "name", type: "text", name: "Nombre", content: "RESERVA SAN FRANCISCO", position: { x: 100, y: 180 }, size: { w: 780, h: 140 }, style: { fontSize: { min: 20, max: 56 }, fontWeight: 800, color: "#245C98" } },
+      { id: "price", type: "text", name: "Precio", content: "DESDE UF 21.776*", position: { x: 100, y: 420 }, size: { w: 780, h: 90 }, style: { fontSize: { min: 20, max: 64 }, fontWeight: 800, color: "#245C98" } },
+      { id: "cta", type: "text", name: "Texto tag", content: "VISITA PILOTOS", position: { x: 100, y: 550 }, size: { w: 360, h: 70 }, style: { fontSize: 24, color: "#fff", backgroundColor: "#245C98" } },
+      { id: "legal", type: "text", name: "Texto", content: "*Precio incluye descuento. www.enaco.cl", position: { x: 100, y: 990 }, size: { w: 780, h: 40 }, style: { fontSize: 16, color: "#666" } },
+    ],
+  };
+
+  it("un cuadrado desde 16:9 no es una tira: no se pierden la foto, el nombre ni el legal", () => {
+    expect(isLinearFormat(master.size, { w: 1080, h: 1080 })).toBe(false);
+    const out = adaptTree(master, { w: 1080, h: 1080 });
+    for (const id of ["photo", "name", "price", "cta", "legal"]) {
+      expect(out.children.find((c) => c.id === id)?.visible, id).not.toBe(false);
+    }
+  });
+
+  it("el nombre es el titular aunque el precio tenga letra más grande", async () => {
+    const { inferRoles } = await import("../layer-roles");
+    const roles = inferRoles(master);
+    expect(roles.get("name")).toBe("headline");
+    expect(roles.get("price")).toBe("price");
+    expect(roles.get("cta")).toBe("cta");
+    expect(roles.get("legal")).toBe("legal");
+  });
+});

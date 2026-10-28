@@ -56,8 +56,15 @@ export function aspectDiff(mw: number, mh: number, aw: number, ah: number): numb
   return Math.abs(m - a) / Math.min(m, a);
 }
 
+// Tira = formato alargado (2:1 o más, en cualquier eje) y bien distinto del
+// original. Un cuadrado desde un 16:9 difiere un 78% pero no es una tira: se
+// adapta por reflow, no en fila (antes quedaba solo logo + precio + CTA).
+const STRIP_RATIO = 2;
+
 export function isLinearFormat(master: { w: number; h: number }, size: { w: number; h: number }): boolean {
-  return aspectDiff(master.w, master.h, size.w, size.h) > LINEAR_ASPECT_DIFF;
+  const r = size.w / size.h;
+  const elongated = r >= STRIP_RATIO || r <= 1 / STRIP_RATIO;
+  return elongated && aspectDiff(master.w, master.h, size.w, size.h) > LINEAR_ASPECT_DIFF;
 }
 
 export function adaptTree(master: TemplateDefinition, size: { w: number; h: number }): TemplateDefinition {
@@ -173,7 +180,7 @@ function fitChildren(
 
 // Orden canónico de una tira: marca/oferta a un lado, mensaje al medio, CTA
 // al final (derecha en horizontal, abajo en vertical).
-const STRIP_ORDER: LayerRole[] = ["logo", "badge", "headline", "secondary", "product", "icon", "cta"];
+const STRIP_ORDER: LayerRole[] = ["logo", "badge", "headline", "secondary", "price", "product", "icon", "cta", "legal"];
 
 // Fracción máxima del eje corto que ocupa cada rol. En tiras horizontales
 // es el alto (un CTA de todo el alto de un billboard es desproporcionado);
@@ -237,7 +244,7 @@ function linearize(master: TemplateDefinition, size: { w: number; h: number }): 
         let p = horizontal ? composeTextRow(item, availH, availW) : composeTextColumn(item, availW, availH);
         let font = numericFont(p.layer as TextLayer);
         if (roleOf(item) === "headline") headlineFont = font;
-        else if (headlineFont && font > headlineFont * SECONDARY_MAX_RATIO) {
+        else if (headlineFont && roleOf(item) !== "price" && font > headlineFont * SECONDARY_MAX_RATIO) {
           const r = (headlineFont * SECONDARY_MAX_RATIO) / font;
           const fit = bestTextFitCapped(item, p.w, p.h, font * r);
           p = { layer: restyleText(item, fit.fs, fit.w, fit.h), w: fit.w, h: fit.h };
@@ -379,7 +386,8 @@ export function coverFrame(
 // Titular, CTA y badge no se ocultan: si quedan bajo la letra mínima, crecen
 // hasta alcanzarla (centrados, dentro del margen de seguridad y hasta 30% del
 // alto). Un CTA de 920×120 del Vertical escalado a 160×600 quedaba en 6 px.
-const GROW_ROLES = new Set<LayerRole>(["headline", "cta", "badge"]);
+// El legal tampoco se oculta en formatos parecidos: lo exige la marca.
+const GROW_ROLES = new Set<LayerRole>(["headline", "cta", "price", "badge", "legal"]);
 
 function growToLegible(l: TemplateLayer, frame: { w: number; h: number }, minFont: number): TemplateLayer {
   if (l.type !== "text") return l;

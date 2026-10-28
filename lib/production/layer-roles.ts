@@ -11,11 +11,13 @@ import { isFontSizeRange } from "./types";
 export type LayerRole =
   | "background"
   | "headline"
+  | "price"
   | "cta"
   | "badge"
   | "logo"
   | "product"
   | "secondary"
+  | "legal"
   | "icon"
   | "decoration";
 
@@ -24,12 +26,14 @@ export const ROLE_PRIORITY: Record<LayerRole, number> = {
   background: 0,
   headline: 1,
   cta: 2,
-  badge: 3,
-  logo: 4,
-  product: 5,
-  secondary: 6,
-  icon: 7,
-  decoration: 8,
+  price: 3,
+  badge: 4,
+  logo: 5,
+  product: 6,
+  secondary: 7,
+  legal: 8,
+  icon: 9,
+  decoration: 10,
 };
 
 const BACKGROUND_COVER = 0.9;
@@ -66,19 +70,31 @@ function fontOf(t: TextLayer): number {
   return 0;
 }
 
-const CTA_NAME = /\b(cta|bot[oó]n|button|comprar|compra|pide|pedir|reserva|ver m[aá]s)\b/i;
+const CTA_NAME =
+  /\b(cta|bot[oó]n|button|comprar|compra|pide|pedir|reserva|ver m[aá]s|visita|visitar|agenda|agendar|cotiza|cotizar|conoce|conocer|inscr[ií]bete)\b/i;
 const BADGE_NAME = /\b(badge|sello|dcto|descuento|oferta|tag|etiqueta|precio)\b/i;
 const LOGO_NAME = /\blogo/i;
+// Por el nombre de la capa (lo pone la plantilla o el productor): manda sobre
+// el tamaño de letra. En retail el precio suele ser el texto más grande y no
+// por eso es el titular.
+const HEADLINE_NAME = /^(titular|t[ií]tulo|headline|title|nombre)\b/i;
+const PRICE_NAME = /^(precio|price)\b/i;
+// Letra chica: por nombre de capa o por cómo empieza (asterisco de condiciones).
+const LEGAL_NAME = /^(legal|letra chica)\b/i;
+const LEGAL_TEXT = /^\s*\*|im[aá]genes referenciales|bases en|condiciones en|v[aá]lido hasta/i;
 
 export function inferRoles(def: TemplateDefinition): Map<string, LayerRole> {
   const roles = new Map<string, LayerRole>();
   const visible = def.children.filter((c) => c.visible !== false);
   let headline: { id: string; fs: number } | null = null;
-  for (const l of visible) {
-    if (l.type === "text" && !l.style.backgroundColor) {
-      const fs = fontOf(l);
-      if (!headline || fs > headline.fs) headline = { id: l.id, fs };
-    }
+  const plain = visible.filter((l): l is TextLayer => l.type === "text" && !l.style.backgroundColor);
+  const named = plain.filter((l) => HEADLINE_NAME.test(l.name ?? ""));
+  // El titular: el que se llama así (el de letra más grande si hay varios);
+  // si ninguno, el texto más grande que no sea un precio.
+  const candidates = named.length > 0 ? named : plain.filter((l) => !PRICE_NAME.test(l.name ?? ""));
+  for (const l of candidates.length > 0 ? candidates : plain) {
+    const fs = fontOf(l);
+    if (!headline || fs > headline.fs) headline = { id: l.id, fs };
   }
   for (const l of visible) {
     const name = `${l.name ?? ""} ${l.type === "text" ? l.content : ""}`;
@@ -93,7 +109,10 @@ export function inferRoles(def: TemplateDefinition): Map<string, LayerRole> {
         // Círculo/cuadrado con fondo = badge; pastilla ancha = CTA.
         if ((ratio < 1.6 && round) || (BADGE_NAME.test(name) && !CTA_NAME.test(name))) role = "badge";
         else role = "cta";
-      } else role = l.id === headline?.id ? "headline" : "secondary";
+      } else if (l.id === headline?.id) role = "headline";
+      else if (PRICE_NAME.test(l.name ?? "")) role = "price";
+      else if (LEGAL_NAME.test(l.name ?? "") || LEGAL_TEXT.test(l.content)) role = "legal";
+      else role = "secondary";
     } else if (l.type === "icon") role = "icon";
     else if (l.type === "image") role = "product";
     else role = "decoration";
