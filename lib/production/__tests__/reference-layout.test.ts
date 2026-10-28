@@ -26,7 +26,7 @@ describe("referencia por bloques", () => {
   });
 
   it("arma capas editables con la composición, el logo y los roles correctos", () => {
-    const built = buildReferenceDefinition(sanitizeReferenceLayout(raw)!, "{logo.primary}");
+    const built = buildReferenceDefinition(sanitizeReferenceLayout(raw)!, { src: "{logo.primary}", aspect: 1 });
     const d = built.definition;
     expect(d.size).toEqual({ w: 1080, h: 1080 });
     const hero = d.children.find((c) => c.id === "hero")!;
@@ -46,5 +46,40 @@ describe("referencia por bloques", () => {
   it("sin logo de marca no deja el slot", () => {
     const built = buildReferenceDefinition(sanitizeReferenceLayout(raw)!, null);
     expect(built.definition.children.some((c) => c.id === "logo")).toBe(false);
+  });
+
+  it("un logo cuadrado sobre un recuadro de su misma proporción ocupa el recuadro y la forma sobra", () => {
+    const layout = sanitizeReferenceLayout({
+      aspect: "square",
+      background: "#ffffff",
+      blocks: [
+        { role: "headline", x: 10, y: 10, w: 80, h: 10, text: "PUERTA DEL SOL" },
+        { role: "shape", x: 68, y: 70, w: 18, h: 18, background_color: "#245C98" },
+        { role: "logo", x: 68.5, y: 76, w: 17, h: 5 },
+      ],
+    })!;
+    const d = buildReferenceDefinition(layout, { src: "logo.png", aspect: 1 }).definition;
+    expect(d.children.some((c) => c.type === "shape")).toBe(false);
+    const logo = d.children.find((c) => c.id === "logo")!;
+    expect(logo.size.w).toBe(logo.size.h);
+    expect(logo.size.w).toBeCloseTo(194, -1);
+  });
+
+  it("una palabra sobre un bloque de otra proporción va centrada con aire", () => {
+    const layout = sanitizeReferenceLayout({
+      aspect: "square",
+      background: "#ffffff",
+      blocks: [
+        { role: "headline", x: 10, y: 10, w: 80, h: 10, text: "PUERTA DEL SOL" },
+        { role: "shape", x: 10, y: 70, w: 40, h: 20, background_color: "#245C98" },
+        { role: "logo", x: 12, y: 75, w: 30, h: 6 },
+      ],
+    })!;
+    const d = buildReferenceDefinition(layout, { src: "logo.png", aspect: 4 }).definition;
+    expect(d.children.some((c) => c.type === "shape")).toBe(true);
+    const logo = d.children.find((c) => c.id === "logo")!;
+    expect(Math.round(logo.size.w / logo.size.h)).toBe(4);
+    const cx = logo.position.x + logo.size.w / 2;
+    expect(cx).toBeCloseTo(0.3 * 1080, -1);
   });
 });

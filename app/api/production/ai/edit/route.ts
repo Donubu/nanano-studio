@@ -31,6 +31,7 @@ import { resolveTemplateBrandKit, resolveBrandLogo } from "@/lib/production/proj
 import { checkProductionAiQuota, quotaBlockedBody } from "@/lib/production/ai-rate-limit";
 import { loadClientBrandGuide } from "@/lib/production/plan-generation";
 import { applyEditOps } from "@/lib/production/edit-ops";
+import { ensureTextContrast, ensureLogoVisible, logoColorsOf } from "@/lib/production/layout-plan";
 import { requestEditPlan, EDIT_PLANNER_AGENT_NAME, EDIT_PLANNER_MODEL } from "@/lib/production/edit-planner";
 import type { LayoutFixUsage } from "@/lib/production/layout-fixer";
 import { downloadReference } from "@/lib/production/reference-images";
@@ -183,8 +184,12 @@ export async function POST(request: NextRequest) {
         accent: kit.colors[0]?.value,
         logo,
       });
+      // Un fondo nuevo puede dejar textos sin contraste o el logo sobre su
+      // propio color: se corrige igual que al crear.
+      const resolveC = (c: string) => resolveColor(c, kit, c);
+      const definition = ensureLogoVisible(ensureTextContrast(result.definition, resolveC), resolveC, logoColorsOf(kit));
       body = {
-        definition: result.definition,
+        definition,
         images: result.images,
         skins: result.skins.map((sk) => ({ ...sk, colors: skinColors(result.definition, sk.layer_id, kit) })),
         textures: result.textures,

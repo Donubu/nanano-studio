@@ -23,6 +23,7 @@ import {
 } from "./layout-lint";
 import { LayerPatch, applyLayerPatches } from "./layout-patch";
 import { COMPOSITION_RULES } from "./art-direction";
+import { ensureTextContrast } from "./layout-plan";
 
 export const LAYOUT_FIXER_MODEL =
   process.env.PRODUCTION_AI_LAYOUT_MODEL || "gemini-3.8-flash";
@@ -70,10 +71,12 @@ Reglas:
 4. Tamaños legibles: mínimo 10px en formatos chicos (lado corto < 120px), 12px en el resto. El titular es siempre el texto más grande.
 5. En formatos muy chicos o muy alargados puedes ocultar (hidden: true) elementos secundarios: bajadas, textos legales, decoraciones. Nunca ocultes el titular, el CTA, el precio ni el logo.
 6. Formatos alargados (tiras): distribuye en fila (horizontal) o columna (vertical) siguiendo el orden de lectura del original.
-7. Cambia solo lo necesario. No cambies textos ni colores. Si una capa está bien, no la incluyas.
+7. Cambia solo lo necesario. No cambies textos ni colores. Si una capa está bien, no la incluyas. Si las instrucciones del productor piden cambiar colores, fondos o textos, no puedes hacerlo aquí: haz el resto y dilo al final del rationale ("para cambiar colores o textos usa «Pídele a la IA»").
 
 En "recompose", además, compón con este criterio:
 ${COMPOSITION_RULES.map((r) => `- ${r}`).join("\n")}
+- Aprovecha todo el formato: sin franjas vacías grandes (más de ~15% del alto o del ancho sin contenido). Si el formato nuevo es más alto, la imagen principal crece (en vertical, entre 45% y 60% del alto) y los bloques de texto, precio, CTA y logo crecen y se reparten en el resto; si es más ancho, la imagen ocupa un lado completo.
+- Mantén los grupos del original juntos (cintillo + nombre arriba, precio + logo como un bloque) y sus proporciones (un logo cuadrado sigue cuadrado).
 
 Responde solo con el JSON pedido: "patches" (una entrada por capa a cambiar, con su id y solo los campos que cambian) y "rationale" (una frase en español de Chile, tuteo, que explique qué corregiste).`;
 
@@ -239,6 +242,10 @@ export interface RunLayoutFixParams {
   abortSignal?: AbortSignal;
   maxPasses?: number;
   onUsage?: (u: LayoutFixUsage) => void;
+  // Resuelve tokens de color: si viene, al final se asegura el contraste de
+  // los textos (al recomponer, un texto blanco que iba sobre la foto puede
+  // quedar sobre el fondo blanco; el modelo no cambia colores).
+  resolveColor?: (c: string) => string;
 }
 
 export interface RunLayoutFixResult {
@@ -295,7 +302,7 @@ export async function runLayoutFix(p: RunLayoutFixParams): Promise<RunLayoutFixR
     throw Object.assign(e as Error, { usage, passes, issuesBefore });
   }
   return {
-    tree: current,
+    tree: p.resolveColor ? ensureTextContrast(current, p.resolveColor) : current,
     patches,
     rationale: rationales.join(" "),
     issuesBefore,

@@ -13,14 +13,15 @@ import pool from "@/lib/db";
 import { ResultSetHeader, RowDataPacket } from "mysql2";
 import { BrandGuide } from "./brand-guide";
 import { BrandKitContent, resolveTreeTokens, resolveColor } from "./brand-kit";
-import { expandPlan, ensureTextContrast, LayoutPlan } from "./layout-plan";
+import { expandPlan, ensureTextContrast, ensureLogoVisible, logoColorsOf, LayoutPlan } from "./layout-plan";
 import { requestLayoutPlans, LAYOUT_PLANNER_AGENT_NAME, LAYOUT_PLANNER_MODEL } from "./layout-planner";
-import { LayoutFixUsage } from "./layout-fixer";
+import { LayoutFixUsage, runLayoutFix } from "./layout-fixer";
 import { topPieceImages } from "./brand-pieces";
 import { resolveBrandLogo } from "./project-brand-kit";
 import { requestReferenceLayout } from "./reference-planner";
 import { buildReferenceDefinition, type ReferenceLayout } from "./reference-layout";
 import { adaptTree } from "./adapt";
+import type { TemplateDefinition } from "./types";
 
 export const DEFAULT_MASTER_DIMS = { w: 1920, h: 1080 };
 export const DEFAULT_VARIANT_DIMS = [
@@ -128,26 +129,46 @@ export async function generateFromPlans(
       ? await resolveBrandLogo(p.brandKit, p.clientId, { useToken: p.brandKitId != null })
       : null;
   const resolveC = (c: string) => resolveColor(c, p.brandKit, c);
-  const referenceProposal = (() => {
+  const logoColors = logoColorsOf(p.brandKit);
+  const finish = (d: TemplateDefinition) => ensureLogoVisible(ensureTextContrast(d, resolveC), resolveC, logoColors);
+  const referenceProposal = await (async () => {
     if (!referenceLayout) return null;
-    const built = buildReferenceDefinition(referenceLayout, logo?.src ?? null);
-    const fit = (dims: { w: number; h: number }) =>
-      ensureTextContrast(
-        built.definition.size.w === dims.w && built.definition.size.h === dims.h ? built.definition : adaptTree(built.definition, dims),
-        resolveC,
-      );
+    const built = buildReferenceDefinition(referenceLayout, logo);
     // El master va en la proporción de la referencia (una referencia cuadrada
-    // armada en 16:9 se ve estirada); las otras orientaciones salen de ahí.
-    const refDims = built.definition.size;
+    // armada en 16:9 se ve estirada); las otras orientaciones salen de ahí,
+    // recompuestas con IA como "Adaptar con IA" (el reajuste solo deja
+    // franjas vacías y textos sobre fondos donde no se leen).
+    const definition = finish(built.definition);
+    const refDims = definition.size;
     const sameAspect = (a: { w: number; h: number }) => Math.abs(a.w / a.h - refDims.w / refDims.h) < 0.05;
     const otherDims = [masterDims, ...variantDims].filter((d) => !sameAspect(d));
-    const definition = fit(refDims);
+    const view = (t: TemplateDefinition) => resolveTreeTokens(t, p.brandKit);
+    const variants = await Promise.all(
+      otherDims.map(async (dims) => {
+        const base = adaptTree(definition, dims);
+        try {
+          const res = await runLayoutFix({
+            tree: base,
+            sourceTree: definition,
+            view,
+            image: p.images?.[0] ?? null,
+            imageRole: "original",
+            recompose: true,
+          });
+          addUsage(res.usage);
+          return { dims, definition: finish(res.tree) };
+        } catch (e) {
+          addUsage((e as { usage?: LayoutFixUsage }).usage);
+          return { dims, definition: finish(base) };
+        }
+      }),
+    );
     return {
       template_id: "reference",
       rationale: "Fiel a la referencia: misma composición, jerarquía y colores, con los textos y el logo de la marca.",
       image_prompts: built.imagePrompts,
       definition,
-      variants: otherDims.map((dims) => ({ dims, definition: fit(dims) })),
+      variants,
       preview: resolveTreeTokens(definition, p.brandKit),
     };
   })();
@@ -155,10 +176,9 @@ export async function generateFromPlans(
     .map((plan) => {
       const raw = expandPlan(plan, masterDims, variantDims, logo?.src ?? null);
       if (!raw) return null;
-      const resolve = (c: string) => resolveColor(c, p.brandKit, c);
       const expanded = {
-        definition: ensureTextContrast(raw.definition, resolve),
-        variants: raw.variants.map((v) => ({ ...v, definition: ensureTextContrast(v.definition, resolve) })),
+        definition: finish(raw.definition),
+        variants: raw.variants.map((v) => ({ ...v, definition: finish(v.definition) })),
       };
       return {
         template_id: plan.template_id,

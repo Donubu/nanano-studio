@@ -133,3 +133,32 @@ describe("formatChileanPrices", () => {
     expect(formatChileanPrices("Año 2026")).toBe("Año 2026");
   });
 });
+
+describe("ensureLogoVisible", () => {
+  const base = (bg: string) => ({
+    id: "tpl_root",
+    type: "frame" as const,
+    position: { x: 0, y: 0 },
+    size: { w: 1080, h: 1080 },
+    layout: { mode: "free" as const },
+    background: { type: "color" as const, value: bg },
+    children: [
+      { id: "logo", type: "image" as const, name: "Logo", src: "x", fit: "contain" as const, position: { x: 800, y: 800 }, size: { w: 200, h: 200 } },
+    ],
+  });
+
+  it("pone una placa blanca detrás del logo cuando el fondo es de su mismo color", async () => {
+    const { ensureLogoVisible } = await import("../layout-plan");
+    const out = ensureLogoVisible(base("{color.primary}"), (c) => (c === "{color.primary}" ? "#245C98" : c), ["#245C98"]);
+    expect(out.children.map((c) => c.id)).toEqual(["logo-plate", "logo"]);
+    expect(out.children[0].size.w).toBeGreaterThan(200);
+    // Idempotente.
+    expect(ensureLogoVisible(out, (c) => (c === "{color.primary}" ? "#245C98" : c), ["#245C98"]).children).toHaveLength(2);
+  });
+
+  it("no toca el logo sobre un fondo distinto", async () => {
+    const { ensureLogoVisible } = await import("../layout-plan");
+    const def = base("#FFFFFF");
+    expect(ensureLogoVisible(def, (c) => c, ["#245C98"])).toBe(def);
+  });
+});

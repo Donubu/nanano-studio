@@ -127,25 +127,82 @@ function fitFont(text: string, w: number, h: number, uppercase: boolean, padded:
   return Math.max(8, Math.floor(Math.min(innerH / (lines * 1.15), innerW / (longest * glyph))));
 }
 
+function isLight(c: string): boolean {
+  const m = /^#([0-9a-f]{6})$/i.exec(c);
+  if (!m) return false;
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 160;
+}
+
 export interface BuiltReference {
   definition: TemplateDefinition;
   imagePrompts: { id: string; prompt: string }[];
 }
 
-export function buildReferenceDefinition(layout: ReferenceLayout, logoSrc: string | null): BuiltReference {
+const pct = (b: ReferenceBlock, W: number, H: number) => ({
+  x: (b.x / 100) * W,
+  y: (b.y / 100) * H,
+  w: (b.w / 100) * W,
+  h: (b.h / 100) * H,
+});
+
+// Forma que contiene al bloque del logo (la referencia suele tener el logo
+// sobre un recuadro de color).
+function containingShape(blocks: ReferenceBlock[], logo: ReferenceBlock): number {
+  const c = { x: logo.x + logo.w / 2, y: logo.y + logo.h / 2 };
+  return blocks.findIndex(
+    (b) => b.role === "shape" && c.x >= b.x && c.x <= b.x + b.w && c.y >= b.y && c.y <= b.y + b.h && b.w * b.h > logo.w * logo.h,
+  );
+}
+
+export function buildReferenceDefinition(
+  layout: ReferenceLayout,
+  logo: { src: string; aspect: number } | null,
+): BuiltReference {
   const { w: W, h: H } = CANONICAL_SIZES[layout.aspect];
   const children: TemplateLayer[] = [];
   const imagePrompts: { id: string; prompt: string }[] = [];
   let images = 0;
+  // Caja final del logo, con su proporción real. Si está sobre un recuadro y
+  // tiene la proporción del recuadro (el logo de Enaco ya es el cuadrado
+  // azul), ocupa el recuadro y la forma sobra; si no, va centrado con aire.
+  const skip = new Set<number>();
+  const logoBoxes = new Map<number, { x: number; y: number; w: number; h: number }>();
   layout.blocks.forEach((b, i) => {
+    if (b.role !== "logo" || !logo) return;
+    const aspect = logo.aspect > 0 ? logo.aspect : 1;
+    const si = containingShape(layout.blocks, b);
+    let area = pct(b, W, H);
+    if (si >= 0) {
+      const s = pct(layout.blocks[si], W, H);
+      const matches = Math.abs(Math.log(s.w / s.h / aspect)) < Math.log(1.3);
+      if (matches) skip.add(si);
+      const inset = matches ? 0 : 0.15;
+      area = { x: s.x + s.w * inset, y: s.y + s.h * inset, w: s.w * (1 - 2 * inset), h: s.h * (1 - 2 * inset) };
+    }
+    const w = Math.min(area.w, area.h * aspect);
+    const h = w / aspect;
+    logoBoxes.set(i, { x: area.x + (area.w - w) / 2, y: area.y + (area.h - h) / 2, w, h });
+  });
+  layout.blocks.forEach((b, i) => {
+    if (skip.has(i)) return;
     const box = {
       position: { x: Math.round((b.x / 100) * W), y: Math.round((b.y / 100) * H) },
       size: { w: Math.max(4, Math.round((b.w / 100) * W)), h: Math.max(4, Math.round((b.h / 100) * H)) },
     };
     if (b.role === "logo") {
-      if (!logoSrc) return;
-      const logo: ImageLayer = { id: LOGO_SLOT_ID, type: "image", name: "Logo", ...box, src: logoSrc, fit: "contain", focalX: 0, focalY: 0 };
-      children.push(logo);
+      const lb = logoBoxes.get(i);
+      if (!logo || !lb || children.some((c) => c.id === LOGO_SLOT_ID)) return;
+      const layer: ImageLayer = {
+        id: LOGO_SLOT_ID,
+        type: "image",
+        name: "Logo",
+        position: { x: Math.round(lb.x), y: Math.round(lb.y) },
+        size: { w: Math.round(lb.w), h: Math.round(lb.h) },
+        src: logo.src,
+        fit: "contain",
+      };
+      children.push(layer);
       return;
     }
     if (b.role === "image") {
@@ -192,6 +249,21 @@ export function buildReferenceDefinition(layout: ReferenceLayout, logoSrc: strin
           : {}),
       },
     };
+    // Texto claro sin fondo sobre una foto: sombra suave para que se lea
+    // sobre cielos y zonas claras (la referencia lo resuelve con la foto que
+    // tiene; la generada puede ser más clara).
+    const overPhoto = children.some(
+      (c) =>
+        c.type === "image" &&
+        c.id !== LOGO_SLOT_ID &&
+        box.position.x < c.position.x + c.size.w &&
+        c.position.x < box.position.x + box.size.w &&
+        box.position.y < c.position.y + c.size.h &&
+        c.position.y < box.position.y + box.size.h,
+    );
+    if (!withBg && overPhoto && isLight(text.style.color)) {
+      text.shadow = { x: 0, y: Math.max(1, Math.round(fs * 0.04)), blur: Math.round(fs * 0.35), color: "rgba(0,0,0,0.55)" };
+    }
     children.push(text);
   });
   return {

@@ -26,7 +26,8 @@ import { TemplateDefinition } from "@/lib/production/types";
 import { EMPTY_KIT_CONTENT } from "@/lib/production/brand-kit";
 import { resolveTemplateBrandKit } from "@/lib/production/project-brand-kit";
 import { checkProductionAiQuota, quotaBlockedBody } from "@/lib/production/ai-rate-limit";
-import { resolveTreeTokens } from "@/lib/production/brand-kit";
+import { resolveTreeTokens, resolveColor } from "@/lib/production/brand-kit";
+import { ensureLogoVisible, logoColorsOf } from "@/lib/production/layout-plan";
 import { adaptTree } from "@/lib/production/adapt";
 import { collapseShapeTextPairs } from "@/lib/production/composites";
 import {
@@ -198,8 +199,15 @@ export async function POST(
         imageRole: "original",
         recompose: true,
         instructions,
+        resolveColor: (c) => resolveColor(c, mergedKit, c),
       });
-      result = { ok: true, tree: res.tree, rationale: res.rationale, usage: res.usage };
+      const resolveC = (c: string) => resolveColor(c, mergedKit, c);
+      result = {
+        ok: true,
+        tree: ensureLogoVisible(res.tree, resolveC, logoColorsOf(mergedKit)),
+        rationale: res.rationale,
+        usage: res.usage,
+      };
     } catch (e) {
       result = {
         ok: false,

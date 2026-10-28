@@ -443,7 +443,75 @@ export function ensureTextContrast(
       if (ratio == null || ratio >= MIN_CONTRAST) return l;
       const white = contrastRatio("#ffffff", bg) ?? 0;
       const black = contrastRatio("#111111", bg) ?? 0;
-      return { ...l, style: { ...l.style, color: white >= black ? "#FFFFFF" : "#111111" } };
+      const toDark = black > white;
+      // Una sombra oscura pensada para texto claro sobre foto ensucia al
+      // texto que pasa a oscuro.
+      const darkShadow = !!l.shadow && /rgba?\(\s*0\s*,\s*0\s*,\s*0/.test(l.shadow.color);
+      return {
+        ...l,
+        style: { ...l.style, color: toDark ? "#111111" : "#FFFFFF" },
+        ...(toDark && darkShadow ? { shadow: undefined } : {}),
+      };
     });
   return { ...def, children: fix(def.children, true) };
+}
+
+// Colores medidos de los logos que trajo el kit de practicante
+// (brand-assets.ts los etiqueta "Color del logo …").
+export function logoColorsOf(kit: { colors: { label: string; value: string }[] }): string[] {
+  return kit.colors.filter((c) => /^Color del logo/i.test(c.label)).map((c) => c.value);
+}
+
+const colorDistance = (a: string, b: string) => {
+  const ra = hexToRgb(a);
+  const rb = hexToRgb(b);
+  if (!ra || !rb) return Infinity;
+  return Math.hypot(ra[0] - rb[0], ra[1] - rb[1], ra[2] - rb[2]);
+};
+
+// Un logo sólido (el de Enaco es un cuadrado azul) sobre un fondo de su mismo
+// color desaparece. Si el fondo detrás del logo (la forma que lo contiene o
+// el fondo de la pieza; no una foto) se parece a un color del logo, se le pone
+// detrás una placa blanca un poco más grande. Idempotente: una placa por logo.
+export function ensureLogoVisible(
+  def: TemplateDefinition,
+  resolve: (color: string) => string,
+  logoColors: string[],
+): TemplateDefinition {
+  if (logoColors.length === 0) return def;
+  const rootBg = def.background?.type === "color" ? resolve(def.background.value) : null;
+  const kids = def.children;
+  const out: TemplateLayer[] = [];
+  let changed = false;
+  kids.forEach((l, i) => {
+    const isLogo = l.type === "image" && l.visible !== false && (l.id === LOGO_SLOT_ID || /^logo\b/i.test(l.name ?? ""));
+    if (isLogo && !kids.some((k) => k.id === `${l.id}-plate`)) {
+      const cx = l.position.x + l.size.w / 2;
+      const cy = l.position.y + l.size.h / 2;
+      let behind = rootBg;
+      for (const s of kids.slice(0, i)) {
+        if (s.visible === false) continue;
+        const inside = cx >= s.position.x && cx <= s.position.x + s.size.w && cy >= s.position.y && cy <= s.position.y + s.size.h;
+        if (!inside) continue;
+        if (s.type === "image") behind = null;
+        else if (s.type === "shape") behind = resolve(s.fill);
+      }
+      if (behind && logoColors.some((c) => colorDistance(resolve(c), behind!) < 48)) {
+        const pad = Math.max(2, Math.round(Math.min(l.size.w, l.size.h) * 0.06));
+        out.push({
+          id: `${l.id}-plate`,
+          type: "shape",
+          name: "Placa del logo",
+          position: { x: l.position.x - pad, y: l.position.y - pad },
+          size: { w: l.size.w + 2 * pad, h: l.size.h + 2 * pad },
+          shape: "rect",
+          fill: "#FFFFFF",
+          cornerRadius: 0,
+        });
+        changed = true;
+      }
+    }
+    out.push(l);
+  });
+  return changed ? { ...def, children: out } : def;
 }

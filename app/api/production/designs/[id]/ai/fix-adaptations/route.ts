@@ -32,7 +32,7 @@ import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { z } from "zod";
 import { parseBody } from "@/lib/api-utils";
 import { TemplateDefinition } from "@/lib/production/types";
-import { EMPTY_KIT_CONTENT, resolveTreeTokens, BrandKitContent } from "@/lib/production/brand-kit";
+import { EMPTY_KIT_CONTENT, resolveTreeTokens, resolveColor, BrandKitContent } from "@/lib/production/brand-kit";
 import { resolveTemplateBrandKit } from "@/lib/production/project-brand-kit";
 import { checkProductionAiQuota, quotaBlockedBody } from "@/lib/production/ai-rate-limit";
 import { LintIssue } from "@/lib/production/layout-lint";
@@ -138,6 +138,7 @@ async function fixOne(params: {
       abortSignal: params.signal,
       maxPasses: MAX_PASSES,
       onUsage: params.onUsage,
+      resolveColor: (c) => resolveColor(c, kit, c),
     });
     return {
       type: "item",
