@@ -68,3 +68,32 @@ describe("parseBrandGuide · desempeño y legales", () => {
     expect(brandGuideError('{"marca":"X"}')).toBeNull();
   });
 });
+
+describe("parseBrandGuide · piezas reales", () => {
+  it("lee piezas con su URL de origen y no las manda al modelo", () => {
+    const g = parseBrandGuide(
+      JSON.stringify({
+        marca: "X",
+        desempeno: {
+          aprendizajes: ["a"],
+          piezas: [
+            {
+              imagen_url: "https://cdn.example.com/a.jpg",
+              texto: "Desde UF 21.776*",
+              resultado: "CTR 2,4%",
+              rendimiento: "alto",
+              descripcion_visual: "Render de casa a la derecha, precio grande en azul a la izquierda",
+            },
+            { imagen_url: "https://cdn.example.com/b.jpg", texto: "Disponibles", rendimiento: "BAJO" },
+          ],
+        },
+      }),
+    )!;
+    expect(g.desempeno?.piezas?.[0]).toMatchObject({ imagen: "", imagen_origen: "https://cdn.example.com/a.jpg", rendimiento: "alto" });
+    expect(g.desempeno?.piezas?.[1].rendimiento).toBe("bajo");
+    const forModel = JSON.stringify(brandGuideForModel(g));
+    expect(forModel).toContain("Desde UF 21.776*");
+    expect(forModel).toContain("Render de casa a la derecha");
+    expect(forModel).not.toContain("cdn.example.com");
+  });
+});

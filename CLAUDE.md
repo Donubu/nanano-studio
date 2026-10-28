@@ -280,6 +280,11 @@ Modelos por env: `PRODUCTION_AI_LAYOUT_MODEL`, `PRODUCTION_AI_PLANNER_MODEL`,
   (`lib/production/brand-guide.ts`). Queda en `clients.brand_guide_json`.
 - El planificador la recibe como `brand_guide` y la respeta. Practicante nunca
   se consulta durante una generación.
+- `desempeno.piezas`: anuncios reales con métricas. Al sincronizar,
+  `lib/production/brand-pieces.ts` descarga cada imagen (solo https público,
+  sin IPs privadas, con topes) y la re-sube al bucket; las 3 mejores van al
+  planificador como referencia visual.
+- Contrato completo con practicante: `docs/practicante-agente-guia-de-marca.md`.
 - Vars: `PRACTICANTE_URL`, `PRACTICANTE_API_KEY`, `PRACTICANTE_USER_EMAIL`.
 
 ### Brand kit: tokens de marca heredados por proyecto

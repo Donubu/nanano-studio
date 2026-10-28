@@ -16,6 +16,7 @@ import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { callPracticante } from "@/lib/practicante-client";
 import { brandGuidePrompt, parseBrandGuide, brandGuideError, BrandGuide } from "@/lib/production/brand-guide";
+import { importPieceImages } from "@/lib/production/brand-pieces";
 
 export const maxDuration = 300;
 
@@ -98,8 +99,12 @@ export async function POST(
 
     // Qué agente respondió y cuánto costó (una sincronización lee brandbook,
     // estrategia y métricas: ~30 s a 2 min y ~USD 0,5–1 según practicante).
+    // Imágenes de las piezas reales: se re-suben a nuestro bucket (las URLs
+    // de las plataformas de medios expiran).
+    const pieces = await importPieceImages(guide, id);
+    if (pieces.failed.length > 0) console.warn("[brand-guide] piezas sin imagen:", pieces.failed);
     const synced: BrandGuide = {
-      ...guide,
+      ...pieces.guide,
       sync: {
         agente: res.delegatedTo ?? "",
         costo_usd: typeof res.tokenUsage?.estimatedCost === "number" ? res.tokenUsage.estimatedCost : null,

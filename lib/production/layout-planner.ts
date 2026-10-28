@@ -28,6 +28,7 @@ Recibes:
 - "brand": colores y fuentes de la marca, como tokens. Puede venir vacío.
 - "brand_guide" (opcional): la guía de marca del brandbook (voz, tratamiento, palabras a usar y a evitar, ejemplos, reglas visuales). Si viene, MANDA sobre tus preferencias: escribe en esa voz y con ese tratamiento, usa su vocabulario, nunca uses sus palabras prohibidas, respeta sus reglas, y para colores sin token de marca usa los hex de la guía. El nombre de la marca va escrito exactamente como en brand_guide.marca (si no cabe, no lo uses en ese slot). Si trae "estrategia", alinea el mensaje con su posicionamiento, público y mensajes clave, y nombra productos o campañas tal como vienen. Si trae "desempeno" (métricas de la marca), apóyate en lo que rinde (mensajes, CTA y estilos destacados, aprendizajes) y no repitas lo que está en mensajes_a_evitar. Si trae "legales", nunca uses un claim de sus restricciones y, si la plantilla tiene un slot de texto legal o de letra chica, pon ahí el texto obligatorio.
 - Opcionalmente, imágenes de referencia: úsalas para elegir la plantilla cuya composición más se parezca, y para sacar paleta, tono y copy.
+- Opcionalmente, imágenes precedidas por "Pieza real de la marca que rindió bien": anuncios reales de esta marca con buenas métricas. Son la mejor pista de qué funciona con su público: toma de ellas la jerarquía, cuánto texto llevan, cómo muestran el precio y el CTA, y el tipo de imagen. No las copies literal ni repitas su campaña si el brief es otro. En brand_guide.desempeno.piezas vienen además todas las piezas (las que rinden y las que no) con su descripción visual y sus métricas: imita los patrones de las que rinden y evita los de las que no.
 
 Devuelve "proposals": entre 1 y 3 propuestas, cada una con una plantilla DISTINTA (salvo que el brief pida algo muy específico). Ordénalas de mejor a peor.
 
@@ -110,6 +111,8 @@ export interface PlanRequest {
   brandGuide?: BrandGuide | null;
   // Referencias ya descargadas (base64 sin prefijo).
   images?: { mimeType: string; data: string }[];
+  // Anuncios reales de la marca que mejor rindieron (brand-pieces.ts).
+  brandPieces?: { mimeType: string; data: string; caption: string }[];
   count?: number;
 }
 
@@ -127,6 +130,7 @@ export async function requestLayoutPlans(req: PlanRequest): Promise<PlanResponse
       ...(req.instructions?.trim() ? { instructions: req.instructions.trim() } : {}),
       proposals_wanted: req.count ?? 3,
       ...(req.images?.length ? { reference_images: req.images.length } : {}),
+      ...(req.brandPieces?.length ? { brand_top_pieces: req.brandPieces.length } : {}),
     },
     catalog: describeCatalog(),
     brand: brandForModel(req.brandKit),
@@ -136,6 +140,10 @@ export async function requestLayoutPlans(req: PlanRequest): Promise<PlanResponse
   const parts: Part[] = (req.images ?? []).map((img) => ({
     inlineData: { mimeType: img.mimeType, data: img.data },
   }));
+  for (const piece of req.brandPieces ?? []) {
+    parts.push({ text: `Pieza real de la marca que rindió bien: ${piece.caption}` });
+    parts.push({ inlineData: { mimeType: piece.mimeType, data: piece.data } });
+  }
   parts.push({ text: JSON.stringify(context) });
 
   const model = LAYOUT_PLANNER_MODEL;

@@ -16,6 +16,7 @@ import { BrandKitContent, resolveTreeTokens, resolveColor } from "./brand-kit";
 import { expandPlan, ensureTextContrast, LayoutPlan } from "./layout-plan";
 import { requestLayoutPlans, LAYOUT_PLANNER_AGENT_NAME, LAYOUT_PLANNER_MODEL } from "./layout-planner";
 import { LayoutFixUsage } from "./layout-fixer";
+import { topPieceImages } from "./brand-pieces";
 
 export const DEFAULT_MASTER_DIMS = { w: 1920, h: 1080 };
 export const DEFAULT_VARIANT_DIMS = [
@@ -64,8 +65,10 @@ export async function generateFromPlans(
   let usage: LayoutFixUsage | undefined;
   let error: string | null = null;
   try {
+    const brandGuide = await loadClientBrandGuide(p.clientId);
     const res = await requestLayoutPlans({
-      brandGuide: await loadClientBrandGuide(p.clientId),
+      brandGuide,
+      brandPieces: await topPieceImages(brandGuide),
       intent: p.intent,
       tone: p.tone,
       instructions: p.instructions,

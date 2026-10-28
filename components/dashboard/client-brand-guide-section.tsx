@@ -279,6 +279,45 @@ export default function ClientBrandGuideSection({ clientId }: { clientId: number
               </ul>
             </Row>
           )}
+          {(g.desempeno?.piezas?.length ?? 0) > 0 && (
+            <div className="md:col-span-2">
+              <Row label="Piezas reales y sus métricas">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {g.desempeno!.piezas!.map((p, i) => (
+                    <div key={i} className="rounded-lg border border-border/50 overflow-hidden bg-muted/30 text-[11px]">
+                      {p.imagen ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={p.imagen} alt="" className="w-full aspect-square object-cover bg-muted" />
+                      ) : (
+                        <div className="w-full aspect-square flex items-center justify-center text-muted-foreground">
+                          Sin imagen
+                        </div>
+                      )}
+                      <div className="p-2 space-y-1">
+                        <span
+                          className={
+                            p.rendimiento === "alto"
+                              ? "inline-block px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300"
+                              : "inline-block px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300"
+                          }
+                        >
+                          {p.rendimiento === "alto" ? "Rinde" : "No rinde"}
+                        </span>
+                        {p.texto && <p className="line-clamp-2">{p.texto}</p>}
+                        <p className="text-muted-foreground">{[p.formato, p.canal].filter(Boolean).join(" · ")}</p>
+                        {p.resultado && <p className="text-muted-foreground line-clamp-3">{p.resultado}</p>}
+                        {p.descripcion_visual && (
+                          <p className="text-muted-foreground/80 line-clamp-3" title={p.descripcion_visual}>
+                            {p.descripcion_visual}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Row>
+            </div>
+          )}
           {(g.desempeno?.estilos_visuales.length ?? 0) > 0 && (
             <Row label="Estilos que rinden">
               <Chips items={g.desempeno!.estilos_visuales} />

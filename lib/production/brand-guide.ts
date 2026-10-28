@@ -48,6 +48,10 @@ export interface BrandGuide {
     ctas_destacados: Evidencia[];
     formatos_destacados: { formato: string; canal: string; resultado: string }[];
     estilos_visuales: string[];
+    // Anuncios reales con sus métricas. La imagen la re-sube nanano a su
+    // bucket al sincronizar (brand-pieces.ts): las URLs de las plataformas
+    // de medios expiran.
+    piezas?: PiezaReal[];
   };
   // Textos legales obligatorios y restricciones de claims. Opcional.
   legales?: {
@@ -58,6 +62,24 @@ export interface BrandGuide {
   fuentes: string[];
   // Trazabilidad de la última sincronización (no va al modelo).
   sync?: { agente: string; costo_usd: number | null; tools: string[] };
+}
+
+export interface PiezaReal {
+  // URL en nuestro bucket ("" si no se pudo traer).
+  imagen: string;
+  // URL que mandó practicante (solo para reintentar la descarga).
+  imagen_origen: string;
+  texto: string;
+  formato: string;
+  canal: string;
+  campana: string;
+  periodo: string;
+  resultado: string;
+  rendimiento: "alto" | "bajo";
+  por_que: string;
+  // Descripción de la imagen hecha por visión de IA en practicante
+  // (composición, jerarquía, colores, tipo de foto, cuánto texto).
+  descripcion_visual: string;
 }
 
 export interface Evidencia {
@@ -76,6 +98,7 @@ export function brandGuidePrompt(slug: string): { message: string; promptSuffix:
         `Consulta el brandbook del cliente "${slug}" y cualquier otro conocimiento de esa marca (estrategia, productos, campañas, reglas de marca medibles).`,
         "Resume lo que sirve para diseñar y escribir piezas digitales: voz, tratamiento, vocabulario, estrategia (posicionamiento, público, propuesta de valor, mensajes clave, productos y campañas vigentes), reglas visuales y de logo, y legales.",
         "En 'desempeno' resume lo que dicen las métricas: qué mensajes, CTA, formatos y estilos visuales rindieron mejor o peor, cada uno con la métrica que lo respalda. Si no hay métricas, déjalo vacío.",
+        "En 'desempeno.piezas' incluye hasta 6 anuncios reales que mejor rindieron y hasta 3 que peor rindieron, con la URL de su imagen, su copy y sus métricas.",
         "Si un dato no está en el material de la marca, déjalo vacío. No inventes.",
         "Responde SOLO con un objeto JSON con esta forma exacta (sin markdown):",
       ],
@@ -112,6 +135,20 @@ export function brandGuidePrompt(slug: string): { message: string; promptSuffix:
           ctas_destacados: [{ texto: "string", resultado: "string" }],
           formatos_destacados: [{ formato: "string — ej. 300x250", canal: "string", resultado: "string" }],
           estilos_visuales: ["string — estilo que rinde mejor y su métrica"],
+          piezas: [
+            {
+              imagen_url: "string — URL https pública de la imagen del anuncio (o data:image/...;base64)",
+              texto: "string — copy visible en la pieza",
+              formato: "string — tamaño o placement",
+              canal: "string",
+              campana: "string",
+              periodo: "string",
+              resultado: "string — métricas con comparación",
+              rendimiento: "alto | bajo",
+              por_que: "string — qué explica el resultado",
+              descripcion_visual: "string — descripción de la imagen (composición, jerarquía, colores, foto/render, cuánto texto)",
+            },
+          ],
         },
         legales: {
           textos_obligatorios: ["string — legal que debe ir en las piezas"],
@@ -208,6 +245,25 @@ export function parseBrandGuide(raw: string): BrandGuide | null {
         .filter((x) => x.formato)
         .slice(0, 10),
       estilos_visuales: strs(desempeno.estilos_visuales, 10, 300),
+      piezas: (Array.isArray(desempeno.piezas) ? desempeno.piezas : [])
+        .map((x) => obj(x))
+        .map(
+          (x): PiezaReal => ({
+            imagen: "",
+            imagen_origen: str(x.imagen_url ?? x.imagen, 4000),
+            texto: str(x.texto, 300),
+            formato: str(x.formato, 60),
+            canal: str(x.canal, 60),
+            campana: str(x.campana, 160),
+            periodo: str(x.periodo, 80),
+            resultado: str(x.resultado, 300),
+            rendimiento: str(x.rendimiento, 10).toLowerCase() === "bajo" ? "bajo" : "alto",
+            por_que: str(x.por_que, 300),
+            descripcion_visual: str(x.descripcion_visual ?? x.descripcion, 800),
+          }),
+        )
+        .filter((x) => x.imagen_origen || x.texto)
+        .slice(0, 12),
     },
     legales: {
       textos_obligatorios: strs(legales.textos_obligatorios, 10, 400),
@@ -267,5 +323,12 @@ export function brandGuideForModel(g: BrandGuide): Record<string, unknown> {
   const { fuentes: _fuentes, sync: _sync, ...rest } = g;
   void _fuentes;
   void _sync;
+  // Las piezas van sin URLs (las imágenes, si se usan, van aparte como imagen).
+  if (rest.desempeno?.piezas) {
+    rest.desempeno = {
+      ...rest.desempeno,
+      piezas: rest.desempeno.piezas.map((p) => ({ ...p, imagen: "", imagen_origen: "" })),
+    };
+  }
   return (prune(rest) as Record<string, unknown>) ?? {};
 }

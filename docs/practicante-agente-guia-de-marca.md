@@ -162,7 +162,21 @@ recorta y lo inválido se descarta.
     "mensajes_a_evitar":   [{ "texto": "string", "resultado": "string" }],  // ≤10
     "ctas_destacados":     [{ "texto": "string", "resultado": "string" }],  // ≤10
     "formatos_destacados": [{ "formato": "300x250", "canal": "string", "resultado": "string" }],  // ≤10
-    "estilos_visuales": ["string"]          // estilo que rinde + su métrica (≤10, ≤300 c/u)
+    "estilos_visuales": ["string"],         // estilo que rinde + su métrica (≤10, ≤300 c/u)
+    "piezas": [                             // ANUNCIOS REALES: hasta 6 que mejor rindieron y 3 que peor (≤12)
+      {
+        "imagen_url": "https://…",          // imagen del anuncio: URL https pública o data:image/…;base64
+        "texto": "string",                  // copy visible en la pieza (≤300)
+        "formato": "string",                // tamaño o placement: "1080x1080", "Feed de Facebook" (≤60)
+        "canal": "string",                  // Meta Ads, Google Ads, DV360… (≤60)
+        "campana": "string",                // (≤160)
+        "periodo": "string",                // (≤80)
+        "resultado": "string",              // métricas con comparación: impresiones, clics, CTR, CPM, conversiones (≤300)
+        "rendimiento": "alto | bajo",
+        "por_que": "string",                // qué explica el resultado: precio visible, tipo de imagen, CTA… (≤300)
+        "descripcion_visual": "string"      // descripción de la imagen por visión de IA (≤800), ver Anexo
+      }
+    ]
   },
 
   // QUÉ NO SE PUEDE
@@ -185,12 +199,34 @@ recorta y lo inválido se descarta.
 - `desempeno`: la IA prioriza los mensajes, CTA y estilos que rinden y no
   repite los de `mensajes_a_evitar`. Los aprendizajes se ven en la ficha del
   cliente.
+- `desempeno.piezas`: al sincronizar, nanano **descarga cada imagen y la
+  re-sube a su bucket**. Por eso la URL puede ser temporal (CDN de Meta
+  firmado, por ejemplo), pero tiene que poder descargarse en ese momento.
+  Después:
+  - la ficha del cliente muestra la galería con sus métricas;
+  - "Crear desde texto" recibe las **3 mejores como referencia visual**:
+    jerarquía, cuánto texto llevan, cómo muestran el precio y el CTA, y el
+    tipo de imagen.
+
+  Reglas de la descarga:
+  - Solo `https` público, o `data:image/...;base64`.
+  - Hasta 10 MB y 15 s por imagen, y hasta 3 redirects.
+  - Nada que resuelva a una IP privada o local.
+  - Una pieza cuya imagen no se pudo traer queda solo con sus métricas.
 - `legales`: nunca usa un claim prohibido. Si la plantilla tiene un slot de
   letra chica, pone ahí el texto obligatorio.
 - `visual`: colores y fuentes cuando la pieza no tiene brand kit propio; el
   logo y las reglas son restricciones. El logo como archivo sale del brand kit
   de nanano, no de acá.
 - `fuentes` no va al modelo: es trazabilidad.
+
+**Qué piezas mandar en `desempeno.piezas`:**
+- Hasta 6 anuncios con mejor resultado y hasta 3 con peor resultado del
+  período, priorizando los de más volumen (impresiones), para que la
+  comparación sea confiable.
+- Con su imagen real (la creatividad, no un logo ni un thumbnail genérico).
+- Un carrusel o un video cuenta como pieza: la imagen es la primera tarjeta o
+  el thumbnail.
 
 **Qué buscar en las métricas** (si existen):
 - **Mensajes:** qué ángulo rinde (precio, beneficio, urgencia, novedad,
@@ -323,3 +359,76 @@ agente inactivo, y por lo tanto `no_brand_material`: `dreams`, `mitta`, `smu`,
       Brand Kits → Sincronizar).
 - [ ] (Siguiente) Responder `CAMPAIGN_BRIEF` y `COPY_REVIEW`.
 - [ ] Borrar el agente "Banner Designer".
+
+---
+
+## Anexo — Instrucciones para el agente de cada cliente
+
+> Esta sección se le puede pasar tal cual al agente (como instrucción del
+> sistema o como conocimiento). Resume qué espera nanano y qué puede mandar.
+
+Cuando un pedido traiga `promptSuffix` con `operation: "BRAND_GUIDE"`, nanano
+(Puerto Studio) te está pidiendo el conocimiento de tu marca para producir
+banners. No diseñes nada: entrega datos fieles en el JSON del `schema`.
+
+**Lo que puedes y debes mandar:**
+
+1. **Lenguaje:** tono, tratamiento, palabras a usar y a evitar, y titulares y
+   CTA **reales** de piezas de la marca.
+2. **Estrategia:** posicionamiento, público, propuesta de valor, mensajes
+   clave, productos con su beneficio y precio "desde" si existe, y campañas
+   vigentes.
+3. **Identidad visual:** colores en hex, tipografías con su uso, reglas del
+   logo y estilo fotográfico.
+4. **Métricas (`desempeno`):** aprendizajes con su evidencia (métrica, valor,
+   comparación, canal y período), y mensajes, CTA, formatos y estilos que
+   rinden o no.
+5. **Piezas reales (`desempeno.piezas`).** Sí, puedes y conviene mandarlas:
+   - hasta 6 anuncios que mejor rindieron y hasta 3 que peor, priorizando
+     los de más volumen;
+   - `imagen_url`: la imagen del anuncio. Sirve la URL de la plataforma
+     (incluso firmada o temporal, porque nanano la descarga en el momento
+     y la guarda), siempre que sea `https` público. También puede ser
+     `data:image/...;base64`. Para carruseles o videos, la primera tarjeta o
+     el thumbnail;
+   - `texto`, `formato`, `canal`, `campana`, `periodo`, `resultado` (con
+     números y comparación contra el promedio), `rendimiento`
+     (`"alto"`/`"bajo"`) y `por_que`;
+   - **`descripcion_visual`: si la pieza ya está descrita por visión de IA,
+     manda esa descripción.** Es muy útil: nanano la usa aunque no pueda
+     descargar la imagen, y se la pasa al planificador de todas las piezas
+     (las 3 mejores van además como imagen). Que cubra:
+     - composición (dónde va la foto o render, dónde el texto);
+     - jerarquía (qué se lee primero);
+     - cuánto texto lleva;
+     - cómo se muestra el precio y el CTA;
+     - colores dominantes;
+     - tipo de imagen (render, foto, mixto, con o sin personas).
+6. **Legales:** textos obligatorios tal como deben ir y claims prohibidos.
+
+**Reglas:**
+- No inventes. Si no hay dato, deja `""`, `[]` o `null`.
+- Cada afirmación de métricas lleva su evidencia; sin evidencia, no va.
+- Nombres de marca y de productos exactos; precios en formato chileno
+  (`$9.990`, `UF 21.776`).
+- Responde solo con el objeto JSON, sin markdown.
+- Si lo que falta es importante (público, legales exactos, métricas por
+  tamaño de banner), anótalo en `fuentes` como "Sin material: …" para que
+  el equipo lo complete.
+
+**Ejemplo de una pieza:**
+
+```json
+{
+  "imagen_url": "https://scontent.xx.fbcdn.net/v/t45.1600-4/…jpg",
+  "texto": "RESERVA SAN FRANCISCO · Casas de 207 a 237 m² · DESDE UF 21.776* · VISITA PILOTOS",
+  "formato": "1080x1080 · Feed de Facebook",
+  "canal": "Meta Ads",
+  "campana": "Reserva San Francisco — Casas",
+  "periodo": "29 jul – 27 oct 2026",
+  "resultado": "CTR 2,4% (1.231 clics, 50.439 impr.) vs 1,6% promedio de la cuenta",
+  "rendimiento": "alto",
+  "por_que": "Precio visible y CTA claro; render más foto de la casa",
+  "descripcion_visual": "Base blanca. Render de la casa ocupa la mitad derecha. A la izquierda, nombre del proyecto en azul corporativo arriba, metraje en gris, precio grande en azul y botón azul 'VISITA PILOTOS'. Logo ENACO en cuadrado azul arriba a la izquierda. Legal en letra chica al pie. Texto medio."
+}
+```
