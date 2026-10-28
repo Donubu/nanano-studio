@@ -44,6 +44,10 @@ import { prepareImageForAgent } from "@/lib/production/prepare-image";
 import { buildHtml5Zip } from "@/lib/production/html5-export";
 import { AdaptationRenderer } from "@/components/production/render/adaptation-renderer";
 import {
+  AiFixAdaptationsModal,
+  FixCandidate,
+} from "@/components/production/ai-fix-adaptations-modal";
+import {
   extractVariables,
   substituteVariables,
   DataRow,
@@ -314,6 +318,9 @@ export default function ProducirPage() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showPicker, setShowPicker] = useState(false);
+  // Modal "Revisar con IA" del paso Formatos. Los candidatos se congelan al
+  // abrir (snapshot del árbol que muestra cada card en ese momento).
+  const [aiFixCandidates, setAiFixCandidates] = useState<FixCandidate[] | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   // --- Editor embebido (workspace unificado) ---
@@ -1062,6 +1069,35 @@ export default function ProducirPage() {
   // Quita el ajuste manual de una adaptación SIN tocar el modo edición
   // (esto se invoca desde la card al hacer hover, fuera del flujo de editar).
   // La adaptación vuelve a derivar automáticamente del master cercano.
+  // Arma los candidatos de "Revisar con IA": el árbol de cada formato tal
+  // como lo muestra su card (manual_layout si lo tiene; si no, el mismo
+  // cálculo que usa el editor de la adaptación al abrirse).
+  const handleOpenAiFix = useCallback(() => {
+    const candidates: FixCandidate[] = [];
+    for (const a of adaptations) {
+      const manual = parseOverrides(a.overrides_json).manual_layout;
+      const source = resolveSource(a, orientations);
+      const sourceDef =
+        resolveEffectiveDefinition(source, orientations) ??
+        principalOrientation?.definition ??
+        null;
+      const tree =
+        manual ??
+        (sourceDef ? buildInitialFromAdaptFit(sourceDef, a.width, a.height, a.fit_mode) : null);
+      if (!tree) continue;
+      candidates.push({
+        adaptationId: a.id,
+        label: a.custom_name || a.preset_name || `${a.width}×${a.height}`,
+        width: a.width,
+        height: a.height,
+        tree,
+        sourceTree: sourceDef,
+        isManual: !!manual,
+      });
+    }
+    setAiFixCandidates(candidates);
+  }, [adaptations, orientations, principalOrientation]);
+
   const handleResetAdaptationOverride = useCallback(
     async (adaptationId: number): Promise<boolean> => {
       if (designId == null) return false;
@@ -2142,6 +2178,17 @@ export default function ProducirPage() {
                   </button>
                 </div>
               )}
+              {adaptationsLoaded && adaptations.length > 0 && designId != null && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleOpenAiFix}
+                  className="gap-1"
+                  title="Detecta formatos con problemas (textos que no caben, piezas fuera del formato, letra ilegible) y los corrige con IA"
+                >
+                  <Sparkles className="h-4 w-4 text-violet-400" /> Revisar con IA
+                </Button>
+              )}
               <Button size="sm" onClick={() => setShowPicker(true)} className="gap-1">
                 <Plus className="h-4 w-4" /> Agregar formatos
               </Button>
@@ -2580,6 +2627,17 @@ export default function ProducirPage() {
           <Check className="h-4 w-4" />
           {aiSuccessToast}
         </div>
+      )}
+
+      {aiFixCandidates && designId != null && (
+        <AiFixAdaptationsModal
+          designId={designId}
+          candidates={aiFixCandidates}
+          brandKit={brandKitContent}
+          dataRow={previewRow}
+          onClose={() => setAiFixCandidates(null)}
+          onApplied={fetchAdaptations}
+        />
       )}
 
       {showPicker && (

@@ -63,7 +63,7 @@ export interface RetryInfo {
 }
 
 // Ejecutar función con retry y backoff exponencial
-async function withRetry<T>(
+export async function withRetry<T>(
   operation: () => Promise<T>,
   operationName: string,
   onRetry?: (info: RetryInfo) => void,
@@ -146,7 +146,7 @@ let geminiClient: GoogleGenAI | null = null;
 // Timeout for API calls (10 minutes — image generation in 4K can be very slow)
 const API_TIMEOUT_MS = Number(process.env.GOOGLE_AI_TIMEOUT_MS) || 600000;
 
-function getClient(backend?: string): GoogleGenAI {
+export function getClient(backend?: string): GoogleGenAI {
   if (useVertexForBackend(backend)) {
     if (!vertexClient) {
       vertexClient = new GoogleGenAI({

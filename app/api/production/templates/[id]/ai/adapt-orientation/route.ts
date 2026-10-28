@@ -183,6 +183,8 @@ export async function POST(
     // 4. Llamar al agente
     const targetDims = { w: target.base_width, h: target.base_height };
     const masterDims = { w: master.base_width, h: master.base_height };
+    // Latencia de pared (incluye el retry de validación) para production_ai_invocations.duration_ms.
+    const startedAt = Date.now();
     const result = await runAdaptOrientation({
       master: masterDefinition,
       masterDims,
@@ -199,9 +201,9 @@ export async function POST(
     const [inv] = await pool.execute<ResultSetHeader>(
       `INSERT INTO production_ai_invocations
          (production_project_id, template_id, target_template_id, operation,
-          agent_name, input_tokens, output_tokens, estimated_cost,
+          agent_name, input_tokens, output_tokens, estimated_cost, duration_ms,
           success, error_msg, conversation_id, rationale, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         target.production_project_id,
         master.id,
@@ -211,6 +213,7 @@ export async function POST(
         result.tokenUsage?.inputTokens ?? null,
         result.tokenUsage?.outputTokens ?? null,
         result.tokenUsage?.estimatedCost ?? null,
+        Date.now() - startedAt,
         result.ok ? 1 : 0,
         result.ok ? null : result.error,
         result.conversationId ?? null,
