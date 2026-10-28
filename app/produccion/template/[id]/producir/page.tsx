@@ -4209,10 +4209,10 @@ function VariantsStrip({
                   onAiAdapt(m.id);
                 }}
                 className="mt-1 w-full flex items-center justify-center gap-1 text-[10px] font-medium px-2 py-1 rounded border border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 hover:border-violet-500/60 transition-colors"
-                title="Pide a la IA que reorganice el contenido para este formato"
+                title="Vuelve a armar esta orientación desde el master con IA. Para pedir cambios (colores, textos, composición, animación) usa «Pídele a la IA»."
               >
                 <Sparkles className="h-3 w-3" />
-                Adaptar con IA
+                Readaptar del master
               </button>
             )}
             {/* Acciones de sync — solo en orientaciones no-principal:
@@ -4741,7 +4741,7 @@ function AiAdaptModal({
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-violet-400" />
             <div>
-              <h2 className="text-sm font-semibold">Adaptar con IA</h2>
+              <h2 className="text-sm font-semibold">Readaptar desde el master</h2>
               <p className="text-xs text-muted-foreground">
                 {target.name} · {target.base_width}×{target.base_height} ·
                 derivado de master {master.base_width}×{master.base_height}
@@ -4754,19 +4754,14 @@ function AiAdaptModal({
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">
-              Instrucciones (opcional)
-            </label>
-            <textarea
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-              placeholder="Ej: mantén el badge de descuento bien visible; el headline debe estar arriba en este formato"
-              rows={2}
-              disabled={loading || accepting}
-              className="w-full bg-muted border border-border/50 rounded-md px-3 py-2 text-sm disabled:opacity-50"
-            />
-          </div>
+          {/* Sin instrucciones: los pedidos en lenguaje natural (colores,
+              textos, composición, animación) van todos a «Pídele a la IA».
+              Esto es solo volver a armar la orientación desde el master. */}
+          <p className="text-xs text-muted-foreground">
+            La IA vuelve a armar esta orientación a partir del master, reubicando todo para este formato. Para
+            pedir cambios concretos (colores, textos, composición o animación), usa{" "}
+            <span className="text-violet-300">«Pídele a la IA»</span> sobre esta orientación.
+          </p>
 
           {/* Capture/upload del master ocurre en background. Hint inline
               discreto debajo del textarea para que el productor sepa que

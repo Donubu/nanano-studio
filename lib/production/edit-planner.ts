@@ -27,6 +27,8 @@ Operaciones ("op"):
   · Efectos sueltos (se aplican encima del estilo rápido): gradient_colors (2-3 colores, de arriba hacia abajo con gradient_angle 180), outline_color/outline_width (contorno por fuera de la letra, px), outline2_color/outline2_width (segundo contorno, por fuera del primero), extrude_color/extrude_depth (volumen 3D, px; ~6% de la letra). Ancho 0 quita el efecto.
   · texture_prompt EN INGLÉS: material o textura dentro de las letras (gold foil, turquoise water, wood); se genera aparte.
   · Cuida el contraste con lo que hay detrás: un titular sobre foto oscura con degradado oscuro no se lee; un contorno o volumen oscuro ayuda sobre fotos claras.
+- recompose {layout_instructions}: reacomoda la pieza COMPLETA (posición y tamaño de todas las capas) con el recompositor de layouts. Úsala para pedidos de composición general: "reacomoda", "adapta a este formato", "foto arriba y precio abajo", "aprovecha mejor el espacio", "ordena mejor", "hay mucho espacio vacío". layout_instructions = el pedido de composición en una frase. Para mover o agrandar UNA capa puntual usa update. Se puede combinar con otras operaciones (por ejemplo set_background + recompose).
+- animate {animation_intent, animation_intensity?}: anima la pieza (entradas, orden y énfasis por capa) con el motor de animación. Úsala para "anima", "dale movimiento", "que entre el precio al final", "haz que el botón palpite". animation_intent = qué se quiere en una frase; animation_intensity: subtle, balanced o energetic.
 - remove {id}: quita una capa.
 - set_background {color}: color de fondo de la pieza.
 - generate_image {id, image_prompt}: genera con IA la imagen de una capa de imagen existente.
@@ -87,6 +89,9 @@ const RESPONSE_SCHEMA = {
           extrude_color: { type: "string" },
           extrude_depth: { type: "number" },
           texture_prompt: { type: "string", maxLength: 400 },
+          layout_instructions: { type: "string", maxLength: 400 },
+          animation_intent: { type: "string", maxLength: 300 },
+          animation_intensity: { type: "string", enum: ["subtle", "balanced", "energetic"] },
           skin_kind: { type: "string", enum: [...SKIN_KINDS] },
           focal_x: { type: "number" },
           focal_y: { type: "number" },

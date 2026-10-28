@@ -212,13 +212,18 @@ fuente del conocimiento de marca (ver "Guía de marca").
 - `POST /api/production/designs/[id]/ai/fix-adaptations` — "Revisar con IA" del
   paso Formatos (SSE): lint determinista (`layout-lint.ts`) → correcciones por
   capa (`layout-fixer.ts` / `layout-patch.ts`) → lint, hasta 2 pasadas.
-- `POST /api/production/templates/[id]/ai/adapt-orientation` — `adaptTree` del
-  master + `runLayoutFix` en modo `recompose` (puede reubicar todo), con la
-  captura del master como imagen del original.
+- `POST /api/production/templates/[id]/ai/adapt-orientation` — botón
+  "Readaptar del master" (sin instrucciones): `adaptTree` del master +
+  `runLayoutFix` en modo `recompose` (puede reubicar todo), con la captura del
+  master como imagen del original.
 - `POST /api/production/ai/edit` — barra "Pídele a la IA" del editor (master,
-  orientaciones y ajustes manuales): instrucción en lenguaje natural →
-  operaciones (`lib/production/edit-ops.ts`: set_text, update, add, remove,
-  set_background, generate_image, frame_subject, set_skin) aplicadas como un cambio
+  orientaciones y ajustes manuales): el ÚNICO lugar donde se escribe un pedido
+  en lenguaje natural. Instrucción → operaciones (`lib/production/edit-ops.ts`:
+  set_text, update, add, remove, set_background, generate_image, frame_subject,
+  set_skin, recompose, animate). `recompose` corre el recompositor de
+  `runLayoutFix` sobre la pieza editada (master del design como referencia) y
+  `animate` el motor de animación; ambos en la misma llamada, después de las
+  operaciones por capa aplicadas como un cambio
   deshacible; las imágenes pedidas se generan con `generate-images`. El modelo
   VE las fotos de las capas (hasta 3, desde nuestro bucket) y para reencuadrar
   solo indica dónde está el sujeto en la foto y dónde lo quiere; `frameSubject`

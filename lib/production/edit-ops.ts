@@ -30,6 +30,8 @@ export const EDIT_OPS = [
   "generate_image",
   "frame_subject",
   "set_skin",
+  "recompose",
+  "animate",
 ] as const;
 export type EditOpKind = (typeof EDIT_OPS)[number];
 export const ADD_KINDS = ["text", "button", "badge", "image", "shape", "icon", "logo"] as const;
@@ -82,6 +84,12 @@ export interface EditOp {
   extrude_depth?: number;
   // Textura dentro de las letras (se genera aparte, como las imágenes).
   texture_prompt?: string;
+  // "recompose": qué cambiar de la composición (lo ejecuta el recompositor
+  // de "Adaptar con IA" sobre la pieza ya editada).
+  layout_instructions?: string;
+  // "animate": intención de la animación e intensidad.
+  animation_intent?: string;
+  animation_intensity?: "subtle" | "balanced" | "energetic";
   name?: string;
 }
 
@@ -111,6 +119,9 @@ export interface EditResult {
   images: ImageRequest[];
   skins: SkinRequest[];
   textures: ImageRequest[];
+  // Pasos que no son operaciones por capa: los ejecuta la ruta después.
+  recompose: { instructions: string } | null;
+  animate: { intent: string; intensity: "subtle" | "balanced" | "energetic" } | null;
   applied: number;
   skipped: string[];
 }
@@ -449,11 +460,13 @@ export function applyEditOps(
   const images: ImageRequest[] = [];
   const skins: SkinRequest[] = [];
   const textures: ImageRequest[] = [];
+  let recompose: EditResult["recompose"] = null;
+  let animate: EditResult["animate"] = null;
   const skipped: string[] = [];
   let applied = 0;
 
   for (const op of ops) {
-    const needsId = op.op !== "add" && op.op !== "set_background";
+    const needsId = op.op !== "add" && op.op !== "set_background" && op.op !== "recompose" && op.op !== "animate";
     if (needsId && (!op.id || !exists(children, op.id))) {
       skipped.push(`${op.op}: capa "${op.id ?? "?"}" no existe`);
       continue;
@@ -509,6 +522,16 @@ export function applyEditOps(
         children = mapLayers(children, op.id!, (l) => l);
         images.push({ layer_id: op.id!, prompt: op.image_prompt.trim() });
         break;
+      case "recompose":
+        recompose = { instructions: (op.layout_instructions ?? "").trim().slice(0, 1000) };
+        break;
+      case "animate":
+        animate = {
+          intent: (op.animation_intent ?? "").trim().slice(0, 500) || "animación de entrada clara para un banner",
+          intensity:
+            op.animation_intensity === "subtle" || op.animation_intensity === "energetic" ? op.animation_intensity : "balanced",
+        };
+        break;
       case "set_skin": {
         const target = findLayer(children, op.id!);
         if (target?.type !== "text") {
@@ -556,5 +579,5 @@ export function applyEditOps(
     }
     applied++;
   }
-  return { definition: { ...def, background, children }, images, skins, textures, applied, skipped };
+  return { definition: { ...def, background, children }, images, skins, textures, recompose, animate, applied, skipped };
 }

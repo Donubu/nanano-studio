@@ -121,3 +121,23 @@ describe("frameSubject", () => {
     expect(imageSize(png)).toEqual({ w: 1408, h: 768 });
   });
 });
+
+describe("applyEditOps · recomponer y animar", () => {
+  it("las deja como pasos para la ruta, junto con las demás operaciones", () => {
+    const r = applyEditOps(def, [
+      { op: "set_background", color: "#245C98" },
+      { op: "recompose", layout_instructions: "foto arriba y precio abajo" },
+      { op: "animate", animation_intent: "el precio entra al final", animation_intensity: "energetic" },
+    ]);
+    expect(r.applied).toBe(3);
+    expect(r.definition.background).toEqual({ type: "color", value: "#245C98" });
+    expect(r.recompose).toEqual({ instructions: "foto arriba y precio abajo" });
+    expect(r.animate).toEqual({ intent: "el precio entra al final", intensity: "energetic" });
+  });
+
+  it("sin esas operaciones no hay pasos extra", () => {
+    const r = applyEditOps(def, [{ op: "set_text", id: "title", content: "Hola" }]);
+    expect(r.recompose).toBeNull();
+    expect(r.animate).toBeNull();
+  });
+});

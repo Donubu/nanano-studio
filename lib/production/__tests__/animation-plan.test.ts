@@ -87,3 +87,59 @@ describe("followBaseChanges", () => {
     expect(out.animation!.tracks.some((t) => t.layerId === "cta")).toBe(false);
   });
 });
+
+describe("grupos visuales en la animación", () => {
+  // Caso real: franja + texto arriba, foto, caja de precio con precio y legal
+  // dentro y el logo pegado a la derecha.
+  const piece = {
+    id: "tpl_root",
+    type: "frame" as const,
+    position: { x: 0, y: 0 },
+    size: { w: 1080, h: 1080 },
+    layout: { mode: "free" as const },
+    children: [
+      { id: "band", type: "shape" as const, shape: "rect" as const, fill: "#D31215", position: { x: 48, y: 48 }, size: { w: 985, h: 63 } },
+      { id: "ribbon", type: "text" as const, content: "NUEVA ETAPA", position: { x: 54, y: 56 }, size: { w: 972, h: 45 }, style: { fontSize: 30, color: "#fff" } },
+      { id: "photo", type: "image" as const, src: "x", position: { x: 48, y: 110 }, size: { w: 985, h: 922 } },
+      { id: "box", type: "shape" as const, shape: "rect" as const, fill: "#D31215", position: { x: 156, y: 759 }, size: { w: 578, h: 189 } },
+      { id: "price", type: "text" as const, content: "DESDE UF 2.773*", position: { x: 173, y: 799 }, size: { w: 543, h: 73 }, style: { fontSize: 60, color: "#fff" } },
+      { id: "logo", type: "image" as const, name: "Logo", src: "l", position: { x: 734, y: 759 }, size: { w: 189, h: 189 } },
+    ],
+  };
+
+  it("agrupa texto sobre franja, precio en su caja y logo al lado, pero no la foto", async () => {
+    const { visualGroups } = await import("../animation-plan");
+    const g = visualGroups(piece);
+    expect(g.get("ribbon")).toEqual({ anchor: "band", kind: "inside" });
+    expect(g.get("price")).toEqual({ anchor: "box", kind: "inside" });
+    expect(g.get("logo")).toEqual({ anchor: "box", kind: "beside" });
+    expect(g.has("photo")).toBe(false);
+  });
+
+  it("el grupo entra junto; el pop se vuelve subida y el latido flotación", async () => {
+    const { buildAnimationFromPlan } = await import("../animation-plan");
+    const anim = buildAnimationFromPlan(piece, {
+      duration_ms: 5000,
+      loop: 1,
+      rationale: "",
+      layers: [
+        { id: "band", entrance: "slide-down", start_ms: 0, duration_ms: 500, emphasis: "none" },
+        { id: "ribbon", entrance: "fade", start_ms: 300, duration_ms: 400, emphasis: "none" },
+        { id: "box", entrance: "pop", start_ms: 1200, duration_ms: 500, emphasis: "none" },
+        { id: "price", entrance: "fade", start_ms: 1500, duration_ms: 400, emphasis: "pulse" },
+        { id: "logo", entrance: "pop", start_ms: 1600, duration_ms: 400, emphasis: "none" },
+      ],
+    });
+    const track = (id: string, p: string) => anim.tracks.find((t) => t.layerId === id && t.property === p);
+    expect(track("ribbon", "position.y")?.keyframes.map((k) => k.t)).toEqual(track("band", "position.y")?.keyframes.map((k) => k.t));
+    expect(track("price", "position.y")?.keyframes[0].t).toBe(1200);
+    expect(track("logo", "position.y")?.keyframes[0].t).toBe(1200);
+    // Con el logo al lado, el latido pasa a flotación del grupo entero.
+    expect(track("box", "scale")).toBeUndefined();
+    expect(track("logo", "scale")).toBeUndefined();
+    const floatTimes = (id: string) => track(id, "position.y")?.keyframes.map((k) => k.t);
+    expect(floatTimes("logo")).toEqual(floatTimes("box"));
+    expect(floatTimes("price")).toEqual(floatTimes("box"));
+    expect(floatTimes("box")!.length).toBeGreaterThan(2);
+  });
+});

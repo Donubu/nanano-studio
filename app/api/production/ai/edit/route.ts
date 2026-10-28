@@ -26,11 +26,16 @@ import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { z } from "zod";
 import { parseBody } from "@/lib/api-utils";
 import { TemplateDefinition } from "@/lib/production/types";
-import { EMPTY_KIT_CONTENT, resolveColor, BrandKitContent } from "@/lib/production/brand-kit";
+import { EMPTY_KIT_CONTENT, resolveColor, resolveTreeTokens, BrandKitContent } from "@/lib/production/brand-kit";
 import { resolveTemplateBrandKit, resolveBrandLogo } from "@/lib/production/project-brand-kit";
 import { checkProductionAiQuota, quotaBlockedBody } from "@/lib/production/ai-rate-limit";
 import { loadClientBrandGuide } from "@/lib/production/plan-generation";
 import { applyEditOps } from "@/lib/production/edit-ops";
+import { runLayoutFix } from "@/lib/production/layout-fixer";
+import { collapseShapeTextPairs } from "@/lib/production/composites";
+import { requestAnimationPlan } from "@/lib/production/animation-planner";
+import { buildAnimationFromPlan } from "@/lib/production/animation-plan";
+import { validateAnimationConfig } from "@/lib/production/template-schema";
 import { ensureTextContrast, ensureLogoVisible, logoColorsOf } from "@/lib/production/layout-plan";
 import { requestEditPlan, EDIT_PLANNER_AGENT_NAME, EDIT_PLANNER_MODEL } from "@/lib/production/edit-planner";
 import type { LayoutFixUsage } from "@/lib/production/layout-fixer";
@@ -93,6 +98,28 @@ function asRootTree(raw: unknown): TemplateDefinition | null {
   const t = raw as Partial<TemplateDefinition>;
   if (t.type !== "frame" || !Array.isArray(t.children) || !t.size || !t.layout) return null;
   return t as TemplateDefinition;
+}
+
+// Master del design de la plantilla (la principal: menor id sin link), como
+// referencia de jerarquía al recomponer. null si no se puede resolver.
+async function loadDesignMaster(templateId: number | null): Promise<TemplateDefinition | null> {
+  if (!templateId) return null;
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT m.definition_json
+       FROM production_templates t
+       JOIN production_templates m
+         ON m.design_id = t.design_id AND m.linked_to_template_id IS NULL AND m.deleted_at IS NULL
+      WHERE t.id = ?
+      ORDER BY m.id ASC LIMIT 1`,
+    [templateId],
+  );
+  const raw = (rows[0] as { definition_json?: unknown } | undefined)?.definition_json;
+  if (!raw) return null;
+  try {
+    return (typeof raw === "string" ? JSON.parse(raw) : raw) as TemplateDefinition;
+  } catch {
+    return null;
+  }
 }
 
 // Color de fondo de la capa (resuelto) para la piel que se va a generar.
@@ -184,10 +211,58 @@ export async function POST(request: NextRequest) {
         accent: kit.colors[0]?.value,
         logo,
       });
+      const resolveC = (c: string) => resolveColor(c, kit, c);
+      const addUsage = (u: LayoutFixUsage | undefined | null) => {
+        if (!u) return;
+        usage = usage
+          ? {
+              inputTokens: usage.inputTokens + u.inputTokens,
+              outputTokens: usage.outputTokens + u.outputTokens,
+              estimatedCost: usage.estimatedCost + u.estimatedCost,
+            }
+          : u;
+      };
+      let definition = result.definition;
+      // Composición general: el mismo recompositor de "Readaptar desde el
+      // master", sobre la pieza ya editada y con el master como referencia
+      // de jerarquía.
+      if (result.recompose) {
+        const master = await loadDesignMaster(template_id ?? null);
+        const res = await runLayoutFix({
+          tree: definition,
+          sourceTree: collapseShapeTextPairs(master ?? tree).definition,
+          view: (t) => resolveTreeTokens(t, kit),
+          image: null,
+          imageRole: "original",
+          recompose: true,
+          instructions: result.recompose.instructions || instruction,
+          resolveColor: resolveC,
+        });
+        addUsage(res.usage);
+        definition = res.tree;
+      }
       // Un fondo nuevo puede dejar textos sin contraste o el logo sobre su
       // propio color: se corrige igual que al crear.
-      const resolveC = (c: string) => resolveColor(c, kit, c);
-      const definition = ensureLogoVisible(ensureTextContrast(result.definition, resolveC), resolveC, logoColorsOf(kit));
+      definition = ensureLogoVisible(ensureTextContrast(definition, resolveC), resolveC, logoColorsOf(kit));
+      // Animación: el motor de "Animar con IA" sobre la pieza final.
+      if (result.animate) {
+        const res = await requestAnimationPlan({
+          resolvedTree: resolveTreeTokens(definition, kit),
+          intent: result.animate.intent,
+          complexity: result.animate.intensity,
+        });
+        addUsage(res.usage);
+        const known = new Set<string>(["tpl_root"]);
+        const walk = (nodes: TemplateLayer[]) =>
+          nodes.forEach((n) => {
+            known.add(n.id);
+            if (n.type === "frame") walk(n.children);
+          });
+        walk(definition.children);
+        const v = validateAnimationConfig(buildAnimationFromPlan(definition, res.plan), known);
+        if (v.ok) definition = { ...definition, animation: v.animation };
+        else result.skipped.push(`animate: ${v.error}`);
+      }
       body = {
         definition,
         images: result.images,
