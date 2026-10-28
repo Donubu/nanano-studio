@@ -79,7 +79,13 @@ export function SmartText({
     visibility: "hidden",
     pointerEvents: "none",
     whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
+    // Sin cortes dentro de palabra al MEDIR: una palabra más ancha que la
+    // caja tiene que desbordar (scrollWidth > maxW) para que la búsqueda
+    // baje el tamaño. Con break-word el measurer la partía ("DSCT/O.") y
+    // el tamaño quedaba grande. El texto visible conserva su break-word
+    // como red de seguridad si ni el mínimo alcanza.
+    wordBreak: "normal",
+    overflowWrap: "normal",
     fontFamily: style.fontFamily,
     fontWeight: style.fontWeight,
     lineHeight: style.lineHeight,

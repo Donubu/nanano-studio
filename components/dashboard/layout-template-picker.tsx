@@ -8,10 +8,11 @@
 //   3. "Clonar existente" — copia exacta de otro template del mismo proyecto
 //                          (master + variantes), útil para variar contenido
 //                          sin re-componer el layout desde cero.
-//   4. "Subir referencia" — el Banner Designer replica el estilo de 1-3
-//                          imágenes (GENERATE_FROM_REFERENCE).
-//   5. "Crear desde texto" — el Banner Designer compone desde cero a partir
+//   4. "Subir referencia" — la IA elige plantillas del catálogo que calcen con
+//                          1-3 imágenes y las completa (GENERATE_FROM_REFERENCE).
+//   5. "Crear desde texto" — la IA elige plantillas y las completa a partir
 //                          de una descripción (GENERATE_FROM_PROMPT).
+//   Ambas devuelven hasta 3 propuestas (lib/production/plan-generation.ts).
 //
 // Cada selección actualiza `pickedSource` (discriminated union). Al pulsar
 // Crear, el caller recibe el source y arma el POST correspondiente:
@@ -19,6 +20,7 @@
 
 import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import {
+  Check,
   Copy,
   Image as ImageIcon,
   Loader2,
@@ -39,6 +41,10 @@ import {
 } from "@/lib/production/layout-templates";
 import { TemplateDefinition, TemplateLayer } from "@/lib/production/types";
 import { prepareImageForAgent, renameForPrepared } from "@/lib/production/prepare-image";
+import { EMPTY_KIT_CONTENT } from "@/lib/production/brand-kit";
+import { serializeOverrides } from "@/lib/production/overrides";
+import { imageJobsFor, applyGeneratedImages, ImageRatio } from "@/lib/production/layout-plan";
+import { AdaptationRenderer } from "@/components/production/render/adaptation-renderer";
 
 export type PickerSource =
   | { kind: "blank" }
@@ -51,7 +57,7 @@ export type PickerSource =
       kind: "ai-reference";
       definition: TemplateDefinition;
       variants: AiVariant[];
-      // Kit con el que el agente resolvió los tokens; se persiste en el
+      // Kit con el que la IA resolvió los tokens; se persiste en el
       // template para que el editor muestre exactamente lo mismo.
       brandKitId: number | null;
     }
@@ -353,8 +359,8 @@ export function LayoutTemplatePicker({
 }
 
 // Tab "Subir referencia": permite arrastrar/cargar 1-3 imágenes, mandarlas
-// al Banner Designer para que extraiga estilo y proponga un template, y
-// mostrar el rationale del agente. Cuando la generación es exitosa, el
+// a la IA para que elija plantillas con su estilo, y mostrar las propuestas
+// para elegir. Cuando la generación es exitosa, el
 // pickedSource del picker pasa a ser { kind: "ai-reference", definition,
 // variants } y el botón "Crear" del footer del picker arma el POST final
 // con esa proposal.
@@ -373,7 +379,9 @@ function ReferenceUploadTab({
   const [uploading, setUploading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [rationale, setRationale] = useState<string | null>(null);
+  const [proposals, setProposals] = useState<AiProposal[]>([]);
+  const [selected, setSelected] = useState(0);
+  const [brandKitId, setBrandKitId] = useState<number | null>(null);
   const [cost, setCost] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -453,7 +461,7 @@ function ReferenceUploadTab({
     }
     setGenerating(true);
     setError(null);
-    setRationale(null);
+    setProposals([]);
     try {
       const res = await fetch(
         "/api/production/ai/generate-from-reference",
@@ -477,25 +485,25 @@ function ReferenceUploadTab({
         setError(body?.error || `Error ${res.status}`);
         return;
       }
-      const proposal = body.proposal as {
-        definition: TemplateDefinition;
-        variants: Array<{
-          dims: { w: number; h: number };
-          definition: TemplateDefinition;
-        }>;
-      };
-      setRationale(typeof body.rationale === "string" ? body.rationale : null);
+      const list = readProposals(body);
+      if (list.length === 0) {
+        setError("La IA no devolvió propuestas");
+        return;
+      }
+      setProposals(list);
+      setSelected(0);
+      setBrandKitId(typeof body.brand_kit_id === "number" ? body.brand_kit_id : null);
       setCost(
         typeof body.tokenUsage?.estimatedCost === "number"
           ? body.tokenUsage.estimatedCost
           : null,
       );
-      // Marcamos pickedSource como ai-reference con la proposal: ahora el
-      // botón "Crear" del footer del picker la usa.
+      // Marcamos pickedSource como ai-reference con la primera propuesta:
+      // el botón "Crear" del footer del picker usa la elegida.
       onPicked({
         kind: "ai-reference",
-        definition: proposal.definition,
-        variants: proposal.variants,
+        definition: list[0].definition,
+        variants: list[0].variants,
         brandKitId: typeof body.brand_kit_id === "number" ? body.brand_kit_id : null,
       });
     } catch (e) {
@@ -629,8 +637,8 @@ function ReferenceUploadTab({
 
       <div className="flex items-center justify-between">
         <p className="text-[11px] text-muted-foreground">
-          El agente extrae paleta, jerarquía y layout de las referencias y los
-          aplica con el brand kit del cliente. No copia logos ni texto literal.
+          La IA toma paleta, jerarquía y composición de las referencias y propone
+          hasta 3 diseños con el brand kit del cliente. No copia logos ni texto literal.
         </p>
         <Button
           size="sm"
@@ -653,22 +661,220 @@ function ReferenceUploadTab({
         </div>
       )}
 
-      {hasProposal && rationale && (
-        <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg px-3 py-2">
-          <p className="text-[10px] uppercase tracking-wide text-violet-400 mb-1 flex items-center justify-between">
-            <span>Decisión del agente</span>
-            {cost != null && (
-              <span className="text-muted-foreground normal-case tracking-normal">
-                ~ USD {cost.toFixed(4)}
-              </span>
-            )}
+      {hasProposal && proposals.length > 0 && (
+        <ProposalChooser
+          productionProjectId={productionProjectId}
+          proposals={proposals}
+          selected={selected}
+          cost={cost}
+          onSelect={(i) => {
+            setSelected(i);
+            onPicked({
+              kind: "ai-reference",
+              definition: proposals[i].definition,
+              variants: proposals[i].variants,
+              brandKitId,
+            });
+          }}
+          onUpdate={(i, p) => {
+            setProposals((cur) => cur.map((x, j) => (j === i ? p : x)));
+            if (i === selected) {
+              onPicked({ kind: "ai-reference", definition: p.definition, variants: p.variants, brandKitId });
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Propuesta de los endpoints generate-from-* (lib/production/plan-generation.ts):
+// el planificador devuelve hasta 3, cada una sobre una plantilla distinta.
+interface AiProposal {
+  template_id: string;
+  rationale: string;
+  definition: TemplateDefinition;
+  variants: AiVariant[];
+  // Master con tokens ya resueltos: se dibuja sin cargar el brand kit.
+  preview: TemplateDefinition;
+  // Prompts (en inglés) que escribió la IA para cada slot de imagen.
+  image_prompts?: { id: string; prompt: string }[];
+}
+
+// Costo aproximado por imagen del generador por defecto (Nano Banana 2, 1K).
+// El costo real lo registra el server con el precio de la tabla `models`.
+const IMAGE_COST_HINT = 0.067;
+
+function proposalDefs(p: AiProposal): TemplateDefinition[] {
+  return [p.definition, ...p.variants.map((v) => v.definition)];
+}
+
+function withImages(
+  p: AiProposal,
+  images: { slot_id: string; ratio: ImageRatio; url: string }[],
+): AiProposal {
+  return {
+    ...p,
+    definition: applyGeneratedImages(p.definition, images),
+    variants: p.variants.map((v) => ({ ...v, definition: applyGeneratedImages(v.definition, images) })),
+    preview: applyGeneratedImages(p.preview, images),
+  };
+}
+
+function readProposals(body: Record<string, unknown>): AiProposal[] {
+  if (Array.isArray(body.proposals) && body.proposals.length > 0) {
+    return body.proposals as AiProposal[];
+  }
+  // Respuesta antigua (una sola propuesta, sin preview).
+  const p = body.proposal as { definition: TemplateDefinition; variants: AiVariant[] } | undefined;
+  if (!p) return [];
+  return [
+    {
+      template_id: "",
+      rationale: typeof body.rationale === "string" ? body.rationale : "",
+      definition: p.definition,
+      variants: p.variants,
+      preview: p.definition,
+    },
+  ];
+}
+
+function ProposalPreview({ def, targetH }: { def: TemplateDefinition; targetH: number }) {
+  const s = targetH / def.size.h;
+  return (
+    <div
+      className="overflow-hidden rounded border border-border/30"
+      style={{ width: def.size.w * s, height: targetH }}
+    >
+      <div style={{ width: def.size.w, height: def.size.h, transform: `scale(${s})`, transformOrigin: "0 0" }}>
+        <AdaptationRenderer
+          adaptation={{
+            width: def.size.w,
+            height: def.size.h,
+            fit_mode: "responsive",
+            overrides_json: serializeOverrides({ manual_layout: def }),
+          }}
+          master={def}
+          brandKit={EMPTY_KIT_CONTENT}
+        />
+      </div>
+    </div>
+  );
+}
+
+// Elige entre las propuestas: la seleccionada es la que instancia "Crear".
+function ProposalChooser({
+  productionProjectId,
+  proposals,
+  selected,
+  onSelect,
+  onUpdate,
+  cost,
+}: {
+  productionProjectId: number;
+  proposals: AiProposal[];
+  selected: number;
+  onSelect: (i: number) => void;
+  // Reemplaza una propuesta (p. ej. con las imágenes ya generadas).
+  onUpdate: (i: number, p: AiProposal) => void;
+  cost: number | null;
+}) {
+  const [imagesBusy, setImagesBusy] = useState(false);
+  const [imagesError, setImagesError] = useState<string | null>(null);
+  const current = proposals[selected];
+  const jobs = current ? imageJobsFor(proposalDefs(current), current.image_prompts ?? []) : [];
+
+  const generateImages = async () => {
+    if (!current || jobs.length === 0 || imagesBusy) return;
+    const idx = selected;
+    setImagesBusy(true);
+    setImagesError(null);
+    try {
+      const res = await fetch("/api/production/ai/generate-images", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ production_project_id: productionProjectId, jobs }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setImagesError(body?.error || `Error ${res.status}`);
+        return;
+      }
+      const images = (body.images as { slot_id: string; ratio: ImageRatio; url?: string; error?: string }[])
+        .filter((i): i is { slot_id: string; ratio: ImageRatio; url: string } => typeof i.url === "string");
+      const failed = (body.images as { error?: string }[]).filter((i) => i.error);
+      if (failed.length > 0) setImagesError(`${failed.length} imagen(es) fallaron: ${failed[0].error}`);
+      onUpdate(idx, withImages(current, images));
+    } catch (e) {
+      setImagesError(`Error de red: ${(e as Error).message}`);
+    } finally {
+      setImagesBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] uppercase tracking-wide text-violet-400 flex items-center justify-between">
+        <span>
+          {proposals.length === 1 ? "Propuesta de la IA" : `${proposals.length} propuestas · elige una`}
+        </span>
+        {cost != null && (
+          <span className="text-muted-foreground normal-case tracking-normal">
+            ~ USD {cost.toFixed(4)}
+          </span>
+        )}
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        {proposals.map((p, i) => {
+          const tpl = LAYOUT_TEMPLATES.find((t) => t.id === p.template_id);
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={() => onSelect(i)}
+              className={cn(
+                "text-left rounded-lg border p-2 space-y-1.5 transition-colors",
+                i === selected
+                  ? "border-violet-500 bg-violet-500/10"
+                  : "border-border/50 hover:border-violet-500/50",
+              )}
+            >
+              <div className="flex justify-center">
+                <ProposalPreview def={p.preview} targetH={96} />
+              </div>
+              <p className="text-[11px] font-medium flex items-center gap-1">
+                {i === selected && <Check className="h-3 w-3 text-violet-400" />}
+                {tpl?.name ?? "Propuesta"}
+              </p>
+              {p.rationale && (
+                <p className="text-[10px] text-muted-foreground line-clamp-3">{p.rationale}</p>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      {jobs.length > 0 && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-border/50 px-3 py-2">
+          <p className="text-[11px] text-muted-foreground">
+            La propuesta elegida tiene {jobs.length === 1 ? "1 imagen pendiente" : `${jobs.length} imágenes pendientes`}{" "}
+            (una por proporción de cada orientación). Puedes generarlas con IA o subirlas después en el editor.
           </p>
-          <p className="text-xs text-foreground">{rationale}</p>
-          <p className="text-[10px] text-muted-foreground mt-2">
-            Propuesta lista. Pulsa Crear abajo para instanciar el template.
-          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={generateImages}
+            disabled={imagesBusy}
+            className="gap-1 shrink-0"
+          >
+            {imagesBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
+            Generar {jobs.length === 1 ? "imagen" : "imágenes"} · ~USD {(jobs.length * IMAGE_COST_HINT).toFixed(2)}
+          </Button>
         </div>
       )}
+      {imagesError && <p className="text-[11px] text-red-300">{imagesError}</p>}
+      <p className="text-[10px] text-muted-foreground">
+        Pulsa Crear abajo para instanciar la propuesta elegida con sus orientaciones 1:1 y 9:16.
+      </p>
     </div>
   );
 }
@@ -679,7 +885,7 @@ function ReferenceUploadTab({
 // pickedSource ({ kind: "ai-prompt" }) y el botón Crear del footer la
 // instancia.
 const TONE_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "", label: "Que decida el agente" },
+  { value: "", label: "Que decida la IA" },
   { value: "energetic", label: "Energético / promo" },
   { value: "premium", label: "Premium / elegante" },
   { value: "corporate", label: "Corporativo / sobrio" },
@@ -702,7 +908,9 @@ function PromptTab({
   const [instructions, setInstructions] = useState("");
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [rationale, setRationale] = useState<string | null>(null);
+  const [proposals, setProposals] = useState<AiProposal[]>([]);
+  const [selected, setSelected] = useState(0);
+  const [brandKitId, setBrandKitId] = useState<number | null>(null);
   const [cost, setCost] = useState<number | null>(null);
 
   const canGenerate = intent.trim().length >= 3 && !generating;
@@ -711,7 +919,7 @@ function PromptTab({
     if (!canGenerate) return;
     setGenerating(true);
     setError(null);
-    setRationale(null);
+    setProposals([]);
     try {
       const res = await fetch("/api/production/ai/generate-from-prompt", {
         method: "POST",
@@ -728,11 +936,14 @@ function PromptTab({
         setError(body?.error || `Error ${res.status}`);
         return;
       }
-      const proposal = body.proposal as {
-        definition: TemplateDefinition;
-        variants: AiVariant[];
-      };
-      setRationale(typeof body.rationale === "string" ? body.rationale : null);
+      const list = readProposals(body);
+      if (list.length === 0) {
+        setError("La IA no devolvió propuestas");
+        return;
+      }
+      setProposals(list);
+      setSelected(0);
+      setBrandKitId(typeof body.brand_kit_id === "number" ? body.brand_kit_id : null);
       setCost(
         typeof body.tokenUsage?.estimatedCost === "number"
           ? body.tokenUsage.estimatedCost
@@ -740,8 +951,8 @@ function PromptTab({
       );
       onPicked({
         kind: "ai-prompt",
-        definition: proposal.definition,
-        variants: proposal.variants,
+        definition: list[0].definition,
+        variants: list[0].variants,
         brandKitId: typeof body.brand_kit_id === "number" ? body.brand_kit_id : null,
       });
     } catch (e) {
@@ -807,9 +1018,9 @@ function PromptTab({
 
       <div className="flex items-center justify-between gap-3">
         <p className="text-[11px] text-muted-foreground">
-          El agente compone master 16:9 más variantes 1:1 y 9:16 con el brand kit
-          del cliente. Las imágenes quedan como slots vacíos para que las subas
-          después en el editor.
+          La IA propone hasta 3 diseños sobre las plantillas del catálogo, con el
+          brand kit del cliente, en 16:9 más 1:1 y 9:16. Las imágenes quedan como
+          slots vacíos para que las subas después en el editor.
         </p>
         <Button
           size="sm"
@@ -832,21 +1043,28 @@ function PromptTab({
         </div>
       )}
 
-      {hasProposal && rationale && (
-        <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg px-3 py-2">
-          <p className="text-[10px] uppercase tracking-wide text-violet-400 mb-1 flex items-center justify-between">
-            <span>Decisión del agente</span>
-            {cost != null && (
-              <span className="text-muted-foreground normal-case tracking-normal">
-                ~ USD {cost.toFixed(4)}
-              </span>
-            )}
-          </p>
-          <p className="text-xs text-foreground">{rationale}</p>
-          <p className="text-[10px] text-muted-foreground mt-2">
-            Propuesta lista. Pulsa Crear abajo para instanciar el template.
-          </p>
-        </div>
+      {hasProposal && proposals.length > 0 && (
+        <ProposalChooser
+          productionProjectId={productionProjectId}
+          proposals={proposals}
+          selected={selected}
+          cost={cost}
+          onSelect={(i) => {
+            setSelected(i);
+            onPicked({
+              kind: "ai-prompt",
+              definition: proposals[i].definition,
+              variants: proposals[i].variants,
+              brandKitId,
+            });
+          }}
+          onUpdate={(i, p) => {
+            setProposals((cur) => cur.map((x, j) => (j === i ? p : x)));
+            if (i === selected) {
+              onPicked({ kind: "ai-prompt", definition: p.definition, variants: p.variants, brandKitId });
+            }
+          }}
+        />
       )}
     </div>
   );

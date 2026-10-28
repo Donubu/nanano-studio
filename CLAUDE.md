@@ -275,14 +275,30 @@ La respuesta de `/api/practicante/run` incluye:
   en la última hora (`PRODUCTION_AI_HOURLY_CALLS_PER_USER`, default 20).
   0 desactiva el tope. El panel "Costos IA" del proyecto muestra el uso del día.
 
-### Endpoints que invocan al agente
+### Endpoints que invocan al agente (practicante)
 - `POST /api/production/templates/[id]/ai/adapt-orientation` — `ADAPT_ORIENTATION` (id = target; el master se resuelve por design).
 - `POST /api/production/templates/[id]/ai/animate` — `ANIMATE_TEMPLATE`.
-- `POST /api/production/ai/generate-from-reference` — `GENERATE_FROM_REFERENCE` (1-3 imágenes).
-- `POST /api/production/ai/generate-from-prompt` — `GENERATE_FROM_PROMPT` (solo texto).
-Todos registran en `production_ai_invocations`, pasan por el rate limiting y
+Registran en `production_ai_invocations`, pasan por el rate limiting y
 normalizan la respuesta con `lib/production/composites.ts` (colapsa pares
 shape+text en un TextLayer con fondo).
+
+### IA directa con Gemini (sin practicante, desde 2026-10-28)
+Principio: el motor arma, la IA decide. El modelo devuelve decisiones chicas
+con JSON schema forzado, nunca árboles completos.
+- `POST /api/production/ai/generate-from-prompt` y `.../generate-from-reference`
+  — Gemini 3.8 Flash elige plantillas de `lib/production/layout-templates.ts` y
+  devuelve hasta 3 planes (textos por slot, ocultos, recolor, fuentes, prompts
+  de imagen) que `lib/production/layout-plan.ts` expande a master + variantes.
+  Las referencias van como imagen nativa. Flujo en `lib/production/plan-generation.ts`.
+- `POST /api/production/ai/generate-images` — llena los slots de imagen de una
+  propuesta con Nano Banana 2 (API Gemini; Imagen 4 no existe en la región
+  `global` de Vertex), una imagen por slot y proporción.
+- `POST /api/production/designs/[id]/ai/fix-adaptations` — "Revisar con IA" del
+  paso Formatos: lint determinista (`layout-lint.ts`) → correcciones por capa
+  (`layout-fixer.ts` / `layout-patch.ts`) por SSE.
+Modelos por env: `PRODUCTION_AI_LAYOUT_MODEL`, `PRODUCTION_AI_PLANNER_MODEL`,
+`PRODUCTION_AI_IMAGE_MODEL`. También registran en `production_ai_invocations`
+(con `model` y `duration_ms`) y pasan por el rate limiting.
 
 ### Brand kit: tokens de marca heredados por proyecto
 `lib/production/project-brand-kit.ts` es el único resolver. Orden: kit

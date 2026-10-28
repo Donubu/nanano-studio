@@ -1,0 +1,350 @@
+// Planes de diseño sobre las plantillas de layout-templates.ts.
+//
+// Para crear un banner desde texto o referencia, la IA no compone el árbol:
+// elige una plantilla del catálogo y devuelve un PLAN chico (textos por
+// slot, capas a ocultar, mapeo de colores y fuentes, prompts para las
+// imágenes). Este módulo:
+//   1. describe el catálogo para el modelo (slots con su capacidad aprox.),
+//   2. expande un plan a master + orientaciones con el mismo motor que usan
+//      las plantillas a mano (cada aspect tiene su composición propia).
+//
+// Puro: corre en server (rutas de IA) y en cliente (tests, previews).
+
+import {
+  TemplateDefinition,
+  TemplateLayer,
+  TextLayer,
+  isFontSizeRange,
+} from "./types";
+import { LAYOUT_TEMPLATES, LayoutTemplate, AspectKey, findLayoutTemplate } from "./layout-templates";
+import { collapseShapeTextPairs } from "./composites";
+import { adaptTree, aspectDiff } from "./adapt";
+
+export interface LayoutPlan {
+  template_id: string;
+  // Contenido por id de capa de texto. Los ids que falten conservan el
+  // placeholder de la plantilla (y el plan se marca incompleto en la UI).
+  texts: { id: string; content: string }[];
+  // Capas a quitar (texto, imagen, forma). Un texto que era botón/badge se
+  // lleva su fondo, porque antes se fusiona el par shape+text.
+  hidden: string[];
+  // Recolor: color de la plantilla → color nuevo (hex o token "{color.x}").
+  colors: { from: string; to: string }[];
+  heading_font?: string | null;
+  body_font?: string | null;
+  // Prompt (en inglés, para el generador de imágenes) por slot de imagen.
+  image_prompts: { id: string; prompt: string }[];
+  rationale: string;
+}
+
+export interface TemplateSlot {
+  id: string;
+  name: string;
+  placeholder: string;
+  // Caracteres que caben en total y por línea (estimación, el mínimo entre
+  // aspects). line_chars es el tope de una palabra: el renderer no la
+  // corta bien y el auto-fit solo achica por alto.
+  max_chars: number;
+  line_chars: number;
+}
+
+export interface CatalogEntry {
+  id: string;
+  name: string;
+  description: string;
+  texts: TemplateSlot[];
+  images: { id: string; name: string; full_bleed: boolean }[];
+  colors: string[];
+}
+
+const ASPECTS: AspectKey[] = ["horizontal", "square", "vertical"];
+// Mismo ancho de glifo que layout-lint.ts: estimación, no layout real.
+const AVG_GLYPH_W = 0.55;
+// Piso del auto-fit al instanciar: el texto real casi nunca mide lo mismo que
+// el placeholder, así que cada texto pasa a rango [45% .. 100%] de su tamaño.
+const AUTOFIT_MIN_RATIO = 0.45;
+const AUTOFIT_MIN_PX = 12;
+
+function walk(nodes: TemplateLayer[], fn: (l: TemplateLayer) => void) {
+  for (const n of nodes) {
+    fn(n);
+    if (n.type === "frame") walk(n.children, fn);
+  }
+}
+
+const normColor = (c: string) => c.trim().toLowerCase();
+
+function templateColors(def: TemplateDefinition): string[] {
+  const out = new Set<string>();
+  const add = (c: string | undefined) => {
+    if (c && c.startsWith("#")) out.add(normColor(c));
+  };
+  if (def.background?.type === "color") add(def.background.value);
+  walk(def.children, (l) => {
+    if (l.type === "shape") add(l.fill);
+    if (l.type === "text") {
+      add(l.style.color);
+      add(l.style.backgroundColor);
+    }
+    if (l.type === "icon") add(l.color);
+  });
+  return [...out];
+}
+
+function slotCapacity(l: TextLayer): { total: number; perLine: number } {
+  const fs = typeof l.style.fontSize === "number" ? l.style.fontSize : isFontSizeRange(l.style.fontSize) ? l.style.fontSize.max : 32;
+  // Texto con fondo (botón/badge, o par shape+text) lleva padding interno.
+  const w = l.style.backgroundColor ? l.size.w - fs * 0.8 : l.size.w * 0.9;
+  const perLine = Math.max(1, Math.floor(w / (fs * AVG_GLYPH_W)));
+  const lines = Math.max(1, Math.floor(l.size.h / (fs * (l.style.lineHeight ?? 1.2))));
+  return { total: perLine * lines, perLine };
+}
+
+export function describeTemplate(t: LayoutTemplate): CatalogEntry {
+  const texts = new Map<string, TemplateSlot>();
+  const images = new Map<string, { id: string; name: string; full_bleed: boolean }>();
+  const colors = new Set<string>();
+  for (const a of ASPECTS) {
+    const def = t.aspects[a];
+    templateColors(def).forEach((c) => colors.add(c));
+    walk(def.children, (l) => {
+      if (l.type === "text") {
+        const cap = slotCapacity(l);
+        const prev = texts.get(l.id);
+        // La capacidad que manda es la más chica entre aspects: el texto
+        // tiene que caber en todas las orientaciones.
+        texts.set(l.id, {
+          id: l.id,
+          name: prev?.name ?? l.name ?? l.id,
+          placeholder: prev?.placeholder ?? l.content,
+          max_chars: Math.min(prev?.max_chars ?? Infinity, cap.total),
+          line_chars: Math.min(prev?.line_chars ?? Infinity, cap.perLine),
+        });
+      }
+      if (l.type === "image" && !images.has(l.id)) {
+        images.set(l.id, {
+          id: l.id,
+          name: l.name ?? l.id,
+          full_bleed: l.size.w >= def.size.w * 0.9 && l.size.h >= def.size.h * 0.9,
+        });
+      }
+    });
+  }
+  return {
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    texts: [...texts.values()],
+    images: [...images.values()],
+    colors: [...colors],
+  };
+}
+
+export function describeCatalog(): CatalogEntry[] {
+  return LAYOUT_TEMPLATES.map(describeTemplate);
+}
+
+function applyToLayer(
+  l: TemplateLayer,
+  plan: { texts: Map<string, string>; colors: Map<string, string>; heading?: string | null; body?: string | null },
+): TemplateLayer {
+  const color = (c: string | undefined) =>
+    c && plan.colors.has(normColor(c)) ? plan.colors.get(normColor(c))! : c;
+
+  if (l.type === "text") {
+    const content = plan.texts.get(l.id) ?? l.content;
+    const weight = Number(l.style.fontWeight ?? 400);
+    const font = weight >= 700 ? plan.heading : plan.body;
+    const fs = l.style.fontSize;
+    return {
+      ...l,
+      content,
+      style: {
+        ...l.style,
+        color: color(l.style.color) ?? l.style.color,
+        backgroundColor: color(l.style.backgroundColor),
+        ...(font ? { fontFamily: font } : {}),
+        fontSize:
+          typeof fs === "number"
+            ? { min: Math.min(fs, Math.max(AUTOFIT_MIN_PX, Math.round(fs * AUTOFIT_MIN_RATIO))), max: fs }
+            : fs,
+      },
+    };
+  }
+  if (l.type === "shape") {
+    return {
+      ...l,
+      fill: color(l.fill) ?? l.fill,
+      stroke: l.stroke ? { ...l.stroke, color: color(l.stroke.color) ?? l.stroke.color } : l.stroke,
+    };
+  }
+  if (l.type === "icon") return { ...l, color: color(l.color) ?? l.color };
+  return l;
+}
+
+function instantiateAspect(def: TemplateDefinition, plan: LayoutPlan): TemplateDefinition {
+  const collapsed = collapseShapeTextPairs(def).definition;
+  const hidden = new Set(plan.hidden);
+  const ctx = {
+    texts: new Map(plan.texts.map((t) => [t.id, t.content])),
+    colors: new Map(plan.colors.map((c) => [normColor(c.from), c.to])),
+    heading: plan.heading_font,
+    body: plan.body_font,
+  };
+  const mapChildren = (nodes: TemplateLayer[]): TemplateLayer[] =>
+    nodes
+      .filter((n) => !hidden.has(n.id))
+      .map((n) => {
+        const next = applyToLayer(n, ctx);
+        return next.type === "frame" ? { ...next, children: mapChildren(next.children) } : next;
+      });
+  const bg = collapsed.background;
+  const bgColor = bg?.type === "color" ? ctx.colors.get(normColor(bg.value)) : undefined;
+  return {
+    ...collapsed,
+    background: bgColor ? { type: "color", value: bgColor } : collapsed.background,
+    children: mapChildren(collapsed.children),
+  };
+}
+
+// Aspect de la plantilla más parecido a unas dims. Si las dims no son las
+// canónicas, se adapta con el motor (adaptTree) desde ese aspect.
+function aspectFor(t: LayoutTemplate, dims: { w: number; h: number }): AspectKey {
+  let best: AspectKey = "horizontal";
+  let bestDiff = Infinity;
+  for (const a of ASPECTS) {
+    const s = t.aspects[a].size;
+    const d = aspectDiff(s.w, s.h, dims.w, dims.h);
+    if (d < bestDiff) {
+      best = a;
+      bestDiff = d;
+    }
+  }
+  return best;
+}
+
+export interface ExpandedPlan {
+  definition: TemplateDefinition;
+  variants: { dims: { w: number; h: number }; definition: TemplateDefinition }[];
+}
+
+export function expandPlan(
+  plan: LayoutPlan,
+  masterDims: { w: number; h: number },
+  variantDims: { w: number; h: number }[],
+): ExpandedPlan | null {
+  const t = findLayoutTemplate(plan.template_id);
+  if (!t) return null;
+  const build = (dims: { w: number; h: number }) => {
+    const def = instantiateAspect(t.aspects[aspectFor(t, dims)], plan);
+    return def.size.w === dims.w && def.size.h === dims.h ? def : adaptTree(def, dims);
+  };
+  return {
+    definition: build(masterDims),
+    variants: variantDims.map((dims) => ({ dims, definition: build(dims) })),
+  };
+}
+
+// Normaliza la respuesta cruda del modelo. Descarta planes con plantilla
+// inexistente; filtra ids que no son de esa plantilla.
+export function sanitizePlan(raw: unknown): LayoutPlan | null {
+  if (!raw || typeof raw !== "object") return null;
+  const p = raw as Record<string, unknown>;
+  const t = typeof p.template_id === "string" ? findLayoutTemplate(p.template_id) : null;
+  if (!t) return null;
+  const entry = describeTemplate(t);
+  const textIds = new Set(entry.texts.map((s) => s.id));
+  const imageIds = new Set(entry.images.map((s) => s.id));
+  const allIds = new Set<string>();
+  for (const a of ASPECTS) walk(t.aspects[a].children, (l) => allIds.add(l.id));
+
+  const arr = (v: unknown) => (Array.isArray(v) ? v : []);
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  return {
+    template_id: t.id,
+    texts: arr(p.texts)
+      .map((x) => ({ id: str((x as { id?: unknown }).id), content: str((x as { content?: unknown }).content).trim() }))
+      .filter((x) => textIds.has(x.id) && x.content.length > 0),
+    hidden: arr(p.hidden).map(str).filter((id) => allIds.has(id)),
+    colors: arr(p.colors)
+      .map((x) => ({ from: str((x as { from?: unknown }).from), to: str((x as { to?: unknown }).to).trim() }))
+      .filter((x) => x.from && x.to && (/^#[0-9a-f]{3,8}$/i.test(x.to) || /^\{color\.[\w-]+\}$/.test(x.to))),
+    heading_font: str(p.heading_font) || null,
+    body_font: str(p.body_font) || null,
+    image_prompts: arr(p.image_prompts)
+      .map((x) => ({ id: str((x as { id?: unknown }).id), prompt: str((x as { prompt?: unknown }).prompt).trim() }))
+      .filter((x) => imageIds.has(x.id) && x.prompt.length > 0),
+    rationale: str(p.rationale),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Imágenes generadas para los slots de una propuesta
+// ---------------------------------------------------------------------------
+
+// Proporciones que acepta el generador (Imagen 4).
+export const IMAGE_RATIOS = ["1:1", "3:4", "4:3", "9:16", "16:9"] as const;
+export type ImageRatio = (typeof IMAGE_RATIOS)[number];
+
+export function nearestImageRatio(w: number, h: number): ImageRatio {
+  const r = w / h;
+  let best: ImageRatio = "1:1";
+  let bestDiff = Infinity;
+  for (const ratio of IMAGE_RATIOS) {
+    const [a, b] = ratio.split(":").map(Number);
+    const d = Math.abs(Math.log(r / (a / b)));
+    if (d < bestDiff) {
+      best = ratio;
+      bestDiff = d;
+    }
+  }
+  return best;
+}
+
+export interface ImageJob {
+  slot_id: string;
+  ratio: ImageRatio;
+  prompt: string;
+}
+
+// Qué imágenes hay que generar: una por slot y por proporción distinta que
+// necesiten las orientaciones (un fondo full-bleed 16:9 y su versión 9:16
+// son dos imágenes; recortar una sola dejaría el vertical sin sujeto).
+// Solo slots vacíos (src null) con prompt en el plan.
+export function imageJobsFor(
+  defs: TemplateDefinition[],
+  prompts: { id: string; prompt: string }[],
+): ImageJob[] {
+  const byId = new Map(prompts.map((p) => [p.id, p.prompt]));
+  const seen = new Set<string>();
+  const jobs: ImageJob[] = [];
+  for (const def of defs) {
+    walk(def.children, (l) => {
+      if (l.type !== "image" || l.src != null || l.visible === false) return;
+      const prompt = byId.get(l.id);
+      if (!prompt) return;
+      const ratio = nearestImageRatio(l.size.w, l.size.h);
+      const key = `${l.id}|${ratio}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      jobs.push({ slot_id: l.id, ratio, prompt });
+    });
+  }
+  return jobs;
+}
+
+// Pone en cada slot la imagen generada de su proporción.
+export function applyGeneratedImages(
+  def: TemplateDefinition,
+  images: { slot_id: string; ratio: ImageRatio; url: string }[],
+): TemplateDefinition {
+  const byKey = new Map(images.map((i) => [`${i.slot_id}|${i.ratio}`, i.url]));
+  const map = (nodes: TemplateLayer[]): TemplateLayer[] =>
+    nodes.map((l) => {
+      if (l.type === "frame") return { ...l, children: map(l.children) };
+      if (l.type !== "image" || l.src != null) return l;
+      const url = byKey.get(`${l.id}|${nearestImageRatio(l.size.w, l.size.h)}`);
+      return url ? { ...l, src: url, fit: l.fit ?? "cover" } : l;
+    });
+  return { ...def, children: map(def.children) };
+}
