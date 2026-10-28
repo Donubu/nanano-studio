@@ -132,13 +132,19 @@ async function imageAspect(url: string): Promise<number | null> {
   }
 }
 
-export async function resolveBrandLogo(kit: BrandKitContent | null, clientId: number): Promise<BrandLogo | null> {
+// `useToken`: el editor solo resuelve tokens del kit asignado a la plantilla
+// (brand_kit_id). Si la plantilla no tiene kit asignado, va la URL directa
+// del logo para que se vea igual.
+export async function resolveBrandLogo(
+  kit: BrandKitContent | null,
+  clientId: number,
+  opts: { useToken?: boolean } = {},
+): Promise<BrandLogo | null> {
   let src: string | null = null;
   let url: string | null = null;
   const fromKit = kit?.logos.find((l) => l.src);
   if (fromKit) {
-    // El editor resuelve el token con el mismo kit.
-    src = makeRef("logo", fromKit.name);
+    src = opts.useToken === false ? fromKit.src : makeRef("logo", fromKit.name);
     url = fromKit.src;
   } else {
     const [rows] = await pool.execute<ClientLogoRow[]>("SELECT logo FROM clients WHERE id = ?", [clientId]);

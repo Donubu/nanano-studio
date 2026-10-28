@@ -164,7 +164,9 @@ export async function POST(request: NextRequest) {
       const layerImages = await loadLayerImages(tree, selectedIds);
       const photoSizes: Record<string, { w: number; h: number }> = {};
       for (const li of layerImages) if (li.size) photoSizes[li.layerId] = li.size;
-      const logo = await resolveBrandLogo(kit, clientId);
+      // Token solo si la plantilla tiene kit asignado (el editor resuelve
+      // tokens de ese kit); si no, URL directa.
+      const logo = await resolveBrandLogo(kit, clientId, { useToken: brandKitId != null });
       const plan = await requestEditPlan({
         tree,
         instruction,

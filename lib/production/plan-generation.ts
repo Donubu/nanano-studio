@@ -83,7 +83,8 @@ export async function generateFromPlans(
     usage = (e as { usage?: LayoutFixUsage }).usage;
   }
 
-  const logo = plans.length > 0 ? await resolveBrandLogo(p.brandKit, p.clientId) : null;
+  // La plantilla nueva se crea con brand_kit_id = p.brandKitId: token solo si hay kit.
+  const logo = plans.length > 0 ? await resolveBrandLogo(p.brandKit, p.clientId, { useToken: p.brandKitId != null }) : null;
   const proposals = plans
     .map((plan) => {
       const raw = expandPlan(plan, masterDims, variantDims, logo?.src ?? null);
