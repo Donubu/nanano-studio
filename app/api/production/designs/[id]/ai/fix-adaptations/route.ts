@@ -35,11 +35,11 @@ import { TemplateDefinition } from "@/lib/production/types";
 import { EMPTY_KIT_CONTENT, resolveTreeTokens, BrandKitContent } from "@/lib/production/brand-kit";
 import { resolveTemplateBrandKit } from "@/lib/production/project-brand-kit";
 import { checkProductionAiQuota, quotaBlockedBody } from "@/lib/production/ai-rate-limit";
-import { lintLayout, hasLintErrors, LintIssue } from "@/lib/production/layout-lint";
-import { applyLayerPatches, LayerPatch } from "@/lib/production/layout-patch";
+import { LintIssue } from "@/lib/production/layout-lint";
+import { LayerPatch } from "@/lib/production/layout-patch";
 import { DataRow, substituteVariables } from "@/lib/production/variables";
 import {
-  requestLayoutFix,
+  runLayoutFix,
   sumUsage,
   ZERO_USAGE,
   LayoutFixUsage,
@@ -128,61 +128,41 @@ async function fixOne(params: {
   // Lo que "se ve": variables sustituidas y tokens resueltos.
   const view = (t: TemplateDefinition) =>
     resolveTreeTokens(dataRow ? substituteVariables(t, dataRow) : t, kit);
-  const resolvedSource = params.sourceTree ? view(params.sourceTree) : null;
-  const issuesBefore = lintLayout(view(params.tree));
-
-  let current = params.tree;
-  let issues = issuesBefore;
-  const allPatches: LayerPatch[] = [];
-  const rationales: string[] = [];
-  let passes = 0;
   try {
-    while (passes < MAX_PASSES) {
-      passes++;
-      const res = await requestLayoutFix({
-        resolvedTree: view(current),
-        resolvedSource,
-        issues,
-        // La captura solo describe el árbol de la primera pasada.
-        image: passes === 1 && params.image ? { mimeType: "image/webp", data: params.image } : null,
-        instructions: params.instructions,
-        abortSignal: params.signal,
-      });
-      params.onUsage(res.usage);
-      if (res.rationale) rationales.push(res.rationale);
-      if (res.patches.length === 0) break;
-      const applied = applyLayerPatches(current, res.patches);
-      current = applied.definition;
-      allPatches.push(...res.patches);
-      issues = lintLayout(view(current));
-      if (!hasLintErrors(issues)) break;
-    }
+    const res = await runLayoutFix({
+      tree: params.tree,
+      sourceTree: params.sourceTree,
+      view,
+      image: params.image ? { mimeType: "image/webp", data: params.image } : null,
+      instructions: params.instructions,
+      abortSignal: params.signal,
+      maxPasses: MAX_PASSES,
+      onUsage: params.onUsage,
+    });
+    return {
+      type: "item",
+      adaptation_id: params.adaptationId,
+      ok: true,
+      tree: res.tree,
+      patches: res.patches,
+      rationale: res.rationale,
+      issues_before: res.issuesBefore,
+      issues_after: res.issuesAfter,
+      passes: res.passes,
+      duration_ms: Date.now() - startedAt,
+    };
   } catch (e) {
-    const usage = (e as { usage?: LayoutFixUsage }).usage;
-    if (usage) params.onUsage(usage);
+    const err = e as Error & { passes?: number; issuesBefore?: LintIssue[] };
     return {
       type: "item",
       adaptation_id: params.adaptationId,
       ok: false,
-      issues_before: issuesBefore,
-      passes,
+      issues_before: err.issuesBefore ?? [],
+      passes: err.passes ?? 0,
       duration_ms: Date.now() - startedAt,
-      error: (e as Error).message,
+      error: err.message,
     };
   }
-
-  return {
-    type: "item",
-    adaptation_id: params.adaptationId,
-    ok: true,
-    tree: current,
-    patches: allPatches,
-    rationale: rationales.join(" "),
-    issues_before: issuesBefore,
-    issues_after: issues,
-    passes,
-    duration_ms: Date.now() - startedAt,
-  };
 }
 
 export async function POST(

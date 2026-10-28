@@ -1,4 +1,4 @@
-// Tope de uso del Banner Designer (rutas /api/production/**/ai/*).
+// Tope de uso de la IA de producción (rutas /api/production/**/ai/*).
 //
 // Dos límites, ambos leídos de production_ai_invocations (la tabla que cada
 // ruta escribe al terminar, con éxito o error):
@@ -102,7 +102,7 @@ export async function checkProductionAiQuota(params: {
       ok: false,
       code: PRODUCTION_AI_QUOTA_CODE,
       reason: "hourly_calls",
-      message: `Llegaste al máximo de ${limits.hourlyCallsPerUser} llamadas al Banner Designer por hora. Espera un rato antes de volver a generar.`,
+      message: `Llegaste al máximo de ${limits.hourlyCallsPerUser} llamadas a la IA por hora. Espera un rato antes de volver a generar.`,
       limits,
       usage,
     };

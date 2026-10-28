@@ -2,9 +2,9 @@
 //
 // El schema soporta botones / badges / ribbons como UN TextLayer con
 // style.backgroundColor + backgroundCornerRadius. El patrón viejo (ShapeLayer
-// abajo + TextLayer encima con las mismas dims) sigue apareciendo: el Banner
-// Designer lo emite pese a que BANNERS.md §8.6 lo prohíbe, y hay templates
-// históricos armados así. Dos capas sueltas son molestas de mover, animar y
+// abajo + TextLayer encima con las mismas dims) sigue apareciendo: las
+// plantillas de layout-templates.ts lo usan y hay templates históricos (del
+// antiguo Banner Designer) armados así. Dos capas sueltas son molestas de mover, animar y
 // leer en el panel. Este módulo las colapsa:
 //
 //   - collapseShapeTextPairs(def): normalización automática sobre un árbol

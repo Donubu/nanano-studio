@@ -356,7 +356,7 @@ export default function ProducirPage() {
   // "Personalizar para este proyecto" (fork + abrir editor).
   const [editingKitId, setEditingKitId] = useState<number | null>(null);
 
-  // Modal de Banner Designer (IA): id de la orientación que se está adaptando.
+  // Modal "Adaptar con IA": id de la orientación que se está adaptando.
   // null = modal cerrado. La modal se monta como overlay y maneja su propio
   // ciclo de pedida → preview → accept/regenerate/cancel.
   const [aiAdaptTargetId, setAiAdaptTargetId] = useState<number | null>(null);
@@ -1589,7 +1589,7 @@ export default function ProducirPage() {
     [orientations, principalOrientation, templateId],
   );
 
-  // Acepta una propuesta del Banner Designer.
+  // Acepta una propuesta de "Adaptar con IA".
   //   - applyToAllLinked = false  → PUT con linked_to_template_id=null.
   //     La propuesta queda solo en esta orientación. Diferenciada del master.
   //   - applyToAllLinked = true   → PUT con propagate_to_group=true.
@@ -3960,7 +3960,7 @@ function BrandKitSelectorBar({
           onSelect(v === "" ? null : Number(v));
         }}
         className="bg-muted border border-border/50 rounded px-2 py-1 text-xs min-w-0 max-w-xs"
-        title="Elegí qué brand kit alimenta tokens al editor en este template"
+        title="Elige qué brand kit alimenta tokens al editor en este template"
       >
         <option value="">— sin brand kit —</option>
         {/* Agrupamos por scope para que el productor distinga visualmente */}
@@ -4045,7 +4045,7 @@ function VariantsStrip({
   onDelete: (id: number) => void;
   onDifferentiate: (id: number) => void;
   onRelinkToMaster: (id: number) => void;
-  // Abre el modal del Banner Designer para esa orientación. El handler vive en
+  // Abre el modal "Adaptar con IA" para esa orientación. El handler vive en
   // el padre porque maneja state (proposal, loading, errores, persistencia).
   onAiAdapt: (id: number) => void;
 }) {
@@ -4196,7 +4196,7 @@ function VariantsStrip({
                 {m.base_width}×{m.base_height}
               </span>
             </button>
-            {/* Banner Designer (IA): botón explícito + siempre visible bajo
+            {/* Adaptar con IA: botón explícito + siempre visible bajo
                 cada variante no-principal. Llama al agente que reorganiza el
                 contenido del master para este aspect — distinto del reflow,
                 puede mover capas, no solo escalar. El master no se adapta a
@@ -4209,7 +4209,7 @@ function VariantsStrip({
                   onAiAdapt(m.id);
                 }}
                 className="mt-1 w-full flex items-center justify-center gap-1 text-[10px] font-medium px-2 py-1 rounded border border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 hover:border-violet-500/60 transition-colors"
-                title="Pide al Banner Designer (IA) que reorganice el contenido para este formato"
+                title="Pide a la IA que reorganice el contenido para este formato"
               >
                 <Sparkles className="h-3 w-3" />
                 Adaptar con IA
@@ -4467,12 +4467,12 @@ function AddVariantModal({
   );
 }
 
-// Modal del Banner Designer: invoca al agente de practicante para que adapte
-// el master a la dimensión de la orientación target, muestra preview side-by-side
+// Modal "Adaptar con IA": pide a /ai/adapt-orientation (motor + Gemini) que
+// adapte el master a la dimensión de la orientación target, muestra preview side-by-side
 // y permite aceptar / regenerar / cancelar. La propuesta aceptada se aplica
 // vía PUT al template (con linked_to_template_id=null porque deja de heredar
 // del master — el contenido es distinto intencionalmente).
-// Llamadas al Banner Designer en curso o recién terminadas, por id de
+// Llamadas de "Adaptar con IA" en curso o recién terminadas, por id de
 // orientación target. Vive fuera del componente para sobrevivir a un
 // remount del modal (la página puede desmontar hijos si refetchea; antes
 // eso dejaba el fetch huérfano y el modal volvía vacío sin error). El modal
@@ -4524,10 +4524,9 @@ function AiAdaptModal({
   const [referenceUrl, setReferenceUrl] = useState<string | null>(null);
   const [referenceMime, setReferenceMime] = useState<"image/webp" | "image/jpeg">("image/jpeg");
   const [capturePhase, setCapturePhase] = useState<"pending" | "done">("pending");
-  // Adjuntar la captura del master es opcional: con imagen el agente hace
-  // una ida y vuelta extra por analyze_media (Gemini) y el input se duplica
-  // (~36k → ~74k tokens medidos). Default ON porque mejora la fidelidad;
-  // el productor puede apagarlo para un ajuste barato.
+  // Adjuntar la captura del master es opcional: va a Gemini como imagen
+  // nativa (referencia del diseño original). Default ON porque mejora la
+  // fidelidad; cuesta unos cientos de tokens más.
   const [useReference, setUseReference] = useState(true);
   const captureWrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -4586,7 +4585,7 @@ function AiAdaptModal({
   const applyJobResult = useCallback((r: AdaptJobResult) => {
     setLoading(false);
     if (!r.ok) {
-      setError(r.error ?? "Error desconocido del Banner Designer");
+      setError(r.error ?? "Error desconocido de la IA");
       setProposal(null);
       return;
     }
@@ -4626,7 +4625,7 @@ function AiAdaptModal({
         );
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
-          return { ok: false, error: body?.error || `Error ${res.status} del Banner Designer` };
+          return { ok: false, error: body?.error || `Error ${res.status} de la IA` };
         }
         // Respuesta 2xx sin proposal (proxy que devolvió otra cosa, JSON
         // truncado, etc.): lo hacemos visible en vez de quedar en silencio.
@@ -4635,7 +4634,7 @@ function AiAdaptModal({
           return {
             ok: false,
             error:
-              "El Banner Designer respondió pero no llegó una propuesta válida. Revisa el panel de costos IA del proyecto: si la invocación figura como exitosa, reintenta con Regenerar.",
+              "La IA respondió pero no llegó una propuesta válida. Reintenta con Regenerar.",
           };
         }
         return {
@@ -4742,7 +4741,7 @@ function AiAdaptModal({
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-violet-400" />
             <div>
-              <h2 className="text-sm font-semibold">Adaptar con Banner Designer</h2>
+              <h2 className="text-sm font-semibold">Adaptar con IA</h2>
               <p className="text-xs text-muted-foreground">
                 {target.name} · {target.base_width}×{target.base_height} ·
                 derivado de master {master.base_width}×{master.base_height}
@@ -4797,13 +4796,13 @@ function AiAdaptModal({
               ) : referenceUrl ? (
                 <>
                   <Check className="h-3 w-3 text-emerald-400" />
-                  Referencia visual lista. Pulsa Generar para pedirle al
-                  Banner Designer una propuesta.
+                  Referencia visual lista. Pulsa Generar para pedirle a la
+                  IA una propuesta.
                 </>
               ) : (
                 <span>
-                  Pulsa Generar para pedirle al Banner Designer una
-                  propuesta (sin imagen de referencia).
+                  Pulsa Generar para pedirle a la IA una propuesta (sin
+                  imagen de referencia).
                 </span>
               )}
             </p>
@@ -4813,7 +4812,7 @@ function AiAdaptModal({
             <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin text-violet-400" />
               <span>
-                Pidiéndole al Banner Designer una propuesta
+                Pidiéndole a la IA una propuesta
                 {useReference && referenceUrl ? " (con imagen de referencia)" : ""}…
               </span>
             </div>
@@ -4883,7 +4882,7 @@ function AiAdaptModal({
               {rationale && (
                 <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg px-3 py-2">
                   <p className="text-[10px] uppercase tracking-wide text-violet-400 mb-1">
-                    Decisión del agente
+                    Decisión de la IA
                   </p>
                   <p className="text-xs text-foreground">{rationale}</p>
                 </div>
@@ -4907,7 +4906,7 @@ function AiAdaptModal({
               no hay decisión — va directo a esta. */}
           {proposal && targetIsLinked && (
             <p className="text-xs text-muted-foreground">
-              Esta orientación está vinculada al master. Elegí cómo aplicar la
+              Esta orientación está vinculada al master. Elige cómo aplicar la
               propuesta:
             </p>
           )}
@@ -4928,8 +4927,8 @@ function AiAdaptModal({
               className="gap-1"
               title={
                 proposal
-                  ? "Pide al agente otra propuesta usando las instrucciones actuales"
-                  : "Pide al Banner Designer una propuesta con las instrucciones de arriba"
+                  ? "Pide a la IA otra propuesta usando las instrucciones actuales"
+                  : "Pide a la IA una propuesta con las instrucciones de arriba"
               }
             >
               {loading ? (

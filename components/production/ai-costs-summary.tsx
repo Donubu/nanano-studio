@@ -5,7 +5,7 @@ import { ChevronDown, ChevronRight, Loader2, Sparkles, AlertTriangle } from "luc
 import { formatDateLocal } from "@/lib/utils";
 
 /**
- * Resumen de costos del Banner Designer para un proyecto de producción.
+ * Resumen de costos de IA (Gemini y legado Banner Designer) de un proyecto de producción.
  * Consume GET /api/production/projects/[id]/ai-costs. Colapsado por default:
  * la cabecera muestra el total y la ventana reciente; al expandir aparece el
  * desglose por operación y las últimas invocaciones (con rationale/error).
@@ -99,7 +99,7 @@ export function AiCostsSummary({
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Sparkles className="h-3.5 w-3.5" />
-        Este proyecto aún no ha usado el Banner Designer.
+        Este proyecto aún no ha usado la IA.
       </div>
     );
   }

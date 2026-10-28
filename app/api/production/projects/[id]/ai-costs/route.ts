@@ -7,7 +7,7 @@ import { getProductionAiLimits, getProductionAiUsage } from "@/lib/production/ai
 /**
  * GET /api/production/projects/[id]/ai-costs
  *
- * Resumen de costos de IA (Banner Designer) por proyecto de producción.
+ * Resumen de costos de IA (Gemini; históricamente Banner Designer) por proyecto de producción.
  * Lee `production_ai_invocations` — la tabla se escribe en cada llamada al
  * agente desde las rutas /ai/*, pero hasta ahora nadie la consumía.
  *

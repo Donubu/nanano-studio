@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
-import { callPracticante } from "@/lib/production/banner-designer";
+import { callPracticante } from "@/lib/practicante-client";
 import { brandGuidePrompt, parseBrandGuide, BrandGuide } from "@/lib/production/brand-guide";
 
 export const maxDuration = 300;

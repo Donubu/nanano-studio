@@ -1291,7 +1291,7 @@ function CreateTimelinePicker({
             title={
               templateId == null
                 ? "templateId no disponible — IA solo aplica con un template guardado"
-                : "Generar animación con el agente Banner Designer"
+                : "Generar la animación con IA"
             }
             className="w-full text-left px-2 py-1.5 rounded hover:bg-muted text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -1299,7 +1299,7 @@ function CreateTimelinePicker({
             <span className="flex-1">
               <span className="font-medium">Animar con IA</span>
               <span className="block text-[10px] text-muted-foreground/80 leading-tight">
-                Banner Designer decide qué y cómo animar
+                La IA decide qué y cómo animar
               </span>
             </span>
           </button>
@@ -1408,7 +1408,7 @@ function AiAnimateModal({
           </button>
         </div>
         <p className="text-[11px] text-muted-foreground leading-tight">
-          El agente Banner Designer decide qué capas animar, con qué propiedades
+          La IA decide qué capas animar, con qué propiedades
           y easing. Podés deshacer si no te convence el resultado.
         </p>
         <label className="block text-xs">

@@ -184,151 +184,71 @@ Production runs on Coolify from `docker-compose.coolify.yml` (see the file's hea
 - Body size limit: 50MB (middleware + server actions)
 - Env files: `.env.local` (dev), `.env.production` (mirror of production values — the live env vars are defined in the Coolify UI), `.env.gcp` / `.env.private` (legacy, outdated — do not trust for current infra)
 
-## Production Templates — Banner Designer (Practicante AI)
+## Production Templates — IA de producción
 
-### Visión general
-Los templates de producción tienen integración con un agente especialista de
-**Practicante** (plataforma de agentes interna del usuario, Sonnet 4.6) llamado
-**Banner Designer**. El agente acepta dos operaciones:
+### Principio
+El motor arma, la IA decide. Toda la IA de producción llama directo a Gemini
+desde nanano (`gemini-3.8-flash` por defecto) con JSON schema forzado y
+devuelve decisiones chicas que el código determinista aplica; nunca árboles
+completos ni keyframes. Practicante NO arma, adapta ni anima piezas: es solo la
+fuente del conocimiento de marca (ver "Guía de marca").
 
-- `ADAPT_ORIENTATION`: recibe un master + dims target, devuelve una nueva
-  `TemplateDefinition` adaptada a la nueva orientación.
-- `GENERATE_FROM_PROMPT`: recibe intent + dims + brand kit, genera master +
-  variantes coherentes.
-
-El system prompt completo del agente vive en `BANNERS.md` (raíz del repo).
-Ese archivo se copia tal cual en la configuración del agente "Banner
-Designer" en practicante. **Cualquier cambio en lo que el agente sabe/decide
-se hace ahí y se re-pega en practicante.** No hay otro origen de verdad.
-
-### Wiring existente con Practicante
-- Proxy: `app/api/practicante/run/route.ts` — POSTea a
-  `${PRACTICANTE_URL}/api/external/run` con `X-API-Key` y `X-User-Email`.
-- Listado: `app/api/practicante/agents/route.ts` — proxy a
-  `/api/external/agents` para que el cliente vea agentes disponibles.
-- Vars: `PRACTICANTE_URL`, `PRACTICANTE_API_KEY`, `PRACTICANTE_USER_EMAIL`
-  (fallback si el email del session no existe en practicante).
-- Targeting de agente: enviar `agentName: "Banner Designer"` en el body.
-  Sin esto, va al orquestador (más caro/lento).
-
-### Contrato de llamada al Banner Designer
-- `message` (string): prompt humano corto. Ej. `"Adapta este master a 1080x1920 vertical"`.
-- `promptSuffix` (string JSON): contexto estructurado completo. Incluye
-  `operation`, `master`, `master_dims`, `target_dims`, `brand_kit`,
-  `instructions`, etc. Ver §3 de `BANNERS.md`.
-- `agentName: "Banner Designer"` (forceAgent vía proxy).
-- `returnOnlyFinalText: true` (la respuesta es JSON parseable).
-- `existingConversationId` (opcional): permite retry contextual cuando la
-  validación zod falla en el lado puerto.studio.
-
-### Respuesta del agente
-```json
-{
-  "definition": { "id": "tpl_root", "type": "frame", "...": "..." },
-  "variants": [{ "dims": { "w": 1080, "h": 1080 }, "definition": {...} }],
-  "rationale": "Una frase explicando la decisión"
-}
-```
-- `variants` solo en `GENERATE_FROM_PROMPT`.
-- `rationale` siempre (UI lo muestra en el preview antes de aceptar).
-
-### Validación server-side
-1. `JSON.parse` el `response` del proxy.
-2. Zod schema validation de la `definition` contra
-   `TemplateDefinition` (declarar en `lib/production/types.ts` o un
-   `lib/production/template-schema.ts` separado).
-3. Si falla validación: reintento (max 1) usando `existingConversationId` y
-   un `message` describiendo el error específico. El agente corrige solo
-   ese error (ver §10 de `BANNERS.md`).
-4. Si tras retry sigue fallando: error visible al usuario con la opción de
-   regenerar manualmente.
-
-### Cost tracking
-La respuesta de `/api/practicante/run` incluye:
-```json
-{
-  "response": "...",
-  "tokenUsage": {
-    "inputTokens": 18234,
-    "outputTokens": 3120,
-    "estimatedCost": 0.0473
-  },
-  "toolsUsed": ["..."],
-  "conversationId": "...",
-  "delegatedTo": "..."
-}
-```
-
-- **Origen del costo**: `tokenUsage.estimatedCost` (USD) viene directo del
-  agente. Lo calcula practicante con los pricing actuales de Anthropic.
-- **Almacenamiento**: cada invocación queda registrada en
-  `production_ai_invocations` (tabla nueva, ver migración pendiente). Campos:
-  `id`, `production_project_id`, `template_id`, `operation`, `agent_name`,
-  `input_tokens`, `output_tokens`, `estimated_cost`, `success`, `error_msg`,
-  `conversation_id`, `created_by`, `created_at`.
-- **Acumulación**: el dashboard de costos del proyecto suma `estimated_cost`
-  de las invocaciones del proyecto y lo expone junto a los costos de GCP.
-- **Rate limiting**: `lib/production/ai-rate-limit.ts`, aplicado en las 4
-  rutas de IA (429 con `code: PRODUCTION_AI_QUOTA_EXCEEDED`). Dos topes leídos
-  de `production_ai_invocations`: presupuesto diario por proyecto en USD
-  (`PRODUCTION_AI_DAILY_USD_PER_PROJECT`, default 10) y llamadas por usuario
-  en la última hora (`PRODUCTION_AI_HOURLY_CALLS_PER_USER`, default 20).
-  0 desactiva el tope. El panel "Costos IA" del proyecto muestra el uso del día.
-
-### Endpoints que invocan al agente (practicante)
-- `POST /api/production/templates/[id]/ai/adapt-orientation` — `ADAPT_ORIENTATION` (id = target; el master se resuelve por design).
-- `POST /api/production/templates/[id]/ai/animate` — `ANIMATE_TEMPLATE`.
-Registran en `production_ai_invocations`, pasan por el rate limiting y
-normalizan la respuesta con `lib/production/composites.ts` (colapsa pares
-shape+text en un TextLayer con fondo).
-
-### IA directa con Gemini (sin practicante, desde 2026-10-28)
-Principio: el motor arma, la IA decide. El modelo devuelve decisiones chicas
-con JSON schema forzado, nunca árboles completos.
+### Rutas
 - `POST /api/production/ai/generate-from-prompt` y `.../generate-from-reference`
-  — Gemini 3.8 Flash elige plantillas de `lib/production/layout-templates.ts` y
-  devuelve hasta 3 planes (textos por slot, ocultos, recolor, fuentes, prompts
-  de imagen) que `lib/production/layout-plan.ts` expande a master + variantes.
-  Las referencias van como imagen nativa. Flujo en `lib/production/plan-generation.ts`.
+  — Gemini elige plantillas de `lib/production/layout-templates.ts` y devuelve
+  hasta 3 planes (textos por slot, ocultos, recolor, fuentes, prompts de imagen)
+  que `lib/production/layout-plan.ts` expande a master + variantes, con
+  contraste mínimo (`ensureTextContrast`). Referencias como imagen nativa.
+  Flujo en `lib/production/plan-generation.ts`; planificador en `layout-planner.ts`.
 - `POST /api/production/ai/generate-images` — llena los slots de imagen de una
   propuesta con Nano Banana 2 (API Gemini; Imagen 4 no existe en la región
   `global` de Vertex), una imagen por slot y proporción.
 - `POST /api/production/designs/[id]/ai/fix-adaptations` — "Revisar con IA" del
-  paso Formatos: lint determinista (`layout-lint.ts`) → correcciones por capa
-  (`layout-fixer.ts` / `layout-patch.ts`) por SSE.
+  paso Formatos (SSE): lint determinista (`layout-lint.ts`) → correcciones por
+  capa (`layout-fixer.ts` / `layout-patch.ts`) → lint, hasta 2 pasadas.
+- `POST /api/production/templates/[id]/ai/adapt-orientation` — `adaptTree` del
+  master + `runLayoutFix` en modo `recompose` (puede reubicar todo), con la
+  captura del master como imagen del original.
+- `POST /api/production/templates/[id]/ai/animate` — Gemini devuelve una
+  coreografía por capa (entrada, inicio, duración, énfasis) y
+  `lib/production/animation-plan.ts` la traduce a tracks; se valida con
+  `validateAnimationConfig`.
+Ninguna escribe a la BD el resultado: el usuario ve un preview y acepta.
 Modelos por env: `PRODUCTION_AI_LAYOUT_MODEL`, `PRODUCTION_AI_PLANNER_MODEL`,
-`PRODUCTION_AI_IMAGE_MODEL`. También registran en `production_ai_invocations`
-(con `model` y `duration_ms`) y pasan por el rate limiting.
+`PRODUCTION_AI_ANIMATION_MODEL`, `PRODUCTION_AI_IMAGE_MODEL`.
+
+### Cost tracking y rate limiting
+- Cada invocación (un lote cuenta como una) queda en `production_ai_invocations`
+  con `operation`, `agent_name`, `model`, tokens, `estimated_cost` (USD,
+  calculado con la tabla de precios del módulo), `duration_ms`, `success`,
+  `error_msg` y `rationale`. El panel "Costos IA" del proyecto la suma.
+- `lib/production/ai-rate-limit.ts` aplica en todas las rutas de IA (429 con
+  `code: PRODUCTION_AI_QUOTA_EXCEEDED`): USD diario por proyecto
+  (`PRODUCTION_AI_DAILY_USD_PER_PROJECT`, default 10) y llamadas por usuario en
+  la última hora (`PRODUCTION_AI_HOURLY_CALLS_PER_USER`, default 20). 0 desactiva.
+
+### Guía de marca (practicante)
+- `clients.slug` es la llave compartida con practicante (`Client.slug` allá);
+  los nombres no coinciden entre plataformas.
+- `POST /api/clients/[id]/brand-guide` sincroniza a pedido (ficha del cliente →
+  Brand Kits) vía `lib/practicante-client.ts` → `/api/external/run`
+  (orquestador, con las tools `brandbook_<slug>`), pidiendo JSON de voz,
+  tratamiento, vocabulario, ejemplos, colores, tipografías, logo y reglas
+  (`lib/production/brand-guide.ts`). Queda en `clients.brand_guide_json`.
+- El planificador la recibe como `brand_guide` y la respeta. Practicante nunca
+  se consulta durante una generación.
+- Vars: `PRACTICANTE_URL`, `PRACTICANTE_API_KEY`, `PRACTICANTE_USER_EMAIL`.
 
 ### Brand kit: tokens de marca heredados por proyecto
 `lib/production/project-brand-kit.ts` es el único resolver. Orden: kit
 explícito del template → fork project-scoped → kit client-wide de la marca →
-null. Lo usan la creación de templates (POST) y las 4 rutas de IA, así el
-editor muestra los mismos tokens que el agente usó. Un fork es un snapshot:
+null. Lo usan la creación de templates (POST) y las rutas de IA, así el
+editor muestra los mismos tokens que usó la IA. Un fork es un snapshot:
 no se mezcla con el kit de la marca.
 
-### UI integration points (planeados)
-- Botón ✨ "Adaptar con IA" en cada mini preview no-master del `VariantsStrip`
-  (`app/produccion/template/[id]/producir/page.tsx`). Click → modal con
-  `instructions` opcional → preview side-by-side actual vs propuesta →
-  Aceptar / Regenerar / Cancelar.
-- Card "Crear con IA" en el `LayoutTemplatePicker`
-  (`components/dashboard/layout-template-picker.tsx`). Click → prompt
-  textbox → genera master + 3 orientaciones.
-
 ### Reglas operativas
-- El agente NUNCA escribe a la BD directamente. Solo devuelve JSON. El backend
-  de puerto.studio es responsable de PUT al template tras validar.
-- El usuario SIEMPRE ve un preview antes de aplicar. Sin aceptación explícita,
-  no se persiste.
-- Imágenes generadas en `src: null`. El productor las sube después por el
-  flujo normal de `ImagePicker` en el editor.
-- Los `rationale` quedan registrados en `production_ai_invocations.rationale`
-  (TEXT) por si el usuario quiere auditar después.
-
-### Si el agente "Banner Designer" no existe todavía en practicante
-- `/api/practicante/agents` GET no lo retorna → el botón ✨ debe deshabilitarse
-  con tooltip "Banner Designer no configurado en practicante".
-- Fallback alternativo: usar el orquestador (sin `agentName`) con todo el
-  contexto de BANNERS.md inyectado como `promptSuffix`. Es más caro y lento
-  pero funciona como bridge mientras se crea el agente especialista.
+- La IA nunca escribe a la BD directamente: el backend valida y el usuario
+  acepta un preview antes de persistir.
+- Las imágenes de una propuesta quedan en `src: null` salvo que el usuario
+  pida "Generar imágenes"; después se cambian por el flujo normal de
+  `ImagePicker` en el editor.

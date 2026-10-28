@@ -1,16 +1,12 @@
-// Endpoint: genera una AnimationConfig para un template usando el agente
-// Banner Designer en operación ANIMATE_TEMPLATE.
+// Endpoint: "Animar con IA". Gemini directo, sin practicante: el modelo
+// devuelve una coreografía por capa (entrada, inicio, duración, énfasis;
+// lib/production/animation-plan.ts) y el motor la traduce a tracks.
 //
 // URL: /api/production/templates/[id]/ai/animate
 //   - [id] = id del template a animar (master o variante linked).
 //   - Body: { intent: string, complexity?, durationHintMs?, instructions? }
 //
-// Flujo:
-//   1. Resuelve template + verifica permisos admin.
-//   2. Carga el brand kit del proyecto (cascada client + project).
-//   3. Llama runAnimateTemplate con el template + brand kit + intent.
-//   4. Registra la invocación en production_ai_invocations.
-//   5. Devuelve { animation, rationale, tokenUsage, conversationId, invocation_id }.
+// Devuelve { animation, rationale, tokenUsage, invocation_id }.
 //
 // IMPORTANTE: NO escribe la animation al template. El cliente muestra
 // preview/aplica directamente y persiste con el PUT estándar al template.
@@ -25,11 +21,17 @@ import { TemplateDefinition } from "@/lib/production/types";
 import { EMPTY_KIT_CONTENT } from "@/lib/production/brand-kit";
 import { resolveTemplateBrandKit } from "@/lib/production/project-brand-kit";
 import { checkProductionAiQuota, quotaBlockedBody } from "@/lib/production/ai-rate-limit";
+import { resolveTreeTokens } from "@/lib/production/brand-kit";
+import { validateAnimationConfig } from "@/lib/production/template-schema";
+import { buildAnimationFromPlan } from "@/lib/production/animation-plan";
 import {
-  runAnimateTemplate,
-  brandKitForAgent,
-  BANNER_DESIGNER_AGENT_NAME,
-} from "@/lib/production/banner-designer";
+  requestAnimationPlan,
+  ANIMATION_PLANNER_AGENT_NAME,
+  ANIMATION_PLANNER_MODEL,
+} from "@/lib/production/animation-planner";
+import type { LayoutFixUsage } from "@/lib/production/layout-fixer";
+import type { AnimationConfig } from "@/lib/production/animation";
+import type { TemplateLayer } from "@/lib/production/types";
 
 interface TemplateRow extends RowDataPacket {
   id: number;
@@ -60,12 +62,6 @@ export async function POST(
     const session = await auth();
     if (!session?.user || session.user.role !== "admin") {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-    }
-    if (!session.user.email) {
-      return NextResponse.json(
-        { error: "Sesión sin email — no se puede invocar practicante" },
-        { status: 400 },
-      );
     }
     const { id: rawId } = await params;
     const templateId = Number(rawId);
@@ -123,42 +119,58 @@ export async function POST(
         : null;
     const mergedKit = resolvedKit?.content ?? EMPTY_KIT_CONTENT;
 
-    // 3. Llamar al agente
-    const templateDims = { w: tpl.base_width, h: tpl.base_height };
-    // Latencia de pared (incluye el retry de validación) para production_ai_invocations.duration_ms.
+    // 3. Coreografía (Gemini) → tracks (motor) → validación de schema.
     const startedAt = Date.now();
-    const result = await runAnimateTemplate({
-      template: definition,
-      templateDims,
-      brandKit: brandKitForAgent(mergedKit),
-      intent,
-      complexity,
-      durationHintMs,
-      existingAnimation: definition.animation ?? null,
-      instructions,
-      userEmail: session.user.email,
-    });
+    let usage: LayoutFixUsage | null = null;
+    let result:
+      | { ok: true; animation: AnimationConfig; rationale: string }
+      | { ok: false; error: string };
+    try {
+      const res = await requestAnimationPlan({
+        resolvedTree: resolveTreeTokens(definition, mergedKit),
+        intent,
+        complexity: complexity ?? "balanced",
+        durationHintMs,
+        instructions,
+      });
+      usage = res.usage;
+      const animation = buildAnimationFromPlan(definition, res.plan);
+      const known = new Set<string>(["tpl_root"]);
+      const walk = (nodes: TemplateLayer[]) =>
+        nodes.forEach((n) => {
+          known.add(n.id);
+          if (n.type === "frame") walk(n.children);
+        });
+      walk(definition.children);
+      const v = validateAnimationConfig(animation, known);
+      result = v.ok
+        ? { ok: true, animation: v.animation, rationale: res.plan.rationale }
+        : { ok: false, error: v.error };
+    } catch (e) {
+      usage = (e as { usage?: LayoutFixUsage }).usage ?? null;
+      result = { ok: false, error: (e as Error).message };
+    }
 
-    // 4. Registrar invocación (pase lo que pase, para auditoría de cost).
+    // 4. Registrar invocación (pase lo que pase, para auditoría de costo).
     const [inv] = await pool.execute<ResultSetHeader>(
       `INSERT INTO production_ai_invocations
          (production_project_id, template_id, target_template_id, operation,
-          agent_name, input_tokens, output_tokens, estimated_cost, duration_ms,
+          agent_name, model, input_tokens, output_tokens, estimated_cost, duration_ms,
           success, error_msg, conversation_id, rationale, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
       [
         tpl.production_project_id,
         tpl.id,
         tpl.id, // no hay distinción master/target acá; el target ES el template
         "ANIMATE_TEMPLATE",
-        BANNER_DESIGNER_AGENT_NAME,
-        result.tokenUsage?.inputTokens ?? null,
-        result.tokenUsage?.outputTokens ?? null,
-        result.tokenUsage?.estimatedCost ?? null,
+        ANIMATION_PLANNER_AGENT_NAME,
+        ANIMATION_PLANNER_MODEL,
+        usage?.inputTokens ?? null,
+        usage?.outputTokens ?? null,
+        usage?.estimatedCost ?? null,
         Date.now() - startedAt,
         result.ok ? 1 : 0,
         result.ok ? null : result.error,
-        result.conversationId ?? null,
         result.ok ? result.rationale : null,
         Number(session.user.id),
       ],
@@ -166,11 +178,7 @@ export async function POST(
 
     if (!result.ok) {
       return NextResponse.json(
-        {
-          error: result.error,
-          invocation_id: inv.insertId,
-          tokenUsage: result.tokenUsage,
-        },
+        { error: result.error, invocation_id: inv.insertId, tokenUsage: usage },
         { status: 502 },
       );
     }
@@ -178,8 +186,7 @@ export async function POST(
     return NextResponse.json({
       animation: result.animation,
       rationale: result.rationale,
-      tokenUsage: result.tokenUsage,
-      conversationId: result.conversationId,
+      tokenUsage: usage,
       invocation_id: inv.insertId,
     });
   } catch (error) {

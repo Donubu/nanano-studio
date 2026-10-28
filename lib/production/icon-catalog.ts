@@ -2,9 +2,8 @@
 // La lista completa de lucide (>1500 íconos) es ruido; este subset cubre los
 // casos típicos: ecommerce, social, comunicación, transporte, multimedia,
 // estados/UI. Si necesitas un ícono que no está acá, primero pregunta si
-// vale agregarlo al catálogo (no agregues sin coordinar — el agente Banner
-// Designer está limitado a esta lista exacta y agregar uno requiere
-// actualizar BANNERS.md también).
+// vale agregarlo al catálogo (no agregues sin coordinar: el zod schema y el
+// editor validan contra esta lista exacta).
 //
 // Cada entrada tiene un `name` (exact match con el export de lucide-react,
 // PascalCase) y una `category` para agrupar en el selector visual.
@@ -24,7 +23,7 @@ export interface IconCatalogEntry {
   label: string;       // español, para mostrar en tooltip
 }
 
-// 48 íconos curados. Cualquier cambio acá DEBE replicarse en BANNERS.md §5.7.
+// 48 íconos curados.
 export const ICON_CATALOG: IconCatalogEntry[] = [
   // ecommerce
   { name: "ShoppingCart",   category: "ecommerce",     label: "Carrito" },

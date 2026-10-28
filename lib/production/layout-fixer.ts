@@ -12,8 +12,16 @@
 import { ThinkingLevel, type Part } from "@google/genai";
 import { getClient, withRetry } from "@/lib/google-ai";
 import { TemplateDefinition, TemplateLayer } from "./types";
-import { LintIssue, effectiveFontSize, isBackgroundLayer, isVisibleLayer, safeMargin } from "./layout-lint";
-import { LayerPatch } from "./layout-patch";
+import {
+  LintIssue,
+  effectiveFontSize,
+  isBackgroundLayer,
+  isVisibleLayer,
+  safeMargin,
+  lintLayout,
+  hasLintErrors,
+} from "./layout-lint";
+import { LayerPatch, applyLayerPatches } from "./layout-patch";
 
 export const LAYOUT_FIXER_MODEL =
   process.env.PRODUCTION_AI_LAYOUT_MODEL || "gemini-3.8-flash";
@@ -37,8 +45,13 @@ export interface LayoutFixRequest {
   // Orientación de origen (resuelta) para conservar la intención del diseño.
   resolvedSource?: TemplateDefinition | null;
   issues: LintIssue[];
-  // Captura del resultado actual (data URI o base64 + mime).
+  // Captura (data URI o base64 + mime). Por defecto es el render actual de
+  // la pieza adaptada; con imageRole "original" es el diseño de origen.
   image?: { mimeType: string; data: string } | null;
+  imageRole?: "current" | "original";
+  // Cambio de orientación ("Adaptar con IA"): el modelo puede reubicar todo,
+  // no solo corregir lo que marcó el lint.
+  recompose?: boolean;
   instructions?: string;
   abortSignal?: AbortSignal;
 }
@@ -56,7 +69,8 @@ Cómo leer el input:
 - Coordenadas en px, origen arriba a la izquierda. x,y es la esquina superior izquierda de la caja; w,h su tamaño.
 - "background: true" marca fondos a pantalla completa: no los muevas.
 - "original" es la misma pieza en su formato de origen: respeta su jerarquía (qué es titular, qué es CTA, qué es logo) y el orden de lectura.
-- Si viene una imagen, es el render actual de la pieza adaptada.
+- Si viene una imagen: con "image_role": "original" es el diseño de origen; si no, es el render actual de la pieza adaptada.
+- Con "task": "recompose" se trata de un cambio de orientación (ej. horizontal → vertical): el armado automático es solo un punto de partida y puedes mover y redimensionar TODAS las capas para lograr la mejor composición en el nuevo formato, conservando la jerarquía y el estilo del original. Ahí la regla 7 no aplica a la geometría.
 
 Reglas:
 1. Todo lo importante dentro del formato y del margen de seguridad indicado.
@@ -178,6 +192,8 @@ export async function requestLayoutFix(req: LayoutFixRequest): Promise<LayoutFix
       layers: i.layerIds,
       detail: i.detail,
     })),
+    ...(req.recompose ? { task: "recompose" } : {}),
+    ...(req.image && req.imageRole === "original" ? { image_role: "original" } : {}),
     current: describeTree(resolvedTree),
     ...(resolvedSource ? { original: describeTree(resolvedSource) } : {}),
     ...(req.instructions?.trim() ? { instructions: req.instructions.trim() } : {}),
@@ -247,3 +263,86 @@ export function sumUsage(a: LayoutFixUsage, b: LayoutFixUsage): LayoutFixUsage {
 }
 
 export const ZERO_USAGE: LayoutFixUsage = { inputTokens: 0, outputTokens: 0, estimatedCost: 0 };
+
+// ---------------------------------------------------------------------------
+// Ciclo completo: lint → Gemini → aplicar → lint, hasta `maxPasses`.
+// Lo usan "Revisar con IA" (fix-adaptations) y "Adaptar con IA".
+// ---------------------------------------------------------------------------
+
+export interface RunLayoutFixParams {
+  tree: TemplateDefinition;
+  sourceTree: TemplateDefinition | null;
+  // Lo que "se ve": tokens resueltos y, si aplica, variables sustituidas.
+  view: (t: TemplateDefinition) => TemplateDefinition;
+  image?: { mimeType: string; data: string } | null;
+  imageRole?: "current" | "original";
+  recompose?: boolean;
+  instructions?: string;
+  abortSignal?: AbortSignal;
+  maxPasses?: number;
+  onUsage?: (u: LayoutFixUsage) => void;
+}
+
+export interface RunLayoutFixResult {
+  tree: TemplateDefinition;
+  patches: LayerPatch[];
+  rationale: string;
+  issuesBefore: LintIssue[];
+  issuesAfter: LintIssue[];
+  passes: number;
+  usage: LayoutFixUsage;
+}
+
+export async function runLayoutFix(p: RunLayoutFixParams): Promise<RunLayoutFixResult> {
+  const resolvedSource = p.sourceTree ? p.view(p.sourceTree) : null;
+  const issuesBefore = lintLayout(p.view(p.tree));
+  const maxPasses = p.maxPasses ?? 2;
+  let current = p.tree;
+  let issues = issuesBefore;
+  let usage = ZERO_USAGE;
+  const patches: LayerPatch[] = [];
+  const rationales: string[] = [];
+  let passes = 0;
+  const track = (u: LayoutFixUsage) => {
+    usage = sumUsage(usage, u);
+    p.onUsage?.(u);
+  };
+  try {
+    while (passes < maxPasses) {
+      passes++;
+      const res = await requestLayoutFix({
+        resolvedTree: p.view(current),
+        resolvedSource,
+        issues,
+        // La imagen del render actual solo describe la primera pasada; la
+        // del original sirve en todas.
+        image: passes === 1 || p.imageRole === "original" ? p.image : null,
+        imageRole: p.imageRole,
+        // Recomponer solo en la primera pasada; la segunda corrige lo que quedó.
+        recompose: p.recompose && passes === 1,
+        instructions: p.instructions,
+        abortSignal: p.abortSignal,
+      });
+      track(res.usage);
+      if (res.rationale) rationales.push(res.rationale);
+      if (res.patches.length === 0) break;
+      current = applyLayerPatches(current, res.patches).definition;
+      patches.push(...res.patches);
+      issues = lintLayout(p.view(current));
+      if (!hasLintErrors(issues)) break;
+    }
+  } catch (e) {
+    const u = (e as { usage?: LayoutFixUsage }).usage;
+    if (u) track(u);
+    throw Object.assign(e as Error, { usage, passes, issuesBefore });
+  }
+  return {
+    tree: current,
+    patches,
+    rationale: rationales.join(" "),
+    issuesBefore,
+    issuesAfter: issues,
+    passes,
+    usage,
+  };
+}
