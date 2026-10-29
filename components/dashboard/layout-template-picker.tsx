@@ -765,6 +765,9 @@ function ReferenceUploadTab({
             if (i === selected) {
               onPicked({ kind: "ai-reference", definition: p.definition, variants: p.variants, brandKitId });
             }
+            // Con las fotos puestas la comparación con la referencia cambia
+            // (encuadre, pesos): otra verificación sobre la propuesta fiel.
+            if (i === 0 && p.template_id.startsWith("reference")) setVerifyRun((n) => n + 1);
           }}
         />
       )}

@@ -70,6 +70,13 @@ describe("lintBrand", () => {
     expect(issues.map((i) => i.kind)).toEqual(["brand_logo_space"]);
     expect(issues[0].layerIds).toEqual(["h", "logo"]);
   });
+  it("usa la fracción numérica del área de seguridad cuando practicante la manda", () => {
+    const g: BrandGuide = { ...guide, visual: { ...guide.visual, logo: { ...guide.visual.logo, area_seguridad_fraccion: 1 } } };
+    // Texto a 30px del logo (alto 40): con 25% (10px) no invade, con 1× (40px) sí.
+    const d = def([image("logo", 20, 20, 120, 40), text("h", "Cerca", 170, 25, 200, 30), text("legal", "*Precio incluye descuento www.enaco.cl", 0, 540)]);
+    expect(lintBrand(d, guide)).toEqual([]);
+    expect(lintBrand(d, g).map((i) => i.kind)).toEqual(["brand_logo_space"]);
+  });
   it("sin guía solo revisa que el logo se lea", () => {
     expect(lintBrand(def([image("logo", 0, 0, 10, 10)]), null).map((i) => i.kind)).toEqual(["brand_logo_size"]);
     expect(lintBrand(def([image("logo", 0, 0, 100, 40)]), null)).toEqual([]);

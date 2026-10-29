@@ -97,7 +97,10 @@ export function lintBrand(def: TemplateDefinition, guide: BrandGuide | null): Li
         detail: `el logo mide ${Math.round(short)}px en su lado corto: no se lee`,
       });
     }
-    const space = guide?.visual.logo.area_seguridad ? clearSpaceRatio(guide.visual.logo.area_seguridad) * short : 0;
+    // Fracción de la altura del logo: la cifra de practicante si la hay, si
+    // no lo que se pueda leer del texto del manual (o el default).
+    const ratio = guide?.visual.logo.area_seguridad_fraccion ?? (guide?.visual.logo.area_seguridad ? clearSpaceRatio(guide.visual.logo.area_seguridad) : 0);
+    const space = ratio * short;
     if (space > 0) {
       const zone = { x: logo.position.x - space, y: logo.position.y - space, w: logo.size.w + 2 * space, h: logo.size.h + 2 * space };
       for (const l of def.children) {

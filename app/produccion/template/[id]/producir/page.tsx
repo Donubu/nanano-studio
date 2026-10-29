@@ -64,10 +64,7 @@ import {
 } from "@/lib/production/types";
 import { TemplateEditor } from "@/components/production/editor/template-editor";
 import { ProjectBrandKitModal } from "@/components/production/editor/project-brand-kit-modal";
-import {
-  buildInitialFromAdaptFit,
-  deriveManualLayoutFromMaster,
-} from "@/lib/production/overrides";
+import { buildInitialFromAdaptFit } from "@/lib/production/overrides";
 import {
   BrandKit,
   BrandKitContent,
@@ -2756,6 +2753,22 @@ export default function ProducirPage() {
                 tope del canal.
               </p>
             </div>
+            {dataset && dataset.rows.length > 0 && (
+              <select
+                value={selectedRowIdx ?? ""}
+                onChange={(e) => setSelectedRowIdx(e.target.value === "" ? null : Number(e.target.value))}
+                disabled={!!batchProgress || !!singleDownloadingId}
+                className="bg-muted border border-border/50 rounded-md px-2 py-1.5 text-xs max-w-[220px]"
+                title="Fila del dataset que usan la vista previa, el chequeo de marca, el mockup y las descargas individuales (Descargar todo exporta todas las filas)"
+              >
+                <option value="">Sin fila (variables como {"{{var}}"})</option>
+                {dataset.rows.map((row, i) => (
+                  <option key={i} value={i}>
+                    {i + 1}. {rowSubfolderName(row, i)}
+                  </option>
+                ))}
+              </select>
+            )}
             <select
               value={exportFormat}
               onChange={(e) => setExportFormat(e.target.value as "jpeg" | "png")}

@@ -24,7 +24,15 @@ export interface BrandGuide {
   visual: {
     colores: { nombre: string; hex: string; uso: string }[];
     tipografias: { nombre: string; uso: string }[];
-    logo: { ancho_min_px: number | null; area_seguridad: string; usos_prohibidos: string[] };
+    logo: {
+      ancho_min_px: number | null;
+      area_seguridad: string;
+      // Área de seguridad en fracción de la altura del logo (0.25 = un
+      // cuarto del alto a cada lado). null si el manual no da cifra; el
+      // chequeo de marca asume 0.25.
+      area_seguridad_fraccion?: number | null;
+      usos_prohibidos: string[];
+    };
     estilo_fotografico: string;
   };
   // Estrategia y negocio: qué comunicar (posicionamiento, público, mensajes,
@@ -116,7 +124,12 @@ export function brandGuidePrompt(slug: string): { message: string; promptSuffix:
         visual: {
           colores: [{ nombre: "string", hex: "#RRGGBB", uso: "string" }],
           tipografias: [{ nombre: "string", uso: "string" }],
-          logo: { ancho_min_px: "number | null", area_seguridad: "string", usos_prohibidos: ["string"] },
+          logo: {
+            ancho_min_px: "number | null",
+            area_seguridad: "string — cómo la describe el manual",
+            area_seguridad_fraccion: "number | null — la misma área como fracción de la altura del logo (0.25 = un cuarto del alto a cada lado); null si el manual no da cifra",
+            usos_prohibidos: ["string"],
+          },
           estilo_fotografico: "string",
         },
         estrategia: {
@@ -217,6 +230,10 @@ export function parseBrandGuide(raw: string): BrandGuide | null {
         ancho_min_px:
           typeof logo.ancho_min_px === "number" && Number.isFinite(logo.ancho_min_px) ? logo.ancho_min_px : null,
         area_seguridad: str(logo.area_seguridad, 800),
+        area_seguridad_fraccion:
+          typeof logo.area_seguridad_fraccion === "number" && Number.isFinite(logo.area_seguridad_fraccion) && logo.area_seguridad_fraccion > 0
+            ? Math.min(2, logo.area_seguridad_fraccion)
+            : null,
         usos_prohibidos: strs(logo.usos_prohibidos, 20, 160),
       },
       estilo_fotografico: str(visual.estilo_fotografico, 600),

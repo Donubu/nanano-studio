@@ -55,10 +55,14 @@ export default function ClientBrandGuideSection({ clientId }: { clientId: number
         setAssetsMsg(body?.error || `Error ${res.status}`);
         return;
       }
+      const warnings: string[] = Array.isArray(body.warnings) ? body.warnings : [];
       setAssetsMsg(
-        body.logosAdded || body.colorsAdded
-          ? `Kit de marca actualizado: ${body.logosAdded} logo(s) y ${body.colorsAdded} color(es) nuevos.`
-          : "El kit de marca ya estaba al día.",
+        [
+          body.logosAdded || body.colorsAdded
+            ? `Kit de marca actualizado: ${body.logosAdded} logo(s) y ${body.colorsAdded} color(es) nuevos.`
+            : "El kit de marca ya estaba al día.",
+          ...warnings,
+        ].join(" "),
       );
     } catch (e) {
       setAssetsMsg(`Error de red: ${(e as Error).message}`);

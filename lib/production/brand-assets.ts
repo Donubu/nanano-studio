@@ -22,6 +22,20 @@ interface PracticanteAsset {
   descripcion?: string;
   colores?: { hex: string; pct: number }[];
   origen?: string;
+  formato?: string;
+  ancho?: number | null;
+  alto?: number | null;
+}
+
+// Un logo raster más chico que esto se ve blando en un master de 1920 px o
+// en un feed a 2× (Topaz lo reescala, pero mejor pedir el original).
+const LOGO_MIN_RASTER_PX = 1000;
+
+// El primer logo del kit es el que usa resolveBrandLogo: SVG primero, y
+// entre rasters el más grande.
+function logoQuality(a: PracticanteAsset): number {
+  if ((a.formato ?? "").toLowerCase() === "svg" || /\.svg(\?|$)/i.test(a.url)) return 1_000_000;
+  return Math.max(a.ancho ?? 0, a.alto ?? 0);
 }
 
 interface KitRow extends RowDataPacket {
@@ -52,6 +66,8 @@ export interface BrandAssetsSync {
   kitId: number;
   created: boolean;
   logosAdded: number;
+  // Avisos para el equipo (logos en baja, etc.); no detienen la sincronización.
+  warnings: string[];
   colorsAdded: number;
   fuentes: string[];
 }
@@ -82,7 +98,13 @@ export async function syncBrandAssets(params: {
   const assets = (data.assets ?? []).filter(
     (a) => a.origen !== "pieza_archivada" && typeof a.url === "string" && /^https:\/\//i.test(a.url),
   );
-  const logos = assets.filter((a) => a.tipo === "logo");
+  const logos = assets.filter((a) => a.tipo === "logo").sort((x, y) => logoQuality(y) - logoQuality(x));
+  const warnings: string[] = [];
+  if (logos.length > 0 && logoQuality(logos[0]) < LOGO_MIN_RASTER_PX) {
+    warnings.push(
+      `El logo de mayor resolución que tiene practicante mide ${logos[0].ancho ?? "?"}×${logos[0].alto ?? "?"} px: pide el SVG o un PNG de al menos ${LOGO_MIN_RASTER_PX} px para que no salga blando en masters grandes y feeds a 2×.`,
+    );
+  }
 
   // Kit de la marca: el default client-wide; si no hay, se crea.
   const [rows] = await pool.execute<KitRow[]>(
@@ -149,5 +171,5 @@ export async function syncBrandAssets(params: {
     );
     kitId = ins.insertId;
   }
-  return { kitId, created: !existing, logosAdded, colorsAdded, fuentes: data.fuentes ?? [] };
+  return { kitId, created: !existing, logosAdded, colorsAdded, warnings, fuentes: data.fuentes ?? [] };
 }

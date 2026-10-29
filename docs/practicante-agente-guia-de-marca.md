@@ -136,7 +136,11 @@ recorta y lo inválido se descarta.
     "tipografias": [{ "nombre": "string", "uso": "string" }],               // ≤8
     "logo": {
       "ancho_min_px": 120,                  // number o null
-      "area_seguridad": "string",           // ≤800
+      "area_seguridad": "string",           // ≤800, como lo describe el manual
+      "area_seguridad_fraccion": 0.25,      // number o null: la misma área como fracción de la ALTURA del logo
+                                            // (0.25 = un cuarto del alto a cada lado). Si el manual la da en "x",
+                                            // módulos o px de un logo de referencia, conviértela; null si no hay cifra.
+                                            // nanano la usa para marcar lo que invade el área del logo en cada pieza.
       "usos_prohibidos": ["string"]         // ≤20
     },
     "estilo_fotografico": "string"          // ≤600: luz, encuadre, casting, qué evitar
@@ -316,6 +320,24 @@ valide.
 `aprobado` es `false` si hay al menos una observación `bloqueante`.
 
 ---
+
+## 4. `BRAND_ASSETS` — logos y piezas (en uso, sin modelo)
+
+La define Practicante (`docs/api-nanano-marca.md` de su repo). Lo que nanano
+hace con la respuesta y lo que necesita:
+
+- Los `tipo: "logo"` se vuelcan al brand kit de la marca como tokens
+  `{logo.<variante>}`. El **primero** es el que usan las plantillas y la IA:
+  nanano ordena SVG primero y, entre rasters, el de mayor `ancho`/`alto`.
+- **Resolución:** el logo debe venir en **SVG** o en PNG con transparencia de
+  **al menos 1000 px** en su lado mayor. Un logo de 178×30 (lo que llegó de
+  Enaco) se ve blando en un master de 1920 px y en un feed exportado a 2×;
+  nanano lo avisa al sincronizar y puede reescalarlo con Topaz, pero el
+  original es siempre mejor.
+- `formato`, `ancho` y `alto` son obligatorios para elegir bien; sin ellos el
+  logo cuenta como de 0 px.
+- Los `colores` medidos de los logos se suman a la paleta si no estaban.
+- Nada se borra del kit (el diseñador puede haber subido logos a mano).
 
 ## Errores (todas las operaciones)
 

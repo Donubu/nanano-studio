@@ -34,11 +34,13 @@ interface ModelRow extends RowDataPacket {
 }
 
 // GET - Listar modelos
+// GET - Catálogo completo con config y precios: solo admin (lo consumen las
+// páginas del dashboard; el chat recibe sus modelos por proyecto).
 export async function GET(request: NextRequest) {
   try {
     const session = await auth();
 
-    if (!session?.user) {
+    if (!session?.user || session.user.role !== "admin") {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 

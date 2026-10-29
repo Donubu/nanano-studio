@@ -21,7 +21,10 @@ export async function POST(req: NextRequest) {
   const baseUrl = process.env.PRACTICANTE_URL;
   const apiKey = process.env.PRACTICANTE_API_KEY;
   const primaryEmail = session.user.email;
-  const fallbackEmail = process.env.PRACTICANTE_USER_EMAIL;
+  // El identity compartido (PRACTICANTE_USER_EMAIL) solo respalda a los
+  // admins: un usuario común que Practicante no conoce no puede gastar con
+  // la cuenta de la casa (barrido de permisos 2026-08-13).
+  const fallbackEmail = session.user.role === "admin" ? process.env.PRACTICANTE_USER_EMAIL : undefined;
 
   if (!baseUrl || !apiKey) {
     return NextResponse.json(
