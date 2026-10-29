@@ -19,6 +19,7 @@ import { cleanPhotoOverlays, imageCostPerImage } from "./image-generator";
 import { expandPlan, ensureTextContrast, ensureLogoVisible, logoColorsOf, nearestImageRatio, LayoutPlan } from "./layout-plan";
 import { requestLayoutPlans, LAYOUT_PLANNER_AGENT_NAME, LAYOUT_PLANNER_MODEL } from "./layout-planner";
 import { LayoutFixUsage, runLayoutFix } from "./layout-fixer";
+import { lintLayout, hasLintErrors } from "./layout-lint";
 import { topPieceImages } from "./brand-pieces";
 import { resolveBrandLogo } from "./project-brand-kit";
 import { requestReferenceLayout } from "./reference-planner";
@@ -237,7 +238,10 @@ export async function generateFromPlans(
     const view = (t: TemplateDefinition) => resolveTreeTokens(t, p.brandKit);
     const variants = await Promise.all(
       otherDims.map(async (dims) => {
+        // Misma estructura que el master (anclajes, paneles y grupos); la IA
+        // solo corrige si el chequeo encuentra errores.
         const base = adaptTree(definition, dims);
+        if (!hasLintErrors(lintLayout(view(base)))) return { dims, definition: finishRef(base) };
         try {
           const res = await runLayoutFix({
             tree: base,
@@ -245,7 +249,7 @@ export async function generateFromPlans(
             view,
             image: p.images?.[0] ?? null,
             imageRole: "original",
-            recompose: true,
+            maxPasses: 1,
           });
           addUsage(res.usage);
           return { dims, definition: finishRef(res.tree) };

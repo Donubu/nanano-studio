@@ -165,3 +165,33 @@ describe("applyLayerPatches", () => {
     expect(g.children[1].visible).toBe(false);
   });
 });
+
+describe("lintComposition (aprovechamiento del formato)", () => {
+  const vertical = (titleFs: number, photoH: number) => ({
+    id: "tpl_root",
+    type: "frame" as const,
+    position: { x: 0, y: 0 },
+    size: { w: 1080, h: 1920 },
+    layout: { mode: "free" as const },
+    children: [
+      { id: "t", type: "text" as const, name: "Titular", content: "SANTUARIO DE LA LAGUNA", position: { x: 72, y: 100 }, size: { w: 936, h: titleFs * 1.3 }, style: { fontSize: titleFs, color: "#111" } },
+      { id: "p", type: "image" as const, src: "x", position: { x: 72, y: 300 }, size: { w: 936, h: photoH } },
+      { id: "c", type: "text" as const, name: "Precio", content: "DESDE UF 2.783*", position: { x: 72, y: 300 + photoH + 40 }, size: { w: 600, h: 120 }, style: { fontSize: 96, color: "#111" } },
+    ],
+  });
+
+  it("marca un titular chico para el formato y una franja vacía grande", async () => {
+    const { lintComposition } = await import("../layout-lint");
+    const issues = lintComposition(vertical(40, 700));
+    expect(issues.some((i) => i.kind === "text_undersized" && i.layerIds[0] === "t")).toBe(true);
+    const band = issues.find((i) => i.kind === "empty_band");
+    expect(band?.detail).toMatch(/franja vacía de \d+px/);
+  });
+
+  it("una composición que llena el formato pasa", async () => {
+    const { lintComposition } = await import("../layout-lint");
+    const def = vertical(80, 1300);
+    def.children[2].position.y = 1650;
+    expect(lintComposition(def)).toEqual([]);
+  });
+});

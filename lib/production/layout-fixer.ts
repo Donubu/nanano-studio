@@ -19,6 +19,7 @@ import {
   isVisibleLayer,
   safeMargin,
   lintLayout,
+  lintComposition,
   hasLintErrors,
 } from "./layout-lint";
 import { LayerPatch, applyLayerPatches } from "./layout-patch";
@@ -76,6 +77,7 @@ Reglas:
 
 En "recompose", además, compón con este criterio:
 ${COMPOSITION_RULES.map((r) => `- ${r}`).join("\n")}
+- Los problemas "text_undersized" y "empty_band" del chequeo son obligatorios: sube el fontSize (y la caja del texto en proporción) hasta el mínimo indicado, y llena las franjas vacías agrandando la imagen o los bloques y repartiéndolos.
 - Aprovecha todo el formato: sin franjas vacías grandes (más de ~15% del alto o del ancho sin contenido). Si el formato nuevo es más alto, la imagen principal crece (en vertical, entre 45% y 60% del alto) y los bloques de texto, precio, CTA y logo crecen y se reparten en el resto; si es más ancho, la imagen ocupa un lado completo.
 - Mantén los grupos del original juntos (cintillo + nombre arriba, precio + logo como un bloque) y sus proporciones (un logo cuadrado sigue cuadrado).
 
@@ -261,7 +263,10 @@ export interface RunLayoutFixResult {
 
 export async function runLayoutFix(p: RunLayoutFixParams): Promise<RunLayoutFixResult> {
   const resolvedSource = p.sourceTree ? p.view(p.sourceTree) : null;
-  const issuesBefore = lintLayout(p.view(p.tree));
+  // Al recomponer también se mide el aprovechamiento del formato.
+  const lint = (t: TemplateDefinition) =>
+    p.recompose ? [...lintLayout(p.view(t)), ...lintComposition(p.view(t))] : lintLayout(p.view(t));
+  const issuesBefore = lint(p.tree);
   const maxPasses = p.maxPasses ?? 2;
   let current = p.tree;
   let issues = issuesBefore;
@@ -294,7 +299,7 @@ export async function runLayoutFix(p: RunLayoutFixParams): Promise<RunLayoutFixR
       if (res.patches.length === 0) break;
       current = applyLayerPatches(current, res.patches).definition;
       patches.push(...res.patches);
-      issues = lintLayout(p.view(current));
+      issues = lint(current);
       if (!hasLintErrors(issues)) break;
     }
   } catch (e) {

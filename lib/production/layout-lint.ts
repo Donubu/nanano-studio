@@ -21,10 +21,12 @@ import {
   TextLayer,
   isFontSizeRange,
 } from "./types";
-import { insetFrameRatio } from "./layer-roles";
+import { insetFrameRatio, inferRoles, type LayerRole } from "./layer-roles";
 
 export type LintIssueKind =
   | "background_gap"
+  | "empty_band"
+  | "text_undersized"
   | "out_of_bounds"
   | "outside_safe_area"
   | "overlap"
@@ -232,7 +234,11 @@ export function lintLayout(def: TemplateDefinition): LintIssue[] {
     const covered = intersection(b, frameBox) / (frame.w * frame.h);
     const nearlyBg = b.w >= frame.w * 0.75 && b.h >= frame.h * 0.75;
     // Un marco simétrico es diseño, no una banda.
-    if (nearlyBg && covered < 0.995 && insetFrameRatio(l, frame) == null) {
+    // Un marco chico (≤12% del lado corto en cada borde, aunque sea
+    // asimétrico por un cintillo) es diseño, no una banda.
+    const gaps = [b.x, b.y, frame.w - (b.x + b.w), frame.h - (b.y + b.h)];
+    const framed = gaps.every((g) => g >= -1 && g <= Math.min(frame.w, frame.h) * 0.12);
+    if (nearlyBg && covered < 0.995 && insetFrameRatio(l, frame) == null && !framed) {
       issues.push({
         kind: "background_gap",
         severity: "error",
@@ -310,4 +316,90 @@ export function lintLayout(def: TemplateDefinition): LintIssue[] {
 
 export function hasLintErrors(issues: LintIssue[]): boolean {
   return issues.some((i) => i.severity === "error");
+}
+
+
+// ---------------------------------------------------------------------------
+// Aprovechamiento del formato (solo al recomponer una orientación o una pieza
+// completa; en los formatos de salida chicos estas reglas no aplican)
+// ---------------------------------------------------------------------------
+//
+// Al pasar de un cuadrado a un vertical la recomposición tiende a dejar los
+// textos en su tamaño y el espacio extra vacío. Estas reglas le dicen, con
+// números, qué agrandar y dónde sobra.
+
+// Letra mínima por rol, como fracción del lado corto del formato.
+const MIN_FONT_RATIO: Partial<Record<LayerRole, number>> = {
+  headline: 0.06,
+  price: 0.05,
+  cta: 0.032,
+  badge: 0.03,
+  secondary: 0.026,
+  legal: 0.014,
+};
+const ROLE_LABEL: Partial<Record<LayerRole, string>> = {
+  headline: "el titular",
+  price: "el precio",
+  cta: "el CTA",
+  badge: "el badge",
+  secondary: "la bajada",
+  legal: "el legal",
+};
+// Franja vacía máxima sobre el eje largo, como fracción de ese eje.
+const MAX_EMPTY_BAND = 0.15;
+
+export function lintComposition(def: TemplateDefinition): LintIssue[] {
+  const issues: LintIssue[] = [];
+  const frame = def.size;
+  if (def.layout.mode === "stack") return issues;
+  const short = Math.min(frame.w, frame.h);
+  const roles = inferRoles(def);
+  const visible = def.children.filter(isVisibleLayer);
+
+  for (const l of visible) {
+    if (l.type !== "text") continue;
+    const role = roles.get(l.id);
+    const ratio = role ? MIN_FONT_RATIO[role] : undefined;
+    const fs = effectiveFontSize(l);
+    if (!ratio || fs == null) continue;
+    const min = Math.round(short * ratio);
+    if (fs < min * 0.9) {
+      issues.push({
+        kind: "text_undersized",
+        severity: "error",
+        layerIds: [l.id],
+        detail: `${ROLE_LABEL[role!]} ("${l.content.slice(0, 30)}") queda en ${Math.round(fs)}px; en este formato debería tener al menos ${min}px: agranda la letra y su caja`,
+      });
+    }
+  }
+
+  // Franjas vacías sobre el eje largo (entre bloques y contra los bordes,
+  // descontando el margen de seguridad). Los fondos no cuentan como contenido.
+  const vertical = frame.h >= frame.w;
+  const axis = vertical ? frame.h : frame.w;
+  const margin = safeMargin(frame);
+  const spans = visible
+    .filter((l) => !isBackgroundLayer(l, frame) && !(l.type === "shape" && l.size.w * l.size.h > frame.w * frame.h * 0.6))
+    .map((l) => (vertical ? [l.position.y, l.position.y + l.size.h] : [l.position.x, l.position.x + l.size.w]))
+    .map(([a, b]) => [Math.max(margin, a), Math.min(axis - margin, b)])
+    .filter(([a, b]) => b > a)
+    .sort((p, q) => p[0] - q[0]);
+  let cursor = margin;
+  const bands: [number, number][] = [];
+  for (const [a, b] of spans) {
+    if (a > cursor) bands.push([cursor, a]);
+    cursor = Math.max(cursor, b);
+  }
+  if (axis - margin > cursor) bands.push([cursor, axis - margin]);
+  for (const [a, b] of bands) {
+    if (b - a > axis * MAX_EMPTY_BAND) {
+      issues.push({
+        kind: "empty_band",
+        severity: "error",
+        layerIds: [],
+        detail: `franja vacía de ${Math.round(b - a)}px (${vertical ? "y" : "x"} ${Math.round(a)}–${Math.round(b)}): agranda la imagen o los bloques vecinos, o redistribúyelos para llenarla`,
+      });
+    }
+  }
+  return issues;
 }

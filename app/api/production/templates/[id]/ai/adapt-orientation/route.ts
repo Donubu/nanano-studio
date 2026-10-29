@@ -27,7 +27,8 @@ import { EMPTY_KIT_CONTENT } from "@/lib/production/brand-kit";
 import { resolveTemplateBrandKit } from "@/lib/production/project-brand-kit";
 import { checkProductionAiQuota, quotaBlockedBody } from "@/lib/production/ai-rate-limit";
 import { resolveTreeTokens, resolveColor } from "@/lib/production/brand-kit";
-import { ensureLogoVisible, logoColorsOf } from "@/lib/production/layout-plan";
+import { ensureLogoVisible, ensureTextContrast, logoColorsOf } from "@/lib/production/layout-plan";
+import { lintLayout, hasLintErrors } from "@/lib/production/layout-lint";
 import { adaptTree } from "@/lib/production/adapt";
 import { collapseShapeTextPairs } from "@/lib/production/composites";
 import {
@@ -59,6 +60,10 @@ interface ProjectRow extends RowDataPacket {
 // referencia visual del diseño original. Solo se usa la primera.
 const bodySchema = z.object({
   instructions: z.string().max(2000).optional(),
+  // "faithful" (default): el motor conserva la estructura del master
+  // (anclajes, paneles, grupos) y la IA solo corrige errores del chequeo, si
+  // los hay. "recompose": la IA reubica todo para el formato.
+  mode: z.enum(["faithful", "recompose"]).optional(),
   files: z
     .array(
       z.object({
@@ -190,18 +195,30 @@ export async function POST(
     let result:
       | { ok: true; tree: TemplateDefinition; rationale: string; usage: LayoutFixUsage }
       | { ok: false; error: string; usage: LayoutFixUsage | null };
+    const recompose = parsed.data.mode === "recompose";
+    const view = (t: TemplateDefinition) => resolveTreeTokens(t, mergedKit);
     try {
-      const res = await runLayoutFix({
-        tree: base,
-        sourceTree: master,
-        view: (t) => resolveTreeTokens(t, mergedKit),
-        image: masterImage,
-        imageRole: "original",
-        recompose: true,
-        instructions,
-        resolveColor: (c) => resolveColor(c, mergedKit, c),
-      });
       const resolveC = (c: string) => resolveColor(c, mergedKit, c);
+      // Fiel: si la adaptación del motor no tiene errores, no se llama a la
+      // IA (misma estructura que el master, sin costo).
+      const res =
+        !recompose && !hasLintErrors(lintLayout(view(base)))
+          ? {
+              tree: ensureTextContrast(base, resolveC),
+              rationale: "Adapté la orientación manteniendo la composición del master (mismos anclajes y grupos).",
+              usage: { inputTokens: 0, outputTokens: 0, estimatedCost: 0 },
+            }
+          : await runLayoutFix({
+              tree: base,
+              sourceTree: master,
+              view,
+              image: masterImage,
+              imageRole: "original",
+              recompose,
+              maxPasses: recompose ? undefined : 1,
+              instructions,
+              resolveColor: resolveC,
+            });
       result = {
         ok: true,
         tree: ensureLogoVisible(res.tree, resolveC, logoColorsOf(mergedKit)),

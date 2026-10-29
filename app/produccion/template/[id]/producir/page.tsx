@@ -4528,6 +4528,9 @@ function AiAdaptModal({
   // nativa (referencia del diseño original). Default ON porque mejora la
   // fidelidad; cuesta unos cientos de tokens más.
   const [useReference, setUseReference] = useState(true);
+  // "faithful": misma composición que el master (anclajes y grupos), la IA
+  // solo corrige errores. "recompose": la IA reubica todo para el formato.
+  const [mode, setMode] = useState<"faithful" | "recompose">("faithful");
   const captureWrapRef = useRef<HTMLDivElement | null>(null);
 
   const targetDef =
@@ -4620,6 +4623,7 @@ function AiAdaptModal({
             body: JSON.stringify({
               instructions: instructions.trim() || undefined,
               files: filesParam,
+              mode,
             }),
           },
         );
@@ -4662,7 +4666,7 @@ function AiAdaptModal({
     // existe y React ignora estos setState; la instancia nueva se enganchó
     // al job en su effect de montaje y aplica el resultado por su cuenta.
     applyJobResult(result);
-  }, [target.id, instructions, referenceUrl, referenceMime, useReference, applyJobResult]);
+  }, [target.id, instructions, referenceUrl, referenceMime, useReference, applyJobResult, mode]);
 
   // Al montar: si hay un job para este target (en curso o terminado y no
   // consumido), lo retomamos. Cubre el remount del modal durante la espera.
@@ -4757,9 +4761,39 @@ function AiAdaptModal({
           {/* Sin instrucciones: los pedidos en lenguaje natural (colores,
               textos, composición, animación) van todos a «Pídele a la IA».
               Esto es solo volver a armar la orientación desde el master. */}
-          <p className="text-xs text-muted-foreground">
-            La IA vuelve a armar esta orientación a partir del master, reubicando todo para este formato. Para
-            pedir cambios concretos (colores, textos, composición o animación), usa{" "}
+          <div className="space-y-2">
+            {(
+              [
+                {
+                  v: "faithful",
+                  title: "Mantener la composición del master",
+                  hint: "Misma estructura: lo que va arriba sigue arriba, los grupos se mueven juntos y la foto conserva su marco. La IA solo corrige si algo se pisa o se sale.",
+                },
+                {
+                  v: "recompose",
+                  title: "Recomponer para este formato con IA",
+                  hint: "La IA reubica y redimensiona todo para aprovechar el formato. Puede cambiar la composición.",
+                },
+              ] as const
+            ).map((o) => (
+              <label key={o.v} className="flex items-start gap-2 text-xs cursor-pointer select-none">
+                <input
+                  type="radio"
+                  name="adapt-mode"
+                  checked={mode === o.v}
+                  onChange={() => setMode(o.v)}
+                  disabled={loading || accepting || !!proposal}
+                  className="accent-violet-500 mt-0.5"
+                />
+                <span>
+                  <span className="font-medium">{o.title}</span>
+                  <span className="block text-[11px] text-muted-foreground">{o.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Para pedir cambios concretos (colores, textos, composición o animación), usa{" "}
             <span className="text-violet-300">«Pídele a la IA»</span> sobre esta orientación.
           </p>
 

@@ -43,6 +43,7 @@ import { reflowForPreview, reflowAnimation, keepLayerAspect } from "./reflow";
 import { scaleLayerStyle, scaleLayerUniform, scaleLayoutConfig } from "./scale";
 import { inferRoles, companionIcons, coversFrame, insetFrameRatio, ROLE_PRIORITY, LayerRole } from "./layer-roles";
 import { effectiveFontSize, safeMargin } from "./layout-lint";
+import { visualGroups } from "./animation-plan";
 
 // Diferencia relativa de aspect ratio a partir de la cual el reflow por
 // constraints deja de tener sentido y pasamos a recomposición lineal.
@@ -86,12 +87,14 @@ export function adaptTree(master: TemplateDefinition, size: { w: number; h: numb
   };
   const reflowed = reflowForPreview(scaled, size);
   const masterById = new Map(master.children.map((c) => [c.id, c]));
-  const fittedChildren = fitChildren(reflowed.children, reflowed.size, scaled.size, indexById(scaled)).map((c) => {
+  const mapped = fitChildren(reflowed.children, reflowed.size, scaled.size, indexById(scaled)).map((c) => {
     const orig = masterById.get(c.id);
     if (!orig) return c;
     if (coversFrame(orig, master.size)) return coverFrame(orig, master.size, size);
+    if (isPanel(orig, master.size)) return relativeBox(orig, master.size, size, s);
     return keepLayerAspect(c, orig);
   });
+  const fittedChildren = keepGroupsTogether(mapped, master, s);
   const fitted: TemplateDefinition = hideIllegible(
     { ...reflowed, children: fittedChildren },
     inferRoles(master),
@@ -101,6 +104,91 @@ export function adaptTree(master: TemplateDefinition, size: { w: number; h: numb
     ...fitted,
     animation: master.animation ? reflowAnimation(master.animation, master, fitted) : master.animation,
   };
+}
+
+// Panel: foto o bloque de color que ocupa casi toda la pieza sin cubrirla
+// (una foto enmarcada en blanco). Conserva su lugar relativo y su margen en
+// el formato nuevo (la foto se recorta para cubrir su caja); escalarlo como
+// un producto lo achicaba y dejaba franjas vacías.
+function isPanel(l: TemplateLayer, frame: { w: number; h: number }): boolean {
+  return (l.type === "image" || l.type === "shape") && l.size.w >= frame.w * 0.75 && l.size.h >= frame.h * 0.55;
+}
+
+// Los márgenes del panel son un marco: conservan su grosor (escalados solo
+// por el lado corto), no se estiran con el formato.
+function relativeBox(
+  orig: TemplateLayer,
+  from: { w: number; h: number },
+  to: { w: number; h: number },
+  s: number,
+): TemplateLayer {
+  const left = orig.position.x * s;
+  const top = orig.position.y * s;
+  const right = (from.w - orig.position.x - orig.size.w) * s;
+  const bottom = (from.h - orig.position.y - orig.size.h) * s;
+  return {
+    ...scaleLayerStyle(orig, s),
+    position: { x: left, y: top },
+    size: { w: Math.max(1, to.w - left - right), h: Math.max(1, to.h - top - bottom) },
+    constraints: undefined,
+    ...(orig.type === "image" ? { fit: "cover" as const } : {}),
+  };
+}
+
+// Grupos visuales (layer-roles.ts / animation-plan.ts: texto sobre su
+// franja, precio y legal en su caja, logo al lado): los miembros se mueven
+// con su contenedor y conservan su posición relativa. El reflow proporcional
+// los separaba (en un horizontal, el logo quedaba a 450 px de la caja).
+function keepGroupsTogether(children: TemplateLayer[], master: TemplateDefinition, s: number): TemplateLayer[] {
+  const groups = visualGroups(master);
+  if (groups.size === 0) return children;
+  const orig = new Map(master.children.map((c) => [c.id, c]));
+  const anchors = new Set([...groups.values()].map((g) => g.anchor));
+  // El contenedor escala parejo (s) desde el centro donde lo dejó el reflow:
+  // el constraint "scale" lo estiraba en un eje (una caja de precio de 578
+  // quedaba de 1028 de ancho). Las franjas a lo ancho (≥90% del formato) sí
+  // se estiran.
+  const W0 = master.size.w;
+  const H0 = master.size.h;
+  const rigid = new Map(
+    children.map((c) => {
+      const o = orig.get(c.id);
+      if (!anchors.has(c.id) || !o) return [c.id, c];
+      const fullW = o.size.w >= W0 * 0.9;
+      const fullH = o.size.h >= H0 * 0.9;
+      const w = fullW ? c.size.w : o.size.w * s;
+      const h = fullH ? c.size.h : o.size.h * s;
+      const cx = c.position.x + c.size.w / 2;
+      const cy = c.position.y + c.size.h / 2;
+      return [c.id, { ...c, position: { x: fullW ? c.position.x : cx - w / 2, y: fullH ? c.position.y : cy - h / 2 }, size: { w, h } }];
+    }),
+  );
+  return children.map((c) => {
+    if (anchors.has(c.id) && !groups.has(c.id)) return rigid.get(c.id) ?? c;
+    const g = groups.get(c.id);
+    if (!g) return c;
+    const a0 = orig.get(g.anchor);
+    const a1 = rigid.get(g.anchor);
+    const m0 = orig.get(c.id);
+    if (!a0 || !a1 || !m0 || a1.visible === false) return c;
+    const sx = a1.size.w / Math.max(1, a0.size.w);
+    const sy = a1.size.h / Math.max(1, a0.size.h);
+    const k = Math.min(sx, sy);
+    const styled = Math.abs(k - s) > 0.01 ? scaleLayerStyle(m0, k) : c;
+    // Un texto que ocupa casi todo el ancho de su contenedor (el del
+    // cintillo) se ensancha con él; el resto escala parejo.
+    const spans = m0.type === "text" && g.kind === "inside" && m0.size.w >= a0.size.w * 0.8;
+    return {
+      ...styled,
+      position: {
+        x: a1.position.x + (m0.position.x - a0.position.x) * sx,
+        y: a1.position.y + (m0.position.y - a0.position.y) * sy,
+      },
+      size: { w: m0.size.w * (spans ? sx : k), h: m0.size.h * k },
+      constraints: undefined,
+      visible: c.visible,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

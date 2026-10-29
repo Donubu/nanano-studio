@@ -212,10 +212,20 @@ fuente del conocimiento de marca (ver "Guía de marca").
 - `POST /api/production/designs/[id]/ai/fix-adaptations` — "Revisar con IA" del
   paso Formatos (SSE): lint determinista (`layout-lint.ts`) → correcciones por
   capa (`layout-fixer.ts` / `layout-patch.ts`) → lint, hasta 2 pasadas.
+- Toda recomposición (`runLayoutFix` con `recompose`: Readaptar, Pídele a la
+  IA "reacomoda", orientaciones desde referencia) suma `lintComposition`
+  (layout-lint.ts): franjas vacías >15% del eje largo y letra mínima por rol
+  relativa al lado corto (titular 6%, precio 5%, CTA 3,2%…). El modelo recibe
+  esos problemas con números y los corrige en sus pasadas.
 - `POST /api/production/templates/[id]/ai/adapt-orientation` — botón
-  "Readaptar del master" (sin instrucciones): `adaptTree` del master +
-  `runLayoutFix` en modo `recompose` (puede reubicar todo), con la captura del
-  master como imagen del original.
+  "Readaptar del master" (sin instrucciones), con `mode`:
+  - `faithful` (default): `adaptTree` conserva la estructura del master
+    (constraints inferidos, paneles de foto con su marco, grupos visuales
+    rígidos); si el lint no tiene errores no se llama a la IA, y si los tiene
+    `runLayoutFix` solo los corrige (1 pasada, sin recomponer).
+  - `recompose`: `runLayoutFix` en modo `recompose` (reubica todo), con la
+    captura del master como imagen del original.
+  Las orientaciones desde referencia usan el modo fiel.
 - `POST /api/production/ai/edit` — barra "Pídele a la IA" del editor (master,
   orientaciones y ajustes manuales): el ÚNICO lugar donde se escribe un pedido
   en lenguaje natural. Instrucción → operaciones (`lib/production/edit-ops.ts`:

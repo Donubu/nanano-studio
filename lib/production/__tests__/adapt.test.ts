@@ -246,3 +246,47 @@ describe("adaptTree — cambio de orientación con precio grande", () => {
     expect(roles.get("legal")).toBe("legal");
   });
 });
+
+describe("adaptTree — misma estructura que el master", () => {
+  // Pieza tipo "foto enmarcada": franja arriba, foto panel con marco, caja de
+  // precio con texto dentro y logo al lado.
+  const piece: TemplateDefinition = {
+    id: "tpl_root",
+    type: "frame",
+    position: { x: 0, y: 0 },
+    size: { w: 1080, h: 1080 },
+    layout: { mode: "free" },
+    background: { type: "color", value: "#ffffff" },
+    children: [
+      { id: "photo", type: "image", name: "Imagen", src: "x", position: { x: 46, y: 111 }, size: { w: 987, h: 916 } },
+      { id: "band", type: "shape", shape: "rect", fill: "#e60000", position: { x: 46, y: 48 }, size: { w: 987, h: 64 } },
+      { id: "ribbon", type: "text", content: "APROVECHA EL SUBSIDIO", position: { x: 54, y: 56 }, size: { w: 972, h: 46 }, style: { fontSize: 30, color: "#fff" } },
+      { id: "box", type: "shape", shape: "rect", fill: "#e60000", position: { x: 157, y: 759 }, size: { w: 578, h: 190 } },
+      { id: "price", type: "text", name: "Precio", content: "DESDE UF 2.783*", position: { x: 173, y: 805 }, size: { w: 545, h: 70 }, style: { fontSize: 60, color: "#fff" } },
+      { id: "logo", type: "image", name: "Logo", src: "l", fit: "contain", position: { x: 734, y: 759 }, size: { w: 189, h: 190 } },
+    ],
+  };
+  const byId = (d: TemplateDefinition, id: string) => d.children.find((c) => c.id === id)!;
+
+  for (const size of [{ w: 1920, h: 1080 }, { w: 1080, h: 1920 }]) {
+    it(`${size.w}×${size.h}: la foto conserva su marco y el grupo de precio queda junto`, () => {
+      const out = adaptTree(piece, size);
+      const photo = byId(out, "photo");
+      expect(Math.round(photo.position.x)).toBe(46);
+      expect(Math.round(size.w - photo.position.x - photo.size.w)).toBe(47);
+      const box = byId(out, "box");
+      const logo = byId(out, "logo");
+      const price = byId(out, "price");
+      // La caja no se deforma y el logo sigue pegado a su derecha.
+      expect(Math.round(box.size.w)).toBe(578);
+      expect(Math.round(logo.position.x - (box.position.x + box.size.w))).toBe(-1);
+      expect(Math.round(logo.position.y)).toBe(Math.round(box.position.y));
+      // El precio sigue dentro de su caja.
+      expect(price.position.x).toBeGreaterThan(box.position.x);
+      expect(price.position.y + price.size.h).toBeLessThan(box.position.y + box.size.h);
+      // El texto del cintillo se ensancha con la franja.
+      const band = byId(out, "band");
+      expect(byId(out, "ribbon").size.w).toBeGreaterThan(band.size.w * 0.9);
+    });
+  }
+});
