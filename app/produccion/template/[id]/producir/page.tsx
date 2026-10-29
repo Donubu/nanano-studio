@@ -76,6 +76,7 @@ import {
 } from "@/lib/production/brand-kit";
 import { reflowForPreview } from "@/lib/production/reflow";
 import { adaptTree } from "@/lib/production/adapt";
+import { adaptationSafeZone } from "@/lib/production/safe-zone";
 import {
   TemplateLayerView,
   stackToFlexStyle,
@@ -244,6 +245,7 @@ interface Adaptation {
   preset_name: string | null;
   preset_orientation: "horizontal" | "vertical" | "square" | null;
   preset_file_size_max_kb: number | null;
+  preset_safe_zone: unknown;
 }
 
 // Canales que se sirven a píxel exacto (IAB): JPG a 1×. El resto (social) va
@@ -820,6 +822,7 @@ export default function ProducirPage() {
       editingAdaptation.width,
       editingAdaptation.height,
       editingAdaptation.fit_mode,
+      adaptationSafeZone(editingAdaptation),
     );
   }, [editingAdaptation, orientations, principalOrientation]);
 
@@ -1099,9 +1102,10 @@ export default function ProducirPage() {
         null;
       const tree =
         manual ??
-        (sourceDef ? buildInitialFromAdaptFit(sourceDef, a.width, a.height, a.fit_mode) : null);
+        (sourceDef ? buildInitialFromAdaptFit(sourceDef, a.width, a.height, a.fit_mode, adaptationSafeZone(a)) : null);
       if (!tree) continue;
       candidates.push({
+        safe: adaptationSafeZone(a),
         adaptationId: a.id,
         label: a.custom_name || a.preset_name || `${a.width}×${a.height}`,
         width: a.width,
@@ -1321,7 +1325,7 @@ export default function ProducirPage() {
     setSingleDownloadingHtml5Id(a.id);
     try {
       const built = await buildHtml5Zip({
-        adaptation: a,
+        adaptation: { ...a, safe_zone: adaptationSafeZone(a) },
         master: srcDef,
         brandKit: brandKitContent,
         dataRow: previewRow,
@@ -1348,7 +1352,7 @@ export default function ProducirPage() {
     setSingleDownloadingHtml5Id(a.id);
     try {
       const built = await buildHtml5({
-        adaptation: a,
+        adaptation: { ...a, safe_zone: adaptationSafeZone(a) },
         master: src?.definition ?? definition,
         brandKit: brandKitContent,
         dataRow: previewRow,
@@ -1397,7 +1401,7 @@ export default function ProducirPage() {
         setBatchProgress({ current: i + 1, total: list.length });
         const src = resolveSource(a, orientations);
         const built = await buildHtml5Zip({
-          adaptation: a,
+          adaptation: { ...a, safe_zone: adaptationSafeZone(a) },
           master: src?.definition ?? definition,
           brandKit: brandKitContent,
           dataRow: previewRow,
@@ -2122,6 +2126,7 @@ export default function ProducirPage() {
                 initial={adaptInitialDefinition}
                 baseWidth={editingAdaptation.width}
                 baseHeight={editingAdaptation.height}
+                safeZone={adaptationSafeZone(editingAdaptation)}
                 onSave={handleSaveAdapt}
                 saveRef={editorSaveRef}
                 brandKit={brandKitContent}
@@ -2902,7 +2907,7 @@ export default function ProducirPage() {
           return (
             <AdaptationRenderer
               ref={renderRef}
-              adaptation={currentlyRendering.adaptation}
+              adaptation={{ ...currentlyRendering.adaptation, safe_zone: adaptationSafeZone(currentlyRendering.adaptation) }}
               master={srcDef}
               brandKit={brandKitContent}
               dataRow={currentlyRendering.row}
@@ -3470,7 +3475,7 @@ function AdaptationPreview({
   }
 
   if (adaptation.fit_mode === "responsive") {
-    const reflowed = adaptTree(effectiveMaster, { w: adaptW, h: adaptH });
+    const reflowed = adaptTree(effectiveMaster, { w: adaptW, h: adaptH }, { safe: adaptationSafeZone(adaptation) });
     const resolved = resolveTreeTokens(reflowed, brandKit);
     const bg =
       resolved.background && resolved.background.type === "color"

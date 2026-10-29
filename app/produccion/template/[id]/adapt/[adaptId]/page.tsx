@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Loader2, RotateCcw } from "lucide-react";
 import { TemplateEditor } from "@/components/production/editor/template-editor";
+import { adaptationSafeZone } from "@/lib/production/safe-zone";
 import { TemplateDefinition, newRootFrame } from "@/lib/production/types";
 import {
   BrandKit,
@@ -37,6 +38,7 @@ interface Adaptation {
   custom_name: string | null;
   preset_name: string | null;
   preset_channel: string | null;
+  preset_safe_zone?: unknown;
   width: number;
   height: number;
   overrides_json: string | null;
@@ -125,7 +127,7 @@ export default function AdaptationEditorPage() {
           : newRootFrame(tpl.base_width, tpl.base_height);
       const initial =
         overrides.manual_layout ??
-        deriveManualLayoutFromMaster(masterDef, adapt.width, adapt.height);
+        deriveManualLayoutFromMaster(masterDef, adapt.width, adapt.height, adaptationSafeZone(adapt));
       setInitialDefinition(initial);
     } catch (err) {
       console.error("Error cargando datos:", err);
@@ -277,6 +279,7 @@ export default function AdaptationEditorPage() {
           initial={initialDefinition}
           baseWidth={adaptation.width}
           baseHeight={adaptation.height}
+          safeZone={adaptationSafeZone(adaptation)}
           templateId={template.id}
           onSave={handleSaveOverride}
           brandKit={brandKitContent}

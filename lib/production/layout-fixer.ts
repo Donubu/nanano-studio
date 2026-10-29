@@ -18,6 +18,7 @@ import {
   isBackgroundLayer,
   isVisibleLayer,
   safeMargin,
+  safeInsets,
   lintLayout,
   lintComposition,
   hasLintErrors,
@@ -26,6 +27,7 @@ import { LayerPatch, applyLayerPatches } from "./layout-patch";
 import { COMPOSITION_RULES } from "./art-direction";
 import { ensureTextContrast } from "./layout-plan";
 import { keepLayerAspect } from "./reflow";
+import { hasSafeZone, type SafeZone } from "./safe-zone";
 
 export const LAYOUT_FIXER_MODEL =
   process.env.PRODUCTION_AI_LAYOUT_MODEL || "gemini-3.8-flash";
@@ -34,6 +36,8 @@ export const LAYOUT_FIXER_AGENT_NAME = "layout-fixer";
 export type LayoutFixUsage = GeminiUsage;
 
 export interface LayoutFixRequest {
+  // Zona segura de la plataforma destino, si hay.
+  safe?: SafeZone | null;
   // Árbol adaptado con tokens resueltos: es lo que el modelo "ve" en números.
   resolvedTree: TemplateDefinition;
   // Orientación de origen (resuelta) para conservar la intención del diseño.
@@ -180,6 +184,9 @@ export async function requestLayoutFix(req: LayoutFixRequest): Promise<LayoutFix
       w: r(resolvedTree.size.w),
       h: r(resolvedTree.size.h),
       safeMargin: safeMargin(resolvedTree.size),
+      ...(hasSafeZone(req.safe)
+        ? { safe_zone: { ...safeInsets(resolvedTree.size, req.safe), note: "franjas que tapa la plataforma: nada importante dentro de ellas" } }
+        : {}),
     },
     problems: issues.map((i) => ({
       kind: i.kind,
@@ -245,6 +252,7 @@ export interface RunLayoutFixParams {
   abortSignal?: AbortSignal;
   maxPasses?: number;
   onUsage?: (u: LayoutFixUsage) => void;
+  safe?: SafeZone | null;
   // Resuelve tokens de color: si viene, al final se asegura el contraste de
   // los textos (al recomponer, un texto blanco que iba sobre la foto puede
   // quedar sobre el fondo blanco; el modelo no cambia colores).
@@ -265,7 +273,9 @@ export async function runLayoutFix(p: RunLayoutFixParams): Promise<RunLayoutFixR
   const resolvedSource = p.sourceTree ? p.view(p.sourceTree) : null;
   // Al recomponer también se mide el aprovechamiento del formato.
   const lint = (t: TemplateDefinition) =>
-    p.recompose ? [...lintLayout(p.view(t)), ...lintComposition(p.view(t))] : lintLayout(p.view(t));
+    p.recompose
+      ? [...lintLayout(p.view(t), { safe: p.safe }), ...lintComposition(p.view(t), { safe: p.safe })]
+      : lintLayout(p.view(t), { safe: p.safe });
   const issuesBefore = lint(p.tree);
   const maxPasses = p.maxPasses ?? 2;
   let current = p.tree;
@@ -282,6 +292,7 @@ export async function runLayoutFix(p: RunLayoutFixParams): Promise<RunLayoutFixR
     while (passes < maxPasses) {
       passes++;
       const res = await requestLayoutFix({
+        safe: p.safe,
         resolvedTree: p.view(current),
         resolvedSource,
         issues,

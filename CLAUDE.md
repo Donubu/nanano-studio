@@ -291,6 +291,17 @@ respeta `maxLength`) y `maxItems` en arrays de objetos grandes (da 400).
 Modelos por env: `PRODUCTION_AI_LAYOUT_MODEL`, `PRODUCTION_AI_PLANNER_MODEL`,
 `PRODUCTION_AI_ANIMATION_MODEL`, `PRODUCTION_AI_EDIT_MODEL`, `PRODUCTION_AI_IMAGE_MODEL`.
 
+### Zonas seguras por plataforma
+`lib/production/safe-zone.ts`: franjas que la interfaz tapa o recorta
+(stories/reels, TikTok, Shorts, feed 4:5, portada de X, miniatura de YouTube),
+por defecto como fracción del formato según canal y proporción, o fijas en
+`production_format_presets.safe_zone_json` (migración 131). Se aplican en
+`lintLayout`/`lintComposition` (`opts.safe`), en `adaptTree` (`opts.safe`:
+fitChildren, tiras y growToLegible), en el render/export de adaptaciones
+(`safe_zone` del objeto adaptación), en "Revisar con IA" (el modelo recibe
+`safe_zone`) y en el editor de la adaptación (overlay sombreado, activo por
+defecto). Los fondos a sangre no se ven afectados.
+
 ### Exportación (paso Descargar)
 - HTML5 (`lib/production/html5-export.ts` + `export-assets.ts`): cada imagen se
   redimensiona al tamaño dibujado × dpr y se re-codifica (JPEG, o PNG si hay

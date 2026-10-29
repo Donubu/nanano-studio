@@ -22,6 +22,7 @@ import { PreviewThumbnails, ThumbnailPreset } from "./preview-thumbnails";
 import { LayerContextMenu, LayerContextMenuPosition } from "./layer-context-menu";
 import { TimelinePanel } from "./timeline-panel";
 import { AiEditBar } from "./ai-edit-bar";
+import type { SafeZone } from "@/lib/production/safe-zone";
 import { applySkin } from "@/lib/production/skin";
 
 interface Props {
@@ -60,6 +61,9 @@ interface Props {
   // permanece raw — al editar un text layer el productor ve "{{var}}", no
   // el valor.
   dataRow?: DataRow | null;
+  // Zona segura de la plataforma (editor de una adaptación): se dibuja
+  // sombreada y el toggle arranca activo.
+  safeZone?: SafeZone | null;
 }
 
 export function TemplateEditor({
@@ -78,6 +82,7 @@ export function TemplateEditor({
   topBanner,
   rightAccessory,
   dataRow,
+  safeZone = null,
 }: Props) {
   // Estado de colapso de los paneles laterales. Por default abiertos.
   const [layersCollapsed, setLayersCollapsed] = useState(false);
@@ -223,7 +228,16 @@ export function TemplateEditor({
   // visualización, no un atributo del template. Si el productor quiere
   // distintos márgenes para distintas piezas, abre el toggle, edita, lo
   // apaga. La constante de 5% vive en TemplateCanvas.
-  const [showSafetyZone, setShowSafetyZone] = useState(false);
+  // Con zona segura de plataforma el overlay arranca visible (es lo que
+  // decide dónde puede ir el CTA); el toggle lo oculta. Sin zona, arranca
+  // oculto como siempre.
+  const [safetyManual, setSafetyManual] = useState(false);
+  const [safetyHidden, setSafetyHidden] = useState(false);
+  const showSafetyZone = safeZone ? !safetyHidden : safetyManual;
+  const setShowSafetyZone = (fn: (v: boolean) => boolean) => {
+    if (safeZone) setSafetyHidden((h) => !fn(!h));
+    else setSafetyManual(fn);
+  };
   // Grilla y reglas: preferencias del productor, persistidas por navegador.
   const [showGrid, setShowGrid] = useState(false);
   const [gridSize, setGridSize] = useState(20);
@@ -641,6 +655,11 @@ export function TemplateEditor({
                 canUndo={editor.canUndo}
                 canRedo={editor.canRedo}
                 showSafetyZone={showSafetyZone}
+                safetyZoneTitle={
+                  safeZone
+                    ? `Zona segura de la plataforma: franjas que tapa la interfaz (arriba ${safeZone.top}px, abajo ${safeZone.bottom}px, izquierda ${safeZone.left}px, derecha ${safeZone.right}px). Nada importante dentro de ellas.`
+                    : undefined
+                }
                 onToggleSafetyZone={() => setShowSafetyZone((v) => !v)}
                 showGrid={showGrid}
                 onToggleGrid={() => setShowGrid((v) => !v)}
@@ -661,6 +680,7 @@ export function TemplateEditor({
               dataRow={dataRow}
               onLayerContextMenu={openContextMenu}
               showSafetyZone={showSafetyZone}
+              safeZone={safeZone}
               showGrid={showGrid}
               gridSize={gridSize}
               showRulers={showRulers}

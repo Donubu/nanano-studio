@@ -16,6 +16,7 @@ import {
   findParent,
 } from "@/lib/production/types";
 import { adaptTree } from "@/lib/production/adapt";
+import type { SafeZone } from "@/lib/production/safe-zone";
 import { BrandKitContent, EMPTY_KIT_CONTENT, resolveTreeTokens } from "@/lib/production/brand-kit";
 import { substituteVariables, DataRow } from "@/lib/production/variables";
 import { TemplateLayerView, stackToFlexStyle } from "./template-layer";
@@ -44,6 +45,9 @@ interface Props {
   // bordes (story de Instagram con UI overlay, foto de perfil cuando el banner
   // se usa como cover, etc).
   showSafetyZone?: boolean;
+  // Zona segura de la plataforma (safe-zone.ts): franjas por lado que tapa la
+  // interfaz. Cuando viene, el overlay la dibuja en vez del 5% uniforme.
+  safeZone?: SafeZone | null;
   // Grilla (en unidades del canvas) y reglas. Ambas son ayudas visuales; la
   // grilla además atrae al mover cuando no hay otro snap más cercano.
   showGrid?: boolean;
@@ -102,6 +106,7 @@ export function TemplateCanvas({
   dataRow,
   onLayerContextMenu,
   showSafetyZone = false,
+  safeZone = null,
   showGrid = false,
   gridSize = 20,
   showRulers = false,
@@ -602,7 +607,33 @@ export function TemplateCanvas({
                 indicador visual — no interfiere con drag ni con la
                 exportación. El border-width se compensa con 1/scale para
                 que se vea siempre 1px en pantalla independiente del zoom. */}
-            {showSafetyZone && (
+            {showSafetyZone && safeZone && (
+              // Franjas que tapa la plataforma, sombreadas.
+              <>
+                {(
+                  [
+                    { left: 0, top: 0, width: baseW, height: safeZone.top },
+                    { left: 0, top: baseH - safeZone.bottom, width: baseW, height: safeZone.bottom },
+                    { left: 0, top: 0, width: safeZone.left, height: baseH },
+                    { left: baseW - safeZone.right, top: 0, width: safeZone.right, height: baseH },
+                  ] as const
+                ).map((r, i) =>
+                  r.width > 0 && r.height > 0 ? (
+                    <div
+                      key={i}
+                      style={{
+                        position: "absolute",
+                        ...r,
+                        pointerEvents: "none",
+                        background: "repeating-linear-gradient(45deg, rgba(250,204,21,0.18) 0 6px, rgba(250,204,21,0.06) 6px 12px)",
+                        boxShadow: `inset 0 0 0 ${1 / scale}px rgba(250,204,21,0.7)`,
+                      }}
+                    />
+                  ) : null,
+                )}
+              </>
+            )}
+            {showSafetyZone && !safeZone && (
               <div
                 style={{
                   position: "absolute",

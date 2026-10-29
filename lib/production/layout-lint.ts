@@ -22,6 +22,7 @@ import {
   isFontSizeRange,
 } from "./types";
 import { insetFrameRatio, inferRoles, type LayerRole } from "./layer-roles";
+import { hasSafeZone, type SafeZone } from "./safe-zone";
 
 export type LintIssueKind =
   | "background_gap"
@@ -74,6 +75,23 @@ export interface Box {
 
 export function safeMargin(size: { w: number; h: number }): number {
   return Math.max(2, Math.round(Math.min(size.w, size.h) * SAFE_MARGIN_RATIO));
+}
+
+// Márgenes por lado: el mínimo del 3% y, si la plataforma tapa más (zona
+// segura de stories, TikTok…), eso.
+export function safeInsets(size: { w: number; h: number }, zone?: SafeZone | null): SafeZone {
+  const m = safeMargin(size);
+  return {
+    top: Math.max(m, zone?.top ?? 0),
+    right: Math.max(m, zone?.right ?? 0),
+    bottom: Math.max(m, zone?.bottom ?? 0),
+    left: Math.max(m, zone?.left ?? 0),
+  };
+}
+
+export interface LintOptions {
+  // Zona segura de la plataforma (safe-zone.ts). Sin ella, solo el 3%.
+  safe?: SafeZone | null;
 }
 
 export function isVisibleLayer(l: TemplateLayer): boolean {
@@ -217,13 +235,15 @@ function walkTexts(nodes: TemplateLayer[], issues: LintIssue[]) {
 
 // `def` debe venir con tokens resueltos (resolveTreeTokens): con un token
 // en fontSize no hay número que medir y la capa se salta.
-export function lintLayout(def: TemplateDefinition): LintIssue[] {
+export function lintLayout(def: TemplateDefinition, opts: LintOptions = {}): LintIssue[] {
   const issues: LintIssue[] = [];
   const frame = def.size;
   walkTexts(def.children, issues);
   if (def.layout.mode === "stack") return issues;
 
   const margin = safeMargin(frame);
+  const insets = safeInsets(frame, opts.safe);
+  const platformZone = hasSafeZone(opts.safe);
   const frameBox: Box = { x: 0, y: 0, w: frame.w, h: frame.h };
 
   // Fondo que casi cubre pero deja bandas (típico de una foto achicada para
@@ -267,16 +287,18 @@ export function lintLayout(def: TemplateDefinition): LintIssue[] {
     }
     if (l.type === "shape") continue; // decoración: puede ir al borde
     const crossesMargin =
-      b.x < margin - 1 ||
-      b.y < margin - 1 ||
-      b.x + b.w > frame.w - margin + 1 ||
-      b.y + b.h > frame.h - margin + 1;
+      b.x < insets.left - 1 ||
+      b.y < insets.top - 1 ||
+      b.x + b.w > frame.w - insets.right + 1 ||
+      b.y + b.h > frame.h - insets.bottom + 1;
     if (crossesMargin) {
       issues.push({
         kind: "outside_safe_area",
         severity: "warning",
         layerIds: [l.id],
-        detail: `${label(l)} invade el margen de seguridad (${margin}px)`,
+        detail: platformZone
+          ? `${label(l)} invade la zona que tapa la plataforma (arriba ${insets.top}px, abajo ${insets.bottom}px, izq ${insets.left}px, der ${insets.right}px)`
+          : `${label(l)} invade el margen de seguridad (${margin}px)`,
       });
     }
   }
@@ -348,10 +370,11 @@ const ROLE_LABEL: Partial<Record<LayerRole, string>> = {
 // Franja vacía máxima sobre el eje largo, como fracción de ese eje.
 const MAX_EMPTY_BAND = 0.15;
 
-export function lintComposition(def: TemplateDefinition): LintIssue[] {
+export function lintComposition(def: TemplateDefinition, opts: LintOptions = {}): LintIssue[] {
   const issues: LintIssue[] = [];
   const frame = def.size;
   if (def.layout.mode === "stack") return issues;
+  const insets = safeInsets(frame, opts.safe);
   const short = Math.min(frame.w, frame.h);
   const roles = inferRoles(def);
   const visible = def.children.filter(isVisibleLayer);
@@ -377,20 +400,21 @@ export function lintComposition(def: TemplateDefinition): LintIssue[] {
   // descontando el margen de seguridad). Los fondos no cuentan como contenido.
   const vertical = frame.h >= frame.w;
   const axis = vertical ? frame.h : frame.w;
-  const margin = safeMargin(frame);
+  const start = vertical ? insets.top : insets.left;
+  const end = axis - (vertical ? insets.bottom : insets.right);
   const spans = visible
     .filter((l) => !isBackgroundLayer(l, frame) && !(l.type === "shape" && l.size.w * l.size.h > frame.w * frame.h * 0.6))
     .map((l) => (vertical ? [l.position.y, l.position.y + l.size.h] : [l.position.x, l.position.x + l.size.w]))
-    .map(([a, b]) => [Math.max(margin, a), Math.min(axis - margin, b)])
+    .map(([a, b]) => [Math.max(start, a), Math.min(end, b)])
     .filter(([a, b]) => b > a)
     .sort((p, q) => p[0] - q[0]);
-  let cursor = margin;
+  let cursor = start;
   const bands: [number, number][] = [];
   for (const [a, b] of spans) {
     if (a > cursor) bands.push([cursor, a]);
     cursor = Math.max(cursor, b);
   }
-  if (axis - margin > cursor) bands.push([cursor, axis - margin]);
+  if (end > cursor) bands.push([cursor, end]);
   for (const [a, b] of bands) {
     if (b - a > axis * MAX_EMPTY_BAND) {
       issues.push({

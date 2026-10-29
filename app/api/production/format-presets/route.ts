@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
 
     const [rows] = await pool.execute<FormatPresetRow[]>(
       `SELECT id, channel, group_name, name, width, height, orientation,
-              file_size_max_kb, is_system, client_id, sort_order
+              file_size_max_kb, safe_zone_json, is_system, client_id, sort_order
          FROM production_format_presets
         WHERE ${where.join(" AND ")}
         ORDER BY channel ASC, sort_order ASC, name ASC`,

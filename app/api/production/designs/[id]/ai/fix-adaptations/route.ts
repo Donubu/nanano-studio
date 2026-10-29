@@ -34,6 +34,7 @@ import { parseBody } from "@/lib/api-utils";
 import { TemplateDefinition } from "@/lib/production/types";
 import { EMPTY_KIT_CONTENT, resolveTreeTokens, resolveColor, BrandKitContent } from "@/lib/production/brand-kit";
 import { resolveTemplateBrandKit } from "@/lib/production/project-brand-kit";
+import { adaptationSafeZone, type SafeZone } from "@/lib/production/safe-zone";
 import { checkProductionAiQuota, quotaBlockedBody } from "@/lib/production/ai-rate-limit";
 import { LintIssue } from "@/lib/production/layout-lint";
 import { LayerPatch } from "@/lib/production/layout-patch";
@@ -80,6 +81,8 @@ interface AdaptationRow extends RowDataPacket {
   id: number;
   width: number;
   height: number;
+  preset_channel: string | null;
+  preset_safe_zone: unknown;
 }
 interface PrincipalRow extends RowDataPacket {
   id: number;
@@ -120,6 +123,7 @@ async function fixOne(params: {
   kit: BrandKitContent;
   dataRow: DataRow | null;
   instructions?: string;
+  safe: SafeZone | null;
   signal: AbortSignal;
   onUsage: (u: LayoutFixUsage) => void;
 }): Promise<ItemResult> {
@@ -133,6 +137,7 @@ async function fixOne(params: {
       tree: params.tree,
       sourceTree: params.sourceTree,
       view,
+      safe: params.safe,
       image: params.image ? { mimeType: "image/webp", data: params.image } : null,
       instructions: params.instructions,
       abortSignal: params.signal,
@@ -201,8 +206,10 @@ export async function POST(
 
     const ids = [...new Set(items.map((i) => i.adaptation_id))];
     const [adaptRows] = await pool.query<AdaptationRow[]>(
-      `SELECT id, width, height FROM production_template_adaptations
-        WHERE design_id = ? AND id IN (?)`,
+      `SELECT a.id, a.width, a.height, fp.channel AS preset_channel, fp.safe_zone_json AS preset_safe_zone
+         FROM production_template_adaptations a
+         LEFT JOIN production_format_presets fp ON fp.id = a.format_preset_id
+        WHERE a.design_id = ? AND a.id IN (?)`,
       [designId, ids],
     );
     const adaptById = new Map(adaptRows.map((a) => [a.id, a]));
@@ -214,7 +221,13 @@ export async function POST(
       );
     }
 
-    const prepared: { adaptationId: number; tree: TemplateDefinition; sourceTree: TemplateDefinition | null; image?: string }[] = [];
+    const prepared: {
+      adaptationId: number;
+      tree: TemplateDefinition;
+      sourceTree: TemplateDefinition | null;
+      image?: string;
+      safe: SafeZone | null;
+    }[] = [];
     for (const item of items) {
       const a = adaptById.get(item.adaptation_id)!;
       const tree = asRootTree(item.tree, { w: a.width, h: a.height });
@@ -225,6 +238,7 @@ export async function POST(
         );
       }
       prepared.push({
+        safe: adaptationSafeZone(a),
         adaptationId: a.id,
         tree,
         sourceTree: asRootTree(item.source_tree),

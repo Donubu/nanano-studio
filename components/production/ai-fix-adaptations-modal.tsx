@@ -24,8 +24,11 @@ import { DataRow, substituteVariables } from "@/lib/production/variables";
 import { captureNodeToJpeg } from "@/lib/production/export";
 import { prepareImageForAgent } from "@/lib/production/prepare-image";
 import { AdaptationRenderer } from "@/components/production/render/adaptation-renderer";
+import type { SafeZone } from "@/lib/production/safe-zone";
 
 export interface FixCandidate {
+  // Zona segura de la plataforma del formato (safe-zone.ts).
+  safe?: SafeZone | null;
   adaptationId: number;
   label: string;
   width: number;
@@ -143,7 +146,7 @@ export function AiFixAdaptationsModal({
     const m = new Map<number, LintIssue[]>();
     for (const c of candidates) {
       const tree = dataRow ? substituteVariables(c.tree, dataRow) : c.tree;
-      m.set(c.adaptationId, lintLayout(resolveTreeTokens(tree, brandKit)));
+      m.set(c.adaptationId, lintLayout(resolveTreeTokens(tree, brandKit), { safe: c.safe }));
     }
     return m;
   }, [candidates, brandKit, dataRow]);

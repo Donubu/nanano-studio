@@ -33,6 +33,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import JSZip from "jszip";
+import type { SafeZone } from "./safe-zone";
 import {
   assetBoxes,
   bleedingImages,
@@ -71,6 +72,7 @@ export interface Html5ExportAdaptation {
   height: number;
   fit_mode: FitMode;
   overrides_json: string | null;
+  safe_zone?: SafeZone | null;
 }
 
 export interface BuildHtml5Options {
@@ -228,10 +230,7 @@ function renderInner(opts: BuildHtml5Options): {
   } else {
     const effectiveMaster = dataRow ? substituteVariables(master, dataRow) : master;
     if (adaptation.fit_mode === "responsive") {
-      const reflowed = adaptTree(effectiveMaster, {
-        w: adaptation.width,
-        h: adaptation.height,
-      });
+      const reflowed = adaptTree(effectiveMaster, { w: adaptation.width, h: adaptation.height }, { safe: adaptation.safe_zone });
       effectiveAnimation = reflowed.animation ?? null;
       effectiveTree = reflowed;
     } else {

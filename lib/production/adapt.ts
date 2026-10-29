@@ -42,7 +42,8 @@ import {
 import { reflowForPreview, reflowAnimation, keepLayerAspect } from "./reflow";
 import { scaleLayerStyle, scaleLayerUniform, scaleLayoutConfig } from "./scale";
 import { inferRoles, companionIcons, coversFrame, insetFrameRatio, ROLE_PRIORITY, LayerRole } from "./layer-roles";
-import { effectiveFontSize, safeMargin } from "./layout-lint";
+import { effectiveFontSize, safeInsets } from "./layout-lint";
+import { hasSafeZone, type SafeZone } from "./safe-zone";
 import { visualGroups } from "./animation-plan";
 
 // Diferencia relativa de aspect ratio a partir de la cual el reflow por
@@ -68,9 +69,15 @@ export function isLinearFormat(master: { w: number; h: number }, size: { w: numb
   return elongated && aspectDiff(master.w, master.h, size.w, size.h) > LINEAR_ASPECT_DIFF;
 }
 
-export function adaptTree(master: TemplateDefinition, size: { w: number; h: number }): TemplateDefinition {
-  if (master.size.w === size.w && master.size.h === size.h) return master;
-  if (isLinearFormat(master.size, size)) return linearize(master, size);
+export interface AdaptOptions {
+  // Zona segura de la plataforma destino (safe-zone.ts): lo importante
+  // queda fuera de las franjas que tapa la interfaz.
+  safe?: SafeZone | null;
+}
+
+export function adaptTree(master: TemplateDefinition, size: { w: number; h: number }, opts: AdaptOptions = {}): TemplateDefinition {
+  if (master.size.w === size.w && master.size.h === size.h && !hasSafeZone(opts.safe)) return master;
+  if (isLinearFormat(master.size, size)) return linearize(master, size, opts);
 
   // Primero escala uniforme tipo "contain" (márgenes, tipografía y cajas
   // proporcionales al formato) y recién después reflow por constraints para
@@ -87,7 +94,7 @@ export function adaptTree(master: TemplateDefinition, size: { w: number; h: numb
   };
   const reflowed = reflowForPreview(scaled, size);
   const masterById = new Map(master.children.map((c) => [c.id, c]));
-  const mapped = fitChildren(reflowed.children, reflowed.size, scaled.size, indexById(scaled)).map((c) => {
+  const mapped = fitChildren(reflowed.children, reflowed.size, scaled.size, indexById(scaled), safeInsets(size, opts.safe)).map((c) => {
     const orig = masterById.get(c.id);
     if (!orig) return c;
     if (coversFrame(orig, master.size)) return coverFrame(orig, master.size, size);
@@ -99,6 +106,7 @@ export function adaptTree(master: TemplateDefinition, size: { w: number; h: numb
     { ...reflowed, children: fittedChildren },
     inferRoles(master),
     master,
+    opts.safe,
   );
   return {
     ...fitted,
@@ -212,8 +220,11 @@ function fitChildren(
   parent: { w: number; h: number },
   origParent: { w: number; h: number },
   origById: Map<string, TemplateLayer>,
+  // Márgenes por lado (solo el nivel superior; los frames anidados usan 3%).
+  insets?: SafeZone,
 ): TemplateLayer[] {
   const margin = Math.round(Math.min(parent.w, parent.h) * 0.03);
+  const ins = insets ?? { top: margin, right: margin, bottom: margin, left: margin };
   return children.map((l) => {
     const orig = origById.get(l.id) ?? l;
     let next: TemplateLayer = l;
@@ -222,8 +233,8 @@ function fitChildren(
     //    padre son fondos/franjas intencionales y no se tocan; se mide en el
     //    original porque tras el reflow una caja grande puede "cubrir" el
     //    formato solo por desborde.
-    const maxW = Math.max(1, parent.w - 2 * margin);
-    const maxH = Math.max(1, parent.h - 2 * margin);
+    const maxW = Math.max(1, parent.w - ins.left - ins.right);
+    const maxH = Math.max(1, parent.h - ins.top - ins.bottom);
     const coversW = orig.size.w >= origParent.w * BACKGROUND_COVER;
     const coversH = orig.size.h >= origParent.h * BACKGROUND_COVER;
     const kw = !coversW && l.size.w > maxW ? maxW / l.size.w : 1;
@@ -238,11 +249,11 @@ function fitChildren(
     }
     // 2. Empujar dentro de los márgenes cuando cabe.
     if (!coversW && next.size.w <= maxW) {
-      const x = Math.min(Math.max(next.position.x, margin), parent.w - margin - next.size.w);
+      const x = Math.min(Math.max(next.position.x, ins.left), parent.w - ins.right - next.size.w);
       next = { ...next, position: { ...next.position, x } };
     }
     if (!coversH && next.size.h <= maxH) {
-      const y = Math.min(Math.max(next.position.y, margin), parent.h - margin - next.size.h);
+      const y = Math.min(Math.max(next.position.y, ins.top), parent.h - ins.bottom - next.size.h);
       next = { ...next, position: { ...next.position, y } };
     }
 
@@ -294,15 +305,21 @@ function minLegibleFont(size: { w: number; h: number }): number {
   return Math.min(size.w, size.h) < 120 ? 9 : 10;
 }
 
-function linearize(master: TemplateDefinition, size: { w: number; h: number }): TemplateDefinition {
+function linearize(master: TemplateDefinition, size: { w: number; h: number }, opts: AdaptOptions = {}): TemplateDefinition {
   const W = size.w;
   const H = size.h;
   const horizontal = W >= H;
   const short = Math.min(W, H);
   const pad = Math.max(4, Math.round(short * 0.1));
   const gap = Math.max(4, Math.round(short * 0.12));
-  const availW = Math.max(1, W - 2 * pad);
-  const availH = Math.max(1, H - 2 * pad);
+  // Zona segura: la tira se arma dentro de lo que la plataforma no tapa.
+  const z = safeInsets(size, opts.safe);
+  const padL = Math.max(pad, z.left);
+  const padR = Math.max(pad, z.right);
+  const padT = Math.max(pad, z.top);
+  const padB = Math.max(pad, z.bottom);
+  const availW = Math.max(1, W - padL - padR);
+  const availH = Math.max(1, H - padT - padB);
   const availAlong = horizontal ? availW : availH;
   const minFont = minLegibleFont(size);
 
@@ -390,12 +407,12 @@ function linearize(master: TemplateDefinition, size: { w: number; h: number }): 
   );
   const finalTotal = finalItems.reduce((acc, p) => acc + along(p), 0) + gap * k * Math.max(0, finalItems.length - 1);
 
-  // Colocación centrada en ambos ejes.
-  let cursor = horizontal ? pad + (availW - finalTotal) / 2 : pad + (availH - finalTotal) / 2;
+  // Colocación centrada en ambos ejes (dentro de la zona segura).
+  let cursor = horizontal ? padL + (availW - finalTotal) / 2 : padT + (availH - finalTotal) / 2;
   const children: TemplateLayer[] = backgrounds.map((c) => coverFrame(c, master.size, size));
   for (const p of finalItems) {
-    const x = horizontal ? cursor : pad + (availW - p.w) / 2;
-    const y = horizontal ? pad + (availH - p.h) / 2 : cursor;
+    const x = horizontal ? cursor : padL + (availW - p.w) / 2;
+    const y = horizontal ? padT + (availH - p.h) / 2 : cursor;
     children.push({
       ...p.layer,
       position: { x: Math.round(x), y: Math.round(y) },
@@ -477,28 +494,33 @@ export function coverFrame(
 // El legal tampoco se oculta en formatos parecidos: lo exige la marca.
 const GROW_ROLES = new Set<LayerRole>(["headline", "cta", "price", "badge", "legal"]);
 
-function growToLegible(l: TemplateLayer, frame: { w: number; h: number }, minFont: number): TemplateLayer {
+function growToLegible(l: TemplateLayer, frame: { w: number; h: number }, minFont: number, safe?: SafeZone | null): TemplateLayer {
   if (l.type !== "text") return l;
   const fs = effectiveFontSize(l);
   if (fs == null || fs <= 0 || fs >= minFont) return l;
-  const m = safeMargin(frame);
-  const f = Math.min(minFont / fs, (frame.w - 2 * m) / l.size.w, (frame.h * 0.3) / l.size.h);
+  const ins = safeInsets(frame, safe);
+  const f = Math.min(minFont / fs, (frame.w - ins.left - ins.right) / l.size.w, (frame.h * 0.3) / l.size.h);
   if (f <= 1.02) return l;
   const w = l.size.w * f;
   const h = l.size.h * f;
   const c = center(l);
-  const x = Math.min(Math.max(m, c.x - w / 2), frame.w - m - w);
-  const y = Math.min(Math.max(m, c.y - h / 2), frame.h - m - h);
+  const x = Math.min(Math.max(ins.left, c.x - w / 2), frame.w - ins.right - w);
+  const y = Math.min(Math.max(ins.top, c.y - h / 2), frame.h - ins.bottom - h);
   return { ...scaleLayerStyle(l, f), position: { x, y }, size: { w, h } };
 }
 
-function hideIllegible(def: TemplateDefinition, roles: Map<string, LayerRole>, master: TemplateDefinition): TemplateDefinition {
+function hideIllegible(
+  def: TemplateDefinition,
+  roles: Map<string, LayerRole>,
+  master: TemplateDefinition,
+  safe?: SafeZone | null,
+): TemplateDefinition {
   const minFont = minLegibleFont(def.size);
   const hide = new Set<string>();
   let grown = false;
   const children = def.children.map((l) => {
     if (l.visible === false || !GROW_ROLES.has(roles.get(l.id) as LayerRole)) return l;
-    const next = growToLegible(l, def.size, minFont);
+    const next = growToLegible(l, def.size, minFont, safe);
     if (next !== l) grown = true;
     return next;
   });

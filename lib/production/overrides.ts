@@ -16,6 +16,7 @@ import {
   TemplateDefinition,
 } from "./types";
 import { adaptTree } from "./adapt";
+import type { SafeZone } from "./safe-zone";
 import { scaleLayerUniform, scaleLayoutConfig } from "./scale";
 import { FitMode } from "./fit-mode";
 import {
@@ -50,8 +51,9 @@ export function deriveManualLayoutFromMaster(
   master: TemplateDefinition,
   adaptW: number,
   adaptH: number,
+  safe?: SafeZone | null,
 ): TemplateDefinition {
-  return adaptTree(master, { w: adaptW, h: adaptH });
+  return adaptTree(master, { w: adaptW, h: adaptH }, { safe });
 }
 
 // Cuando la adapt usa un fit_mode scale-based (contain/cover/width/height),
@@ -75,9 +77,10 @@ export function buildInitialFromAdaptFit(
   adaptW: number,
   adaptH: number,
   fitMode: FitMode,
+  safe?: SafeZone | null,
 ): TemplateDefinition {
   if (fitMode === "responsive") {
-    return adaptTree(master, { w: adaptW, h: adaptH });
+    return adaptTree(master, { w: adaptW, h: adaptH }, { safe });
   }
   const masterW = master.size.w;
   const masterH = master.size.h;

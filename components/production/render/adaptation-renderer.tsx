@@ -11,6 +11,7 @@ import {
   resolveTreeTokens,
 } from "@/lib/production/brand-kit";
 import { adaptTree } from "@/lib/production/adapt";
+import type { SafeZone } from "@/lib/production/safe-zone";
 import { parseOverrides } from "@/lib/production/overrides";
 import { substituteVariables, DataRow } from "@/lib/production/variables";
 import {
@@ -25,6 +26,8 @@ interface AdaptationLike {
   height: number;
   fit_mode: FitMode;
   overrides_json: string | null;
+  // Zona segura de la plataforma (safe-zone.ts adaptationSafeZone).
+  safe_zone?: SafeZone | null;
 }
 
 interface Props {
@@ -96,7 +99,7 @@ export const AdaptationRenderer = forwardRef<HTMLDivElement, Props>(function Ada
   const effectiveMaster = dataRow ? substituteVariables(master, dataRow) : master;
 
   if (adaptation.fit_mode === "responsive") {
-    const reflowed = adaptTree(effectiveMaster, { w: adaptW, h: adaptH });
+    const reflowed = adaptTree(effectiveMaster, { w: adaptW, h: adaptH }, { safe: adaptation.safe_zone });
     const resolved = resolveTreeTokens(reflowed, brandKit);
     const bg =
       resolved.background && resolved.background.type === "color"

@@ -42,6 +42,8 @@ interface Props {
   // punteado al 5% del borde. Es un visual-aid, no afecta export.
   showSafetyZone: boolean;
   onToggleSafetyZone: () => void;
+  // Texto del tooltip cuando hay zona segura de plataforma.
+  safetyZoneTitle?: string;
   // Grilla y reglas (ayudas visuales del canvas).
   showGrid?: boolean;
   onToggleGrid?: () => void;
@@ -128,6 +130,7 @@ export function EditorToolbar({
   canRedo,
   showSafetyZone,
   onToggleSafetyZone,
+  safetyZoneTitle,
   showGrid,
   onToggleGrid,
   gridSize = 20,
@@ -181,6 +184,7 @@ export function EditorToolbar({
       <ToolbarBtn
         onClick={onToggleSafetyZone}
         title={
+          safetyZoneTitle ??
           "Zona segura: marca un margen del 5% al borde del banner. " +
           "Mantén textos y logos dentro del rectángulo punteado para " +
           "que no se corten en placements que recortan los bordes " +
