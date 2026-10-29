@@ -28,6 +28,7 @@ import {
   Plus,
   RefreshCw,
   Rocket,
+  ScanSearch,
   Sparkles,
   Trash2,
   Upload,
@@ -46,6 +47,8 @@ import { EMPTY_KIT_CONTENT } from "@/lib/production/brand-kit";
 import { serializeOverrides } from "@/lib/production/overrides";
 import { imageJobsFor, applyGeneratedImages, ImageRatio } from "@/lib/production/layout-plan";
 import { AdaptationRenderer } from "@/components/production/render/adaptation-renderer";
+import { captureNodeToJpeg } from "@/lib/production/export";
+import { FIDELITY_TARGET, MAX_VERIFY_PASSES } from "@/lib/production/reference-verify";
 
 export type PickerSource =
   | { kind: "blank" }
@@ -418,6 +421,9 @@ function ReferenceUploadTab({
   // Copia íntegra: la misma pieza en capas editables (textos, fuentes, colores
   // y fotos de la referencia), sin adaptarla a la marca.
   const [integral, setIntegral] = useState(false);
+  // Cada generación nueva dispara una verificación visual de la propuesta
+  // "Fiel a la referencia" (ReferenceVerifier).
+  const [verifyRun, setVerifyRun] = useState(0);
   const [instructions, setInstructions] = useState("");
   const [uploading, setUploading] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -536,6 +542,7 @@ function ReferenceUploadTab({
       }
       setProposals(list);
       setSelected(0);
+      setVerifyRun((n) => n + 1);
       setBrandKitId(typeof body.brand_kit_id === "number" ? body.brand_kit_id : null);
       setCost(
         typeof body.tokenUsage?.estimatedCost === "number"
@@ -723,6 +730,21 @@ function ReferenceUploadTab({
         </div>
       )}
 
+      {hasProposal && proposals.length > 0 && proposals[0].template_id.startsWith("reference") && files[0] && (
+        <ReferenceVerifier
+          productionProjectId={productionProjectId}
+          proposal={proposals[0]}
+          reference={files[0]}
+          run={verifyRun}
+          onUpdate={(p) => {
+            setProposals((cur) => cur.map((x, j) => (j === 0 ? p : x)));
+            if (selected === 0) {
+              onPicked({ kind: "ai-reference", definition: p.definition, variants: p.variants, brandKitId });
+            }
+          }}
+        />
+      )}
+
       {hasProposal && proposals.length > 0 && (
         <ProposalChooser
           productionProjectId={productionProjectId}
@@ -745,6 +767,156 @@ function ReferenceUploadTab({
             }
           }}
         />
+      )}
+    </div>
+  );
+}
+
+// Ciclo de verificación visual de "Fiel a la referencia": renderiza la
+// propuesta, la captura, la compara con la referencia (verify-reference) y
+// aplica las correcciones; hasta MAX_VERIFY_PASSES pasadas o hasta llegar a
+// FIDELITY_TARGET. Corre solo al generar y a pedido ("Verificar de nuevo").
+function ReferenceVerifier({
+  productionProjectId,
+  proposal,
+  reference,
+  run,
+  onUpdate,
+}: {
+  productionProjectId: number;
+  proposal: AiProposal;
+  reference: UploadedReference;
+  run: number;
+  onUpdate: (p: AiProposal) => void;
+}) {
+  type Pass = { fidelity: number; applied: number; summary: string };
+  const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [passes, setPasses] = useState<Pass[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [renderDef, setRenderDef] = useState<TemplateDefinition | null>(null);
+  const renderRef = useRef<HTMLDivElement | null>(null);
+  const lastRun = useRef(0);
+  // Últimos valores sin que el efecto dependa de ellos.
+  const latest = useRef({ proposal, onUpdate });
+  latest.current = { proposal, onUpdate };
+
+  const capture = useCallback(async (def: TemplateDefinition): Promise<string> => {
+    setRenderDef(def);
+    const started = Date.now();
+    while (!renderRef.current && Date.now() - started < 4000) {
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    const node = renderRef.current;
+    if (!node) throw new Error("No se pudo renderizar la propuesta");
+    // Un respiro para que las fuentes e imágenes del render terminen.
+    await new Promise((r) => setTimeout(r, 150));
+    const blob = await captureNodeToJpeg(node, { pixelRatio: 1 });
+    const prepared = await prepareImageForAgent(blob, { maxSide: 1024 });
+    setRenderDef(null);
+    return prepared.dataUri;
+  }, []);
+
+  const verify = useCallback(async () => {
+    setStatus("running");
+    setError(null);
+    setPasses([]);
+    let current = latest.current.proposal;
+    try {
+      for (let pass = 1; pass <= MAX_VERIFY_PASSES; pass++) {
+        const dataUri = await capture(current.definition);
+        const [head, data] = dataUri.split(",");
+        const mimeType = /data:([^;]+)/.exec(head)?.[1] ?? "image/webp";
+        const res = await fetch("/api/production/ai/verify-reference", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            production_project_id: productionProjectId,
+            reference: { publicUrl: reference.publicUrl, mimeType: reference.mimeType },
+            render: { mimeType, data },
+            definition: current.definition,
+            variant_dims: current.variants.map((v) => v.dims),
+            pass,
+          }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body?.error || `Error ${res.status}`);
+        const p: Pass = { fidelity: body.fidelity ?? 0, applied: body.applied ?? 0, summary: body.summary ?? "" };
+        setPasses((cur) => [...cur, p]);
+        if (p.applied > 0 && body.definition) {
+          current = {
+            ...current,
+            definition: body.definition,
+            preview: body.preview ?? body.definition,
+            variants: body.variants ?? current.variants,
+          };
+          latest.current.onUpdate(current);
+        }
+        if (p.applied === 0 || p.fidelity >= FIDELITY_TARGET) break;
+      }
+      setStatus("done");
+    } catch (e) {
+      setRenderDef(null);
+      setError((e as Error).message);
+      setStatus("error");
+    }
+  }, [capture, productionProjectId, reference.publicUrl, reference.mimeType]);
+
+  useEffect(() => {
+    if (run > 0 && run !== lastRun.current) {
+      lastRun.current = run;
+      void verify();
+    }
+  }, [run, verify]);
+
+  const first = passes[0];
+  const last = passes[passes.length - 1];
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border/50 px-3 py-2">
+      <div className="flex items-center gap-2 text-[11px] min-w-0">
+        {status === "running" ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-400 shrink-0" />
+        ) : (
+          <ScanSearch className="h-3.5 w-3.5 text-violet-400 shrink-0" />
+        )}
+        {status === "running" && (
+          <span className="text-muted-foreground">
+            Comparando con la referencia (pasada {Math.min(passes.length + 1, MAX_VERIFY_PASSES)} de {MAX_VERIFY_PASSES})…
+          </span>
+        )}
+        {status === "done" && first && (
+          <span className="truncate">
+            <span className="font-medium">Fidelidad {first.fidelity}%</span>
+            {passes.length > 1 && last && last.fidelity !== first.fidelity && (
+              <span className="font-medium"> → {last.fidelity}%</span>
+            )}
+            <span className="text-muted-foreground">
+              {" "}· {passes.reduce((n, p) => n + p.applied, 0)} correcciones
+              {last?.summary ? ` · ${last.summary}` : ""}
+            </span>
+          </span>
+        )}
+        {status === "error" && <span className="text-red-300 truncate">Verificación: {error}</span>}
+        {status === "idle" && <span className="text-muted-foreground">Verificación visual contra la referencia</span>}
+      </div>
+      <Button size="sm" variant="ghost" onClick={verify} disabled={status === "running"} className="h-7 gap-1 shrink-0 text-[11px]">
+        <RefreshCw className="h-3 w-3" />
+        Verificar de nuevo
+      </Button>
+      {renderDef && (
+        <div style={{ position: "fixed", left: -100000, top: 0, pointerEvents: "none" }} aria-hidden>
+          <div ref={renderRef}>
+            <AdaptationRenderer
+              adaptation={{
+                width: Math.round(renderDef.size.w),
+                height: Math.round(renderDef.size.h),
+                fit_mode: "responsive",
+                overrides_json: serializeOverrides({ manual_layout: renderDef }),
+              }}
+              master={renderDef}
+              brandKit={EMPTY_KIT_CONTENT}
+            />
+          </div>
+        </div>
       )}
     </div>
   );

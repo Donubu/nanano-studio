@@ -206,6 +206,16 @@ fuente del conocimiento de marca (ver "Guía de marca").
   arma como capas editables, con el master en la proporción de la referencia;
   las del catálogo quedan como alternativas. En este modo no se mandan las
   piezas reales de la marca (competían con la referencia).
+- `POST /api/production/ai/verify-reference` — ciclo de verificación visual
+  de "Fiel a la referencia" (`ReferenceVerifier` en layout-template-picker):
+  el cliente renderiza la propuesta off-screen, la captura (≤1024 px) y la
+  manda con la referencia; Gemini (`reference-verifier.ts`) devuelve
+  `fidelity` 0-100 y correcciones chicas por capa (caja objetivo en %,
+  color, `font_scale`, `hidden`) que `reference-verify.ts` aplica con topes
+  (mover ≤20% del formato, escalar 0,5–2×, letra 0,6–1,6×, el logo nunca se
+  oculta). Hasta 2 pasadas o hasta `FIDELITY_TARGET` (90); corre solo al
+  generar y con "Verificar de nuevo". Las orientaciones se re-derivan con
+  `adaptTree`. Invocación `VERIFY_REFERENCE`.
 - `POST /api/production/ai/generate-images` — llena los slots de imagen de una
   propuesta con Nano Banana 2 (API Gemini; Imagen 4 no existe en la región
   `global` de Vertex), una imagen por slot y proporción.
