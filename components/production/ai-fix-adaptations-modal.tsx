@@ -25,6 +25,8 @@ import { captureNodeToJpeg } from "@/lib/production/export";
 import { prepareImageForAgent } from "@/lib/production/prepare-image";
 import { AdaptationRenderer } from "@/components/production/render/adaptation-renderer";
 import type { SafeZone } from "@/lib/production/safe-zone";
+import type { BrandGuide } from "@/lib/production/brand-guide";
+import { lintBrand } from "@/lib/production/brand-lint";
 
 export interface FixCandidate {
   // Zona segura de la plataforma del formato (safe-zone.ts).
@@ -123,10 +125,26 @@ function IssueChips({ issues }: { issues: LintIssue[] }) {
   );
 }
 
+// Observaciones de marca (brand-lint.ts): se muestran aparte, no se corrigen
+// moviendo cajas ni se le pasan al modelo.
+function BrandIssueList({ issues }: { issues: LintIssue[] }) {
+  if (issues.length === 0) return null;
+  return (
+    <ul className="text-[11px] space-y-0.5 pl-4 list-disc marker:text-amber-400">
+      {issues.map((i, k) => (
+        <li key={k} className={i.severity === "error" ? "text-red-300" : "text-amber-200"}>
+          Marca: {i.detail}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function AiFixAdaptationsModal({
   designId,
   candidates,
   brandKit,
+  brandGuide,
   dataRow,
   onClose,
   onApplied,
@@ -134,6 +152,7 @@ export function AiFixAdaptationsModal({
   designId: number;
   candidates: FixCandidate[];
   brandKit: BrandKitContent;
+  brandGuide: BrandGuide | null;
   // Fila activa del dataset: el chequeo y la IA miden los textos con sus
   // valores reales (como las cards), no con el placeholder {{var}}. Lo que
   // se guarda sigue siendo el árbol con las variables.
@@ -142,14 +161,19 @@ export function AiFixAdaptationsModal({
   // Se llama al cerrar si se aplicó al menos un formato (refetch de la lista).
   onApplied: () => void;
 }) {
+  const view = useCallback(
+    (tree: TemplateDefinition) => resolveTreeTokens(dataRow ? substituteVariables(tree, dataRow) : tree, brandKit),
+    [brandKit, dataRow],
+  );
   const issuesById = useMemo(() => {
     const m = new Map<number, LintIssue[]>();
-    for (const c of candidates) {
-      const tree = dataRow ? substituteVariables(c.tree, dataRow) : c.tree;
-      m.set(c.adaptationId, lintLayout(resolveTreeTokens(tree, brandKit), { safe: c.safe }));
-    }
+    for (const c of candidates) m.set(c.adaptationId, lintLayout(view(c.tree), { safe: c.safe }));
     return m;
-  }, [candidates, brandKit, dataRow]);
+  }, [candidates, view]);
+  const withBrandIssues = useMemo(
+    () => candidates.filter((c) => lintBrand(view(c.tree), brandGuide).length > 0).length,
+    [candidates, view, brandGuide],
+  );
 
   const [selected, setSelected] = useState<Set<number>>(
     () =>
@@ -350,6 +374,8 @@ export function AiFixAdaptationsModal({
                 {withErrors.length === 0
                   ? `Los ${candidates.length} formatos pasan el chequeo automático`
                   : `${withErrors.length} de ${candidates.length} formatos tienen problemas`}
+                {withBrandIssues > 0 &&
+                  ` · ${withBrandIssues} con observaciones de marca (se corrigen a mano o con "Pídele a la IA")`}
               </p>
             </div>
           </div>
@@ -418,6 +444,7 @@ export function AiFixAdaptationsModal({
                       {issues.length > 4 && <li>y {issues.length - 4} más</li>}
                     </ul>
                   )}
+                  <BrandIssueList issues={lintBrand(view(r?.tree ?? c.tree), brandGuide)} />
                 </div>
 
                 <div className="flex gap-3 items-start flex-1 min-w-0">

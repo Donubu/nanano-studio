@@ -78,6 +78,9 @@ import { reflowForPreview } from "@/lib/production/reflow";
 import { adaptTree } from "@/lib/production/adapt";
 import { adaptationSafeZone } from "@/lib/production/safe-zone";
 import { ensureTextContrast } from "@/lib/production/layout-plan";
+import type { BrandGuide } from "@/lib/production/brand-guide";
+import { lintBrand } from "@/lib/production/brand-lint";
+import type { LintIssue } from "@/lib/production/layout-lint";
 import {
   TemplateLayerView,
   stackToFlexStyle,
@@ -280,6 +283,9 @@ export default function ProducirPage() {
   // clientId y brandKits viven en state (no solo locals de fetchAll) porque
   // el editor embebido los necesita como props.
   const [clientId, setClientId] = useState<number | null>(null);
+  // Guía de marca sincronizada desde practicante (clients.brand_guide_json):
+  // alimenta el chequeo de marca de "Revisar con IA" y el preflight de Descargar.
+  const [brandGuide, setBrandGuide] = useState<BrandGuide | null>(null);
   const [brandKits, setBrandKits] = useState<BrandKit[]>([]);
   const [brandKitContent, setBrandKitContent] = useState<BrandKitContent>(EMPTY_KIT_CONTENT);
   const [adaptations, setAdaptations] = useState<Adaptation[]>([]);
@@ -1092,18 +1098,28 @@ export default function ProducirPage() {
   // Arma los candidatos de "Revisar con IA": el árbol de cada formato tal
   // como lo muestra su card (manual_layout si lo tiene; si no, el mismo
   // cálculo que usa el editor de la adaptación al abrirse).
+  const adaptationSourceDef = useCallback(
+    (a: Adaptation) =>
+      resolveEffectiveDefinition(resolveSource(a, orientations), orientations) ??
+      principalOrientation?.definition ??
+      null,
+    [orientations, principalOrientation],
+  );
+  const adaptationTree = useCallback(
+    (a: Adaptation): TemplateDefinition | null => {
+      const manual = parseOverrides(a.overrides_json).manual_layout;
+      if (manual) return manual;
+      const sourceDef = adaptationSourceDef(a);
+      return sourceDef ? buildInitialFromAdaptFit(sourceDef, a.width, a.height, a.fit_mode, adaptationSafeZone(a)) : null;
+    },
+    [adaptationSourceDef],
+  );
   const handleOpenAiFix = useCallback(() => {
     const candidates: FixCandidate[] = [];
     for (const a of adaptations) {
       const manual = parseOverrides(a.overrides_json).manual_layout;
-      const source = resolveSource(a, orientations);
-      const sourceDef =
-        resolveEffectiveDefinition(source, orientations) ??
-        principalOrientation?.definition ??
-        null;
-      const tree =
-        manual ??
-        (sourceDef ? buildInitialFromAdaptFit(sourceDef, a.width, a.height, a.fit_mode, adaptationSafeZone(a)) : null);
+      const sourceDef = adaptationSourceDef(a);
+      const tree = adaptationTree(a);
       if (!tree) continue;
       candidates.push({
         safe: adaptationSafeZone(a),
@@ -1117,7 +1133,7 @@ export default function ProducirPage() {
       });
     }
     setAiFixCandidates(candidates);
-  }, [adaptations, orientations, principalOrientation]);
+  }, [adaptations, adaptationSourceDef, adaptationTree]);
 
   const handleResetAdaptationOverride = useCallback(
     async (adaptationId: number): Promise<boolean> => {
@@ -1531,6 +1547,40 @@ export default function ProducirPage() {
     dataset && selectedRowIdx !== null ? dataset.rows[selectedRowIdx] ?? null : null;
 
   const [fitModeError, setFitModeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!clientId) {
+      setBrandGuide(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/clients/${clientId}/brand-guide`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body) => {
+        if (!cancelled) setBrandGuide((body?.guide as BrandGuide | null) ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setBrandGuide(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
+
+  // Preflight de marca del paso Descargar: lo que exige la guía (logo mínimo
+  // y su área de seguridad, legales obligatorios, claims prohibidos) sobre
+  // cada pieza tal como se va a exportar. Sin guía solo revisa el logo.
+  const brandPreflight = useMemo(() => {
+    const m = new Map<number, LintIssue[]>();
+    for (const a of adaptations) {
+      const tree = adaptationTree(a);
+      if (!tree) continue;
+      const view = resolveTreeTokens(previewRow ? substituteVariables(tree, previewRow) : tree, brandKitContent);
+      const issues = lintBrand(view, brandGuide);
+      if (issues.length > 0) m.set(a.id, issues);
+    }
+    return m;
+  }, [adaptations, adaptationTree, previewRow, brandKitContent, brandGuide]);
 
   const designMembers = useMemo(() => {
     if (orientations.length === 0) return [];
@@ -2661,6 +2711,17 @@ export default function ProducirPage() {
             </div>
           )}
 
+          {adaptationsLoaded && brandPreflight.size > 0 && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200 flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <p>
+                {brandPreflight.size === 1 ? "1 pieza" : `${brandPreflight.size} piezas`} con observaciones de marca
+                {brandGuide ? ` (guía de ${brandGuide.marca})` : " (sin guía de marca sincronizada: solo se revisa el logo)"}.
+                Se pueden descargar igual; revisa el detalle en cada fila.
+              </p>
+            </div>
+          )}
+
           {!adaptationsLoaded ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground py-6 justify-center">
               <Loader2 className="h-4 w-4 animate-spin" /> Cargando piezas…
@@ -2684,6 +2745,23 @@ export default function ProducirPage() {
                         manual
                       </span>
                     )}
+                    {(() => {
+                      const brandIssues = brandPreflight.get(a.id);
+                      if (!brandIssues) return null;
+                      const hasError = brandIssues.some((i) => i.severity === "error");
+                      return (
+                        <span
+                          className={cn(
+                            "text-[10px] border rounded px-1.5 py-0.5 shrink-0 inline-flex items-center gap-1 cursor-help",
+                            hasError ? "text-red-300 border-red-500/40" : "text-amber-300 border-amber-500/40",
+                          )}
+                          title={brandIssues.map((i) => `• ${i.detail}`).join("\n")}
+                        >
+                          <AlertTriangle className="h-3 w-3" />
+                          marca {brandIssues.length}
+                        </span>
+                      );
+                    })()}
                     <Button
                       size="sm"
                       variant="outline"
@@ -2830,6 +2908,7 @@ export default function ProducirPage() {
           designId={designId}
           candidates={aiFixCandidates}
           brandKit={brandKitContent}
+          brandGuide={brandGuide}
           dataRow={previewRow}
           onClose={() => setAiFixCandidates(null)}
           onApplied={fetchAdaptations}

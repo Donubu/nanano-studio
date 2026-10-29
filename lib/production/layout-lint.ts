@@ -32,7 +32,13 @@ export type LintIssueKind =
   | "outside_safe_area"
   | "overlap"
   | "text_overflow"
-  | "text_too_small";
+  | "text_too_small"
+  // Chequeo de marca (brand-lint.ts): no los corrige el modelo.
+  | "brand_logo_size"
+  | "brand_logo_space"
+  | "brand_missing_legal"
+  | "brand_forbidden_text"
+  | "brand_name_case";
 
 export interface LintIssue {
   kind: LintIssueKind;

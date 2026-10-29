@@ -314,6 +314,19 @@ fitChildren, tiras y growToLegible), en el render/export de adaptaciones
 `safe_zone`) y en el editor de la adaptación (overlay sombreado, activo por
 defecto). Los fondos a sangre no se ven afectados.
 
+### Chequeo de marca
+`lib/production/brand-lint.ts` (`lintBrand(def, guide)`, puro): lo que exige
+la guía de marca y el lint de diseño no mira — logo bajo `ancho_min_px` (o
+<16 px), algo invadiendo el área de seguridad del logo (`area_seguridad`,
+25% del lado corto si el manual no da cifra), legales obligatorios ausentes
+(frases entre comillas/URLs de `legales.textos_obligatorios`), claims
+prohibidos (`legales.restricciones` entre comillas) y `palabras_evitar`, y la
+marca escrita distinto al manual. Son issues `brand_*` (LintIssue) que se
+muestran aparte en "Revisar con IA" (líneas "Marca:") y como preflight del
+paso Descargar (chip por fila + aviso); NO se le pasan al modelo de
+corrección: se arreglan a mano o con "Pídele a la IA". La página carga la
+guía con `GET /api/clients/[id]/brand-guide`.
+
 ### Exportación (paso Descargar)
 - HTML5 (`lib/production/html5-export.ts` + `export-assets.ts`): cada imagen se
   redimensiona al tamaño dibujado × dpr y se re-codifica (JPEG, o PNG si hay
