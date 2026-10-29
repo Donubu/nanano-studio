@@ -363,6 +363,20 @@ adaptaciones. Invocación `UPSCALE_IMAGE` (cuenta en la cuota de IA).
   cuerpo, half page al lado). Marcos CSS, sin imágenes; el tipo se elige
   por canal y proporción (`mockupKindFor`) y se puede cambiar.
 
+### Versiones del design (aprobación interna)
+`production_design_versions` (migración 132) congela master + orientaciones
++ adaptaciones como vN (`lib/production/design-versions.ts`:
+`createDesignVersion`, `listDesignVersions`, `reviewDesignVersion`,
+`restoreDesignVersion`). Estados: en_revision → aprobada | con_cambios, con
+quién y cuándo. Restaurar guarda antes un respaldo `kind='pre_restore'`,
+actualiza los templates que siguen existiendo (version+1) y recrea las
+adaptaciones que faltan. Rutas: `GET/POST /api/production/designs/[id]/versions`,
+`PATCH/POST(restore) …/versions/[versionId]`. Panel en el paso Descargar
+(`design-versions-panel.tsx`); la última versión manual es la vN de los
+nombres de archivo y el panel avisa si hubo guardados después. No es un
+link externo: el cliente es interno. `production_templates.version` sigue
+siendo el contador de guardados.
+
 ### Exportación (paso Descargar)
 - HTML5 (`lib/production/html5-export.ts` + `export-assets.ts`): cada imagen se
   redimensiona al tamaño dibujado × dpr y se re-codifica (JPEG, o PNG si hay

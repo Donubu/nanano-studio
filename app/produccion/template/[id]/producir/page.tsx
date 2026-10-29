@@ -84,6 +84,7 @@ import { lintBrand } from "@/lib/production/brand-lint";
 import { lowResAssets, isUpscalableSrc, NaturalSize, LowResAsset } from "@/lib/production/image-resolution";
 import { exportBundleName, exportFileName } from "@/lib/production/export-naming";
 import { ContextMockup } from "@/components/production/context-mockup";
+import { DesignVersionsPanel, VersionsState } from "@/components/production/design-versions-panel";
 import type { LintIssue } from "@/lib/production/layout-lint";
 import {
   TemplateLayerView,
@@ -290,6 +291,8 @@ export default function ProducirPage() {
   // Guía de marca sincronizada desde practicante (clients.brand_guide_json):
   // alimenta el chequeo de marca de "Revisar con IA" y el preflight de Descargar.
   const [brandGuide, setBrandGuide] = useState<BrandGuide | null>(null);
+  // Versiones del design (paso Descargar): la última nombra los archivos.
+  const [versionsState, setVersionsState] = useState<VersionsState | null>(null);
   // Cliente y proyecto para la nomenclatura de los archivos exportados.
   const [exportMeta, setExportMeta] = useState<{ client: string | null; clientName: string | null; project: string | null }>({
     client: null,
@@ -1327,11 +1330,11 @@ export default function ProducirPage() {
         channel: a.preset_channel,
         width: a.width,
         height: a.height,
-        version: principalOrientation?.version ?? template?.version ?? null,
+        version: versionsState?.latest?.number ?? null,
         row,
         ext: exportFormat === "png" ? "png" : "jpg",
       }),
-    [template, exportFormat, exportMeta, principalOrientation],
+    [template, exportFormat, exportMeta, versionsState],
   );
   const bundleName = useCallback(
     (suffix: string) =>
@@ -1339,10 +1342,10 @@ export default function ProducirPage() {
         client: exportMeta.client,
         project: exportMeta.project,
         template: template?.name,
-        version: principalOrientation?.version ?? template?.version ?? null,
+        version: versionsState?.latest?.number ?? null,
         suffix,
       }),
-    [template, exportMeta, principalOrientation],
+    [template, exportMeta, versionsState],
   );
 
   const handleDownloadSingle = async (a: Adaptation) => {
@@ -2803,6 +2806,18 @@ export default function ProducirPage() {
               )}
             </Button>
           </div>
+
+          {designId != null && (
+            <DesignVersionsPanel
+              designId={designId}
+              state={versionsState}
+              onChange={setVersionsState}
+              onRestored={() => {
+                void fetchAll();
+                void fetchAdaptations();
+              }}
+            />
+          )}
 
           {exportNotices.length > 0 && (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200 space-y-1">
