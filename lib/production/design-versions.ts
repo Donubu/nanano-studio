@@ -1,13 +1,10 @@
 // Versiones de un design: snapshot del master, sus orientaciones y sus
-// adaptaciones en un momento dado, con estado de aprobación interna.
+// adaptaciones en un momento dado, con etiqueta y notas.
 // Server-only (lee y escribe la BD). Las rutas de
 // app/api/production/designs/[id]/versions solo validan y llaman acá.
 
 import pool from "@/lib/db";
 import { PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise";
-
-export type DesignVersionStatus = "en_revision" | "aprobada" | "con_cambios";
-export const DESIGN_VERSION_STATUSES: DesignVersionStatus[] = ["en_revision", "aprobada", "con_cambios"];
 
 export interface DesignSnapshot {
   templates: {
@@ -40,17 +37,12 @@ export interface DesignVersionSummary {
   kind: "manual" | "pre_restore";
   label: string | null;
   notes: string | null;
-  status: DesignVersionStatus;
   templates_count: number;
   adaptations_count: number;
   thumbnail_url: string | null;
   created_by: number | null;
   created_by_name: string | null;
   created_at: string;
-  reviewed_by: number | null;
-  reviewed_by_name: string | null;
-  reviewed_at: string | null;
-  review_notes: string | null;
 }
 
 interface TemplateRow extends RowDataPacket {
@@ -77,24 +69,20 @@ interface AdaptationRow extends RowDataPacket {
   sort_order: number;
   updated_at: Date;
 }
-interface VersionRow extends RowDataPacket, Omit<DesignVersionSummary, "created_at" | "reviewed_at"> {
+interface VersionRow extends RowDataPacket, Omit<DesignVersionSummary, "created_at"> {
   created_at: Date;
-  reviewed_at: Date | null;
 }
 
 const SUMMARY_SELECT = `
-  SELECT v.id, v.design_id, v.number, v.kind, v.label, v.notes, v.status,
+  SELECT v.id, v.design_id, v.number, v.kind, v.label, v.notes,
          v.templates_count, v.adaptations_count, v.thumbnail_url,
-         v.created_by, cu.name AS created_by_name, v.created_at,
-         v.reviewed_by, ru.name AS reviewed_by_name, v.reviewed_at, v.review_notes
+         v.created_by, cu.name AS created_by_name, v.created_at
     FROM production_design_versions v
-    LEFT JOIN users cu ON cu.id = v.created_by
-    LEFT JOIN users ru ON ru.id = v.reviewed_by`;
+    LEFT JOIN users cu ON cu.id = v.created_by`;
 
 const toSummary = (r: VersionRow): DesignVersionSummary => ({
   ...r,
   created_at: new Date(r.created_at).toISOString(),
-  reviewed_at: r.reviewed_at ? new Date(r.reviewed_at).toISOString() : null,
 });
 
 async function loadState(designId: number, conn: PoolConnection | typeof pool = pool) {
@@ -186,8 +174,8 @@ export async function createDesignVersion(params: {
   const principal = state.templates.find((t) => t.linked_to_template_id == null) ?? state.templates[0];
   const [res] = await conn.execute<ResultSetHeader>(
     `INSERT INTO production_design_versions
-       (design_id, number, kind, label, notes, status, snapshot_json, templates_count, adaptations_count, thumbnail_url, created_by)
-     VALUES (?, ?, ?, ?, ?, 'en_revision', ?, ?, ?, ?, ?)`,
+       (design_id, number, kind, label, notes, snapshot_json, templates_count, adaptations_count, thumbnail_url, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       params.designId,
       number,
@@ -203,23 +191,6 @@ export async function createDesignVersion(params: {
   );
   const [rows] = await conn.execute<VersionRow[]>(`${SUMMARY_SELECT} WHERE v.id = ?`, [res.insertId]);
   return toSummary(rows[0]);
-}
-
-export async function reviewDesignVersion(params: {
-  designId: number;
-  versionId: number;
-  userId: number;
-  status: DesignVersionStatus;
-  reviewNotes?: string | null;
-}): Promise<DesignVersionSummary | null> {
-  await pool.execute<ResultSetHeader>(
-    `UPDATE production_design_versions
-        SET status = ?, reviewed_by = ?, reviewed_at = NOW(), review_notes = ?
-      WHERE id = ? AND design_id = ?`,
-    [params.status, params.userId, params.reviewNotes?.trim() || null, params.versionId, params.designId],
-  );
-  const [rows] = await pool.execute<VersionRow[]>(`${SUMMARY_SELECT} WHERE v.id = ? AND v.design_id = ?`, [params.versionId, params.designId]);
-  return rows[0] ? toSummary(rows[0]) : null;
 }
 
 export async function updateDesignVersionNotes(params: {

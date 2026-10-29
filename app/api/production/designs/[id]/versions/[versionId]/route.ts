@@ -1,8 +1,6 @@
 // Una versión del design.
 //
-//   PATCH /api/production/designs/[id]/versions/[versionId]
-//         { status?, review_notes?, label?, notes? }
-//         status cambia el estado de aprobación (queda quién y cuándo).
+//   PATCH /api/production/designs/[id]/versions/[versionId]  { label?, notes? }
 //   POST  /api/production/designs/[id]/versions/[versionId]  { action: "restore" }
 //         vuelve el design a esa versión (antes guarda un respaldo pre_restore).
 
@@ -10,16 +8,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { z } from "zod";
 import { parseBody } from "@/lib/api-utils";
-import {
-  DESIGN_VERSION_STATUSES,
-  restoreDesignVersion,
-  reviewDesignVersion,
-  updateDesignVersionNotes,
-} from "@/lib/production/design-versions";
+import { restoreDesignVersion, updateDesignVersionNotes } from "@/lib/production/design-versions";
 
 const patchSchema = z.object({
-  status: z.enum(DESIGN_VERSION_STATUSES as [string, ...string[]]).optional(),
-  review_notes: z.string().max(4000).optional().nullable(),
   label: z.string().max(150).optional().nullable(),
   notes: z.string().max(4000).optional().nullable(),
 });
@@ -41,14 +32,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (!i) return NextResponse.json({ error: "Ids inválidos" }, { status: 400 });
     const parsed = await parseBody(request, patchSchema);
     if (parsed.error) return parsed.error;
-    const { status, review_notes, label, notes } = parsed.data;
-    if (label !== undefined || notes !== undefined) await updateDesignVersionNotes({ ...i, label, notes });
-    let version = null;
-    if (status) {
-      version = await reviewDesignVersion({ ...i, userId: Number(session.user.id), status: status as (typeof DESIGN_VERSION_STATUSES)[number], reviewNotes: review_notes });
-      if (!version) return NextResponse.json({ error: "Versión no encontrada" }, { status: 404 });
-    }
-    return NextResponse.json(version ?? { ok: true });
+    const { label, notes } = parsed.data;
+    await updateDesignVersionNotes({ ...i, label, notes });
+    return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("Error actualizando versión:", error);
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });

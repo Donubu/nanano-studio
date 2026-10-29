@@ -3,7 +3,7 @@
 //   GET  /api/production/designs/[id]/versions
 //        → { versions, latest, changed_since_latest }
 //   POST /api/production/designs/[id]/versions  { label?, notes? }
-//        → congela el estado actual como vN (status en_revision)
+//        → congela el estado actual como vN
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
