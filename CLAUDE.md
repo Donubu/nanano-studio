@@ -291,6 +291,17 @@ respeta `maxLength`) y `maxItems` en arrays de objetos grandes (da 400).
 Modelos por env: `PRODUCTION_AI_LAYOUT_MODEL`, `PRODUCTION_AI_PLANNER_MODEL`,
 `PRODUCTION_AI_ANIMATION_MODEL`, `PRODUCTION_AI_EDIT_MODEL`, `PRODUCTION_AI_IMAGE_MODEL`.
 
+### Exportación (paso Descargar)
+- HTML5 (`lib/production/html5-export.ts` + `export-assets.ts`): cada imagen se
+  redimensiona al tamaño dibujado × dpr y se re-codifica (JPEG, o PNG si hay
+  transparencia); las fotos que sangran fuera del formato se recortan a lo
+  visible y la capa se reescribe a ese rectángulo; las fuentes de Google van
+  embebidas como subconjunto WOFF2 (solo los glifos usados). `maxBytes` (del
+  preset `file_size_max_kb`, default 150 KB en display) baja la calidad JPEG
+  por pasos hasta caber; si no cabe, el paso Descargar lo avisa. Vista previa
+  en iframe con el index.html real.
+- Imagen: display (gdn/email) a 1×, social a 2×; JPG o PNG.
+
 ### Cost tracking y rate limiting
 - Cada invocación (un lote cuenta como una) queda en `production_ai_invocations`
   con `operation`, `agent_name`, `model`, tokens, `estimated_cost` (USD,

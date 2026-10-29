@@ -32,6 +32,8 @@ import {
   Settings2,
   ChevronRight,
   Boxes,
+  Eye,
+  RotateCcw,
 } from "lucide-react";
 import { hasExtremeAspectMismatch } from "@/lib/production/fit-mode";
 import { parseOverrides } from "@/lib/production/overrides";
@@ -41,7 +43,7 @@ import {
   sanitizeFilename,
 } from "@/lib/production/export";
 import { prepareImageForAgent } from "@/lib/production/prepare-image";
-import { buildHtml5Zip } from "@/lib/production/html5-export";
+import { buildHtml5, buildHtml5Zip } from "@/lib/production/html5-export";
 import { AdaptationRenderer } from "@/components/production/render/adaptation-renderer";
 import {
   AiFixAdaptationsModal,
@@ -241,6 +243,20 @@ interface Adaptation {
   preset_group_name: string | null;
   preset_name: string | null;
   preset_orientation: "horizontal" | "vertical" | "square" | null;
+  preset_file_size_max_kb: number | null;
+}
+
+// Canales que se sirven a píxel exacto (IAB): JPG a 1×. El resto (social) va
+// a 2× para pantallas retina.
+const DISPLAY_CHANNELS = new Set(["gdn", "email"]);
+const DEFAULT_HTML5_MAX_KB = 150;
+function exportPixelRatio(a: Adaptation): number {
+  return a.preset_channel == null || DISPLAY_CHANNELS.has(a.preset_channel) ? 1 : 2;
+}
+function html5MaxBytes(a: Adaptation): number | null {
+  if (a.preset_file_size_max_kb != null) return a.preset_file_size_max_kb * 1024;
+  // Sin preset o sin tope: los canales display usan el estándar IAB.
+  return a.preset_channel == null || a.preset_channel === "gdn" ? DEFAULT_HTML5_MAX_KB * 1024 : null;
 }
 
 export default function ProducirPage() {
@@ -1205,6 +1221,11 @@ export default function ProducirPage() {
   // off-screen — la serialización a HTML es pura).
   const [singleDownloadingHtml5Id, setSingleDownloadingHtml5Id] = useState<number | null>(null);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+  // Avisos de peso del último export HTML5 (piezas sobre el tope del canal).
+  const [exportNotices, setExportNotices] = useState<string[]>([]);
+  const [exportFormat, setExportFormat] = useState<"jpeg" | "png">("jpeg");
+  // Vista previa del HTML5 exportado (iframe con el index.html real).
+  const [html5Preview, setHtml5Preview] = useState<{ a: Adaptation; html: string; bytes: number } | null>(null);
 
   // --- Dataset / variables ---
   // El dataset persiste en production_datasets (uno por template). El upload
@@ -1233,7 +1254,10 @@ export default function ProducirPage() {
         return;
       }
       try {
-        const blob = await captureNodeToJpeg(node);
+        const blob = await captureNodeToJpeg(node, {
+          pixelRatio: exportPixelRatio(currentlyRendering.adaptation),
+          format: exportFormat,
+        });
         if (cancelled) return;
         captureResolverRef.current?.(blob);
       } catch (err) {
@@ -1249,7 +1273,7 @@ export default function ProducirPage() {
     return () => {
       cancelled = true;
     };
-  }, [currentlyRendering]);
+  }, [currentlyRendering, exportFormat]);
 
   const exportAdaptation = useCallback(
     (a: Adaptation, row: DataRow | null = null): Promise<Blob | null> => {
@@ -1265,9 +1289,10 @@ export default function ProducirPage() {
     (a: Adaptation): string => {
       const label = a.custom_name || a.preset_name || `${a.width}x${a.height}`;
       const tpl = template?.name ?? "template";
-      return sanitizeFilename(`${tpl}_${label}_${a.width}x${a.height}.jpg`);
+      const ext = exportFormat === "png" ? "png" : "jpg";
+      return sanitizeFilename(`${tpl}_${label}_${a.width}x${a.height}.${ext}`);
     },
-    [template]
+    [template, exportFormat]
   );
 
   const handleDownloadSingle = async (a: Adaptation) => {
@@ -1278,7 +1303,7 @@ export default function ProducirPage() {
       const blob = await exportAdaptation(a, previewRow);
       if (blob) {
         const suffix = previewRow ? `_fila${(selectedRowIdx ?? 0) + 1}` : "";
-        const name = filenameFor(a).replace(/\.jpg$/, `${suffix}.jpg`);
+        const name = filenameFor(a).replace(/\.(jpg|png)$/, `${suffix}.$1`);
         downloadBlob(blob, name);
       }
     } finally {
@@ -1295,22 +1320,98 @@ export default function ProducirPage() {
     const srcDef = src?.definition ?? definition;
     setSingleDownloadingHtml5Id(a.id);
     try {
-      const blob = await buildHtml5Zip({
+      const built = await buildHtml5Zip({
         adaptation: a,
         master: srcDef,
         brandKit: brandKitContent,
         dataRow: previewRow,
         title: `${template.name} ${a.width}x${a.height}`,
+        maxBytes: html5MaxBytes(a),
       });
       const suffix = previewRow ? `_fila${(selectedRowIdx ?? 0) + 1}` : "";
-      const name = filenameFor(a)
-        .replace(/\.jpg$/, `${suffix}_html5.zip`);
-      downloadBlob(blob, name);
+      const name = filenameFor(a).replace(/\.(jpg|png)$/, `${suffix}_html5.zip`);
+      downloadBlob(built.blob, name);
+      setExportNotices(html5Notices(a, built));
     } catch (err) {
       console.error("HTML5 export failed:", err);
       alert("No se pudo generar el ZIP HTML5. Revisa la consola para más detalles.");
     } finally {
       setSingleDownloadingHtml5Id(null);
+    }
+  };
+
+  // Abre el HTML5 en una pestaña, tal como lo sirve el ad server (animación,
+  // fuentes y recortes incluidos), para revisarlo antes de traficar.
+  const handlePreviewHtml5 = async (a: Adaptation) => {
+    if (!template) return;
+    const src = resolveSource(a, orientations);
+    setSingleDownloadingHtml5Id(a.id);
+    try {
+      const built = await buildHtml5({
+        adaptation: a,
+        master: src?.definition ?? definition,
+        brandKit: brandKitContent,
+        dataRow: previewRow,
+        title: `${template.name} ${a.width}x${a.height}`,
+        maxBytes: html5MaxBytes(a),
+      });
+      setHtml5Preview({ a, html: built.html, bytes: built.bytes });
+      setExportNotices(html5Notices(a, built));
+    } finally {
+      setSingleDownloadingHtml5Id(null);
+    }
+  };
+
+  // Aviso de peso de un HTML5 recién armado.
+  const html5Notices = (
+    a: Adaptation,
+    b: { bytes: number; maxBytes: number | null; overBudget: boolean; fontsEmbedded: boolean; quality: number },
+  ) => {
+    const label = a.custom_name || a.preset_name || `${a.width}×${a.height}`;
+    const kb = Math.round(b.bytes / 1024);
+    const out: string[] = [];
+    if (!b.overBudget) {
+      out.push(
+        `${label}: ${kb} KB${b.maxBytes != null ? ` de ${Math.round(b.maxBytes / 1024)} KB` : ""}${b.quality < 0.8 ? ` (imágenes comprimidas al ${Math.round(b.quality * 100)}% para caber)` : ""}.`,
+      );
+    }
+    if (b.overBudget) {
+      out.push(`${label}: pesa ${kb} KB y el tope del canal es ${Math.round((b.maxBytes ?? 0) / 1024)} KB aun con la compresión máxima. Achica o quita imágenes (pieles, texturas) antes de traficar.`);
+    }
+    if (!b.fontsEmbedded) out.push(`${label}: no se pudieron embeber las fuentes; el HTML5 las carga de Google Fonts (no todos los ad servers lo permiten).`);
+    return out;
+  };
+
+  // HTML5 de todas las piezas de canales display, en un ZIP con un ZIP por
+  // pieza (lo que piden los ad servers).
+  const handleDownloadAllHtml5 = async () => {
+    if (!template) return;
+    const list = adaptations.filter((a) => a.preset_channel == null || a.preset_channel === "gdn");
+    if (list.length === 0) return;
+    setBatchProgress({ current: 0, total: list.length });
+    const notices: string[] = [];
+    try {
+      const zip = new JSZip();
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        setBatchProgress({ current: i + 1, total: list.length });
+        const src = resolveSource(a, orientations);
+        const built = await buildHtml5Zip({
+          adaptation: a,
+          master: src?.definition ?? definition,
+          brandKit: brandKitContent,
+          dataRow: previewRow,
+          title: `${template.name} ${a.width}x${a.height}`,
+          maxBytes: html5MaxBytes(a),
+        });
+        zip.file(filenameFor(a).replace(/\.(jpg|png)$/, "_html5.zip"), built.blob);
+        notices.push(...html5Notices(a, built));
+      }
+      const blob = await zip.generateAsync({ type: "blob" });
+      downloadBlob(blob, sanitizeFilename(`${template.name}_html5.zip`));
+      setExportNotices(notices);
+    } finally {
+      setBatchProgress(null);
     }
   };
 
@@ -2490,10 +2591,37 @@ export default function ProducirPage() {
               <h3 className="text-sm font-medium">Descargar</h3>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {adaptationCount} {adaptationCount === 1 ? "pieza" : "piezas"}
-                {dataset ? ` × ${dataset.rows.length} filas de datos` : ""}. JPG listo para subir; HTML5 para
-                banners animados (Google Ads / GDN).
+                {dataset ? ` × ${dataset.rows.length} filas de datos` : ""}. Imagen lista para subir (display a 1×,
+                social a 2×); HTML5 para banners animados (Google Ads / GDN), con fuentes embebidas y peso ajustado al
+                tope del canal.
               </p>
             </div>
+            <select
+              value={exportFormat}
+              onChange={(e) => setExportFormat(e.target.value as "jpeg" | "png")}
+              disabled={!!batchProgress || !!singleDownloadingId}
+              className="bg-muted border border-border/50 rounded-md px-2 py-1.5 text-xs"
+              title="Formato de las imágenes"
+            >
+              <option value="jpeg">JPG</option>
+              <option value="png">PNG</option>
+            </select>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleDownloadAllHtml5}
+              disabled={
+                !adaptationsLoaded ||
+                !adaptations.some((a) => a.preset_channel == null || a.preset_channel === "gdn") ||
+                !!batchProgress ||
+                !!singleDownloadingId
+              }
+              className="gap-1.5"
+              title="HTML5 de todas las piezas display, un ZIP por pieza"
+            >
+              <Code className="h-4 w-4" />
+              Todo HTML5
+            </Button>
             <Button
               size="sm"
               onClick={handleDownloadAll}
@@ -2519,6 +2647,14 @@ export default function ProducirPage() {
             </Button>
           </div>
 
+          {exportNotices.length > 0 && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200 space-y-1">
+              {exportNotices.map((n, i) => (
+                <p key={i}>{n}</p>
+              ))}
+            </div>
+          )}
+
           {!adaptationsLoaded ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground py-6 justify-center">
               <Loader2 className="h-4 w-4 animate-spin" /> Cargando piezas…
@@ -2534,6 +2670,9 @@ export default function ProducirPage() {
                       {a.width}×{a.height}
                     </span>
                     <span className="flex-1 truncate">{label}</span>
+                    <span className="text-[10px] text-muted-foreground/70 shrink-0" title="Resolución de la imagen y tope de peso del HTML5">
+                      {exportPixelRatio(a)}×{html5MaxBytes(a) != null ? ` · ≤${Math.round((html5MaxBytes(a) ?? 0) / 1024)} KB` : ""}
+                    </span>
                     {manual && (
                       <span className="text-[10px] text-emerald-400 border border-emerald-500/40 rounded px-1.5 py-0.5" title="Ajustada a mano">
                         manual
@@ -2560,6 +2699,16 @@ export default function ProducirPage() {
                       {singleDownloadingHtml5Id === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Code className="h-3.5 w-3.5" />}
                       HTML5
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => handlePreviewHtml5(a)}
+                      disabled={singleDownloadingHtml5Id === a.id || !!batchProgress}
+                      className="h-7 px-2"
+                      title="Ver el HTML5 en una pestaña, como lo sirve el ad server"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                    </Button>
                   </li>
                 );
               })}
@@ -2568,6 +2717,47 @@ export default function ProducirPage() {
         </section>
         )}
       </main>
+
+      {html5Preview && (
+        <div
+          className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-6"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setHtml5Preview(null);
+          }}
+        >
+          <div className="bg-background border border-border/50 rounded-xl shadow-2xl max-w-[95vw] max-h-[92vh] flex flex-col">
+            <div className="flex items-center justify-between gap-4 px-4 py-2.5 border-b border-border/50">
+              <div className="text-xs">
+                <span className="font-medium">HTML5 · {html5Preview.a.custom_name || html5Preview.a.preset_name || `${html5Preview.a.width}×${html5Preview.a.height}`}</span>
+                <span className="text-muted-foreground"> · {html5Preview.a.width}×{html5Preview.a.height} · {Math.round(html5Preview.bytes / 1024)} KB · tal como lo sirve el ad server</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setHtml5Preview((p) => (p ? { ...p, html: `${p.html}<!-- ${Date.now()} -->` } : p))}
+                  title="Reproducir de nuevo"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setHtml5Preview(null)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="p-6 overflow-auto bg-[#1b1d22] flex items-center justify-center">
+              <iframe
+                title="Vista previa HTML5"
+                srcDoc={html5Preview.html}
+                sandbox="allow-scripts"
+                width={html5Preview.a.width}
+                height={html5Preview.a.height}
+                style={{ width: html5Preview.a.width, height: html5Preview.a.height, border: 0, background: "#fff", flexShrink: 0 }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {showAddVariant && (
         <AddVariantModal

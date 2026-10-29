@@ -7,7 +7,7 @@
 //   2. Capturar el nodo con html-to-image.
 //   3. Devolver el Blob JPG listo para descargar o meter a un ZIP.
 
-import { toJpeg } from "html-to-image";
+import { toJpeg, toPng } from "html-to-image";
 
 const JPG_QUALITY = 0.92; // 0..1; 0.92 es el sweet spot calidad/peso para banners
 
@@ -52,8 +52,18 @@ function resolveNodeBackground(node: HTMLElement): string {
   return bg;
 }
 
-export async function captureNodeToJpeg(node: HTMLElement): Promise<Blob> {
+export interface CaptureOptions {
+  // 1 = display IAB (píxel exacto); 2 = retina para social.
+  pixelRatio?: number;
+  format?: "jpeg" | "png";
+}
+
+export async function captureNodeToJpeg(node: HTMLElement, opts: CaptureOptions = {}): Promise<Blob> {
   await waitForFontsAndImages(node);
+  if (opts.format === "png") {
+    const dataUrl = await toPng(node, { pixelRatio: opts.pixelRatio ?? 1, cacheBust: true, skipFonts: true });
+    return (await fetch(dataUrl)).blob();
+  }
   // skipFonts: true evita que html-to-image intente leer cssRules de las
   // stylesheets cross-origin (Google Fonts) — eso lanza SecurityError en
   // navegadores Chromium. Las fuentes ya están cargadas en el document
@@ -69,7 +79,7 @@ export async function captureNodeToJpeg(node: HTMLElement): Promise<Blob> {
   const bg = resolveNodeBackground(node);
   const dataUrl = await toJpeg(node, {
     quality: JPG_QUALITY,
-    pixelRatio: 1,
+    pixelRatio: opts.pixelRatio ?? 1,
     cacheBust: true,
     backgroundColor: bg,
     skipFonts: true,

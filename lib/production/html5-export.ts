@@ -34,6 +34,18 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import JSZip from "jszip";
 import {
+  assetBoxes,
+  bleedingImages,
+  collectFontUsage,
+  cropAsset,
+  embedGoogleFonts,
+  prepareAsset,
+  rewriteBleedingImage,
+  type AssetBox,
+  type BleedCrop,
+  type FontUsage,
+} from "./export-assets";
+import {
   TemplateDefinition,
   TemplateLayer,
 } from "./types";
@@ -76,13 +88,39 @@ export interface BuildHtml5Options {
   // Título del documento HTML (queda en <title>). Útil para diferenciar en
   // dashboards de ad servers. Default: "<masterName> <WxH>".
   title?: string;
+  // Peso máximo del index.html (bytes). Si se pasa, las imágenes se
+  // recomprimen hasta caber (o hasta la calidad mínima). null = sin tope.
+  maxBytes?: number | null;
+  // Resolución de las imágenes respecto del tamaño dibujado (1 = display
+  // IAB; 2 = retina). Default 1.
+  dpr?: number;
+  // Fuentes embebidas como subconjunto WOFF2 (default true).
+  embedFonts?: boolean;
+}
+
+export interface Html5Build {
+  html: string;
+  bytes: number;
+  maxBytes: number | null;
+  // true si pesa más que maxBytes aun con la compresión mínima.
+  overBudget: boolean;
+  fontsEmbedded: boolean;
+  // Calidad JPEG con la que quedó.
+  quality: number;
 }
 
 // ---------- Public API ----------
 
 export async function buildHtml5Document(opts: BuildHtml5Options): Promise<string> {
+  return (await buildHtml5(opts)).html;
+}
+
+// Calidades JPEG que se prueban, de mejor a peor, hasta caber en maxBytes.
+const QUALITY_STEPS = [0.82, 0.72, 0.62, 0.52, 0.42];
+
+export async function buildHtml5(opts: BuildHtml5Options): Promise<Html5Build> {
   const inlineImages = opts.inlineImages ?? true;
-  const { effectiveAnimation, effectiveTree, fontFamilies, inner } = renderInner(opts);
+  const { effectiveAnimation, effectiveTree, fontFamilies, inner, boxes, fontUsage, crops, wrapperScale } = renderInner(opts);
   const adW = opts.adaptation.width;
   const adH = opts.adaptation.height;
   const title = opts.title ?? `Banner ${adW}x${adH}`;
@@ -101,18 +139,54 @@ export async function buildHtml5Document(opts: BuildHtml5Options): Promise<strin
     innerBody: inner,
     animationScript: animScript,
   });
-  if (inlineImages) {
-    html = await inlineRemoteImages(html);
-    html = await inlineBackgroundImages(html);
+  const maxBytes = opts.maxBytes ?? null;
+  const dpr = opts.dpr ?? 1;
+  let fontsEmbedded = false;
+  if (opts.embedFonts !== false && fontsLink) {
+    const r = await embedGoogleFonts(html, fontUsage);
+    html = r.html;
+    fontsEmbedded = r.embedded;
   }
-  return html;
+  if (!inlineImages) return { html, bytes: utf8Bytes(html), maxBytes, overBudget: false, fontsEmbedded, quality: 1 };
+
+  // Las imágenes se bajan una vez; cada calidad solo re-codifica.
+  const blobs = await fetchAssets(html);
+  let quality = QUALITY_STEPS[0];
+  let out = html;
+  for (const q of QUALITY_STEPS) {
+    quality = q;
+    const prepared = new Map<string, string>();
+    await Promise.all(
+      [...blobs].map(async ([src, blob]) => {
+        const asset = await prepareAsset(blob, { box: boxes.get(src), dpr, quality: q });
+        prepared.set(src, await blobToDataUrl(asset));
+      }),
+    );
+    // Primero las fotos que sangran (por capa, con su recorte); después el
+    // resto por URL.
+    let page = html;
+    for (const crop of crops) {
+      const blob = blobs.get(crop.src);
+      if (!blob) continue;
+      const cropped = await cropAsset(blob, crop, wrapperScale * dpr, q);
+      page = rewriteBleedingImage(page, crop, await blobToDataUrl(cropped));
+    }
+    out = inlineBackgroundImages(inlineRemoteImages(page, prepared), prepared);
+    if (maxBytes == null || utf8Bytes(out) <= maxBytes) break;
+  }
+  const bytes = utf8Bytes(out);
+  return { html: out, bytes, maxBytes, overBudget: maxBytes != null && bytes > maxBytes, fontsEmbedded, quality };
 }
 
-export async function buildHtml5Zip(opts: BuildHtml5Options): Promise<Blob> {
-  const html = await buildHtml5Document(opts);
+function utf8Bytes(s: string): number {
+  return new TextEncoder().encode(s).length;
+}
+
+export async function buildHtml5Zip(opts: BuildHtml5Options): Promise<{ blob: Blob } & Omit<Html5Build, "html">> {
+  const { html, ...rest } = await buildHtml5(opts);
   const zip = new JSZip();
   zip.file("index.html", html);
-  return zip.generateAsync({ type: "blob" });
+  return { blob: await zip.generateAsync({ type: "blob" }), ...rest };
 }
 
 // ---------- Render the React tree to static markup ----------
@@ -126,6 +200,12 @@ function renderInner(opts: BuildHtml5Options): {
   // explotan cuando el primer kf no está en t=0).
   effectiveTree: TemplateDefinition | null;
   fontFamilies: Set<string>;
+  // Tamaño dibujado de cada imagen y fuentes/glifos usados, para el peso.
+  boxes: Map<string, AssetBox>;
+  fontUsage: FontUsage;
+  // Fotos que sangran fuera del formato: se recortan a lo visible.
+  crops: BleedCrop[];
+  wrapperScale: number;
 } {
   const { adaptation, master, brandKit, dataRow } = opts;
   // El mismo flow que AdaptationRenderer:
@@ -163,6 +243,17 @@ function renderInner(opts: BuildHtml5Options): {
   // Render React → HTML string.
   const treeForRender = manualLayout ?? master;
   const fontFamilies = collectFontFamilies(treeForRender);
+  // Para activos y fuentes: el árbol que de verdad se dibuja. Con fit
+  // "scale" el master se dibuja escalado dentro de un wrapper.
+  const drawn = effectiveTree ?? manualLayout ?? master;
+  const drawnSubstituted = dataRow && !effectiveTree ? substituteVariables(drawn, dataRow) : drawn;
+  const wrapperScale =
+    drawn.size.w === adaptation.width && drawn.size.h === adaptation.height
+      ? 1
+      : Math.min(adaptation.width / drawn.size.w, adaptation.height / drawn.size.h);
+  const boxes = assetBoxes(drawnSubstituted, wrapperScale);
+  const fontUsage = collectFontUsage(drawnSubstituted);
+  const crops = bleedingImages(drawnSubstituted);
 
   const inner = renderToStaticMarkup(
     createElement(AdaptationRenderer, {
@@ -172,7 +263,7 @@ function renderInner(opts: BuildHtml5Options): {
       dataRow: dataRow ?? null,
     }),
   );
-  return { inner, effectiveAnimation, effectiveTree, fontFamilies };
+  return { inner, effectiveAnimation, effectiveTree, fontFamilies, boxes, fontUsage, crops, wrapperScale };
 }
 
 // Indexa todos los layers del árbol por id. Lo usamos en buildAnimationScript
@@ -483,60 +574,47 @@ function roundDec(n: number): number {
 
 // ---------- Image inlining ----------
 
-async function inlineRemoteImages(html: string): Promise<string> {
+// Descarga una vez cada imagen referenciada (src de <img> y url() de las
+// pieles/texturas). Lo que no se puede bajar (CORS) queda remoto.
+async function fetchAssets(html: string): Promise<Map<string, Blob>> {
   const srcs = new Set<string>();
-  const re = /<img\b[^>]*\ssrc="([^"]+)"/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) srcs.add(m[1]);
-  if (srcs.size === 0) return html;
-  const cache = new Map<string, string>();
+  for (const m of html.matchAll(/<img\b[^>]*\ssrc="([^"]+)"/gi)) if (!m[1].startsWith("data:")) srcs.add(m[1]);
+  for (const m of html.matchAll(BG_URL_RE)) if (!m[1].startsWith("data:")) srcs.add(m[1]);
+  const out = new Map<string, Blob>();
   await Promise.all(
     [...srcs].map(async (src) => {
-      if (src.startsWith("data:")) return;
       try {
         const res = await fetch(src, { cache: "force-cache" });
-        if (!res.ok) return;
-        const blob = await res.blob();
-        const dataUrl = await blobToDataUrl(blob);
-        cache.set(src, dataUrl);
+        if (res.ok) out.set(src, await res.blob());
       } catch (err) {
         console.warn("HTML5 export: no se pudo inlinear imagen", src, err);
       }
     }),
   );
-  // Replace each src="..." in the html. Doble pasada porque querySelectorAll
-  // no nos da regex match positions; el regex con capture groups sí.
-  return html.replace(/(<img\b[^>]*\ssrc=")([^"]+)(")/gi, (_, pre, src, post) => {
-    const replacement = cache.get(src) ?? src;
-    return `${pre}${replacement}${post}`;
-  });
+  return out;
+}
+
+function inlineRemoteImages(html: string, dataUrls: Map<string, string>): string {
+  return html.replace(/(<img\b[^>]*\ssrc=")([^"]+)(")/gi, (_, pre, src, post) => `${pre}${dataUrls.get(src) ?? src}${post}`);
 }
 
 // Pieles gráficas (skin.ts): se dibujan como background-image en hasta 9
-// celdas con la misma URL. Se inlinea cada imagen UNA vez como variable CSS
+// celdas con la misma URL. Se embebe cada imagen UNA vez como variable CSS
 // en <head> y las celdas la referencian, así el peso del banner no se
 // multiplica por celda.
 const BG_URL_RE = /url\((?:&quot;|")([^"&)]+)(?:&quot;|")\)/g;
 
-async function inlineBackgroundImages(html: string): Promise<string> {
-  const srcs = new Set<string>();
-  for (const m of html.matchAll(BG_URL_RE)) if (!m[1].startsWith("data:")) srcs.add(m[1]);
-  if (srcs.size === 0) return html;
+function inlineBackgroundImages(html: string, dataUrls: Map<string, string>): string {
   const vars = new Map<string, string>();
   const decls: string[] = [];
-  await Promise.all(
-    [...srcs].map(async (src, i) => {
-      try {
-        const res = await fetch(src, { cache: "force-cache" });
-        if (!res.ok) return;
-        const dataUrl = await blobToDataUrl(await res.blob());
-        vars.set(src, `--nx-img-${i}`);
-        decls.push(`--nx-img-${i}:url("${dataUrl}")`);
-      } catch (err) {
-        console.warn("HTML5 export: no se pudo inlinear piel", src, err);
-      }
-    }),
-  );
+  for (const m of html.matchAll(BG_URL_RE)) {
+    const src = m[1];
+    const data = dataUrls.get(src);
+    if (!data || vars.has(src)) continue;
+    const name = `--nx-img-${vars.size}`;
+    vars.set(src, name);
+    decls.push(`${name}:url("${data}")`);
+  }
   if (vars.size === 0) return html;
   const body = html.replace(BG_URL_RE, (whole, src: string) => {
     const v = vars.get(src);

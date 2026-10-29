@@ -35,6 +35,7 @@ interface AdaptationRow extends RowDataPacket {
   preset_group_name: string | null;
   preset_name: string | null;
   preset_orientation: "horizontal" | "vertical" | "square" | null;
+  preset_file_size_max_kb: number | null;
 }
 
 interface PresetRow extends RowDataPacket {
@@ -121,7 +122,8 @@ export async function GET(
               a.is_active, a.thumbnail_url, a.sort_order,
               a.created_at, a.updated_at,
               fp.channel AS preset_channel, fp.group_name AS preset_group_name,
-              fp.name AS preset_name, fp.orientation AS preset_orientation
+              fp.name AS preset_name, fp.orientation AS preset_orientation,
+              fp.file_size_max_kb AS preset_file_size_max_kb
          FROM production_template_adaptations a
          LEFT JOIN production_format_presets fp ON fp.id = a.format_preset_id
         WHERE a.design_id = ?
