@@ -349,6 +349,20 @@ créditos × `TOPAZ_CREDIT_USD`, default 0.05), la sube a
 templates del design (version+1) y en los `manual_layout` de las
 adaptaciones. Invocación `UPSCALE_IMAGE` (cuenta en la cuota de IA).
 
+### Nomenclatura y previsualización en contexto
+- Archivos: `lib/production/export-naming.ts` —
+  `cliente_proyecto_pieza_canal_WxH_vN.ext` (slug del cliente, título del
+  proyecto, nombre del template, canal del preset, versión del master; en
+  lotes del dataset se agrega `filaN`); los ZIP son
+  `cliente_proyecto_pieza_vN_<sufijo>.zip`. `GET /api/production/projects/[id]`
+  devuelve `client_slug` para esto.
+- "Ver en contexto" (`components/production/context-mockup.tsx`, botón por
+  fila en Descargar): la pieza dentro de un teléfono con la interfaz de
+  Instagram (feed o story, cover como en el teléfono; TikTok si el canal es
+  tiktok) o de una página de noticias (leaderboard arriba, rectángulo en el
+  cuerpo, half page al lado). Marcos CSS, sin imágenes; el tipo se elige
+  por canal y proporción (`mockupKindFor`) y se puede cambiar.
+
 ### Exportación (paso Descargar)
 - HTML5 (`lib/production/html5-export.ts` + `export-assets.ts`): cada imagen se
   redimensiona al tamaño dibujado × dpr y se re-codifica (JPEG, o PNG si hay

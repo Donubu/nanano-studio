@@ -9,6 +9,7 @@ interface ProductionProjectRow extends RowDataPacket {
   id: number;
   client_id: number;
   client_name?: string;
+  client_slug?: string | null;
   client_logo?: string | null;
   title: string;
   description: string | null;
@@ -35,7 +36,7 @@ export async function GET(
     const [rows] = await pool.execute<ProductionProjectRow[]>(
       `SELECT pp.id, pp.client_id, pp.title, pp.description, pp.status, pp.hidden,
               pp.created_by, pp.created_at, pp.updated_at,
-              c.name AS client_name, c.logo AS client_logo
+              c.name AS client_name, c.logo AS client_logo, c.slug AS client_slug
          FROM production_projects pp
          JOIN clients c ON c.id = pp.client_id
         WHERE pp.id = ? AND pp.deleted_at IS NULL`,

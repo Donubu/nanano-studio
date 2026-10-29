@@ -34,6 +34,7 @@ import {
   Boxes,
   Eye,
   RotateCcw,
+  Smartphone,
 } from "lucide-react";
 import { hasExtremeAspectMismatch } from "@/lib/production/fit-mode";
 import { parseOverrides } from "@/lib/production/overrides";
@@ -81,6 +82,8 @@ import { ensureTextContrast } from "@/lib/production/layout-plan";
 import type { BrandGuide } from "@/lib/production/brand-guide";
 import { lintBrand } from "@/lib/production/brand-lint";
 import { lowResAssets, isUpscalableSrc, NaturalSize, LowResAsset } from "@/lib/production/image-resolution";
+import { exportBundleName, exportFileName } from "@/lib/production/export-naming";
+import { ContextMockup } from "@/components/production/context-mockup";
 import type { LintIssue } from "@/lib/production/layout-lint";
 import {
   TemplateLayerView,
@@ -287,6 +290,12 @@ export default function ProducirPage() {
   // Guía de marca sincronizada desde practicante (clients.brand_guide_json):
   // alimenta el chequeo de marca de "Revisar con IA" y el preflight de Descargar.
   const [brandGuide, setBrandGuide] = useState<BrandGuide | null>(null);
+  // Cliente y proyecto para la nomenclatura de los archivos exportados.
+  const [exportMeta, setExportMeta] = useState<{ client: string | null; clientName: string | null; project: string | null }>({
+    client: null,
+    clientName: null,
+    project: null,
+  });
   const [brandKits, setBrandKits] = useState<BrandKit[]>([]);
   const [brandKitContent, setBrandKitContent] = useState<BrandKitContent>(EMPTY_KIT_CONTENT);
   const [adaptations, setAdaptations] = useState<Adaptation[]>([]);
@@ -477,6 +486,7 @@ export default function ProducirPage() {
       if (projRes.ok) {
         const proj = await projRes.json();
         resolvedClientId = proj.client_id;
+        setExportMeta({ client: proj.client_slug ?? proj.client_name ?? null, clientName: proj.client_name ?? null, project: proj.title ?? null });
       }
       setClientId(resolvedClientId);
       // Re-fetch presets including client-specific ones if we have a client.
@@ -1307,14 +1317,32 @@ export default function ProducirPage() {
     []
   );
 
+  // cliente_proyecto_pieza_canal_WxH_vN.ext (lib/production/export-naming.ts).
   const filenameFor = useCallback(
-    (a: Adaptation): string => {
-      const label = a.custom_name || a.preset_name || `${a.width}x${a.height}`;
-      const tpl = template?.name ?? "template";
-      const ext = exportFormat === "png" ? "png" : "jpg";
-      return sanitizeFilename(`${tpl}_${label}_${a.width}x${a.height}.${ext}`);
-    },
-    [template, exportFormat]
+    (a: Adaptation, row?: string | null): string =>
+      exportFileName({
+        client: exportMeta.client,
+        project: exportMeta.project,
+        template: template?.name,
+        channel: a.preset_channel,
+        width: a.width,
+        height: a.height,
+        version: principalOrientation?.version ?? template?.version ?? null,
+        row,
+        ext: exportFormat === "png" ? "png" : "jpg",
+      }),
+    [template, exportFormat, exportMeta, principalOrientation],
+  );
+  const bundleName = useCallback(
+    (suffix: string) =>
+      exportBundleName({
+        client: exportMeta.client,
+        project: exportMeta.project,
+        template: template?.name,
+        version: principalOrientation?.version ?? template?.version ?? null,
+        suffix,
+      }),
+    [template, exportMeta, principalOrientation],
   );
 
   const handleDownloadSingle = async (a: Adaptation) => {
@@ -1324,9 +1352,7 @@ export default function ProducirPage() {
       // descargas la versión que ves en pantalla.
       const blob = await exportAdaptation(a, previewRow);
       if (blob) {
-        const suffix = previewRow ? `_fila${(selectedRowIdx ?? 0) + 1}` : "";
-        const name = filenameFor(a).replace(/\.(jpg|png)$/, `${suffix}.$1`);
-        downloadBlob(blob, name);
+        downloadBlob(blob, filenameFor(a, previewRow ? `fila${(selectedRowIdx ?? 0) + 1}` : null));
       }
     } finally {
       setSingleDownloadingId(null);
@@ -1350,8 +1376,7 @@ export default function ProducirPage() {
         title: `${template.name} ${a.width}x${a.height}`,
         maxBytes: html5MaxBytes(a),
       });
-      const suffix = previewRow ? `_fila${(selectedRowIdx ?? 0) + 1}` : "";
-      const name = filenameFor(a).replace(/\.(jpg|png)$/, `${suffix}_html5.zip`);
+      const name = filenameFor(a, previewRow ? `fila${(selectedRowIdx ?? 0) + 1}` : null).replace(/\.(jpg|png)$/, "_html5.zip");
       downloadBlob(built.blob, name);
       setExportNotices(html5Notices(a, built));
     } catch (err) {
@@ -1430,7 +1455,7 @@ export default function ProducirPage() {
         notices.push(...html5Notices(a, built));
       }
       const blob = await zip.generateAsync({ type: "blob" });
-      downloadBlob(blob, sanitizeFilename(`${template.name}_html5.zip`));
+      downloadBlob(blob, bundleName("html5"));
       setExportNotices(notices);
     } finally {
       setBatchProgress(null);
@@ -1460,16 +1485,12 @@ export default function ProducirPage() {
           setBatchProgress({ current: counter, total });
           const blob = await exportAdaptation(a, row);
           if (blob) {
-            zip.file(`${rowPrefix}${filenameFor(a)}`, blob);
+            zip.file(`${rowPrefix}${filenameFor(a, row ? `fila${r + 1}` : null)}`, blob);
           }
         }
       }
       const zipBlob = await zip.generateAsync({ type: "blob" });
-      const tplName = template?.name ?? "template";
-      const zipName = dataset
-        ? `${tplName}_${dataset.rows.length}filas.zip`
-        : `${tplName}_adaptaciones.zip`;
-      downloadBlob(zipBlob, sanitizeFilename(zipName));
+      downloadBlob(zipBlob, bundleName(dataset ? `${dataset.rows.length}filas` : "piezas"));
     } finally {
       setBatchProgress(null);
     }
@@ -1620,6 +1641,7 @@ export default function ProducirPage() {
     () => lowResAssets(exportPieces, naturalSizes).filter((x) => isUpscalableSrc(x.src)),
     [exportPieces, naturalSizes],
   );
+  const [mockup, setMockup] = useState<Adaptation | null>(null);
   const [upscaling, setUpscaling] = useState<string | null>(null);
   const [upscaleError, setUpscaleError] = useState<string | null>(null);
   const handleUpscale = useCallback(
@@ -2908,6 +2930,16 @@ export default function ProducirPage() {
                     >
                       <Eye className="h-3.5 w-3.5" />
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setMockup(a)}
+                      disabled={!!batchProgress}
+                      className="h-7 px-2"
+                      title="Ver en contexto: dentro del feed, la story o una página web"
+                    >
+                      <Smartphone className="h-3.5 w-3.5" />
+                    </Button>
                   </li>
                 );
               })}
@@ -2916,6 +2948,22 @@ export default function ProducirPage() {
         </section>
         )}
       </main>
+
+      {mockup && (() => {
+        const tree = adaptationTree(mockup);
+        if (!tree) return null;
+        const view = resolveTreeTokens(previewRow ? substituteVariables(tree, previewRow) : tree, brandKitContent);
+        return (
+          <ContextMockup
+            tree={view}
+            brandKit={brandKitContent}
+            brand={brandGuide?.marca ?? exportMeta.clientName ?? "marca"}
+            channel={mockup.preset_channel}
+            label={mockup.custom_name || mockup.preset_name || `${mockup.width}×${mockup.height}`}
+            onClose={() => setMockup(null)}
+          />
+        );
+      })()}
 
       {html5Preview && (
         <div
