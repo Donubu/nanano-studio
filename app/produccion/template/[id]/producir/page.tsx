@@ -80,6 +80,7 @@ import { adaptationSafeZone } from "@/lib/production/safe-zone";
 import { ensureTextContrast } from "@/lib/production/layout-plan";
 import type { BrandGuide } from "@/lib/production/brand-guide";
 import { lintBrand } from "@/lib/production/brand-lint";
+import { lowResAssets, isUpscalableSrc, NaturalSize, LowResAsset } from "@/lib/production/image-resolution";
 import type { LintIssue } from "@/lib/production/layout-lint";
 import {
   TemplateLayerView,
@@ -1567,6 +1568,84 @@ export default function ProducirPage() {
     };
   }, [clientId]);
 
+  // Preflight de resolución: tamaño natural de cada foto (se carga en el
+  // browser) contra la caja más grande en que se exporta (× pixel ratio).
+  const [naturalSizes, setNaturalSizes] = useState<Map<string, NaturalSize>>(new Map());
+  const exportPieces = useMemo(
+    () =>
+      adaptations.flatMap((a) => {
+        const tree = adaptationTree(a);
+        if (!tree) return [];
+        const view = resolveTreeTokens(previewRow ? substituteVariables(tree, previewRow) : tree, brandKitContent);
+        return [{ label: a.custom_name || a.preset_name || `${a.width}×${a.height}`, tree: view, pixelRatio: exportPixelRatio(a) }];
+      }),
+    [adaptations, adaptationTree, previewRow, brandKitContent],
+  );
+  useEffect(() => {
+    if (step !== "export") return;
+    const srcs = new Set<string>();
+    const walk = (nodes: TemplateLayer[]) => {
+      for (const l of nodes) {
+        if (l.type === "image" && l.src && isUpscalableSrc(l.src)) srcs.add(l.src);
+        if (l.type === "frame") walk(l.children);
+      }
+    };
+    for (const p of exportPieces) walk(p.tree.children);
+    const missing = [...srcs].filter((s) => !naturalSizes.has(s));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    Promise.all(
+      missing.map(
+        (src) =>
+          new Promise<[string, NaturalSize]>((resolve) => {
+            const img = new Image();
+            img.onload = () => resolve([src, { w: img.naturalWidth, h: img.naturalHeight }]);
+            img.onerror = () => resolve([src, { w: 0, h: 0 }]);
+            img.src = src;
+          }),
+      ),
+    ).then((entries) => {
+      if (cancelled) return;
+      setNaturalSizes((cur) => {
+        const next = new Map(cur);
+        for (const [k, v] of entries) next.set(k, v);
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [step, exportPieces, naturalSizes]);
+  const lowRes = useMemo<LowResAsset[]>(
+    () => lowResAssets(exportPieces, naturalSizes).filter((x) => isUpscalableSrc(x.src)),
+    [exportPieces, naturalSizes],
+  );
+  const [upscaling, setUpscaling] = useState<string | null>(null);
+  const [upscaleError, setUpscaleError] = useState<string | null>(null);
+  const handleUpscale = useCallback(
+    async (asset: LowResAsset) => {
+      if (designId == null) return;
+      setUpscaling(asset.src);
+      setUpscaleError(null);
+      try {
+        const res = await fetch(`/api/production/designs/${designId}/upscale-image`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: asset.src, factor: asset.factor }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body?.error || `Error ${res.status}`);
+        await fetchAll();
+        await fetchAdaptations();
+      } catch (e) {
+        setUpscaleError((e as Error).message);
+      } finally {
+        setUpscaling(null);
+      }
+    },
+    [designId, fetchAll, fetchAdaptations],
+  );
+
   // Preflight de marca del paso Descargar: lo que exige la guía (logo mínimo
   // y su área de seguridad, legales obligatorios, claims prohibidos) sobre
   // cada pieza tal como se va a exportar. Sin guía solo revisa el logo.
@@ -2708,6 +2787,42 @@ export default function ProducirPage() {
               {exportNotices.map((n, i) => (
                 <p key={i}>{n}</p>
               ))}
+            </div>
+          )}
+
+          {adaptationsLoaded && (lowRes.length > 0 || upscaleError) && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200 space-y-2">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                <p>
+                  {lowRes.length === 1 ? "1 foto se exporta" : `${lowRes.length} fotos se exportan`} más grande que su
+                  resolución: va a salir blanda. Reescalarla con Topaz la reemplaza en todas las piezas que la usan.
+                </p>
+              </div>
+              {upscaleError && <p className="text-red-300">{upscaleError}</p>}
+              <ul className="space-y-1.5">
+                {lowRes.map((x) => (
+                  <li key={x.src} className="flex items-center gap-3">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={x.src} alt="" className="h-8 w-12 object-cover rounded border border-border/40" />
+                    <span className="flex-1 min-w-0 truncate">
+                      {x.have.w}×{x.have.h} → necesita {x.need.w}×{x.need.h}
+                      <span className="text-amber-200/70"> · {x.where.join(", ")}</span>
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleUpscale(x)}
+                      disabled={upscaling != null || !!batchProgress}
+                      className="h-7 gap-1 shrink-0"
+                      title="Topaz Standard V2; reemplaza la foto en masters, orientaciones y ajustes manuales"
+                    >
+                      {upscaling === x.src ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                      Reescalar ×{x.factor}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

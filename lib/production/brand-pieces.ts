@@ -50,7 +50,7 @@ async function assertPublicHttps(raw: string): Promise<URL> {
   return url;
 }
 
-async function fetchImage(raw: string): Promise<Buffer> {
+export async function fetchPublicImage(raw: string): Promise<Buffer> {
   if (raw.startsWith("data:image/")) {
     const b64 = raw.slice(raw.indexOf(",") + 1);
     const buf = Buffer.from(b64, "base64");
@@ -90,7 +90,7 @@ export async function importPieceImages(
     piezas.map(async (p, i) => {
       if (!p.imagen_origen) return p;
       try {
-        const buf = await fetchImage(p.imagen_origen);
+        const buf = await fetchPublicImage(p.imagen_origen);
         const jpeg = await sharp(buf)
           .rotate()
           .resize(MAX_SIDE, MAX_SIDE, { fit: "inside", withoutEnlargement: true })

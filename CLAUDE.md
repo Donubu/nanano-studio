@@ -327,6 +327,18 @@ paso Descargar (chip por fila + aviso); NO se le pasan al modelo de
 corrección: se arreglan a mano o con "Pídele a la IA". La página carga la
 guía con `GET /api/clients/[id]/brand-guide`.
 
+### Resolución de fotos (Topaz)
+`lib/production/image-resolution.ts` (puro) compara el tamaño natural de
+cada foto con la caja más grande en que se exporta (× pixel ratio) y pide
+un factor entero 2–4 (`upscaleFactor`, tolerancia 0,8). El paso Descargar
+carga los tamaños en el browser y ofrece "Reescalar ×N":
+`POST /api/production/designs/[id]/upscale-image` baja la foto (solo https
+público), la pasa por Topaz Standard V2 (`lib/topaz-image.ts`, costo =
+créditos × `TOPAZ_CREDIT_USD`, default 0.05), la sube a
+`templates/{client}/ai/<stem>--Nx.png` y reemplaza la URL en todos los
+templates del design (version+1) y en los `manual_layout` de las
+adaptaciones. Invocación `UPSCALE_IMAGE` (cuenta en la cuota de IA).
+
 ### Exportación (paso Descargar)
 - HTML5 (`lib/production/html5-export.ts` + `export-assets.ts`): cada imagen se
   redimensiona al tamaño dibujado × dpr y se re-codifica (JPEG, o PNG si hay
