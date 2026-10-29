@@ -291,6 +291,18 @@ respeta `maxLength`) y `maxItems` en arrays de objetos grandes (da 400).
 Modelos por env: `PRODUCTION_AI_LAYOUT_MODEL`, `PRODUCTION_AI_PLANNER_MODEL`,
 `PRODUCTION_AI_ANIMATION_MODEL`, `PRODUCTION_AI_EDIT_MODEL`, `PRODUCTION_AI_IMAGE_MODEL`.
 
+### Masters de tira
+"+ Formato" ofrece, además de cuadrado/vertical/horizontal, "Tira horizontal"
+1920×240 (8:1, para 728×90, 970×90, 468×60, 320×50) y "Tira vertical"
+480×1800 (para 160×600). Las orientaciones nuevas se arman con `adaptTree`
+(en tiras, `linearize`): los formatos alargados eligen la orientación de
+proporción más cercana, así un 728×90 sale de la tira aprobada y no del 16:9.
+En `linearize` un texto sobre su franja o caja se lleva el color como fondo
+propio (la forma se oculta), los roles se infieren antes de absorber, una foto
+panel es el fondo de la tira, los textos largos con fondo se componen como
+texto, y legal/bajada no pasan de 0,4/0,6 de la letra del titular. El render
+de adaptaciones aplica `ensureTextContrast` como red de seguridad.
+
 ### Zonas seguras por plataforma
 `lib/production/safe-zone.ts`: franjas que la interfaz tapa o recorta
 (stories/reels, TikTok, Shorts, feed 4:5, portada de X, miniatura de YouTube),

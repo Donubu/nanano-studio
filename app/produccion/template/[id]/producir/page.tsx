@@ -77,6 +77,7 @@ import {
 import { reflowForPreview } from "@/lib/production/reflow";
 import { adaptTree } from "@/lib/production/adapt";
 import { adaptationSafeZone } from "@/lib/production/safe-zone";
+import { ensureTextContrast } from "@/lib/production/layout-plan";
 import {
   TemplateLayerView,
   stackToFlexStyle,
@@ -3476,7 +3477,7 @@ function AdaptationPreview({
 
   if (adaptation.fit_mode === "responsive") {
     const reflowed = adaptTree(effectiveMaster, { w: adaptW, h: adaptH }, { safe: adaptationSafeZone(adaptation) });
-    const resolved = resolveTreeTokens(reflowed, brandKit);
+    const resolved = ensureTextContrast(resolveTreeTokens(reflowed, brandKit), (c) => c);
     const bg =
       resolved.background && resolved.background.type === "color"
         ? resolved.background.value
@@ -4487,11 +4488,16 @@ function AddVariantModal({
   onClose: () => void;
   onAdd: (w: number, h: number, name?: string) => Promise<void>;
 }) {
+  // Las tiras son masters propios para los formatos alargados: un 728×90 o
+  // un 160×600 derivados del 16:9 pierden capas; derivados de su tira salen
+  // con la composición que el productor aprobó.
   const PRESETS = [
     { label: "Cuadrado", w: 1080, h: 1080, ratio: "1:1" },
     { label: "Vertical", w: 1080, h: 1920, ratio: "9:16" },
     { label: "Vertical 4:5", w: 1080, h: 1350, ratio: "4:5" },
     { label: "Horizontal", w: 1920, h: 1080, ratio: "16:9" },
+    { label: "Tira horizontal", w: 1920, h: 240, ratio: "8:1", hint: "728×90, 970×90, 468×60, 320×50" },
+    { label: "Tira vertical", w: 480, h: 1800, ratio: "1:3.75", hint: "160×600" },
   ];
   // Bloqueamos presets cuya aspect ratio ya existe en el design — no tiene
   // sentido tener dos variantes "Horizontal" del mismo master. Para custom
@@ -4601,6 +4607,7 @@ function AddVariantModal({
                   </div>
                   <div className="text-[11px] text-muted-foreground mt-0.5">
                     {p.ratio} · {p.w}×{p.h}
+                    {"hint" in p && p.hint ? ` · para ${p.hint}` : ""}
                   </div>
                 </button>
               );

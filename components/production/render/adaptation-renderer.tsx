@@ -11,6 +11,7 @@ import {
   resolveTreeTokens,
 } from "@/lib/production/brand-kit";
 import { adaptTree } from "@/lib/production/adapt";
+import { ensureTextContrast } from "@/lib/production/layout-plan";
 import type { SafeZone } from "@/lib/production/safe-zone";
 import { parseOverrides } from "@/lib/production/overrides";
 import { substituteVariables, DataRow } from "@/lib/production/variables";
@@ -100,7 +101,7 @@ export const AdaptationRenderer = forwardRef<HTMLDivElement, Props>(function Ada
 
   if (adaptation.fit_mode === "responsive") {
     const reflowed = adaptTree(effectiveMaster, { w: adaptW, h: adaptH }, { safe: adaptation.safe_zone });
-    const resolved = resolveTreeTokens(reflowed, brandKit);
+    const resolved = ensureTextContrast(resolveTreeTokens(reflowed, brandKit), (c) => c);
     const bg =
       resolved.background && resolved.background.type === "color"
         ? resolved.background.value

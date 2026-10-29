@@ -13,7 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
-import { reflowForPreview } from "@/lib/production/reflow";
+import { adaptTree } from "@/lib/production/adapt";
 import { TemplateDefinition } from "@/lib/production/types";
 
 interface BaseTemplateRow extends RowDataPacket {
@@ -104,9 +104,10 @@ export async function POST(
       } catch {
         parsedDef = null;
       }
-      const variantDef = parsedDef
-        ? reflowForPreview(parsedDef, { w: width, h: height })
-        : null;
+      // adaptTree: escala + reflow + ajuste en formatos parecidos, y tira
+      // (fila/columna por prioridad) en los alargados; es lo mismo que ven
+      // los formatos de salida, así la orientación nueva parte igual.
+      const variantDef = parsedDef ? adaptTree(parsedDef, { w: width, h: height }) : null;
 
       // El nombre de la variante es solo su rol (Cuadrado, Vertical, etc.).
       // No le ponemos prefijo con el nombre del template ("concept") porque

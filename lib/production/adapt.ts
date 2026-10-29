@@ -199,6 +199,32 @@ function keepGroupsTogether(children: TemplateLayer[], master: TemplateDefinitio
   });
 }
 
+function collapseTextContainers(def: TemplateDefinition): { def: TemplateDefinition; absorbed: Set<string> } {
+  const groups = visualGroups(def);
+  if (groups.size === 0) return { def, absorbed: new Set() };
+  const byId = new Map(def.children.map((c) => [c.id, c]));
+  const absorbed = new Set<string>();
+  const children = def.children.map((c) => {
+    const g = groups.get(c.id);
+    if (!g || g.kind !== "inside" || c.type !== "text" || c.style.backgroundColor) return c;
+    const box = byId.get(g.anchor);
+    if (!box || box.type !== "shape" || box.visible === false) return c;
+    absorbed.add(box.id);
+    return {
+      ...c,
+      style: {
+        ...c.style,
+        backgroundColor: box.fill,
+        backgroundCornerRadius: box.cornerRadius ?? 0,
+        align: c.style.align ?? "center",
+        verticalAlign: c.style.verticalAlign ?? "middle",
+      },
+    };
+  });
+  if (absorbed.size === 0) return { def, absorbed };
+  return { def: { ...def, children: children.map((c) => (absorbed.has(c.id) ? { ...c, visible: false } : c)) }, absorbed };
+}
+
 // ---------------------------------------------------------------------------
 // Estrategia 1: reflow + ajuste
 // ---------------------------------------------------------------------------
@@ -286,18 +312,24 @@ const STRIP_ORDER: LayerRole[] = ["logo", "badge", "headline", "secondary", "pri
 // en verticales es el ancho (ahí el CTA sí va casi de lado a lado).
 const STRIP_CROSS_H: Partial<Record<LayerRole, number>> = {
   cta: 0.5,
+  price: 0.6,
   badge: 0.9,
   logo: 0.7,
   product: 0.95,
   icon: 0.4,
+  legal: 0.25,
 };
 const STRIP_CROSS_V: Partial<Record<LayerRole, number>> = {
   cta: 0.9,
+  price: 0.9,
   badge: 0.7,
   logo: 0.7,
   product: 0.95,
   icon: 0.35,
+  legal: 0.6,
 };
+// El legal nunca pasa de esta fracción de la letra del titular.
+const LEGAL_MAX_RATIO = 0.4;
 // Un texto secundario no puede ser más grande que esto × el titular.
 const SECONDARY_MAX_RATIO = 0.6;
 
@@ -323,7 +355,17 @@ function linearize(master: TemplateDefinition, size: { w: number; h: number }, o
   const availAlong = horizontal ? availW : availH;
   const minFont = minLegibleFont(size);
 
+  // Un texto sobre su franja o caja de color es una pieza (grupo visual): en
+  // la tira el texto se lleva el color como fondo propio y la forma sobra.
+  // Si no, la forma se descarta como decoración y un texto blanco queda
+  // sobre el fondo blanco de la tira.
+  // Los roles se infieren ANTES de absorber las franjas: un precio con fondo
+  // sigue siendo precio (si no, pasaría a CTA y la tira lo trataría como botón).
   const roles = inferRoles(master);
+  const collapsed = collapseTextContainers(master);
+  master = collapsed.def;
+  // Una foto panel (casi toda la pieza, con marco) es el fondo de la tira.
+  for (const c of master.children) if (roles.get(c.id) === "product" && isPanel(c, master.size)) roles.set(c.id, "background");
   const roleOf = (l: TemplateLayer) => roles.get(l.id) ?? "decoration";
   const visible = master.children.filter((c) => c.visible !== false);
   const backgrounds = visible.filter((c) => roleOf(c) === "background");
@@ -349,8 +391,8 @@ function linearize(master: TemplateDefinition, size: { w: number; h: number }, o
         let p = horizontal ? composeTextRow(item, availH, availW) : composeTextColumn(item, availW, availH);
         let font = numericFont(p.layer as TextLayer);
         if (roleOf(item) === "headline") headlineFont = font;
-        else if (headlineFont && roleOf(item) !== "price" && font > headlineFont * SECONDARY_MAX_RATIO) {
-          const r = (headlineFont * SECONDARY_MAX_RATIO) / font;
+        else if (headlineFont && roleOf(item) !== "price" && font > headlineFont * (roleOf(item) === "legal" ? LEGAL_MAX_RATIO : SECONDARY_MAX_RATIO)) {
+          const r = (headlineFont * (roleOf(item) === "legal" ? LEGAL_MAX_RATIO : SECONDARY_MAX_RATIO)) / font;
           const fit = bestTextFitCapped(item, p.w, p.h, font * r);
           p = { layer: restyleText(item, fit.fs, fit.w, fit.h), w: fit.w, h: fit.h };
           font = fit.fs;
@@ -361,11 +403,26 @@ function linearize(master: TemplateDefinition, size: { w: number; h: number }, o
       // billboard queda desproporcionado; un badge o un producto sí pueden
       // ocupar casi todo el alto.
       const cross = (horizontal ? STRIP_CROSS_H : STRIP_CROSS_V)[roleOf(item)] ?? 0.85;
-      if (isPillText(item)) {
+      // Un texto corto con fondo es un botón (caja desde el texto); uno largo
+      // (un cintillo) se compone como texto y conserva su fondo.
+      if (isPillText(item) && item.content.trim().length <= 24) {
         const p = horizontal
           ? composeButton(item, availW * 0.35, availH * cross)
           : composeButton(item, availW * cross, availH * 0.12);
         return { ...p, font: numericFont(p.layer as TextLayer) };
+      }
+      if (isPillText(item)) {
+        let p = horizontal ? composeTextRow(item, availH * cross, availW) : composeTextColumn(item, availW * cross, availH);
+        // Mismo tope que los textos sin fondo: no más grande que el titular.
+        const maxRatio = roleOf(item) === "legal" ? LEGAL_MAX_RATIO : roleOf(item) === "secondary" ? SECONDARY_MAX_RATIO : null;
+        const f0 = numericFont(p.layer as TextLayer);
+        if (headlineFont && maxRatio && f0 > headlineFont * maxRatio) {
+          const fit = bestTextFitCapped(item, p.w, p.h, headlineFont * maxRatio);
+          p = { layer: restyleText(item, fit.fs, fit.w, fit.h), w: fit.w, h: fit.h };
+        }
+        const pad = numericFont(p.layer as TextLayer) * 0.5;
+        const layer = { ...p.layer, size: { w: p.w + 2 * pad, h: p.h + pad } };
+        return { layer, w: layer.size.w, h: layer.size.h, font: numericFont(layer as TextLayer) };
       }
       const s = horizontal
         ? Math.min((availH * cross) / item.size.h, (availW * 0.6) / item.size.w)
@@ -424,9 +481,11 @@ function linearize(master: TemplateDefinition, size: { w: number; h: number }, o
     cursor += along(p) + gap * k;
   }
   // Las que no entraron quedan ocultas (mismo id: la animación y el
-  // productor las siguen encontrando).
-  for (const c of visible) {
-    if (!hidden.has(c.id) && roleOf(c) !== "decoration") continue;
+  // productor las siguen encontrando), igual que las franjas absorbidas por
+  // su texto.
+  for (const c of master.children) {
+    if (c.visible === false && !collapsed.absorbed.has(c.id)) continue;
+    if (!hidden.has(c.id) && roleOf(c) !== "decoration" && !collapsed.absorbed.has(c.id)) continue;
     const s = Math.min(1, W / c.size.w, H / c.size.h);
     children.push({ ...scaleLayerUniform(c, s, 0, 0), position: { x: 0, y: 0 }, visible: false, constraints: undefined });
   }

@@ -290,3 +290,28 @@ describe("adaptTree — misma estructura que el master", () => {
     });
   }
 });
+
+describe("adaptTree — tiras conservan el color de las franjas", () => {
+  it("un texto sobre su franja roja sale en la tira como texto con fondo rojo", () => {
+    const piece: TemplateDefinition = {
+      id: "tpl_root",
+      type: "frame",
+      position: { x: 0, y: 0 },
+      size: { w: 1080, h: 1080 },
+      layout: { mode: "free" },
+      background: { type: "color", value: "#ffffff" },
+      children: [
+        { id: "band", type: "shape", shape: "rect", fill: "#e60000", position: { x: 46, y: 48 }, size: { w: 987, h: 64 } },
+        { id: "ribbon", type: "text", name: "Titular", content: "APROVECHA EL SUBSIDIO", position: { x: 54, y: 56 }, size: { w: 972, h: 46 }, style: { fontSize: 30, color: "#fff" } },
+        { id: "box", type: "shape", shape: "rect", fill: "#e60000", position: { x: 157, y: 759 }, size: { w: 578, h: 190 } },
+        { id: "price", type: "text", name: "Precio", content: "DESDE UF 2.783*", position: { x: 173, y: 805 }, size: { w: 545, h: 70 }, style: { fontSize: 60, color: "#fff" } },
+      ],
+    };
+    const out = adaptTree(piece, { w: 1920, h: 240 });
+    const price = out.children.find((c) => c.id === "price") as TextLayer;
+    expect(price.visible).not.toBe(false);
+    expect(price.style.backgroundColor).toBe("#e60000");
+    expect(out.children.find((c) => c.id === "box")?.visible).toBe(false);
+    expect(out.children.find((c) => c.id === "band")?.visible).toBe(false);
+  });
+});
