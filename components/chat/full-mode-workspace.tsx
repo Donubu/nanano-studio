@@ -24,6 +24,7 @@ import { cn, formatDateTimeLocal } from "@/lib/utils";
 import { getOpenRouterModelCaps } from "@/lib/openrouter-video-caps";
 import { useNavigation } from "@/contexts/navigation-context";
 import { type ImagenAspectRatio, getDailyPin } from "./image-settings";
+import { supportsTextThinking as modelSupportsThinking } from "@/lib/text-thinking";
 
 // ---- Types ----
 
@@ -424,7 +425,7 @@ export function FullModeWorkspace({
   const supportsMultiImage = activeImageModel?.model_id?.includes("image-preview") || activeImageModel?.model_id?.includes("flash-image");
 
   const activeTextModel = textModels.find(m => m.id === selectedTextModelId) || textModels.find(m => m.is_default) || textModels[0];
-  const supportsTextThinking = activeTextModel?.model_id?.startsWith("gemini-3.1-pro") || false;
+  const supportsTextThinking = modelSupportsThinking(activeTextModel?.model_id);
 
   // Current model for display
   const currentModel = format === "text" ? activeTextModel : format === "image" ? activeImageModel : activeVideoModel;
@@ -3609,7 +3610,7 @@ function TextDetailModal({ item, conversationId, textModels, activeTextModel, th
   onUseAsPrompt: (text: string) => void;
   fetchGenerations: () => void;
 }) {
-  const supportsThinking = activeTextModel?.model_id?.startsWith("gemini-3.1-pro") || false;
+  const supportsThinking = modelSupportsThinking(activeTextModel?.model_id);
   const [followUpInput, setFollowUpInput] = useState("");
   const [followUpFiles, setFollowUpFiles] = useState<AttachedFile[]>([]);
   const [expandedThoughts, setExpandedThoughts] = useState<Set<number>>(new Set());
@@ -3711,7 +3712,7 @@ function TextDetailModal({ item, conversationId, textModels, activeTextModel, th
     setStreamContent("");
 
     try {
-      const supportsThinking = activeTextModel.model_id?.startsWith("gemini-3.1-pro") || false;
+      const supportsThinking = modelSupportsThinking(activeTextModel.model_id);
       const res = await fetch(`/api/conversations/${conversationId}/messages/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

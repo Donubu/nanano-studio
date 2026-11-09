@@ -484,7 +484,7 @@ export async function sendMessage(
     // Structured JSON output
     ...(settings.responseMimeType && { responseMimeType: settings.responseMimeType }),
     ...(settings.responseSchema && { responseSchema: settings.responseSchema as never }),
-    // Note: thinkingBudget: 0 is not sent because some models (gemini-3.1-pro)
+    // Note: thinkingBudget: 0 is not sent because some models (gemini-3.x)
     // require thinking mode and reject budget 0. Omitting thinkingConfig lets
     // the model use its default behavior.
   };
@@ -616,7 +616,7 @@ export async function sendMessageStream(
           ...(settings.includeThoughts && { includeThoughts: true }),
         },
       }),
-      // Note: thinkingBudget: 0 is not sent because some models (gemini-3.1-pro)
+      // Note: thinkingBudget: 0 is not sent because some models (gemini-3.x)
       // require thinking mode and reject budget 0. Omitting thinkingConfig lets
       // the model use its default behavior.
     };

@@ -104,6 +104,7 @@ import {type MusicGenerationSettings, type MusicGenerationStatus, DEFAULT_MUSIC_
 import {useNavigation, generateSlug} from "@/contexts/navigation-context";
 import {FullModeWorkspace} from "./full-mode-workspace";
 import {CanvasWorkspace} from "@/components/canvas/canvas-workspace";
+import { supportsTextThinking } from "@/lib/text-thinking";
 
 // Helper function to get the icon for a conversation based on its generation type
 function getConversationIcon(generationType: string | undefined, className: string) {
@@ -542,12 +543,12 @@ export function ChatInterface() {
         return imageModel.model_id.includes("image-preview") || imageModel.model_id.includes("flash-image");
     })();
 
-    // Check if the current text model supports thinking/reasoning (only gemini-3.1-pro variants)
+    // Check if the current text model supports thinking/reasoning
     const supportsThinking = (() => {
         const textConfig = generationConfig.find(c => c.generation_type === "text");
         const model = getSelectedModel(textConfig);
         if (!model) return false;
-        return model.model_id.startsWith("gemini-3.1-pro");
+        return supportsTextThinking(model.model_id);
     })();
 
     // Check if the current model supports Google Search grounding

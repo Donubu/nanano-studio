@@ -11,6 +11,7 @@ import { HANDLE_IDS as HANDLES, baseHandleId } from "../lib/canvas-types";
 import type { CanvasGenerationConfig, CanvasModel } from "../canvas-workspace";
 import { getVideoCapabilities, reconcileVideoSettings, veoForcesEightSeconds } from "../lib/video-capabilities";
 import { useCanvasContext } from "../canvas-context";
+import { supportsTextThinking } from "@/lib/text-thinking";
 
 interface NodeConfigPanelProps {
   node: Node;
@@ -429,11 +430,11 @@ function ReferencePriorityList({
 // --- Type-specific settings ---
 
 function TextSettings({ data, onUpdate, models }: { data: TextNodeData; onUpdate: (u: Partial<TextNodeData>) => void; models: CanvasModel[] }) {
-  // Check if selected model supports thinking (gemini-3.1-pro)
+  // Check if selected model supports thinking
   const selectedModel = data.modelId
     ? models.find((m) => m.id === data.modelId)
     : models.find((m) => m.is_default) || models[0];
-  const supportsThinking = selectedModel?.model_id?.startsWith("gemini-3.1-pro") ?? false;
+  const supportsThinking = supportsTextThinking(selectedModel?.model_id);
 
   return (
     <>

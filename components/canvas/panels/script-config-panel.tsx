@@ -8,6 +8,7 @@ import type { Node } from "@xyflow/react";
 import type { CanvasNodeData, ScriptNodeData } from "../lib/canvas-types";
 import type { CanvasGenerationConfig } from "../canvas-workspace";
 import { useCanvasContext } from "../canvas-context";
+import { supportsTextThinking } from "@/lib/text-thinking";
 
 interface ScriptConfigPanelProps {
   node: Node;
@@ -38,7 +39,7 @@ export function ScriptConfigPanel({
     ? availableModels.find((m) => m.id === data.modelId)
     : availableModels.find((m) => m.is_default) || availableModels[0];
 
-  const supportsThinking = selectedModel?.model_id?.startsWith("gemini-3.1-pro") ?? false;
+  const supportsThinking = supportsTextThinking(selectedModel?.model_id);
 
   const analysis = data.scriptAnalysis;
   const generalInfo = analysis?.generalInfo;
