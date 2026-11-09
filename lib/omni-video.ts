@@ -12,8 +12,9 @@
  * expone `interactions` pero sus tipos no cubren el modo video (sin video_config
  * ni response_format de video). Migrar al SDK cuando lo tipee.
  *
- * Pricing (docs): input $1.50/1M tok; output de video $17.50/1M tok a
- * 5.792 tok/seg de 720p (≈ $0.10/seg). Si la respuesta trae usage, calculamos
+ * Pricing (docs): input $1.50/1M tok; output de video a 5.792 tok/seg de 720p:
+ * $12/1M en 1.1/1.2 Flash (≈ $0.07/seg) y $17.50/1M en el preview (≈ $0.10/seg);
+ * texto y thinking $9/1M. Si la respuesta trae usage, calculamos
  * el costo exacto y lo devolvemos en GeneratedVideo.actualCost.
  *
  * store=true SIEMPRE: el interaction id (v1_...) queda editable después vía
@@ -25,7 +26,16 @@ import { GeneratedVideo, VideoGenerationProgress } from "./google-ai-video";
 const OMNI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 const OMNI_INPUT_COST_PER_TOKEN = 1.5 / 1_000_000;
-const OMNI_VIDEO_OUTPUT_COST_PER_TOKEN = 17.5 / 1_000_000;
+// Video de salida: el preview cobra $17.50/1M; desde Omni 1.1/1.2 Flash, $12/1M
+// (≈ $0.07/seg a 720p).
+const OMNI_PREVIEW_VIDEO_OUTPUT_COST_PER_TOKEN = 17.5 / 1_000_000;
+const OMNI_VIDEO_OUTPUT_COST_PER_TOKEN = 12 / 1_000_000;
+
+function videoOutputCostPerToken(modelId: string): number {
+  return modelId.includes("omni-flash-preview")
+    ? OMNI_PREVIEW_VIDEO_OUTPUT_COST_PER_TOKEN
+    : OMNI_VIDEO_OUTPUT_COST_PER_TOKEN;
+}
 const OMNI_TEXT_OUTPUT_COST_PER_TOKEN = 9 / 1_000_000;
 const OMNI_VIDEO_TOKENS_PER_SECOND = 5792;
 
@@ -379,7 +389,7 @@ export async function generateOmniVideo(
     ? interaction
     : await pollInteraction(interaction.id, apiKey, onProgress);
 
-  return extractAndDownloadVideo(finalInteraction, apiKey, onProgress);
+  return extractAndDownloadVideo(finalInteraction, apiKey, modelId, onProgress);
 }
 
 // ============================================
@@ -489,6 +499,7 @@ function looksLikeSafetyBlock(interaction: OmniInteraction): boolean {
 async function extractAndDownloadVideo(
   interaction: OmniInteraction,
   apiKey: string,
+  modelId: string,
   onProgress?: (progress: VideoGenerationProgress) => void,
 ): Promise<GeneratedVideo> {
   const status = (interaction.status ?? "").toLowerCase();
@@ -542,6 +553,9 @@ async function extractAndDownloadVideo(
   const usage = interaction.usage;
   const inputTokens = usage?.total_input_tokens ?? 0;
   const totalOutputTokens = usage?.total_output_tokens ?? 0;
+  // Los thought tokens vienen aparte de total_output_tokens y se facturan como
+  // salida de texto.
+  const thoughtTokens = usage?.total_thought_tokens ?? 0;
   const videoTokens = (usage?.output_tokens_by_modality ?? [])
     .filter(m => m.modality === "video")
     .reduce((sum, m) => sum + (m.tokens ?? 0), 0);
@@ -552,8 +566,8 @@ async function extractAndDownloadVideo(
     const otherOutputTokens = Math.max(0, totalOutputTokens - billedVideoTokens);
     actualCost = Number((
       inputTokens * OMNI_INPUT_COST_PER_TOKEN +
-      billedVideoTokens * OMNI_VIDEO_OUTPUT_COST_PER_TOKEN +
-      otherOutputTokens * OMNI_TEXT_OUTPUT_COST_PER_TOKEN
+      billedVideoTokens * videoOutputCostPerToken(modelId) +
+      (otherOutputTokens + thoughtTokens) * OMNI_TEXT_OUTPUT_COST_PER_TOKEN
     ).toFixed(6));
   }
 
