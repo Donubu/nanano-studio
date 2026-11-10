@@ -66,6 +66,18 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
     ) as never,
   ) as unknown as string;
   const photos = useMemo(() => JSON.parse(photosJson) as GalleryPhoto[], [photosJson]);
+  // Tamaño fijo = el usuario lo redimensionó (width/height explícitos en el
+  // nodo). Las props width/height también llegan con la medida automática,
+  // así que no sirven para distinguirlo.
+  const hasFixedSize = useStore(
+    useCallback(
+      (state: { nodeLookup: Map<string, { width?: number; height?: number }> }) => {
+        const n = state.nodeLookup.get(id);
+        return !!n && (n.width != null || n.height != null);
+      },
+      [id],
+    ) as never,
+  ) as unknown as boolean;
 
   const update = useCallback(
     (patch: Partial<CharacterNodeData>) => updateNodeData(id, { ...nodeData, ...patch }),
@@ -161,7 +173,12 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
         <NodeDeleteButton nodeId={id} />
       </div>
 
-      <div className="px-3 py-2 space-y-2">
+      {/* Cuerpo con scroll propio: con tamaño fijo ocupa el alto disponible;
+          sin él, se limita para que muchas etapas no estiren el nodo sin fin.
+          nowheel: la rueda desplaza el contenido en vez de hacer zoom. */}
+      <div
+        className={`nowheel px-3 py-2 space-y-2 overflow-y-auto ${hasFixedSize ? "flex-1 min-h-0" : "max-h-[720px]"}`}
+      >
         <div className="space-y-0.5 text-[10px]">
           <div className={`flex items-center gap-1 ${styleConnections.length ? "text-blue-700 dark:text-blue-300" : "text-muted-foreground"}`}>
             <Palette className="h-3 w-3" />
