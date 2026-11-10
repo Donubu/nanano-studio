@@ -8,7 +8,7 @@
 
 import { memo, useCallback, useMemo, useState } from "react";
 import { Handle, Position, useHandleConnections, useStore, type NodeProps } from "@xyflow/react";
-import { ArrowDown, ArrowUp, Check, Dna, GripVertical, Images, Loader2, Palette, Plus, Trash2, UserRound, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronRight, Dna, GripVertical, Images, Loader2, Palette, Plus, Trash2, UserRound, Wand2 } from "lucide-react";
 import {
   HANDLE_IDS,
   MAX_CHARACTER_STAGES,
@@ -99,6 +99,15 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
     update({ stages: next, ...(stages.some((s) => s.imageNodeId) ? { chainStale: true } : {}) });
   };
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  // Etapas con la galería de fotos abierta (por defecto todas colapsadas).
+  const [expandedStages, setExpandedStages] = useState<Set<string>>(() => new Set());
+  const toggleExpanded = (stageId: string) =>
+    setExpandedStages((prev) => {
+      const next = new Set(prev);
+      if (next.has(stageId)) next.delete(stageId);
+      else next.add(stageId);
+      return next;
+    });
   const [overIndex, setOverIndex] = useState<number | null>(null);
   const addStage = () => {
     if (stages.length >= MAX_CHARACTER_STAGES) return;
@@ -310,11 +319,35 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
                 />
                 {photos.length > 0 ? (
                   <div className="space-y-1">
-                    <div className="text-[10px] text-muted-foreground">
-                      {selectedCount > 0
-                        ? `${selectedCount} ${selectedCount === 1 ? "foto de referencia" : "fotos de referencia"}`
-                        : "Sin fotos de referencia: toca una o más para usarlas"}
-                    </div>
+                    {/* Colapsada por defecto: resumen con las fotos elegidas;
+                        la galería completa se abre al tocarlo. */}
+                    <button
+                      type="button"
+                      onClick={() => toggleExpanded(stage.id)}
+                      aria-expanded={expandedStages.has(stage.id)}
+                      className="nodrag flex w-full items-center gap-1 text-left text-[10px] text-muted-foreground hover:text-foreground"
+                    >
+                      <ChevronRight className={`h-3 w-3 shrink-0 transition-transform ${expandedStages.has(stage.id) ? "rotate-90" : ""}`} />
+                      <span className="shrink-0">
+                        {selectedCount > 0
+                          ? `${selectedCount} ${selectedCount === 1 ? "foto de referencia" : "fotos de referencia"}`
+                          : expandedStages.has(stage.id)
+                            ? "Toca una o más fotos para usarlas"
+                            : "Elegir fotos de referencia"}
+                      </span>
+                      {!expandedStages.has(stage.id) && selectedCount > 0 && (
+                        <span className="flex min-w-0 gap-0.5 overflow-hidden">
+                          {photos
+                            .filter((p) => (stage.referenceImages ?? []).some((r) => r.nodeId === p.nodeId && r.url === p.url))
+                            .slice(0, 6)
+                            .map((p) => (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img key={`${p.nodeId}|${p.url}`} src={p.url} alt="" className="h-5 w-5 shrink-0 rounded object-cover" loading="lazy" />
+                            ))}
+                        </span>
+                      )}
+                    </button>
+                    {expandedStages.has(stage.id) && (
                     <div className="nodrag nowheel flex flex-wrap gap-1 max-h-[132px] overflow-y-auto">
                       {photos.map((p) => {
                         const on = (stage.referenceImages ?? []).some((r) => r.nodeId === p.nodeId && r.url === p.url);
@@ -338,6 +371,7 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
                         );
                       })}
                     </div>
+                    )}
                   </div>
                 ) : (stage.referenceImages ?? []).length > 0 ? (
                   <div className="text-[10px] text-amber-700 dark:text-amber-300">
