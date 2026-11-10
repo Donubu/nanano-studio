@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, Loader2, LayoutTemplate, Trash2, Workflow, MessageSquare, ImageIcon, Video, Bot, Sparkles, Film, StickyNote, Type, ImagePlus, Images, Settings, Palette } from "lucide-react";
+import { X, Loader2, LayoutTemplate, Trash2, Workflow, MessageSquare, ImageIcon, Video, Bot, Sparkles, Film, StickyNote, Type, ImagePlus, Images, Settings, Palette, UserRound, FilePlus2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export interface CanvasTemplateSummary {
@@ -40,6 +40,7 @@ const typeIconMap: Record<string, typeof MessageSquare> = {
   "params-scene": Palette,
   script: Sparkles,
   scene: Film,
+  character: UserRound,
 };
 
 // Overlay de templates: se auto-abre en canvas vacío (punto de partida) y se
@@ -110,6 +111,19 @@ export function TemplatePicker({ isOpen, onClose, onUseTemplate, emptyCanvas }: 
         </div>
 
         <div className="flex-1 overflow-y-auto p-3">
+          {emptyCanvas && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full mb-2 flex items-center gap-3 border border-dashed border-border rounded-lg p-3 text-left hover:border-primary/50 hover:bg-accent/50 transition-colors"
+            >
+              <FilePlus2 className="h-5 w-5 text-muted-foreground shrink-0" />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">Canvas en blanco</span>
+                <span className="block text-xs text-muted-foreground">Empieza sin nodos y agrégalos tú o con &quot;Pídele a la IA&quot;.</span>
+              </span>
+            </button>
+          )}
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -193,7 +207,7 @@ export function TemplatePicker({ isOpen, onClose, onUseTemplate, emptyCanvas }: 
 
         <div className="p-3 border-t border-border flex justify-end">
           <Button variant="ghost" size="sm" onClick={onClose} className="text-xs">
-            {emptyCanvas ? "Empezar de cero" : "Cerrar"}
+            Cerrar
           </Button>
         </div>
       </div>

@@ -316,6 +316,11 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       const newId = newConv.id;
       realConversationIdRef.current = newId;
       skipNextLoadRef.current = true;
+      // El canvas nuevo ya pasó por el selector de templates (se mostró con
+      // id 0, antes de existir la conversación). Sin esto, al crear la
+      // conversación con el primer nodo el selector se reabría: el id cambia
+      // y el nodo todavía no está en el estado.
+      pickerShownForConvRef.current = newId;
       setRealConversationId(newId);
       onConversationCreated?.(newId);
       return newId;
