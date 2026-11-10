@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Loader2, Sparkles, Undo2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { MAX_ASSIST_INSTRUCTION_CHARS } from "@/lib/canvas-ai/assist-plan";
 
 export interface CanvasAiResult {
   reply: string;
@@ -42,6 +43,7 @@ export function CanvasAiBar({ canEdit, selectedCount, onSubmit, canUndo, onUndo 
   const submit = async () => {
     const text = instruction.trim();
     if (text.length < 2 || busy || !canEdit) return;
+    if (text.length > MAX_ASSIST_INSTRUCTION_CHARS) return; // el contador ya avisa
     setBusy("ask");
     setResult(null);
     const ctrl = new AbortController();
@@ -133,7 +135,7 @@ export function CanvasAiBar({ canEdit, selectedCount, onSubmit, canUndo, onUndo 
           <button
             type="button"
             onClick={submit}
-            disabled={!canEdit || busy !== null || instruction.trim().length < 2}
+            disabled={!canEdit || busy !== null || instruction.trim().length < 2 || instruction.length > MAX_ASSIST_INSTRUCTION_CHARS}
             className="flex shrink-0 items-center gap-1 rounded bg-violet-600 px-2.5 py-1.5 text-xs text-white hover:bg-violet-500 disabled:opacity-40"
           >
             <Sparkles className="h-3.5 w-3.5" /> Pedir
@@ -148,6 +150,18 @@ export function CanvasAiBar({ canEdit, selectedCount, onSubmit, canUndo, onUndo 
           <ChevronDown className="h-4 w-4" />
         </button>
       </div>
+
+      {instruction.length > MAX_ASSIST_INSTRUCTION_CHARS * 0.8 && (
+        <div
+          className={cn(
+            "px-3 pb-1 text-right text-[10px]",
+            instruction.length > MAX_ASSIST_INSTRUCTION_CHARS ? "text-red-600 dark:text-red-400" : "text-muted-foreground",
+          )}
+        >
+          {instruction.length.toLocaleString("es-CL")} / {MAX_ASSIST_INSTRUCTION_CHARS.toLocaleString("es-CL")} caracteres
+          {instruction.length > MAX_ASSIST_INSTRUCTION_CHARS && " · acórtalo o divídelo en dos pedidos"}
+        </div>
+      )}
 
       {(result || canUndo) && (
         <div className="space-y-1 border-t border-border/50 px-3 py-2 text-xs">

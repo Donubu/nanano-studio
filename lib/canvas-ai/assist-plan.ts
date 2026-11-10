@@ -175,6 +175,9 @@ const IMAGE_RESOLUTIONS = ["1K", "2K", "4K"];
 export const MAX_NEW_NODES = 40;
 export const MAX_OPS = 120;
 const MAX_PROMPT_CHARS = 8000;
+// Largo máximo del pedido al asistente (un guion pegado con varias etapas
+// cabe holgado; ~10k tokens de entrada). Lo usan la ruta y la barra.
+export const MAX_ASSIST_INSTRUCTION_CHARS = 40000;
 const MAX_LABEL_CHARS = 60;
 
 // Tipo de generación cuyo modelo usa cada tipo de nodo.

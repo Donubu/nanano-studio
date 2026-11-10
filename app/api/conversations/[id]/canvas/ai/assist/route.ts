@@ -12,6 +12,7 @@ import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { generateJson } from "@/lib/production/gemini-json";
 import {
+  MAX_ASSIST_INSTRUCTION_CHARS,
   buildAssistPlan,
   dropInventedStageText,
   pickResultImages,
@@ -31,7 +32,7 @@ export const maxDuration = 120;
 
 const MODEL = process.env.CANVAS_AI_ASSIST_MODEL || "gemini-3.8-flash";
 const HOURLY_LIMIT = Number(process.env.CANVAS_AI_HOURLY_CALLS_PER_USER ?? 30);
-const MAX_INSTRUCTION_CHARS = 4000;
+const MAX_INSTRUCTION_CHARS = MAX_ASSIST_INSTRUCTION_CHARS;
 const MAX_SNAPSHOT_NODES = 300;
 const MAX_NODE_TEXT = 600;
 const RELAYOUT_WORDS = /\b(re)?orden|acomod|organiz|layout|alinea|despeja/i;
@@ -226,7 +227,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const instruction = typeof body?.instruction === "string" ? body.instruction.trim() : "";
   if (instruction.length < 2) return NextResponse.json({ error: "Escribe qué quieres hacer en el canvas." }, { status: 400 });
   if (instruction.length > MAX_INSTRUCTION_CHARS) {
-    return NextResponse.json({ error: `El pedido es muy largo (máximo ${MAX_INSTRUCTION_CHARS} caracteres).` }, { status: 400 });
+    return NextResponse.json(
+      { error: `El pedido es muy largo (${instruction.length.toLocaleString("es-CL")} caracteres; máximo ${MAX_INSTRUCTION_CHARS.toLocaleString("es-CL")}).` },
+      { status: 400 },
+    );
   }
   const snapshot = cleanSnapshot(body?.snapshot);
   if (!snapshot) return NextResponse.json({ error: "Falta el estado del canvas." }, { status: 400 });
