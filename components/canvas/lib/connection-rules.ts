@@ -95,13 +95,15 @@ export const VALID_CONNECTIONS: ConnectionRule[] = [
   { sourceType: "text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "script", targetHandle: HANDLE_IDS.INPUT_RULES },
   { sourceType: "text-practicante", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "script", targetHandle: HANDLE_IDS.INPUT_RULES },
 
-  // === Personaje: ADN y estilo global (un texto cada uno) ===
-  { sourceType: "static-text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_DNA },
-  { sourceType: "text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_DNA },
-  { sourceType: "text-practicante", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_DNA },
+  // === Personaje: estilo global (un texto, compartible entre Personajes) ===
   { sourceType: "static-text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_STYLE },
   { sourceType: "text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_STYLE },
   { sourceType: "text-practicante", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_STYLE },
+
+  // === Personaje: galerías / imágenes de donde cada etapa elige sus fotos ===
+  { sourceType: "static-image-group", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_GALLERY },
+  { sourceType: "static-image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_GALLERY },
+  { sourceType: "image", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_GALLERY },
 
   // === Personaje → imagen de cada etapa (ADN + estilo + texto de la etapa) ===
   { sourceType: "character", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER, targetType: "image", targetHandle: HANDLE_IDS.INPUT_PROMPT },
@@ -160,8 +162,7 @@ export function isValidConnection(
   // Enforce: only 1 rules input per Script
   if (targetHandle === HANDLE_IDS.INPUT_RULES && targetAlreadyUsed(HANDLE_IDS.INPUT_RULES)) return false;
 
-  // Enforce: un ADN y un estilo global por Personaje
-  if (targetHandle === HANDLE_IDS.INPUT_CHARACTER_DNA && targetAlreadyUsed(HANDLE_IDS.INPUT_CHARACTER_DNA)) return false;
+  // Enforce: un estilo global por Personaje (las galerías pueden ser varias)
   if (targetHandle === HANDLE_IDS.INPUT_CHARACTER_STYLE && targetAlreadyUsed(HANDLE_IDS.INPUT_CHARACTER_STYLE)) return false;
 
   return true;

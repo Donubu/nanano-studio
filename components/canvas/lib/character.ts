@@ -11,12 +11,43 @@ import {
 } from "./canvas-types";
 import { wouldCreateCycle } from "./connection-rules";
 
+// Tipos de nodo que se pueden conectar como galería de referencias.
 export const REFERENCE_SOURCE_TYPES = new Set(["image", "static-image", "static-image-group"]);
 
-// Prioridades de referencia (1 = la que manda). La foto propia de la etapa
-// manda sobre la continuidad; sin foto propia la continuidad va neutra.
+// Prioridad con que llegan las fotos elegidas de la etapa (1 = la que manda).
+// La continuidad (imagen de la etapa siguiente) va neutra: queda después.
 export const OWN_REFERENCE_PRIORITY = 1;
-export const CONTINUITY_PRIORITY_WITH_OWN = 2;
+
+/** Fotos que aporta un nodo conectado como galería, en orden. */
+export function galleryImagesOf(node: { type?: string; data: Record<string, unknown> }): { url: string; caption?: string }[] {
+  const d = node.data;
+  if (node.type === "static-image-group") {
+    return ((d.images as { url?: string; caption?: string }[] | undefined) ?? [])
+      .filter((i): i is { url: string; caption?: string } => typeof i?.url === "string" && i.url.length > 0);
+  }
+  if (node.type === "static-image" && typeof d.imageUrl === "string" && d.imageUrl) {
+    return [{ url: d.imageUrl, caption: typeof d.caption === "string" ? d.caption : undefined }];
+  }
+  if (node.type === "image" && typeof d.outputUrl === "string" && d.outputUrl) return [{ url: d.outputUrl }];
+  return [];
+}
+
+/**
+ * URLs elegidas para una etapa que siguen disponibles: la galería sigue
+ * conectada al Personaje y todavía contiene la foto.
+ */
+export function stageReferenceUrls(
+  stage: CharacterStage | null | undefined,
+  galleries: { id: string; type?: string; data: Record<string, unknown> }[],
+): string[] {
+  if (!stage?.referenceImages?.length) return [];
+  const available = new Map(galleries.map((g) => [g.id, new Set(galleryImagesOf(g).map((i) => i.url))]));
+  const out: string[] = [];
+  for (const ref of stage.referenceImages) {
+    if (available.get(ref.nodeId)?.has(ref.url) && !out.includes(ref.url)) out.push(ref.url);
+  }
+  return out;
+}
 
 const IMAGE_GAP_X = 160;
 const IMAGE_SLOT_Y = 420;
@@ -60,11 +91,11 @@ export function composeCharacterPrompt(params: {
 }
 
 /**
- * Remapea los ids que guarda el Personaje (imagen y referencia de cada etapa,
- * registros de Generar) al copiar/pegar o insertar una plantilla. Los ids que
- * no vienen en la copia se descartan para que "Generar etapas" cree lo suyo
- * en vez de apuntar a los nodos del original; las referencias externas se
- * conservan (siguen siendo válidas dentro del mismo canvas).
+ * Remapea los ids que guarda el Personaje (imagen y fotos de cada etapa,
+ * registros de Generar) al copiar/pegar o insertar una plantilla. Las imágenes
+ * de etapa que no vienen en la copia se descartan para que "Generar etapas"
+ * cree las suyas en vez de apuntar a las del original; las fotos de galerías
+ * externas se conservan al pegar (siguen siendo válidas en el mismo canvas).
  */
 export function remapCharacterIds(
   data: Record<string, unknown>,
@@ -77,9 +108,10 @@ export function remapCharacterIds(
     stages: stages.map((s) => ({
       ...s,
       imageNodeId: s.imageNodeId && idMap.has(s.imageNodeId) ? idMap.get(s.imageNodeId) : undefined,
-      referenceNodeId: s.referenceNodeId
-        ? idMap.get(s.referenceNodeId) ?? (opts.keepExternalRefs ? s.referenceNodeId : undefined)
-        : undefined,
+      referenceImages: (s.referenceImages ?? []).flatMap((r) => {
+        const nodeId = idMap.get(r.nodeId) ?? (opts.keepExternalRefs ? r.nodeId : undefined);
+        return nodeId ? [{ nodeId, url: r.url }] : [];
+      }),
     })),
     generatedImageIds: ((data.generatedImageIds as string[] | undefined) ?? []).filter((id) => idMap.has(id)).map((id) => idMap.get(id)!),
     managedEdgeIds: ((data.managedEdgeIds as string[] | undefined) ?? []).filter((id) => edgeIdMap?.has(id)).map((id) => edgeIdMap!.get(id)!),
@@ -108,8 +140,8 @@ interface DesiredEdge {
 
 /**
  * Plan para "Generar etapas": una imagen por etapa (reusa la que ya tenga),
- * conectada al Personaje, a su referencia y a la imagen de la etapa siguiente
- * más reciente. Reconcilia solo lo que puso "Generar etapas" antes (ids en
+ * conectada al Personaje (que al ejecutar le entrega texto y fotos de su
+ * etapa) y a la imagen de la etapa siguiente más reciente (continuidad). Reconcilia solo lo que puso "Generar etapas" antes (ids en
  * managedEdgeIds / generatedImageIds); las conexiones del usuario no se tocan.
  * Las imágenes de etapas borradas se eliminan solo si nunca se generaron.
  */
@@ -150,29 +182,13 @@ export function planCharacterMaterialize(
     stageImage.set(stage.id, id);
   });
 
-  // 2. Conexiones deseadas.
+  // 2. Conexiones deseadas. Las fotos de cada etapa no van como conexión
+  // (una galería conectada a la imagen le mandaría TODAS sus fotos): las
+  // entrega el Personaje al ejecutar, según la selección de la etapa.
   const desired: DesiredEdge[] = [];
-  const allIds = new Set([...nodes.map((n) => n.id), ...addNodes.map((n) => n.id)]);
-  const typeOf = (id: string) => byId.get(id)?.type ?? addNodes.find((n) => n.id === id)?.type;
-  const outHandleOf = (type: string | undefined) =>
-    type === "image" || type === "static-image" || type === "static-image-group" ? HANDLE_IDS.OUTPUT_IMAGE : null;
-
   stages.forEach((stage, i) => {
     const img = stageImage.get(stage.id)!;
     desired.push({ source: character.id, sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER, target: img, targetHandle: HANDLE_IDS.INPUT_PROMPT, priority: null });
-
-    let hasOwn = false;
-    if (stage.referenceNodeId) {
-      const refType = typeOf(stage.referenceNodeId);
-      if (!allIds.has(stage.referenceNodeId) || !refType || !REFERENCE_SOURCE_TYPES.has(refType)) {
-        warnings.push(`La referencia de la etapa "${stage.name}" ya no existe; se omitió.`);
-      } else if (stage.referenceNodeId === img) {
-        warnings.push(`La etapa "${stage.name}" no puede usar su propia imagen como referencia.`);
-      } else {
-        hasOwn = true;
-        desired.push({ source: stage.referenceNodeId, sourceHandle: outHandleOf(refType)!, target: img, targetHandle: HANDLE_IDS.INPUT_REFERENCE, priority: OWN_REFERENCE_PRIORITY });
-      }
-    }
     const newer = stages[i + 1];
     if (newer) {
       desired.push({
@@ -180,7 +196,7 @@ export function planCharacterMaterialize(
         sourceHandle: HANDLE_IDS.OUTPUT_IMAGE,
         target: img,
         targetHandle: HANDLE_IDS.INPUT_REFERENCE,
-        priority: hasOwn ? CONTINUITY_PRIORITY_WITH_OWN : null,
+        priority: null,
       });
     }
   });

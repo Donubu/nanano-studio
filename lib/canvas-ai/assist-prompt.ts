@@ -27,7 +27,7 @@ const TYPE_DOCS: Record<string, string> = {
   "params-video": "Preset de parámetros compartido por varios nodos video (model_id, duration, aspect_ratio, resolution, audio_enabled).",
   "params-scene": "Estilo visual / técnica para Escenas (prompt = descripción del estilo). Se concatena al prompt de lo que generan las escenas.",
   script: "Guión: el usuario pega el guion completo (prompt) y con 'Leer guion' se divide en Escenas automáticamente. La IA NO crea escenas: crea el Guión, conéctale estilo (params-scene → params_scene_ref), reglas (texto → rules) y referencias visuales, y deja que el usuario lo lea.",
-  character: "Personaje para desarrollar por etapas (edades, épocas). Entradas: character_dna (texto con los rasgos permanentes) y character_style (texto con el estilo global: estilo de ilustración, paleta, encuadre). Sus etapas van en el campo stages, de la MÁS ANTIGUA a la MÁS RECIENTE, cada una con name corto, text (solo lo propio de esa etapa) y reference opcional (id o ref de un image, static-image o static-image-group). Con generate_stages=true el sistema crea una imagen por etapa, encadenadas desde la más reciente hacia la más antigua para mantener la continuidad; no crees esas imágenes tú.",
+  character: "Personaje para desarrollar por etapas (edades, épocas). El ADN (rasgos permanentes) va en el campo dna del propio nodo. Entradas: character_style (UN texto con el estilo global; el mismo texto puede conectarse a varios personajes) y character_gallery (galerías, imágenes estáticas o imágenes generadas, una o varias). Sus etapas van en stages, de la MÁS ANTIGUA a la MÁS RECIENTE, cada una con name corto, text (solo lo propio de esa etapa) y photos opcional: fotos de referencia elegidas por número dentro de una galería ({gallery, number}). Con generate_stages=true el sistema crea una imagen por etapa, encadenadas desde la más reciente hacia la más antigua para mantener la continuidad; no crees esas imágenes tú.",
   scene: "Escena generada por un Guión (no se crea ni se edita aquí; sí se puede conectar a image/video/text).",
 };
 
@@ -43,8 +43,8 @@ const INPUT_DOCS: Record<string, string> = {
   rules: "reglas extra para todas las escenas del guion (una)",
   script_chain: "cadena Guión → Escena → Escena",
   params_scene_ref: "estilo reutilizable para todas las escenas del guion (uno)",
-  character_dna: "ADN del personaje: rasgos que no cambian entre etapas (uno)",
-  character_style: "estilo global del personaje (uno)",
+  character_style: "estilo global del personaje (un texto; se puede compartir entre personajes)",
+  character_gallery: "galería o imagen de donde cada etapa elige sus fotos de referencia (varias permitidas)",
 };
 
 function connectionManual(): string {
@@ -94,9 +94,9 @@ ${Object.entries(INPUT_DOCS).map(([k, v]) => `- ${k}: ${v}`).join("\n")}
 
 ## Personajes por etapas
 - Si el usuario pega o describe varias etapas de un personaje (edades, épocas, versiones), crea UN nodo character con una etapa por bloque; no crees un nodo por etapa.
-- Separa el texto pegado: lo que se repite en todas las etapas (rasgos físicos permanentes, nombre, personalidad visible) va a un static-text "ADN" conectado a character_dna; el estilo de ilustración, colores o tipo de imagen va a un static-text "Estilo global" conectado a character_style; cada etapa conserva solo lo propio (edad, ropa, pelo, contexto), con las palabras del usuario: no agregues detalles que el usuario no dijo ni repitas en la etapa lo que ya está en el ADN.
+- Separa el texto pegado: lo que se repite en todas las etapas (rasgos físicos permanentes, nombre, personalidad visible) va al campo dna del character; el estilo de ilustración, colores o tipo de imagen va a un static-text "Estilo global" conectado a character_style (si ya existe un texto de estilo en el canvas, conéctalo en vez de crear otro); cada etapa conserva solo lo propio (edad, ropa, pelo, contexto), con las palabras del usuario: no agregues detalles que el usuario no dijo ni repitas en la etapa lo que ya está en el ADN. Si el usuario solo nombra la etapa ("juvenil", "ninfa recién nacida"), su text es exactamente eso: no la describas tú.
 - Ordena las etapas de la más antigua a la más reciente aunque el usuario las haya escrito al revés. name: corto ("5 años", "Adolescencia").
-- Si el usuario menciona una foto o imagen suya para una etapa y existe en el canvas, úsala como reference de esa etapa (normalmente la más reciente).
+- Si el usuario indica fotos para una etapa ("la foto 2 de la galería Fotos para la actual"), ponlas en photos de esa etapa con el id de la galería y su número (aparecen numeradas en el canvas actual). Si no indica cuáles, no elijas fotos por tu cuenta.
 - Para editar etapas de un character existente, manda update_node con la lista COMPLETA de stages (las que no cambian, igual que estaban).
 - generate_stages=true si el usuario pide generar, crear las imágenes o "armar todo"; si solo pide definir o separar etapas, false.
 
@@ -140,6 +140,7 @@ export const ASSIST_SCHEMA = {
           from: { type: "string" },
           to: { type: "string" },
           input: { type: "string", enum: Object.keys(INPUT_KINDS) },
+          dna: { type: "string" },
           stages: {
             type: "array",
             items: {
@@ -147,7 +148,14 @@ export const ASSIST_SCHEMA = {
               properties: {
                 name: { type: "string" },
                 text: { type: "string" },
-                reference: { type: "string" },
+                photos: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: { gallery: { type: "string" }, number: { type: "integer" } },
+                    required: ["gallery", "number"],
+                  },
+                },
               },
               required: ["name", "text"],
             },
@@ -201,10 +209,22 @@ export function buildAssistUserText(params: {
     if (n.locked) bits.push("BLOQUEADO");
     if (selectedIds.includes(n.id)) bits.push("SELECCIONADO");
     const text = n.text ? `\n    texto: ${JSON.stringify(n.text)}` : "";
+    const dna = n.dna ? `\n    ADN: ${JSON.stringify(n.dna.slice(0, 400))}` : "";
+    const photoName = (url: string) => {
+      for (const g of nodes) {
+        const idx = (g.images ?? []).indexOf(url);
+        if (idx >= 0) return `${g.id}#${idx + 1}`;
+      }
+      return "?";
+    };
     const stageLines = (n.stages ?? [])
-      .map((st, i) => `\n    etapa ${i + 1}: name=${JSON.stringify(st.name)} text=${JSON.stringify(st.text.slice(0, 300))}${st.referenceNodeId ? ` reference=${st.referenceNodeId}` : ""}${st.imageNodeId ? ` imagen=${st.imageNodeId}` : ""}`)
+      .map((st, i) => {
+        const photos = (st.referenceImages ?? []).map((r) => photoName(r.url)).join(", ");
+        return `\n    etapa ${i + 1}: name=${JSON.stringify(st.name)} text=${JSON.stringify(st.text.slice(0, 300))}${photos ? ` fotos=${photos}` : ""}${st.imageNodeId ? ` imagen=${st.imageNodeId}` : ""}`;
+      })
       .join("");
-    return `- ${bits.join(" · ")}${text}${stageLines}`;
+    const images = n.images?.length ? `\n    ${n.images.length} ${n.images.length === 1 ? "foto" : "fotos"} (numeradas 1..${n.images.length})` : "";
+    return `- ${bits.join(" · ")}${text}${dna}${images}${stageLines}`;
   });
   const byHandle = new Map<string, string>();
   for (const [kind, handle] of Object.entries(INPUT_KINDS)) byHandle.set(handle, kind);

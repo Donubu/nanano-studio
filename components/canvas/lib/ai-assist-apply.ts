@@ -4,6 +4,7 @@
 
 import type { Node, Edge } from "@xyflow/react";
 import { autoLayoutPositions } from "./auto-layout";
+import { REFERENCE_SOURCE_TYPES, galleryImagesOf } from "./character";
 import type { AssistSnapshotEdge, AssistSnapshotNode, PlanNode } from "@/lib/canvas-ai/assist-plan";
 
 const MAX_TEXT = 600;
@@ -36,6 +37,10 @@ export function buildAssistSnapshot(nodes: Node[], edges: Edge[]): {
         hasOutput: Boolean(d.outputUrl || d.outputText || (Array.isArray(d.images) && d.images.length > 0) || d.imageUrl),
         locked: d.locked === true,
         ...(n.type === "character" && Array.isArray(d.stages) ? { stages: d.stages as AssistSnapshotNode["stages"] } : {}),
+        ...(n.type === "character" && typeof d.dna === "string" && d.dna ? { dna: d.dna } : {}),
+        ...(REFERENCE_SOURCE_TYPES.has(n.type ?? "")
+          ? { images: galleryImagesOf({ type: n.type, data: d }).map((i) => i.url).slice(0, 24) }
+          : {}),
       };
     }),
     edges: edges.map((e) => ({

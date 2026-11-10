@@ -235,25 +235,33 @@ export interface SceneNodeData extends BaseNodeData {
 export const MAX_SCENES_PER_SCRIPT = 30;
 
 // --- Character Node (desarrollo de personaje por etapas) ---
-// Recibe el ADN del personaje (rasgos permanentes) y un estilo global por sus
-// entradas, y define etapas (edades, épocas…). "Generar etapas" crea un nodo
-// imagen por etapa: cada uno recibe ADN + estilo + el texto de SU etapa desde
-// este nodo (vínculo vivo, se lee al ejecutar), la referencia elegida para la
-// etapa (prioridad 1) y la imagen de la etapa siguiente más reciente como
-// referencia de continuidad. Las etapas van de la más antigua (índice 0) a la
-// más reciente (la última); la cadena se genera desde la más reciente.
+// El ADN (rasgos permanentes) se escribe en el nodo; el estilo global llega
+// por una entrada de texto (el mismo texto puede alimentar a varios
+// Personajes) y las galerías/imágenes de referencia por otra. Cada etapa
+// (edad, época…) tiene su texto y las fotos elegidas de esas galerías.
+// "Generar etapas" crea un nodo imagen por etapa: al ejecutar, cada uno recibe
+// de este nodo ADN + estilo + el texto de SU etapa y sus fotos (prioridad 1),
+// todo leído en ese momento (vínculo vivo), más la imagen de la etapa
+// siguiente más reciente como referencia de continuidad. Las etapas van de la
+// más antigua (índice 0) a la más reciente; la cadena parte por la más reciente.
+export interface CharacterReferenceImage {
+  // Nodo conectado a la entrada de galerías del que viene la foto.
+  nodeId: string;
+  url: string;
+}
+
 export interface CharacterStage {
   id: string;
   name: string;
   text: string;
-  // Nodo image / static-image / static-image-group elegido como referencia.
-  referenceNodeId?: string;
+  referenceImages?: CharacterReferenceImage[];
   // Nodo imagen creado por "Generar etapas" para esta etapa.
   imageNodeId?: string;
 }
 
 export interface CharacterNodeData extends BaseNodeData {
   type: "character";
+  dna: string;
   stages: CharacterStage[];
   // Imágenes creadas alguna vez por "Generar etapas" y conexiones que puso
   // (para reconciliar al volver a generar sin tocar lo que hizo el usuario).
@@ -304,8 +312,8 @@ export const HANDLE_IDS = {
   INPUT_VISUAL_REFERENCE: "input-visual-reference",
   INPUT_PARAMS_SCENE_REF: "input-params-scene-ref",
   INPUT_RULES: "input-rules",
-  INPUT_CHARACTER_DNA: "input-character-dna",
   INPUT_CHARACTER_STYLE: "input-character-style",
+  INPUT_CHARACTER_GALLERY: "input-character-gallery",
   OUTPUT_CHARACTER: "output-character",
 } as const;
 
@@ -475,6 +483,7 @@ export function getDefaultNodeData(type: CanvasNodeType): CanvasNodeData {
         type: "character",
         label: "Personaje",
         status: "completed",
+        dna: "",
         stages: [],
       };
   }

@@ -162,48 +162,53 @@ describe("buildAssistPlan", () => {
 });
 
 describe("buildAssistPlan · Personaje", () => {
-  it("crea un Personaje con etapas, ADN y estilo conectados, y pide generar", () => {
-    const snapshot = { nodes: [{ id: "foto", type: "static-image", label: "Foto actual" }], edges: [] };
+  const galSnap = { id: "gal", type: "static-image-group", label: "Fotos", images: ["https://x/1.png", "https://x/2.png"] };
+
+  it("crea un Personaje con ADN en el nodo, estilo conectado y fotos elegidas por número", () => {
     const plan = buildAssistPlan(
       {
         ops: [
-          { op: "add_node", ref: "dna", node_type: "static-text", label: "ADN", prompt: "ojos verdes" },
           { op: "add_node", ref: "sty", node_type: "static-text", label: "Estilo", prompt: "acuarela" },
           {
-            op: "add_node", ref: "c", node_type: "character", label: "Ana", generate_stages: true,
+            op: "add_node", ref: "c", node_type: "character", label: "Ana", dna: "ojos verdes", generate_stages: true,
             stages: [
               { name: "5 años", text: "niña" },
-              { name: "35 años", text: "adulta", reference: "foto" },
+              { name: "35 años", text: "adulta", photos: [{ gallery: "gal", number: 2 }, { gallery: "gal", number: 9 }] },
               { name: "", text: "" },
             ],
           },
-          { op: "connect", from: "dna", to: "c", input: "character_dna" },
           { op: "connect", from: "sty", to: "c", input: "character_style" },
           { op: "connect", from: "sty", to: "c", input: "character_style" },
         ],
       },
-      snapshot,
+      { nodes: [galSnap], edges: [] },
       models,
       { idPrefix: "x" },
     );
     const c = plan.addNodes.find((n) => n.type === "character")!;
+    expect(c.data.dna).toBe("ojos verdes");
     expect(c.data.stages).toEqual([
       { id: "st-x-1", name: "5 años", text: "niña" },
-      { id: "st-x-2", name: "35 años", text: "adulta", referenceNodeId: "foto" },
+      { id: "st-x-2", name: "35 años", text: "adulta", referenceImages: [{ nodeId: "gal", url: "https://x/2.png" }] },
     ]);
-    expect(plan.addEdges.map((e) => e.targetHandle)).toEqual([HANDLE_IDS.INPUT_CHARACTER_DNA, HANDLE_IDS.INPUT_CHARACTER_STYLE]);
+    // La galería se conecta sola al Personaje; el estilo, una sola vez.
+    expect(plan.addEdges.map((e) => [e.source, e.targetHandle])).toEqual([
+      ["gal", HANDLE_IDS.INPUT_CHARACTER_GALLERY],
+      [plan.addNodes[0].id, HANDLE_IDS.INPUT_CHARACTER_STYLE],
+    ]);
+    expect(plan.warnings.join(" ")).toMatch(/foto número 9/);
     expect(plan.materializeCharacterIds).toEqual([c.id]);
   });
 
-  it("al editar etapas conserva la imagen y referencia de las que siguen", () => {
+  it("al editar etapas conserva imagen y fotos de las que siguen", () => {
     const snapshot = {
       nodes: [{
         id: "char", type: "character",
         stages: [
-          { id: "a", name: "5 años", text: "niña", imageNodeId: "img-a", referenceNodeId: "foto" },
+          { id: "a", name: "5 años", text: "niña", imageNodeId: "img-a", referenceImages: [{ nodeId: "gal", url: "https://x/1.png" }] },
           { id: "b", name: "35 años", text: "adulta", imageNodeId: "img-b" },
         ],
-      }, { id: "foto", type: "static-image" }],
+      }, galSnap],
       edges: [],
     };
     const plan = buildAssistPlan(
@@ -216,24 +221,24 @@ describe("buildAssistPlan · Personaje", () => {
       models,
       { idPrefix: "y" },
     );
-    const st = plan.updates[0].patch.stages as { id: string; imageNodeId?: string; referenceNodeId?: string; text: string }[];
-    expect(st[0]).toMatchObject({ id: "a", imageNodeId: "img-a", referenceNodeId: "foto", text: "niña con lentes" });
+    const st = plan.updates[0].patch.stages as { id: string; imageNodeId?: string; referenceImages?: unknown[]; text: string }[];
+    expect(st[0]).toMatchObject({ id: "a", imageNodeId: "img-a", referenceImages: [{ nodeId: "gal", url: "https://x/1.png" }], text: "niña con lentes" });
     expect(st[1].imageNodeId).toBeUndefined();
     expect(st[2]).toMatchObject({ id: "b", imageNodeId: "img-b" });
     expect(plan.materializeCharacterIds).toEqual([]);
   });
 
-  it("rechaza una referencia que no es imagen", () => {
+  it("rechaza fotos de algo que no es galería ni imagen", () => {
     const plan = buildAssistPlan(
       { ops: [
         { op: "add_node", ref: "t", node_type: "static-text" },
-        { op: "add_node", ref: "c", node_type: "character", stages: [{ name: "x", text: "y", reference: "t" }] },
+        { op: "add_node", ref: "c", node_type: "character", stages: [{ name: "x", text: "y", photos: [{ gallery: "t", number: 1 }] }] },
       ] },
       empty,
       models,
     );
-    expect(plan.addNodes[1].data.stages).toEqual([expect.not.objectContaining({ referenceNodeId: expect.anything() })]);
-    expect(plan.warnings[0]).toMatch(/no es una imagen/);
+    expect(plan.addNodes[1].data.stages).toEqual([{ id: expect.any(String), name: "x", text: "y", referenceImages: [] }]);
+    expect(plan.warnings[0]).toMatch(/no es una galería/);
   });
 });
 

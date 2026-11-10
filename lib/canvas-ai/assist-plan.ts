@@ -37,13 +37,16 @@ export interface AssistSnapshotNode {
   locked?: boolean;
   // Solo nodos character.
   stages?: AssistSnapshotStage[];
+  dna?: string;
+  // Fotos de una galería / imagen estática / imagen generada, en orden.
+  images?: string[];
 }
 
 export interface AssistSnapshotStage {
   id: string;
   name: string;
   text: string;
-  referenceNodeId?: string;
+  referenceImages?: { nodeId: string; url: string }[];
   imageNodeId?: string;
 }
 
@@ -84,8 +87,8 @@ export const INPUT_KINDS = {
   rules: HANDLE_IDS.INPUT_RULES,
   script_chain: HANDLE_IDS.INPUT_SCRIPT_CHAIN,
   params_scene_ref: HANDLE_IDS.INPUT_PARAMS_SCENE_REF,
-  character_dna: HANDLE_IDS.INPUT_CHARACTER_DNA,
   character_style: HANDLE_IDS.INPUT_CHARACTER_STYLE,
+  character_gallery: HANDLE_IDS.INPUT_CHARACTER_GALLERY,
 } as const;
 export type InputKind = keyof typeof INPUT_KINDS;
 
@@ -109,8 +112,9 @@ export interface AssistOp {
   from?: string;
   to?: string;
   input?: string;
-  // character: etapas de la más antigua a la más reciente.
-  stages?: { name?: string; text?: string; reference?: string }[];
+  // character: ADN y etapas de la más antigua a la más reciente.
+  dna?: string;
+  stages?: { name?: string; text?: string; photos?: { gallery: string; number: number }[] }[];
   generate_stages?: boolean;
 }
 
@@ -264,6 +268,8 @@ export function buildAssistPlan(
       else if (type === "static-image") patch.caption = clip(text, 300);
     }
 
+    if (type === "character" && typeof op.dna === "string") patch.dna = clip(op.dna.trim(), MAX_PROMPT_CHARS);
+
     const gen = generationTypeOf(type);
     if (gen && op.model_id != null) {
       const m = modelFor(type, op.model_id);
@@ -325,11 +331,48 @@ export function buildAssistPlan(
     return patch;
   };
 
-  // Etapas de un Personaje desde la op. Conserva id, imagen y referencia de
-  // las etapas existentes con el mismo nombre (así "Generar etapas" no
-  // duplica imágenes al editar).
+  // Conecta source → target con la regla que corresponda (o la entrada
+  // pedida). Devuelve false y deja un aviso si no se puede.
+  const connect = (source: string, target: string, input?: string): boolean => {
+    const sType = nodeType.get(source)!;
+    const tType = nodeType.get(target)!;
+    const wanted = input && input in INPUT_KINDS ? INPUT_KINDS[input as InputKind] : null;
+    const rules = VALID_CONNECTIONS.filter(
+      (r) => r.sourceType === sType && r.targetType === tType && (!wanted || r.targetHandle === wanted),
+    );
+    if (rules.length === 0) {
+      warnings.push(`${nameOf(source)} (${sType}) no se puede conectar a ${nameOf(target)} (${tType})${input ? ` como ${input}` : ""}.`);
+      return false;
+    }
+    if (edges.some((e) => e.source === source && e.target === target && rules.some((r) => r.targetHandle === baseHandleId(e.targetHandle)))) {
+      return true; // ya conectados
+    }
+    const simNodes = [...nodeType.entries()].map(([id, type]) => ({ id, type, position: { x: 0, y: 0 }, data: {} }));
+    const rule = rules.find((r) =>
+      isValidConnection({ source, target, sourceHandle: r.sourceHandle, targetHandle: r.targetHandle }, simNodes, edges),
+    );
+    if (!rule) {
+      warnings.push(`La entrada de ${nameOf(target)} ya está ocupada; no se conectó ${nameOf(source)}.`);
+      return false;
+    }
+    if (wouldCreateCycle(edges, source, target)) {
+      warnings.push(`Conectar ${nameOf(source)} → ${nameOf(target)} crearía un ciclo.`);
+      return false;
+    }
+    edgeSeq += 1;
+    const edge: PlanEdge = { id: `e-${prefix}-${edgeSeq}`, source, sourceHandle: rule.sourceHandle, target, targetHandle: rule.targetHandle };
+    plan.addEdges.push(edge);
+    edges.push({ ...edge });
+    return true;
+  };
+
+  // Etapas de un Personaje desde la op. Conserva id, imagen y fotos de las
+  // etapas existentes con el mismo nombre (así "Generar etapas" no duplica
+  // imágenes al editar). Las fotos se eligen por número dentro de una
+  // galería del canvas; si la galería no está conectada al Personaje, se
+  // conecta.
   let stageSeq = 0;
-  const stagesFor = (op: AssistOp, previous: AssistSnapshotStage[]): AssistSnapshotStage[] | null => {
+  const stagesFor = (op: AssistOp, previous: AssistSnapshotStage[], characterId: string): AssistSnapshotStage[] | null => {
     if (!Array.isArray(op.stages)) return null;
     const byName = new Map(previous.map((st) => [st.name.trim().toLowerCase(), st]));
     const out: AssistSnapshotStage[] = [];
@@ -340,11 +383,25 @@ export function buildAssistPlan(
       const prev = byName.get(name.toLowerCase());
       stageSeq += 1;
       const stage: AssistSnapshotStage = prev ? { ...prev, name, text } : { id: `st-${prefix}-${stageSeq}`, name, text };
-      if (raw.reference) {
-        const refId = resolve(raw.reference);
-        const refType = refId ? nodeType.get(refId) : undefined;
-        if (refId && refType && REFERENCE_TYPES.has(refType)) stage.referenceNodeId = refId;
-        else warnings.push(`La referencia "${raw.reference}" de la etapa "${name}" no es una imagen o galería del canvas.`);
+      if (Array.isArray(raw.photos)) {
+        const refs: { nodeId: string; url: string }[] = [];
+        for (const ph of raw.photos) {
+          const gid = resolve(ph.gallery);
+          const gType = gid ? nodeType.get(gid) : undefined;
+          if (!gid || !gType || !REFERENCE_TYPES.has(gType)) {
+            warnings.push(`"${ph.gallery}" no es una galería o imagen del canvas (etapa "${name}").`);
+            continue;
+          }
+          const images = existing.get(gid)?.images ?? [];
+          const url = images[Math.round(ph.number) - 1];
+          if (!url) {
+            warnings.push(`${nameOf(gid)} no tiene una foto número ${ph.number} (etapa "${name}").`);
+            continue;
+          }
+          if (!refs.some((r) => r.url === url)) refs.push({ nodeId: gid, url });
+          connect(gid, characterId, "character_gallery");
+        }
+        stage.referenceImages = refs;
       }
       out.push(stage);
     }
@@ -385,15 +442,15 @@ export function buildAssistPlan(
         // En video, fieldsFor ajusta duración/proporción/resolución a las
         // capacidades del modelo (el elegido o el predeterminado del proyecto).
         const data = { ...base, ...fieldsFor(type, op, base) };
-        if (type === "character") {
-          data.stages = stagesFor(op, []) ?? [];
-          markGenerate(op, id);
-        }
         const node: PlanNode = { id, type, data };
         plan.addNodes.push(node);
         newById.set(id, node);
         nodeType.set(id, type);
         if (ref) refToId.set(ref, id);
+        if (type === "character") {
+          data.stages = stagesFor(op, [], id) ?? [];
+          markGenerate(op, id);
+        }
         break;
       }
 
@@ -408,7 +465,7 @@ export function buildAssistPlan(
         if (fresh) {
           Object.assign(fresh.data, fieldsFor(type, op, fresh.data));
           if (type === "character") {
-            const st = stagesFor(op, (fresh.data.stages as AssistSnapshotStage[]) ?? []);
+            const st = stagesFor(op, (fresh.data.stages as AssistSnapshotStage[]) ?? [], id);
             if (st) fresh.data.stages = st;
             markGenerate(op, id);
           }
@@ -431,7 +488,7 @@ export function buildAssistPlan(
         };
         const patch = fieldsFor(type, op, base);
         if (type === "character") {
-          const st = stagesFor(op, snap.stages ?? []);
+          const st = stagesFor(op, snap.stages ?? [], id);
           if (st) patch.stages = st;
           markGenerate(op, id);
         }
@@ -476,45 +533,7 @@ export function buildAssistPlan(
           warnings.push(`No pude conectar "${op.from}" → "${op.to}": falta uno de los nodos.`);
           break;
         }
-        const sType = nodeType.get(source)!;
-        const tType = nodeType.get(target)!;
-        const wanted = op.input && op.input in INPUT_KINDS ? INPUT_KINDS[op.input as InputKind] : null;
-        const rules = VALID_CONNECTIONS.filter(
-          (r) => r.sourceType === sType && r.targetType === tType && (!wanted || r.targetHandle === wanted),
-        );
-        if (rules.length === 0) {
-          warnings.push(`${nameOf(source)} (${sType}) no se puede conectar a ${nameOf(target)} (${tType})${op.input ? ` como ${op.input}` : ""}.`);
-          break;
-        }
-        if (edges.some((e) => e.source === source && e.target === target && rules.some((r) => r.targetHandle === baseHandleId(e.targetHandle)))) {
-          break; // ya conectados
-        }
-        const simNodes = [...nodeType.entries()].map(([id, type]) => ({ id, type, position: { x: 0, y: 0 }, data: {} }));
-        const rule = rules.find((r) =>
-          isValidConnection(
-            { source, target, sourceHandle: r.sourceHandle, targetHandle: r.targetHandle },
-            simNodes,
-            edges,
-          ),
-        );
-        if (!rule) {
-          warnings.push(`La entrada de ${nameOf(target)} ya está ocupada; no se conectó ${nameOf(source)}.`);
-          break;
-        }
-        if (wouldCreateCycle(edges, source, target)) {
-          warnings.push(`Conectar ${nameOf(source)} → ${nameOf(target)} crearía un ciclo.`);
-          break;
-        }
-        edgeSeq += 1;
-        const edge: PlanEdge = {
-          id: `e-${prefix}-${edgeSeq}`,
-          source,
-          sourceHandle: rule.sourceHandle,
-          target,
-          targetHandle: rule.targetHandle,
-        };
-        plan.addEdges.push(edge);
-        edges.push({ ...edge });
+        connect(source, target, op.input);
         break;
       }
 

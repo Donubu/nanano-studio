@@ -5,7 +5,7 @@ import type { Node } from "@xyflow/react";
 import type { CanvasNodeData, CanvasNodeStatus, ExecutionProgress, ImageNodeData, TextNodeData, TextPracticanteNodeData, VideoNodeData, StaticTextNodeData, StaticImageNodeData, StaticImageGroupNodeData, OutputHistoryEntry, PracticanteFile, SceneNodeData, ParamsSceneNodeData, CharacterNodeData } from "../lib/canvas-types";
 import { HANDLE_IDS, baseHandleId } from "../lib/canvas-types";
 import { topologicalSort, getDirectInputs, getDescendantNodes } from "../lib/topological-sort";
-import { composeCharacterPrompt, findStageForImage } from "../lib/character";
+import { OWN_REFERENCE_PRIORITY, composeCharacterPrompt, findStageForImage, stageReferenceUrls } from "../lib/character";
 import type { CanvasEdge } from "../lib/canvas-types";
 import type { CanvasGenerationConfig } from "../canvas-workspace";
 
@@ -150,6 +150,19 @@ interface ResolvedInputs {
   paramsOverride: Record<string, unknown> | null;
 }
 
+/** Fotos elegidas en el Personaje para la etapa de una imagen dada. */
+function characterStagePhotos(character: Node, imageNodeId: string, nodes: Node[], edges: CanvasEdge[]): string[] {
+  const data = character.data as unknown as CharacterNodeData;
+  const stage = findStageForImage(data, imageNodeId);
+  if (!stage?.referenceImages?.length) return [];
+  const galleries = getDirectInputs(character.id, edges)
+    .filter((i) => i.targetHandle === HANDLE_IDS.INPUT_CHARACTER_GALLERY)
+    .map((i) => nodes.find((n) => n.id === i.sourceNodeId))
+    .filter((n): n is Node => !!n)
+    .map((n) => ({ id: n.id, type: n.type, data: n.data as Record<string, unknown> }));
+  return stageReferenceUrls(stage, galleries);
+}
+
 /** Texto de salida de un nodo de texto (estático, IA o Practicante). */
 function plainTextOutput(node: Node): string | null {
   const d = node.data as Record<string, unknown>;
@@ -193,17 +206,15 @@ function resolveNodeInputs(
       if (sourceNode.type === "character") {
         // ADN + estilo global + la etapa de ESTA imagen, leídos al ejecutar.
         const charData = sourceData as CharacterNodeData;
-        const charInputs = getDirectInputs(sourceNode.id, edges);
-        const textFrom = (handle: string) => {
-          const inp = charInputs.find((i) => i.targetHandle === handle);
-          const src = inp ? nodes.find((n) => n.id === inp.sourceNodeId) : undefined;
-          return src ? plainTextOutput(src) : null;
-        };
+        const styleInput = getDirectInputs(sourceNode.id, edges).find((i) => i.targetHandle === HANDLE_IDS.INPUT_CHARACTER_STYLE);
+        const styleNode = styleInput ? nodes.find((n) => n.id === styleInput.sourceNodeId) : undefined;
         const composed = composeCharacterPrompt({
-          dna: textFrom(HANDLE_IDS.INPUT_CHARACTER_DNA),
-          style: textFrom(HANDLE_IDS.INPUT_CHARACTER_STYLE),
+          dna: charData.dna,
+          style: styleNode ? plainTextOutput(styleNode) : null,
           stage: findStageForImage(charData, nodeId),
-          hasReferences: inputs.some((i) => i.targetHandle === HANDLE_IDS.INPUT_REFERENCE),
+          hasReferences:
+            characterStagePhotos(sourceNode, nodeId, nodes, edges).length > 0 ||
+            inputs.some((i) => i.targetHandle === HANDLE_IDS.INPUT_REFERENCE),
         });
         return composed || null;
       }
@@ -234,6 +245,15 @@ function resolveNodeInputs(
       const text = getTextOutput();
       if (text) {
         promptContext += (promptContext ? "\n\n" : "") + text;
+      }
+      // Personaje: las fotos elegidas para la etapa de esta imagen entran
+      // como referencia con prioridad 1 (por delante de la continuidad).
+      if (sourceNode.type === "character") {
+        const photos = characterStagePhotos(sourceNode, nodeId, nodes, edges);
+        if (photos.length > 0) {
+          referenceImageUrl = referenceImageUrl ?? photos[0];
+          referenceGroups.push({ urls: photos, priority: OWN_REFERENCE_PRIORITY });
+        }
       }
     }
 

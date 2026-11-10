@@ -74,10 +74,19 @@ function cleanSnapshot(raw: unknown): { nodes: AssistSnapshotNode[]; edges: Assi
               id: x.id,
               name: typeof x.name === "string" ? x.name.slice(0, 80) : "",
               text: typeof x.text === "string" ? x.text.slice(0, 2000) : "",
-              referenceNodeId: typeof x.referenceNodeId === "string" ? x.referenceNodeId : undefined,
+              referenceImages: Array.isArray(x.referenceImages)
+                ? (x.referenceImages as unknown[]).slice(0, 24).flatMap((r) => {
+                    const y = r as Record<string, unknown> | null;
+                    return y && typeof y.nodeId === "string" && typeof y.url === "string" ? [{ nodeId: y.nodeId, url: y.url }] : [];
+                  })
+                : undefined,
               imageNodeId: typeof x.imageNodeId === "string" ? x.imageNodeId : undefined,
             }];
           })
+        : undefined,
+      dna: typeof o.dna === "string" ? o.dna.slice(0, 2000) : undefined,
+      images: Array.isArray(o.images)
+        ? (o.images as unknown[]).filter((u): u is string => typeof u === "string" && /^https:\/\//.test(u)).slice(0, 24)
         : undefined,
     });
   }
