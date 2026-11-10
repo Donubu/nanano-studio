@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
+import { remapCharacterIds } from "@/components/canvas/lib/character";
 import type { TemplateNode, TemplateEdge } from "@/lib/canvas-templates";
 
 interface ConversationCheckRow extends RowDataPacket {
@@ -81,6 +82,9 @@ export async function POST(
       idMap.set(node.id, `node-tpl${stamp}-${i + 1}`);
     });
 
+    const edgeIdMap = new Map<string, string>();
+    templateEdges.forEach((edge, i) => edgeIdMap.set(edge.id, `e-tpl${stamp}-${i + 1}`));
+
     let dx = 0;
     let dy = 0;
     if (position && typeof position.x === "number" && typeof position.y === "number") {
@@ -96,6 +100,11 @@ export async function POST(
       if (typeof data.scriptNodeId === "string" && idMap.has(data.scriptNodeId)) {
         data.scriptNodeId = idMap.get(data.scriptNodeId)!;
       }
+      // Personaje: imagen/referencia de cada etapa apuntan a los nodos nuevos;
+      // una referencia a un nodo fuera del template no existe en este canvas.
+      if (node.type === "character") {
+        Object.assign(data, remapCharacterIds(data, idMap, edgeIdMap, { keepExternalRefs: false }));
+      }
       return {
         ...node,
         id: idMap.get(node.id)!,
@@ -108,7 +117,7 @@ export async function POST(
       .filter((edge) => idMap.has(edge.source) && idMap.has(edge.target))
       .map((edge, i) => ({
         ...edge,
-        id: `e-tpl${stamp}-${i + 1}`,
+        id: edgeIdMap.get(edge.id) ?? `e-tpl${stamp}-${i + 1}`,
         source: idMap.get(edge.source)!,
         target: idMap.get(edge.target)!,
       }));

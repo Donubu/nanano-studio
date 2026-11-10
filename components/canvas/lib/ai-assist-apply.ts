@@ -35,6 +35,7 @@ export function buildAssistSnapshot(nodes: Node[], edges: Edge[]): {
         duration: typeof d.duration === "number" ? d.duration : undefined,
         hasOutput: Boolean(d.outputUrl || d.outputText || (Array.isArray(d.images) && d.images.length > 0) || d.imageUrl),
         locked: d.locked === true,
+        ...(n.type === "character" && Array.isArray(d.stages) ? { stages: d.stages as AssistSnapshotNode["stages"] } : {}),
       };
     }),
     edges: edges.map((e) => ({

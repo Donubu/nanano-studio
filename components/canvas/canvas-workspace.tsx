@@ -50,7 +50,7 @@ import { isValidConnection, wouldCreateCycle, getCompatibleTargetTypes, getCompa
 import { autoLayoutPositions } from "./lib/auto-layout";
 import { getDefaultNodeData, type CanvasNodeType, type CanvasNodeData, type CanvasEdge, HANDLE_IDS } from "./lib/canvas-types";
 import { getDescendantNodes } from "./lib/topological-sort";
-import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Type, Settings, Bot, Sparkles, Film, Play, Loader2 } from "lucide-react";
+import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Type, Settings, Bot, Sparkles, Film, Play, Loader2, UserRound } from "lucide-react";
 import { CanvasProvider } from "./canvas-context";
 import { LabeledEdge } from "./edges/labeled-edge";
 import { ImagePickerModal } from "@/components/chat/image-picker-modal";
@@ -61,6 +61,9 @@ import { buildClipboardPayload, writeCanvasClipboard, readCanvasClipboard, remap
 import { CanvasAiBar, type CanvasAiResult } from "./canvas-ai-bar";
 import { buildAssistSnapshot, placeNewNodes, relayoutMeasuredBlock, type AssistUndoRecord } from "./lib/ai-assist-apply";
 import type { AssistPlan } from "@/lib/canvas-ai/assist-plan";
+import { CharacterNodeComponent } from "./nodes/character-node";
+import { planCharacterMaterialize } from "./lib/character";
+import type { CharacterMaterializeResult } from "./canvas-context";
 import { CursorOverlay } from "./collaboration/cursor-overlay";
 import { PresenceBar } from "./collaboration/presence-bar";
 import { ConnectorGhost } from "./collaboration/connector-ghost";
@@ -88,6 +91,7 @@ const nodeTypes: NodeTypes = {
   "params-video": ParamsNodeComponent,
   "params-scene": ParamsSceneNodeComponent,
   "script": ScriptNodeComponent,
+  "character": CharacterNodeComponent,
   "scene": SceneNodeComponent,
 };
 
@@ -584,6 +588,83 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     [nodes, selectedNodeId],
   );
 
+  // "Generar etapas" de un Personaje: crea/actualiza una imagen por etapa y
+  // sus conexiones (ver lib/character.ts), persistido y compartido.
+  // Recibe el estado sobre el que trabajar (el asistente lo llama justo
+  // después de aplicar su plan, antes de que React re-renderice) y devuelve
+  // el estado resultante.
+  const materializeCharacterFrom = useCallback(async (
+    characterId: string,
+    curNodes: Node[],
+    curEdges: Edge[],
+  ): Promise<CharacterMaterializeResult & { nodes: Node[]; edges: Edge[] }> => {
+    if (!canEdit) throw new Error("Solo el editor del canvas puede generar etapas.");
+    await ensureConversation();
+    const character = curNodes.find((n) => n.id === characterId);
+    if (!character || character.type !== "character") throw new Error("El Personaje ya no existe.");
+    const plan = planCharacterMaterialize(character, curNodes, curEdges);
+
+    const removeNodes = new Set(plan.removeNodeIds);
+    const removeEdges = new Set(plan.removeEdgeIds);
+    const updatedEdges = new Map(plan.updateEdges.map((e) => [e.id, e]));
+    const updatedCharacter: Node = { ...character, data: plan.characterData as unknown as Record<string, unknown> };
+    const nextNodes = [
+      ...curNodes.filter((n) => !removeNodes.has(n.id)).map((n) => (n.id === characterId ? updatedCharacter : n)),
+      ...plan.addNodes,
+    ];
+    const nextEdges = [
+      ...curEdges.filter((e) => !removeEdges.has(e.id)).map((e) => updatedEdges.get(e.id) ?? e),
+      ...plan.addEdges,
+    ];
+
+    takeSnapshot();
+    setNodes(nextNodes);
+    setEdges(nextEdges);
+
+    await Promise.all([persist.saveNode(updatedCharacter), ...plan.addNodes.map((n) => persist.saveNode(n))]);
+    collab.emitNodeData(characterId, plan.characterData as unknown as Record<string, unknown>);
+    for (const n of plan.addNodes) collab.emitNodeAdd(n as unknown as Record<string, unknown>);
+    if (removeNodes.size > 0) {
+      persist.deleteNodes([...removeNodes]);
+      for (const id of removeNodes) collab.emitNodeRemove(id);
+    }
+    const explicitEdgeRemovals = plan.removeEdgeIds.filter((id) => {
+      const e = curEdges.find((x) => x.id === id);
+      return e && !removeNodes.has(e.source) && !removeNodes.has(e.target);
+    });
+    if (explicitEdgeRemovals.length > 0) {
+      persist.deleteEdges(explicitEdgeRemovals);
+      for (const id of explicitEdgeRemovals) collab.emitEdgeRemove(id);
+    }
+    for (const e of [...plan.updateEdges, ...plan.addEdges]) {
+      persist.createEdge(e);
+      collab.emitEdgeAdd(e as unknown as Record<string, unknown>);
+    }
+
+    const parts: string[] = [];
+    if (plan.addNodes.length) parts.push(`${plan.addNodes.length} ${plan.addNodes.length === 1 ? "imagen nueva" : "imágenes nuevas"}`);
+    if (removeNodes.size) parts.push(`${removeNodes.size} sin usar ${removeNodes.size === 1 ? "eliminada" : "eliminadas"}`);
+    if (plan.addEdges.length) parts.push(`${plan.addEdges.length} ${plan.addEdges.length === 1 ? "conexión" : "conexiones"}`);
+    if (plan.addNodes.length > 0) {
+      setTimeout(() => fitView({ nodes: [characterId, ...plan.addNodes.map((n) => n.id)].map((id) => ({ id })), padding: 0.2, duration: 500, maxZoom: 1 }), 120);
+    }
+    return {
+      summary: parts.length ? `Listo: ${parts.join(", ")}.` : "Las etapas ya estaban al día.",
+      warnings: plan.warnings,
+      addedNodeIds: plan.addNodes.map((n) => n.id),
+      addedEdgeIds: plan.addEdges.map((e) => e.id),
+      nodes: nextNodes,
+      edges: nextEdges,
+    };
+  }, [canEdit, ensureConversation, takeSnapshot, setNodes, setEdges, persist, collab.emitNodeData, collab.emitNodeAdd, collab.emitNodeRemove, collab.emitEdgeRemove, collab.emitEdgeAdd, fitView]);
+
+  const materializeCharacter = useCallback(async (characterId: string): Promise<CharacterMaterializeResult> => {
+    const { nodes: _n, edges: _e, ...result } = await materializeCharacterFrom(characterId, latestNodesRef.current, latestEdgesRef.current);
+    void _n;
+    void _e;
+    return result;
+  }, [materializeCharacterFrom]);
+
   const runCanvasAssist = useCallback(async (instruction: string, signal: AbortSignal): Promise<CanvasAiResult> => {
     if (!canEdit) throw new Error("Solo el editor del canvas puede usar la IA.");
     const convId = await ensureConversation();
@@ -680,13 +761,30 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       collab.emitNodeMove(id, pos.x, pos.y);
     }
 
-    setAiUndo({
+    // "Generar etapas" de los Personajes que pidió la IA, sobre el estado
+    // recién aplicado; lo que crea entra al mismo Deshacer.
+    const undoRecord: AssistUndoRecord = {
       addedNodeIds: newNodes.map((n) => n.id),
       addedEdgeIds: addEdges.map((e) => e.id),
       previousNodes: [...updates.map((u) => byId.get(u.id)!), ...[...removeIds].map((id) => byId.get(id)!)],
       removedEdges: [...removedByNode, ...removedExplicit],
       previousPositions,
-    });
+    };
+    const stageWarnings: string[] = [];
+    let stageImages = 0;
+    let stateNodes = nextNodes;
+    let stateEdges = nextEdges;
+    for (const charId of plan.materializeCharacterIds ?? []) {
+      if (!stateNodes.some((n) => n.id === charId)) continue;
+      const r = await materializeCharacterFrom(charId, stateNodes, stateEdges);
+      stateNodes = r.nodes;
+      stateEdges = r.edges;
+      undoRecord.addedNodeIds.push(...r.addedNodeIds);
+      undoRecord.addedEdgeIds.push(...r.addedEdgeIds);
+      stageImages += r.addedNodeIds.length;
+      stageWarnings.push(...r.warnings);
+    }
+    setAiUndo(undoRecord);
 
     if (newNodes.length > 0) {
       // Cuando el navegador ya midió los nodos nuevos, se re-ordena el bloque
@@ -694,7 +792,9 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       // hubo relayout completo) y se centra la vista en él.
       setTimeout(() => {
         if (!plan.relayout) {
-          const ids = new Set(newNodes.map((n) => n.id));
+          // Incluye las imágenes de etapas recién creadas: se ordenan junto
+          // con su Personaje.
+          const ids = new Set(undoRecord.addedNodeIds);
           const block = latestNodesRef.current.filter((n) => ids.has(n.id));
           const moves = relayoutMeasuredBlock(block, latestEdgesRef.current);
           if (moves.size > 0) {
@@ -705,7 +805,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
             }
           }
         }
-        setTimeout(() => fitView({ nodes: newNodes.map((n) => ({ id: n.id })), padding: 0.25, duration: 500, maxZoom: 1 }), 60);
+        setTimeout(() => fitView({ nodes: undoRecord.addedNodeIds.map((id) => ({ id })), padding: 0.25, duration: 500, maxZoom: 1 }), 60);
       }, 250);
     }
 
@@ -717,8 +817,9 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     if (addEdges.length) parts.push(plural(addEdges.length, "conexión", "conexiones"));
     if (removedExplicit.length) parts.push(plural(removedExplicit.length, "conexión quitada", "conexiones quitadas"));
     if (plan.relayout) parts.push("reordenado");
-    return { reply: plan.reply, warnings: plan.warnings, applied: true, summary: parts.join(", ") };
-  }, [canEdit, ensureConversation, aiSelectedIds, screenToFlowPosition, takeSnapshot, setNodes, setEdges, persist, collab.emitNodeAdd, collab.emitNodeData, collab.emitEdgeAdd, collab.emitNodeRemove, collab.emitEdgeRemove, collab.emitNodeMove, fitView]);
+    if (stageImages) parts.push(plural(stageImages, "imagen de etapa", "imágenes de etapas"));
+    return { reply: plan.reply, warnings: [...plan.warnings, ...stageWarnings], applied: true, summary: parts.join(", ") };
+  }, [materializeCharacterFrom, canEdit, ensureConversation, aiSelectedIds, screenToFlowPosition, takeSnapshot, setNodes, setEdges, persist, collab.emitNodeAdd, collab.emitNodeData, collab.emitEdgeAdd, collab.emitNodeRemove, collab.emitEdgeRemove, collab.emitNodeMove, fitView]);
 
   // Revierte exactamente lo que aplicó la IA (persistido y compartido), sin
   // tocar lo que el usuario haya cambiado después en otros nodos.
@@ -1306,6 +1407,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
         emitNodeData: emitNodeDataStable,
         persistNodeData: updateNodeData,
         canEdit,
+        materializeCharacter,
       }}
     >
     <div ref={canvasContainerRef} className="flex h-full w-full relative" tabIndex={-1}>
@@ -1421,8 +1523,8 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
               Crear nodo
             </div>
             {pendingDropRef.current.options.map(({ type, label, handle }) => {
-              const iconMap: Record<string, typeof MessageSquare> = { text: MessageSquare, "text-practicante": Bot, image: ImageIcon, video: Video, note: StickyNote, "static-text": Type, "static-image": ImagePlus, "static-image-group": Images, "params-text": Settings, "params-image": Settings, "params-video": Settings, "params-scene": Settings, script: Sparkles, scene: Film };
-              const colorMap: Record<string, string> = { text: "text-blue-400", "text-practicante": "text-amber-400", image: "text-purple-400", video: "text-amber-400", note: "text-amber-500", "static-text": "text-blue-400", "static-image": "text-emerald-400", "static-image-group": "text-teal-400", "params-text": "text-yellow-400", "params-image": "text-yellow-400", "params-video": "text-yellow-400", "params-scene": "text-yellow-400", script: "text-fuchsia-400", scene: "text-violet-400" };
+              const iconMap: Record<string, typeof MessageSquare> = { text: MessageSquare, "text-practicante": Bot, image: ImageIcon, video: Video, note: StickyNote, "static-text": Type, "static-image": ImagePlus, "static-image-group": Images, "params-text": Settings, "params-image": Settings, "params-video": Settings, "params-scene": Settings, script: Sparkles, scene: Film, character: UserRound };
+              const colorMap: Record<string, string> = { text: "text-blue-400", "text-practicante": "text-amber-400", image: "text-purple-400", video: "text-amber-400", note: "text-amber-500", "static-text": "text-blue-400", "static-image": "text-emerald-400", "static-image-group": "text-teal-400", "params-text": "text-yellow-400", "params-image": "text-yellow-400", "params-video": "text-yellow-400", "params-scene": "text-yellow-400", script: "text-fuchsia-400", scene: "text-violet-400", character: "text-pink-400" };
               const isAI = !type.startsWith("static-") && type !== "scene" && type !== "note";
               const Icon = iconMap[type] || MessageSquare;
               const color = colorMap[type] || "text-muted-foreground";

@@ -161,6 +161,82 @@ describe("buildAssistPlan", () => {
   });
 });
 
+describe("buildAssistPlan · Personaje", () => {
+  it("crea un Personaje con etapas, ADN y estilo conectados, y pide generar", () => {
+    const snapshot = { nodes: [{ id: "foto", type: "static-image", label: "Foto actual" }], edges: [] };
+    const plan = buildAssistPlan(
+      {
+        ops: [
+          { op: "add_node", ref: "dna", node_type: "static-text", label: "ADN", prompt: "ojos verdes" },
+          { op: "add_node", ref: "sty", node_type: "static-text", label: "Estilo", prompt: "acuarela" },
+          {
+            op: "add_node", ref: "c", node_type: "character", label: "Ana", generate_stages: true,
+            stages: [
+              { name: "5 años", text: "niña" },
+              { name: "35 años", text: "adulta", reference: "foto" },
+              { name: "", text: "" },
+            ],
+          },
+          { op: "connect", from: "dna", to: "c", input: "character_dna" },
+          { op: "connect", from: "sty", to: "c", input: "character_style" },
+          { op: "connect", from: "sty", to: "c", input: "character_style" },
+        ],
+      },
+      snapshot,
+      models,
+      { idPrefix: "x" },
+    );
+    const c = plan.addNodes.find((n) => n.type === "character")!;
+    expect(c.data.stages).toEqual([
+      { id: "st-x-1", name: "5 años", text: "niña" },
+      { id: "st-x-2", name: "35 años", text: "adulta", referenceNodeId: "foto" },
+    ]);
+    expect(plan.addEdges.map((e) => e.targetHandle)).toEqual([HANDLE_IDS.INPUT_CHARACTER_DNA, HANDLE_IDS.INPUT_CHARACTER_STYLE]);
+    expect(plan.materializeCharacterIds).toEqual([c.id]);
+  });
+
+  it("al editar etapas conserva la imagen y referencia de las que siguen", () => {
+    const snapshot = {
+      nodes: [{
+        id: "char", type: "character",
+        stages: [
+          { id: "a", name: "5 años", text: "niña", imageNodeId: "img-a", referenceNodeId: "foto" },
+          { id: "b", name: "35 años", text: "adulta", imageNodeId: "img-b" },
+        ],
+      }, { id: "foto", type: "static-image" }],
+      edges: [],
+    };
+    const plan = buildAssistPlan(
+      { ops: [{ op: "update_node", node: "char", stages: [
+        { name: "5 años", text: "niña con lentes" },
+        { name: "20 años", text: "joven" },
+        { name: "35 años", text: "adulta" },
+      ] }] },
+      snapshot,
+      models,
+      { idPrefix: "y" },
+    );
+    const st = plan.updates[0].patch.stages as { id: string; imageNodeId?: string; referenceNodeId?: string; text: string }[];
+    expect(st[0]).toMatchObject({ id: "a", imageNodeId: "img-a", referenceNodeId: "foto", text: "niña con lentes" });
+    expect(st[1].imageNodeId).toBeUndefined();
+    expect(st[2]).toMatchObject({ id: "b", imageNodeId: "img-b" });
+    expect(plan.materializeCharacterIds).toEqual([]);
+  });
+
+  it("rechaza una referencia que no es imagen", () => {
+    const plan = buildAssistPlan(
+      { ops: [
+        { op: "add_node", ref: "t", node_type: "static-text" },
+        { op: "add_node", ref: "c", node_type: "character", stages: [{ name: "x", text: "y", reference: "t" }] },
+      ] },
+      empty,
+      models,
+    );
+    expect(plan.addNodes[1].data.stages).toEqual([expect.not.objectContaining({ referenceNodeId: expect.anything() })]);
+    expect(plan.warnings[0]).toMatch(/no es una imagen/);
+  });
+});
+
 describe("placeNewNodes", () => {
   it("pone el bloque nuevo a la derecha de lo existente, alineado con su nodo conectado", () => {
     const existing = [

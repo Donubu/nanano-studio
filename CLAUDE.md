@@ -189,6 +189,12 @@ Production runs on Coolify from `docker-compose.coolify.yml` (see the file's hea
 - `lib/canvas-ai/assist-plan.ts` (puro, con tests) valida las ops (add/update/remove node, connect/disconnect) con `VALID_CONNECTIONS`, `isValidConnection`, `wouldCreateCycle` y `reconcileVideoSettings`; no crea escenas ni toca nodos bloqueados. El manual que recibe el modelo se genera desde esas mismas reglas (`assist-prompt.ts`).
 - El cliente aplica el plan con la persistencia granular y los eventos de colaboración de siempre; los nodos nuevos se ubican a la derecha de lo existente (`ai-assist-apply.ts`). "Deshacer lo que hizo la IA" revierte y persiste solo lo que tocó la IA (un nivel). Reordenar todo el canvas solo si el pedido lo menciona.
 - Costo y límite: `canvas_ai_invocations` (migración 136); `CANVAS_AI_HOURLY_CALLS_PER_USER` (default 30, 0 desactiva).
+- El asistente crea Personajes: separa un texto pegado en ADN, estilo global y etapas (`stages`), y con `generate_stages` ejecuta "Generar etapas" (lo creado entra al mismo Deshacer).
+
+## Canvas — nodo Personaje (desarrollo por etapas)
+- Tipo `character` (`components/canvas/nodes/character-node.tsx`; migración 137 lo agrega al ENUM `canvas_nodes.type`). Entradas: ADN (`input-character-dna`) y estilo global (`input-character-style`), un texto cada una. Las etapas viven en `data.stages`, de la más antigua a la más reciente, cada una con texto y referencia opcional (image / static-image / galería).
+- "Generar etapas" (`planCharacterMaterialize` en `components/canvas/lib/character.ts`, puro y con tests) crea una imagen por etapa conectada al Personaje (prompt), a su referencia (prioridad 1) y a la imagen de la etapa siguiente más reciente (continuidad; prioridad 2 si hay foto propia, si no neutra). Es incremental: reusa `stage.imageNodeId`, reconcilia solo las conexiones que puso él (`managedEdgeIds`) y borra imágenes de etapas eliminadas solo si nunca se generaron.
+- Vínculo vivo: la imagen lee ADN + estilo + SU etapa al ejecutar (`composeCharacterPrompt`, en `resolveNodeInputs` de use-canvas-execution). La etapa se encuentra por `imageNodeId` porque `canvas_edges` solo guarda `priority`, no data. Copiar/pegar y plantillas remapean esos ids (`remapCharacterIds`).
 
 ## Production Templates — IA de producción
 

@@ -3,6 +3,14 @@
 import { createContext, useContext } from "react";
 
 import type { CanvasGenerationConfig } from "./canvas-workspace";
+
+export interface CharacterMaterializeResult {
+  summary: string;
+  warnings: string[];
+  addedNodeIds: string[];
+  addedEdgeIds: string[];
+}
+
 interface CanvasContextValue {
   projectId: number;
   conversationId: number;
@@ -15,6 +23,8 @@ interface CanvasContextValue {
   // Lock de edición: false = el usuario está en solo-ver (no es el editor de la
   // sala). Los componentes de nodo ocultan controles de escritura con esto.
   canEdit: boolean;
+  // "Generar etapas" de un nodo Personaje.
+  materializeCharacter: (characterId: string) => Promise<CharacterMaterializeResult>;
 }
 
 const CanvasContext = createContext<CanvasContextValue>({
@@ -25,6 +35,7 @@ const CanvasContext = createContext<CanvasContextValue>({
   emitNodeData: () => {},
   persistNodeData: () => {},
   canEdit: true,
+  materializeCharacter: async () => ({ summary: "", warnings: [], addedNodeIds: [], addedEdgeIds: [] }),
 });
 
 export const CanvasProvider = CanvasContext.Provider;

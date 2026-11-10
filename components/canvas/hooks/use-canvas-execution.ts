@@ -2,9 +2,10 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { Node } from "@xyflow/react";
-import type { CanvasNodeData, CanvasNodeStatus, ExecutionProgress, ImageNodeData, TextNodeData, TextPracticanteNodeData, VideoNodeData, StaticTextNodeData, StaticImageNodeData, StaticImageGroupNodeData, OutputHistoryEntry, PracticanteFile, SceneNodeData, ParamsSceneNodeData } from "../lib/canvas-types";
+import type { CanvasNodeData, CanvasNodeStatus, ExecutionProgress, ImageNodeData, TextNodeData, TextPracticanteNodeData, VideoNodeData, StaticTextNodeData, StaticImageNodeData, StaticImageGroupNodeData, OutputHistoryEntry, PracticanteFile, SceneNodeData, ParamsSceneNodeData, CharacterNodeData } from "../lib/canvas-types";
 import { HANDLE_IDS, baseHandleId } from "../lib/canvas-types";
 import { topologicalSort, getDirectInputs, getDescendantNodes } from "../lib/topological-sort";
+import { composeCharacterPrompt, findStageForImage } from "../lib/character";
 import type { CanvasEdge } from "../lib/canvas-types";
 import type { CanvasGenerationConfig } from "../canvas-workspace";
 
@@ -149,6 +150,15 @@ interface ResolvedInputs {
   paramsOverride: Record<string, unknown> | null;
 }
 
+/** Texto de salida de un nodo de texto (estático, IA o Practicante). */
+function plainTextOutput(node: Node): string | null {
+  const d = node.data as Record<string, unknown>;
+  if (d.status !== "completed") return null;
+  if (node.type === "static-text") return (d.content as string) || null;
+  if (node.type === "text" || node.type === "text-practicante") return (d.outputText as string) || null;
+  return null;
+}
+
 /**
  * Resolve inputs from connected upstream nodes.
  */
@@ -180,6 +190,23 @@ function resolveNodeInputs(
       if (sourceNode.type === "text") return (sourceData as TextNodeData).outputText || null;
       if (sourceNode.type === "text-practicante") return (sourceData as TextPracticanteNodeData).outputText || null;
       if (sourceNode.type === "scene") return (sourceData as SceneNodeData).text || null;
+      if (sourceNode.type === "character") {
+        // ADN + estilo global + la etapa de ESTA imagen, leídos al ejecutar.
+        const charData = sourceData as CharacterNodeData;
+        const charInputs = getDirectInputs(sourceNode.id, edges);
+        const textFrom = (handle: string) => {
+          const inp = charInputs.find((i) => i.targetHandle === handle);
+          const src = inp ? nodes.find((n) => n.id === inp.sourceNodeId) : undefined;
+          return src ? plainTextOutput(src) : null;
+        };
+        const composed = composeCharacterPrompt({
+          dna: textFrom(HANDLE_IDS.INPUT_CHARACTER_DNA),
+          style: textFrom(HANDLE_IDS.INPUT_CHARACTER_STYLE),
+          stage: findStageForImage(charData, nodeId),
+          hasReferences: inputs.some((i) => i.targetHandle === HANDLE_IDS.INPUT_REFERENCE),
+        });
+        return composed || null;
+      }
       return null;
     };
 

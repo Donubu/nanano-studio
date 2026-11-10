@@ -12,6 +12,7 @@ import {
   HANDLE_IDS,
   baseHandleId,
   getDefaultNodeData,
+  MAX_CHARACTER_STAGES,
   type CanvasEdge,
   type CanvasNodeType,
 } from "@/components/canvas/lib/canvas-types";
@@ -34,6 +35,16 @@ export interface AssistSnapshotNode {
   duration?: number;
   hasOutput?: boolean;
   locked?: boolean;
+  // Solo nodos character.
+  stages?: AssistSnapshotStage[];
+}
+
+export interface AssistSnapshotStage {
+  id: string;
+  name: string;
+  text: string;
+  referenceNodeId?: string;
+  imageNodeId?: string;
 }
 
 export interface AssistSnapshotEdge {
@@ -73,6 +84,8 @@ export const INPUT_KINDS = {
   rules: HANDLE_IDS.INPUT_RULES,
   script_chain: HANDLE_IDS.INPUT_SCRIPT_CHAIN,
   params_scene_ref: HANDLE_IDS.INPUT_PARAMS_SCENE_REF,
+  character_dna: HANDLE_IDS.INPUT_CHARACTER_DNA,
+  character_style: HANDLE_IDS.INPUT_CHARACTER_STYLE,
 } as const;
 export type InputKind = keyof typeof INPUT_KINDS;
 
@@ -96,6 +109,9 @@ export interface AssistOp {
   from?: string;
   to?: string;
   input?: string;
+  // character: etapas de la más antigua a la más reciente.
+  stages?: { name?: string; text?: string; reference?: string }[];
+  generate_stages?: boolean;
 }
 
 export interface AssistResponse {
@@ -130,6 +146,8 @@ export interface AssistPlan {
   addEdges: PlanEdge[];
   removeEdgeIds: string[];
   relayout: boolean;
+  // Personajes a los que aplicar "Generar etapas" después del plan.
+  materializeCharacterIds: string[];
   warnings: string[];
 }
 
@@ -138,9 +156,10 @@ export interface AssistPlan {
 export const CREATABLE_TYPES: CanvasNodeType[] = [
   "text", "text-practicante", "image", "video", "note", "static-text",
   "static-image", "static-image-group", "params-text", "params-image",
-  "params-video", "params-scene", "script",
+  "params-video", "params-scene", "script", "character",
 ];
 
+const REFERENCE_TYPES = new Set(["image", "static-image", "static-image-group"]);
 const PROMPT_FIELD_TYPES = new Set(["text", "text-practicante", "image", "video", "script"]);
 const CONTENT_FIELD_TYPES = new Set(["note", "static-text", "params-scene"]);
 const IMAGE_ASPECTS = ["16:9", "9:16", "1:1", "4:3", "3:4"];
@@ -185,6 +204,7 @@ export function buildAssistPlan(
     addEdges: [],
     removeEdgeIds: [],
     relayout: response.relayout === "all",
+    materializeCharacterIds: [],
     warnings,
   };
 
@@ -305,6 +325,38 @@ export function buildAssistPlan(
     return patch;
   };
 
+  // Etapas de un Personaje desde la op. Conserva id, imagen y referencia de
+  // las etapas existentes con el mismo nombre (así "Generar etapas" no
+  // duplica imágenes al editar).
+  let stageSeq = 0;
+  const stagesFor = (op: AssistOp, previous: AssistSnapshotStage[]): AssistSnapshotStage[] | null => {
+    if (!Array.isArray(op.stages)) return null;
+    const byName = new Map(previous.map((st) => [st.name.trim().toLowerCase(), st]));
+    const out: AssistSnapshotStage[] = [];
+    for (const raw of op.stages.slice(0, MAX_CHARACTER_STAGES)) {
+      const name = clip((raw.name ?? "").trim(), MAX_LABEL_CHARS);
+      const text = clip((raw.text ?? "").trim(), MAX_PROMPT_CHARS);
+      if (!name && !text) continue;
+      const prev = byName.get(name.toLowerCase());
+      stageSeq += 1;
+      const stage: AssistSnapshotStage = prev ? { ...prev, name, text } : { id: `st-${prefix}-${stageSeq}`, name, text };
+      if (raw.reference) {
+        const refId = resolve(raw.reference);
+        const refType = refId ? nodeType.get(refId) : undefined;
+        if (refId && refType && REFERENCE_TYPES.has(refType)) stage.referenceNodeId = refId;
+        else warnings.push(`La referencia "${raw.reference}" de la etapa "${name}" no es una imagen o galería del canvas.`);
+      }
+      out.push(stage);
+    }
+    if (op.stages.length > MAX_CHARACTER_STAGES) {
+      warnings.push(`Un Personaje admite hasta ${MAX_CHARACTER_STAGES} etapas; se usaron las primeras.`);
+    }
+    return out;
+  };
+  const markGenerate = (op: AssistOp, id: string) => {
+    if (op.generate_stages && !plan.materializeCharacterIds.includes(id)) plan.materializeCharacterIds.push(id);
+  };
+
   const ops = (response.ops ?? []).slice(0, MAX_OPS);
   if ((response.ops ?? []).length > MAX_OPS) {
     warnings.push(`La IA propuso demasiados cambios; se aplicaron los primeros ${MAX_OPS}.`);
@@ -333,6 +385,10 @@ export function buildAssistPlan(
         // En video, fieldsFor ajusta duración/proporción/resolución a las
         // capacidades del modelo (el elegido o el predeterminado del proyecto).
         const data = { ...base, ...fieldsFor(type, op, base) };
+        if (type === "character") {
+          data.stages = stagesFor(op, []) ?? [];
+          markGenerate(op, id);
+        }
         const node: PlanNode = { id, type, data };
         plan.addNodes.push(node);
         newById.set(id, node);
@@ -351,6 +407,11 @@ export function buildAssistPlan(
         const fresh = newById.get(id);
         if (fresh) {
           Object.assign(fresh.data, fieldsFor(type, op, fresh.data));
+          if (type === "character") {
+            const st = stagesFor(op, (fresh.data.stages as AssistSnapshotStage[]) ?? []);
+            if (st) fresh.data.stages = st;
+            markGenerate(op, id);
+          }
           break;
         }
         const snap = existing.get(id)!;
@@ -369,6 +430,11 @@ export function buildAssistPlan(
           resolution: snap.resolution,
         };
         const patch = fieldsFor(type, op, base);
+        if (type === "character") {
+          const st = stagesFor(op, snap.stages ?? []);
+          if (st) patch.stages = st;
+          markGenerate(op, id);
+        }
         if (Object.keys(patch).length === 0) break;
         const prev = plan.updates.find((u) => u.id === id);
         if (prev) Object.assign(prev.patch, patch);
@@ -396,6 +462,7 @@ export function buildAssistPlan(
         }
         removed.add(id);
         nodeType.delete(id);
+        plan.materializeCharacterIds = plan.materializeCharacterIds.filter((x) => x !== id);
         for (const [ref, rid] of refToId) if (rid === id) refToId.delete(ref);
         plan.addEdges = plan.addEdges.filter((e) => e.source !== id && e.target !== id);
         edges = edges.filter((e) => e.source !== id && e.target !== id);
@@ -490,6 +557,7 @@ export function planIsEmpty(plan: AssistPlan): boolean {
     plan.removeNodeIds.length === 0 &&
     plan.addEdges.length === 0 &&
     plan.removeEdgeIds.length === 0 &&
+    plan.materializeCharacterIds.length === 0 &&
     !plan.relayout
   );
 }

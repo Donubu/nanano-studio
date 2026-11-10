@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ImageIcon, Video, MessageSquare, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History, Eye, BookmarkPlus, LayoutTemplate } from "lucide-react";
+import { ImageIcon, Video, MessageSquare, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History, Eye, BookmarkPlus, LayoutTemplate, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CanvasNodeType } from "./lib/canvas-types";
 
@@ -30,6 +30,7 @@ const nodeOptions: { type: CanvasNodeType; icon: typeof MessageSquare; label: st
   { type: "text", icon: MessageSquare, label: "Texto", isAI: true },
   { type: "text-practicante", icon: Bot, label: "Practicante", isAI: true },
   { type: "script", icon: Sparkles, label: "Guión", isAI: true },
+  { type: "character", icon: UserRound, label: "Personaje", isAI: false },
   { type: "image", icon: ImageIcon, label: "Imagen", isAI: true },
   { type: "video", icon: Video, label: "Video", isAI: true },
   { type: "note", icon: StickyNote, label: "Nota", isAI: false },

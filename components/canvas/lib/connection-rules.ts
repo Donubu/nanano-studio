@@ -94,6 +94,17 @@ export const VALID_CONNECTIONS: ConnectionRule[] = [
   { sourceType: "static-text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "script", targetHandle: HANDLE_IDS.INPUT_RULES },
   { sourceType: "text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "script", targetHandle: HANDLE_IDS.INPUT_RULES },
   { sourceType: "text-practicante", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "script", targetHandle: HANDLE_IDS.INPUT_RULES },
+
+  // === Personaje: ADN y estilo global (un texto cada uno) ===
+  { sourceType: "static-text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_DNA },
+  { sourceType: "text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_DNA },
+  { sourceType: "text-practicante", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_DNA },
+  { sourceType: "static-text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_STYLE },
+  { sourceType: "text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_STYLE },
+  { sourceType: "text-practicante", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_STYLE },
+
+  // === Personaje → imagen de cada etapa (ADN + estilo + texto de la etapa) ===
+  { sourceType: "character", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER, targetType: "image", targetHandle: HANDLE_IDS.INPUT_PROMPT },
 ];
 
 /**
@@ -149,6 +160,10 @@ export function isValidConnection(
   // Enforce: only 1 rules input per Script
   if (targetHandle === HANDLE_IDS.INPUT_RULES && targetAlreadyUsed(HANDLE_IDS.INPUT_RULES)) return false;
 
+  // Enforce: un ADN y un estilo global por Personaje
+  if (targetHandle === HANDLE_IDS.INPUT_CHARACTER_DNA && targetAlreadyUsed(HANDLE_IDS.INPUT_CHARACTER_DNA)) return false;
+  if (targetHandle === HANDLE_IDS.INPUT_CHARACTER_STYLE && targetAlreadyUsed(HANDLE_IDS.INPUT_CHARACTER_STYLE)) return false;
+
   return true;
 }
 
@@ -162,7 +177,7 @@ export function getCompatibleTargetTypes(
 ): { type: string; label: string; targetHandle: string }[] {
   const seen = new Set<string>();
   const results: { type: string; label: string; targetHandle: string }[] = [];
-  const labels: Record<string, string> = { text: "Texto", "text-practicante": "Practicante", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video", "params-scene": "Params Escena", script: "Guión", scene: "Escena" };
+  const labels: Record<string, string> = { text: "Texto", "text-practicante": "Practicante", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video", "params-scene": "Params Escena", script: "Guión", scene: "Escena", character: "Personaje" };
   const baseSource = baseHandleId(sourceHandle);
 
   for (const rule of VALID_CONNECTIONS) {
@@ -190,7 +205,7 @@ export function getCompatibleSourceTypes(
 ): { type: string; label: string; sourceHandle: string }[] {
   const seen = new Set<string>();
   const results: { type: string; label: string; sourceHandle: string }[] = [];
-  const labels: Record<string, string> = { text: "Texto", "text-practicante": "Practicante", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video", "params-scene": "Params Escena", script: "Guión", scene: "Escena" };
+  const labels: Record<string, string> = { text: "Texto", "text-practicante": "Practicante", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video", "params-scene": "Params Escena", script: "Guión", scene: "Escena", character: "Personaje" };
   const baseTarget = baseHandleId(targetHandle);
 
   for (const rule of VALID_CONNECTIONS) {

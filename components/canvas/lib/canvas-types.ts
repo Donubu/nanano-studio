@@ -234,9 +234,38 @@ export interface SceneNodeData extends BaseNodeData {
 
 export const MAX_SCENES_PER_SCRIPT = 30;
 
+// --- Character Node (desarrollo de personaje por etapas) ---
+// Recibe el ADN del personaje (rasgos permanentes) y un estilo global por sus
+// entradas, y define etapas (edades, épocas…). "Generar etapas" crea un nodo
+// imagen por etapa: cada uno recibe ADN + estilo + el texto de SU etapa desde
+// este nodo (vínculo vivo, se lee al ejecutar), la referencia elegida para la
+// etapa (prioridad 1) y la imagen de la etapa siguiente más reciente como
+// referencia de continuidad. Las etapas van de la más antigua (índice 0) a la
+// más reciente (la última); la cadena se genera desde la más reciente.
+export interface CharacterStage {
+  id: string;
+  name: string;
+  text: string;
+  // Nodo image / static-image / static-image-group elegido como referencia.
+  referenceNodeId?: string;
+  // Nodo imagen creado por "Generar etapas" para esta etapa.
+  imageNodeId?: string;
+}
+
+export interface CharacterNodeData extends BaseNodeData {
+  type: "character";
+  stages: CharacterStage[];
+  // Imágenes creadas alguna vez por "Generar etapas" y conexiones que puso
+  // (para reconciliar al volver a generar sin tocar lo que hizo el usuario).
+  generatedImageIds?: string[];
+  managedEdgeIds?: string[];
+}
+
+export const MAX_CHARACTER_STAGES = 20;
+
 // --- Union Types ---
-export type CanvasNodeData = TextNodeData | TextPracticanteNodeData | ImageNodeData | VideoNodeData | NoteNodeData | StaticTextNodeData | StaticImageNodeData | StaticImageGroupNodeData | ParamsTextNodeData | ParamsImageNodeData | ParamsVideoNodeData | ParamsSceneNodeData | ScriptNodeData | SceneNodeData;
-export type CanvasNodeType = "text" | "text-practicante" | "image" | "video" | "note" | "static-text" | "static-image" | "static-image-group" | "params-text" | "params-image" | "params-video" | "params-scene" | "script" | "scene";
+export type CanvasNodeData = TextNodeData | TextPracticanteNodeData | ImageNodeData | VideoNodeData | NoteNodeData | StaticTextNodeData | StaticImageNodeData | StaticImageGroupNodeData | ParamsTextNodeData | ParamsImageNodeData | ParamsVideoNodeData | ParamsSceneNodeData | ScriptNodeData | SceneNodeData | CharacterNodeData;
+export type CanvasNodeType = "text" | "text-practicante" | "image" | "video" | "note" | "static-text" | "static-image" | "static-image-group" | "params-text" | "params-image" | "params-video" | "params-scene" | "script" | "scene" | "character";
 
 export type TextNode = Node<TextNodeData, "text">;
 export type TextPracticanteNode = Node<TextPracticanteNodeData, "text-practicante">;
@@ -252,7 +281,8 @@ export type ParamsVideoNode = Node<ParamsVideoNodeData, "params-video">;
 export type ParamsSceneNode = Node<ParamsSceneNodeData, "params-scene">;
 export type ScriptNode = Node<ScriptNodeData, "script">;
 export type SceneNode = Node<SceneNodeData, "scene">;
-export type CanvasNode = TextNode | TextPracticanteNode | ImageNode | VideoNode | NoteNode | StaticTextNode | StaticImageNode | StaticImageGroupNode | ParamsTextNode | ParamsImageNode | ParamsVideoNode | ParamsSceneNode | ScriptNode | SceneNode;
+export type CharacterNode = Node<CharacterNodeData, "character">;
+export type CanvasNode = TextNode | TextPracticanteNode | ImageNode | VideoNode | NoteNode | StaticTextNode | StaticImageNode | StaticImageGroupNode | ParamsTextNode | ParamsImageNode | ParamsVideoNode | ParamsSceneNode | ScriptNode | SceneNode | CharacterNode;
 
 export type CanvasEdge = Edge;
 
@@ -274,6 +304,9 @@ export const HANDLE_IDS = {
   INPUT_VISUAL_REFERENCE: "input-visual-reference",
   INPUT_PARAMS_SCENE_REF: "input-params-scene-ref",
   INPUT_RULES: "input-rules",
+  INPUT_CHARACTER_DNA: "input-character-dna",
+  INPUT_CHARACTER_STYLE: "input-character-style",
+  OUTPUT_CHARACTER: "output-character",
 } as const;
 
 // Input handles are rendered twice: once on the left edge and once on the top
@@ -435,6 +468,14 @@ export function getDefaultNodeData(type: CanvasNodeType): CanvasNodeData {
         label: "Params Escena",
         status: "completed",
         content: "",
+      };
+    case "character":
+      return {
+        ...base,
+        type: "character",
+        label: "Personaje",
+        status: "completed",
+        stages: [],
       };
   }
 }

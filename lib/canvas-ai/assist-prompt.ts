@@ -27,6 +27,7 @@ const TYPE_DOCS: Record<string, string> = {
   "params-video": "Preset de parámetros compartido por varios nodos video (model_id, duration, aspect_ratio, resolution, audio_enabled).",
   "params-scene": "Estilo visual / técnica para Escenas (prompt = descripción del estilo). Se concatena al prompt de lo que generan las escenas.",
   script: "Guión: el usuario pega el guion completo (prompt) y con 'Leer guion' se divide en Escenas automáticamente. La IA NO crea escenas: crea el Guión, conéctale estilo (params-scene → params_scene_ref), reglas (texto → rules) y referencias visuales, y deja que el usuario lo lea.",
+  character: "Personaje para desarrollar por etapas (edades, épocas). Entradas: character_dna (texto con los rasgos permanentes) y character_style (texto con el estilo global: estilo de ilustración, paleta, encuadre). Sus etapas van en el campo stages, de la MÁS ANTIGUA a la MÁS RECIENTE, cada una con name corto, text (solo lo propio de esa etapa) y reference opcional (id o ref de un image, static-image o static-image-group). Con generate_stages=true el sistema crea una imagen por etapa, encadenadas desde la más reciente hacia la más antigua para mantener la continuidad; no crees esas imágenes tú.",
   scene: "Escena generada por un Guión (no se crea ni se edita aquí; sí se puede conectar a image/video/text).",
 };
 
@@ -42,6 +43,8 @@ const INPUT_DOCS: Record<string, string> = {
   rules: "reglas extra para todas las escenas del guion (una)",
   script_chain: "cadena Guión → Escena → Escena",
   params_scene_ref: "estilo reutilizable para todas las escenas del guion (uno)",
+  character_dna: "ADN del personaje: rasgos que no cambian entre etapas (uno)",
+  character_style: "estilo global del personaje (uno)",
 };
 
 function connectionManual(): string {
@@ -89,6 +92,14 @@ ${Object.entries(INPUT_DOCS).map(([k, v]) => `- ${k}: ${v}`).join("\n")}
 - disconnect: from, to, input opcional.
 - relayout: "all" SOLO si el usuario pide ordenar, reordenar o acomodar el canvas; en cualquier otro caso "none" (los nodos nuevos se ubican solos al lado de lo existente sin mover lo del usuario).
 
+## Personajes por etapas
+- Si el usuario pega o describe varias etapas de un personaje (edades, épocas, versiones), crea UN nodo character con una etapa por bloque; no crees un nodo por etapa.
+- Separa el texto pegado: lo que se repite en todas las etapas (rasgos físicos permanentes, nombre, personalidad visible) va a un static-text "ADN" conectado a character_dna; el estilo de ilustración, colores o tipo de imagen va a un static-text "Estilo global" conectado a character_style; cada etapa conserva solo lo propio (edad, ropa, pelo, contexto), con las palabras del usuario: no agregues detalles que el usuario no dijo ni repitas en la etapa lo que ya está en el ADN.
+- Ordena las etapas de la más antigua a la más reciente aunque el usuario las haya escrito al revés. name: corto ("5 años", "Adolescencia").
+- Si el usuario menciona una foto o imagen suya para una etapa y existe en el canvas, úsala como reference de esa etapa (normalmente la más reciente).
+- Para editar etapas de un character existente, manda update_node con la lista COMPLETA de stages (las que no cambian, igual que estaban).
+- generate_stages=true si el usuario pide generar, crear las imágenes o "armar todo"; si solo pide definir o separar etapas, false.
+
 ## Reglas
 - Reutiliza los nodos que ya existen: no dupliques algo que el usuario ya tiene; conéctalo o edítalo.
 - Si el usuario seleccionó nodos, "este", "estos" o "el seleccionado" se refieren a ellos.
@@ -129,6 +140,19 @@ export const ASSIST_SCHEMA = {
           from: { type: "string" },
           to: { type: "string" },
           input: { type: "string", enum: Object.keys(INPUT_KINDS) },
+          stages: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                text: { type: "string" },
+                reference: { type: "string" },
+              },
+              required: ["name", "text"],
+            },
+          },
+          generate_stages: { type: "boolean" },
         },
         required: ["op"],
       },
@@ -177,7 +201,10 @@ export function buildAssistUserText(params: {
     if (n.locked) bits.push("BLOQUEADO");
     if (selectedIds.includes(n.id)) bits.push("SELECCIONADO");
     const text = n.text ? `\n    texto: ${JSON.stringify(n.text)}` : "";
-    return `- ${bits.join(" · ")}${text}`;
+    const stageLines = (n.stages ?? [])
+      .map((st, i) => `\n    etapa ${i + 1}: name=${JSON.stringify(st.name)} text=${JSON.stringify(st.text.slice(0, 300))}${st.referenceNodeId ? ` reference=${st.referenceNodeId}` : ""}${st.imageNodeId ? ` imagen=${st.imageNodeId}` : ""}`)
+      .join("");
+    return `- ${bits.join(" · ")}${text}${stageLines}`;
   });
   const byHandle = new Map<string, string>();
   for (const [kind, handle] of Object.entries(INPUT_KINDS)) byHandle.set(handle, kind);

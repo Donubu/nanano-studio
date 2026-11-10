@@ -1,7 +1,8 @@
 "use client";
 
-import { useHandleConnections, useReactFlow } from "@xyflow/react";
-import { HANDLE_IDS, type SceneNodeData } from "../lib/canvas-types";
+import { useHandleConnections, useNodeId, useReactFlow } from "@xyflow/react";
+import { HANDLE_IDS, type CharacterNodeData, type SceneNodeData } from "../lib/canvas-types";
+import { findStageForImage } from "../lib/character";
 
 /**
  * For AI nodes (text, image, video, practicante) that accept a prompt input:
@@ -17,6 +18,7 @@ export function useUpstreamPromptLabel(): string | null {
     id: HANDLE_IDS.INPUT_PROMPT,
   });
   const { getNode } = useReactFlow();
+  const selfId = useNodeId();
 
   if (promptConnections.length === 0) return null;
 
@@ -27,6 +29,13 @@ export function useUpstreamPromptLabel(): string | null {
     case "scene": {
       const data = sourceNode.data as unknown as SceneNodeData;
       return `Escena ${data.sceneIndex} conectada como prompt`;
+    }
+    case "character": {
+      const data = sourceNode.data as unknown as CharacterNodeData;
+      const stage = selfId ? findStageForImage(data, selfId) : null;
+      return stage
+        ? `${data.label || "Personaje"} · etapa "${stage.name}"`
+        : `ADN y estilo de ${data.label || "Personaje"}`;
     }
     case "text":
       return "Prompt generado por nodo Texto";

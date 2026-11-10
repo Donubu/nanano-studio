@@ -65,6 +65,20 @@ function cleanSnapshot(raw: unknown): { nodes: AssistSnapshotNode[]; edges: Assi
       duration: typeof o.duration === "number" ? o.duration : undefined,
       hasOutput: o.hasOutput === true,
       locked: o.locked === true,
+      stages: Array.isArray(o.stages)
+        ? (o.stages as unknown[]).slice(0, 30).flatMap((st) => {
+            if (!st || typeof st !== "object") return [];
+            const x = st as Record<string, unknown>;
+            if (typeof x.id !== "string") return [];
+            return [{
+              id: x.id,
+              name: typeof x.name === "string" ? x.name.slice(0, 80) : "",
+              text: typeof x.text === "string" ? x.text.slice(0, 2000) : "",
+              referenceNodeId: typeof x.referenceNodeId === "string" ? x.referenceNodeId : undefined,
+              imageNodeId: typeof x.imageNodeId === "string" ? x.imageNodeId : undefined,
+            }];
+          })
+        : undefined,
     });
   }
   const ids = new Set(nodes.map((n) => n.id));

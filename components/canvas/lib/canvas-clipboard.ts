@@ -1,4 +1,5 @@
 import type { Node, Edge } from "@xyflow/react";
+import { remapCharacterIds } from "./character";
 
 // Clipboard de nodos del canvas. Vive en localStorage (no en el clipboard del
 // sistema) para poder pegar en el mismo canvas, en otro canvas o en otra
@@ -136,6 +137,8 @@ export function remapClipboardForPaste(
   payload.nodes.forEach((node, i) => {
     idMap.set(node.id, `node-clip${stamp}-${i + 1}`);
   });
+  const edgeIdMap = new Map<string, string>();
+  payload.edges.forEach((edge, i) => edgeIdMap.set(edge.id, `e-clip${stamp}-${i + 1}`));
 
   let dx = 0;
   let dy = 0;
@@ -153,6 +156,7 @@ export function remapClipboardForPaste(
     if (typeof data.scriptNodeId === "string" && idMap.has(data.scriptNodeId)) {
       data.scriptNodeId = idMap.get(data.scriptNodeId)!;
     }
+    if (node.type === "character") Object.assign(data, remapCharacterIds(data, idMap, edgeIdMap));
     return {
       ...node,
       id: idMap.get(node.id)!,
@@ -175,7 +179,7 @@ export function remapClipboardForPaste(
     const { externalSource: _drop, priority, ...rest } = edge;
     edges.push({
       ...rest,
-      id: `e-clip${stamp}-${i + 1}`,
+      id: edgeIdMap.get(edge.id) ?? `e-clip${stamp}-${i + 1}`,
       source,
       target,
       ...(typeof priority === "number" ? { data: { priority } } : {}),
