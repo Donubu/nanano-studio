@@ -56,7 +56,7 @@ export const StaticTextNodeComponent = memo(function StaticTextNode({ id, data, 
           onChange={handleContentChange}
           readOnly={!canEdit}
           placeholder="Escribe texto que se usará como input..."
-          className="w-full text-xs bg-transparent border-none outline-none resize-y min-h-[50px] max-h-[200px] placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
+          className="nodrag nowheel w-full text-xs bg-transparent border-none outline-none resize-y min-h-[50px] max-h-[200px] placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
           rows={3}
         />
       </div>

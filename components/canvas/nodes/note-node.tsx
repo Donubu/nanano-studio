@@ -39,7 +39,7 @@ export const NoteNodeComponent = memo(function NoteNode({ id, data, selected, wi
           onChange={handleChange}
           readOnly={!canEdit}
           placeholder="Escribe una nota..."
-          className="w-full text-xs bg-transparent border-none outline-none resize-y min-h-[40px] max-h-[200px] text-amber-900 dark:text-amber-200 placeholder:text-amber-400/50"
+          className="nodrag nowheel w-full text-xs bg-transparent border-none outline-none resize-y min-h-[40px] max-h-[200px] text-amber-900 dark:text-amber-200 placeholder:text-amber-400/50"
           rows={2}
         />
       </div>

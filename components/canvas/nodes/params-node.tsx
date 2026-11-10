@@ -86,7 +86,7 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
               }
               update(patch);
             }}
-            className="w-full h-7 rounded border border-input bg-background px-2 text-[11px]"
+            className="nodrag w-full h-7 rounded border border-input bg-background px-2 text-[11px]"
           >
             <option value="">
               {availableModels.find((m) => m.is_default)?.display_name || "Default"}
@@ -106,7 +106,7 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
                 <input type="number" min={0} max={2} step={0.1}
                   value={(nodeData as ParamsTextNodeData).temperature ?? 1.0}
                   onChange={(e) => update({ temperature: parseFloat(e.target.value) })}
-                  className="w-full h-7 rounded border border-input bg-background px-2 text-[11px]"
+                  className="nodrag w-full h-7 rounded border border-input bg-background px-2 text-[11px]"
                 />
               </div>
               <div className="space-y-0.5">
@@ -114,7 +114,7 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
                 <input type="number" min={1} max={1000000}
                   value={(nodeData as ParamsTextNodeData).maxOutputTokens ?? 8192}
                   onChange={(e) => update({ maxOutputTokens: parseInt(e.target.value) })}
-                  className="w-full h-7 rounded border border-input bg-background px-2 text-[11px]"
+                  className="nodrag w-full h-7 rounded border border-input bg-background px-2 text-[11px]"
                 />
               </div>
             </div>
