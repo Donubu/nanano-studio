@@ -25,13 +25,27 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
     type: "image" as const,
   }));
 
-  const existingUrls = new Set(images.map((img) => img.url));
+  // Lista viva de imágenes. El selector agrega N fotos llamando a
+  // addImageUrl N veces seguidas (sin re-render entre medio) y la subida de
+  // archivos termina después de un await: ambas deben sumar sobre lo último
+  // agregado, no sobre la lista que había al abrir. Con el closure, cada
+  // llamada pisaba a la anterior y quedaba una sola foto.
+  const imagesRef = useRef(images);
+  const nodeDataRef = useRef(nodeData);
+  imagesRef.current = images;
+  nodeDataRef.current = nodeData;
 
-  const addImageUrl = useCallback((url: string) => {
-    if (existingUrls.has(url)) return;
-    const newImages = [...images, { url }];
-    updateNodeData(id, { ...nodeData, images: newImages });
-  }, [id, nodeData, images, updateNodeData, existingUrls]);
+  const appendImages = useCallback((urls: string[]) => {
+    const current = imagesRef.current;
+    const known = new Set(current.map((img) => img.url));
+    const fresh = urls.filter((url) => url && !known.has(url) && (known.add(url), true));
+    if (fresh.length === 0) return;
+    const next = [...current, ...fresh.map((url) => ({ url }))];
+    imagesRef.current = next;
+    updateNodeData(id, { ...nodeDataRef.current, images: next });
+  }, [id, updateNodeData]);
+
+  const addImageUrl = useCallback((url: string) => appendImages([url]), [appendImages]);
 
   const addImages = useCallback(async (files: FileList) => {
     setUploading(true);
@@ -39,16 +53,13 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
       const urls = await Promise.all(
         Array.from(files).map((file) => uploadFileToS3(file, projectId))
       );
-      const deduped = urls.filter((url) => !existingUrls.has(url));
-      if (deduped.length === 0) return;
-      const newImages = [...images, ...deduped.map((url) => ({ url }))];
-      updateNodeData(id, { ...nodeData, images: newImages });
+      appendImages(urls);
     } catch (err) {
       console.error("Error uploading images:", err);
     } finally {
       setUploading(false);
     }
-  }, [id, nodeData, images, updateNodeData, existingUrls, projectId]);
+  }, [appendImages, projectId]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {

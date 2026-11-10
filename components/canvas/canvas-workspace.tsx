@@ -584,6 +584,11 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   // reciente (refs), no sobre el de cuando se envió.
   const latestNodesRef = useRef(nodes);
   latestNodesRef.current = nodes;
+  // Ediciones de data aún no reflejadas en `nodes` (ver updateNodeData).
+  const pendingDataRef = useRef(new Map<string, Record<string, unknown>>());
+  useEffect(() => {
+    pendingDataRef.current.clear();
+  }, [nodes]);
   const latestEdgesRef = useRef(edges);
   latestEdgesRef.current = edges;
   const [aiUndo, setAiUndo] = useState<AssistUndoRecord | null>(null);
@@ -1074,19 +1079,19 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       // En solo-ver no se edita nada (chokepoint del context persistNodeData
       // y de onUpdateData de los paneles de config).
       if (!canEdit) return;
-      let mergedNode: Node | null = null;
-      setNodes((nds) => {
-        return nds.map((n) => {
-          if (n.id !== nodeId) return n;
-          const next = { ...n, data: { ...n.data, ...updates } };
-          mergedNode = next;
-          return next;
-        });
-      });
-      if (mergedNode) persist.saveNodeData(mergedNode);
+      setNodes((nds) => nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, ...updates } } : n)));
+      // El nodo a persistir se arma acá y no dentro del updater de setNodes:
+      // con varias ediciones seguidas (ej. agregar N fotos a una galería)
+      // React no corre el updater de inmediato y esas ediciones no se
+      // guardaban. pendingDataRef acumula las ediciones hasta el re-render.
+      const current = latestNodesRef.current.find((n) => n.id === nodeId);
+      if (!current) return;
+      const data = { ...(pendingDataRef.current.get(nodeId) ?? current.data), ...updates };
+      pendingDataRef.current.set(nodeId, data);
+      persist.saveNodeData({ ...current, data });
       collab.emitNodeData(nodeId, updates as Record<string, unknown>);
     },
-    [setNodes, persist, collab.emitNodeData]
+    [canEdit, setNodes, persist, collab.emitNodeData]
   );
 
   // Delete node — el backend soft-deletea también los edges incidentes.
