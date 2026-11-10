@@ -3,7 +3,6 @@
 import {
   forwardRef,
   useCallback,
-  useEffect,
   useState,
   type TextareaHTMLAttributes,
 } from "react";
@@ -33,13 +32,17 @@ export const NodeTextarea = forwardRef<HTMLTextAreaElement, Props>(
   function NodeTextarea({ value, onChange, ...rest }, ref) {
     const { canEdit } = useCanvasContext();
     const [local, setLocal] = useState(value);
-
-    // Only sync when the external value diverges from local. We intentionally
-    // omit `local` from deps so this doesn't run after our own keystrokes.
-    useEffect(() => {
-      setLocal((prev) => (prev === value ? prev : value));
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [value]);
+    // Último valor externo visto. Cuando el `value` de afuera cambia (otro
+    // editor, el panel lateral, deshacer, colaboración) se sincroniza DURANTE
+    // el render y no en un useEffect: con muchas actualizaciones seguidas
+    // (escritura rápida en otro campo que edita el mismo dato), el efecto
+    // encadenaba un setState por commit y React cortaba con "Maximum update
+    // depth exceeded". Las propias teclas no cambian nada: local ya es igual.
+    const [lastValue, setLastValue] = useState(value);
+    if (value !== lastValue) {
+      setLastValue(value);
+      if (value !== local) setLocal(value);
+    }
 
     const handleChange = useCallback(
       (e: React.ChangeEvent<HTMLTextAreaElement>) => {
