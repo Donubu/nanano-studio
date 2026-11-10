@@ -8,7 +8,7 @@
 
 import { memo, useCallback, useMemo, useState } from "react";
 import { Handle, Position, useHandleConnections, useStore, type NodeProps } from "@xyflow/react";
-import { ArrowDown, ArrowUp, Check, Dna, Images, Loader2, Palette, Plus, Trash2, UserRound, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Dna, GripVertical, Images, Loader2, Palette, Plus, Trash2, UserRound, Wand2 } from "lucide-react";
 import {
   HANDLE_IDS,
   MAX_CHARACTER_STAGES,
@@ -87,12 +87,19 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
   const patchStage = (stageId: string, patch: Partial<CharacterStage>) =>
     setStages(stages.map((s) => (s.id === stageId ? { ...s, ...patch } : s)));
   const move = (index: number, delta: number) => {
-    const target = index + delta;
-    if (target < 0 || target >= stages.length) return;
-    const next = [...stages];
-    [next[index], next[target]] = [next[target], next[index]];
-    setStages(next);
+    reorder(index, index + delta);
   };
+  // Mueve la etapa `from` a la posición `to`. Si ya había imágenes creadas, la
+  // cadena de continuidad queda desalineada hasta volver a "Generar etapas".
+  const reorder = (from: number, to: number) => {
+    if (from === to || to < 0 || to >= stages.length) return;
+    const next = [...stages];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    update({ stages: next, ...(stages.some((s) => s.imageNodeId) ? { chainStale: true } : {}) });
+  };
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
   const addStage = () => {
     if (stages.length >= MAX_CHARACTER_STAGES) return;
     setStages([...stages, { id: newStageId(), name: "", text: "" }]);
@@ -209,12 +216,18 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
         </div>
 
         <div className="text-[9px] uppercase tracking-wider text-muted-foreground">
-          Etapas · de la más antigua a la más reciente
+          Etapas · cada una usa la anterior como referencia
         </div>
+
+        {nodeData.chainStale && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-700 dark:text-amber-300">
+            Cambiaste el orden: presiona &quot;Generar etapas&quot; para reconectar la cadena.
+          </div>
+        )}
 
         {stages.length === 0 && (
           <p className="text-[11px] text-muted-foreground">
-            Agrega etapas (por ejemplo 5 años, 15 años, 35 años). Cada una genera su imagen.
+            Agrega etapas en el orden en que quieres generarlas (por ejemplo hoy, 25 años, 15 años, 5 años). Cada una genera su imagen.
           </p>
         )}
 
@@ -222,8 +235,42 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
           {stages.map((stage, i) => {
             const selectedCount = (stage.referenceImages ?? []).filter((r) => photos.some((p) => p.nodeId === r.nodeId && p.url === r.url)).length;
             return (
-              <div key={stage.id} className="rounded-lg border border-border/60 bg-muted/20 p-2 space-y-1.5">
+              <div
+                key={stage.id}
+                onDragOver={(e) => {
+                  if (dragIndex === null) return;
+                  e.preventDefault();
+                  if (overIndex !== i) setOverIndex(i);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragIndex !== null) reorder(dragIndex, i);
+                  setDragIndex(null);
+                  setOverIndex(null);
+                }}
+                className={`rounded-lg border bg-muted/20 p-2 space-y-1.5 ${
+                  dragIndex === i ? "opacity-50" : ""
+                } ${overIndex === i && dragIndex !== null && dragIndex !== i ? "border-pink-400" : "border-border/60"}`}
+              >
                 <div className="flex items-center gap-1">
+                  {canEdit && (
+                    <span
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", stage.id);
+                        setDragIndex(i);
+                      }}
+                      onDragEnd={() => {
+                        setDragIndex(null);
+                        setOverIndex(null);
+                      }}
+                      title="Arrastra para reordenar"
+                      className="nodrag cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground shrink-0"
+                    >
+                      <GripVertical className="h-3.5 w-3.5" />
+                    </span>
+                  )}
                   <span className="text-[10px] text-muted-foreground w-4 shrink-0">{i + 1}.</span>
                   <input
                     value={stage.name}
@@ -240,13 +287,13 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
                   )}
                   {canEdit && (
                     <>
-                      <button type="button" onClick={() => move(i, -1)} disabled={i === 0} title="Más antigua" className="nodrag p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30">
+                      <button type="button" onClick={() => move(i, -1)} disabled={i === 0} title="Subir" className="nodrag p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30">
                         <ArrowUp className="h-3 w-3" />
                       </button>
-                      <button type="button" onClick={() => move(i, 1)} disabled={i === stages.length - 1} title="Más reciente" className="nodrag p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30">
+                      <button type="button" onClick={() => move(i, 1)} disabled={i === stages.length - 1} title="Bajar" className="nodrag p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30">
                         <ArrowDown className="h-3 w-3" />
                       </button>
-                      <button type="button" onClick={() => setStages(stages.filter((s) => s.id !== stage.id))} title="Borrar etapa" className="nodrag p-0.5 text-muted-foreground hover:text-red-400">
+                      <button type="button" onClick={() => update({ stages: stages.filter((s) => s.id !== stage.id), ...(stages.some((s) => s.imageNodeId) ? { chainStale: true } : {}) })} title="Borrar etapa" className="nodrag p-0.5 text-muted-foreground hover:text-red-400">
                         <Trash2 className="h-3 w-3" />
                       </button>
                     </>
@@ -327,8 +374,8 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
           <p className={`text-[10px] ${message.tone === "ok" ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-300"}`}>{message.text}</p>
         )}
         <p className="text-[9px] text-muted-foreground">
-          Crea una imagen por etapa. Cada una recibe ADN + estilo + su texto, sus fotos (prioridad 1) y la imagen de la
-          etapa más reciente siguiente, para mantener la continuidad. Luego ejecútalas con RUN.
+          Crea una imagen por etapa, en orden: la etapa 1 se genera primero y es la referencia de la 2, la 2 de la 3, y
+          así. Cada una recibe además ADN + estilo + su texto y sus fotos (prioridad 1). Luego ejecútalas con RUN.
         </p>
       </div>
 

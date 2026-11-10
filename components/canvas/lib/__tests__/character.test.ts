@@ -45,21 +45,22 @@ function apply(nodes: Node[], edges: Edge[], plan: ReturnType<typeof planCharact
 }
 
 describe("planCharacterMaterialize", () => {
-  it("crea una imagen por etapa, encadenadas de la más reciente a la más antigua", () => {
+  it("crea una imagen por etapa, encadenadas en el orden de la lista (1 → 2 → 3)", () => {
     const plan = planCharacterMaterialize(character(stages), [character(stages), gallery], [], { idPrefix: "t" });
     expect(plan.addNodes).toHaveLength(3);
     const img = Object.fromEntries(plan.characterData.stages.map((s) => [s.id, s.imageNodeId!]));
     const y = (id: string) => plan.addNodes.find((n) => n.id === id)!.position.y;
-    expect(y(img.s35)).toBeLessThan(y(img.s15));
-    expect(y(img.s15)).toBeLessThan(y(img.s5));
+    expect(y(img.s5)).toBeLessThan(y(img.s15));
+    expect(y(img.s15)).toBeLessThan(y(img.s35));
 
     const edge = (source: string, target: string, handle: string) =>
       plan.addEdges.find((e) => e.source === source && e.target === target && e.targetHandle === handle);
     for (const s of ["s5", "s15", "s35"]) expect(edge("char", img[s], HANDLE_IDS.INPUT_PROMPT)).toBeTruthy();
-    // Continuidad 35 → 15 → 5, neutra: las fotos propias llegan desde el
-    // Personaje con prioridad 1 al ejecutar.
-    expect(edge(img.s35, img.s15, HANDLE_IDS.INPUT_REFERENCE)!.data).toBeUndefined();
-    expect(edge(img.s15, img.s5, HANDLE_IDS.INPUT_REFERENCE)).toBeTruthy();
+    // Continuidad 5 → 15 → 35 (la etapa 1 es referencia de la 2…), neutra:
+    // las fotos propias llegan desde el Personaje con prioridad 1 al ejecutar.
+    expect(edge(img.s5, img.s15, HANDLE_IDS.INPUT_REFERENCE)!.data).toBeUndefined();
+    expect(edge(img.s15, img.s35, HANDLE_IDS.INPUT_REFERENCE)).toBeTruthy();
+    expect(edge(img.s35, img.s15, HANDLE_IDS.INPUT_REFERENCE)).toBeUndefined();
     // La galería no se conecta a las imágenes (mandaría todas sus fotos).
     expect(plan.addEdges.some((e) => e.source === "gal")).toBe(false);
     expect(plan.addEdges).toHaveLength(5);
@@ -83,10 +84,28 @@ describe("planCharacterMaterialize", () => {
     const third = planCharacterMaterialize(char2, state.nodes, state.edges, { idPrefix: "c" });
     expect(third.addNodes).toHaveLength(1);
     const img = Object.fromEntries(third.characterData.stages.map((s) => [s.id, s.imageNodeId!]));
-    const removed = state.edges.find((e) => e.source === img.s35 && e.target === img.s15)!;
+    const removed = state.edges.find((e) => e.source === img.s15 && e.target === img.s35)!;
     expect(third.removeEdgeIds).toContain(removed.id);
-    expect(third.addEdges.some((e) => e.source === img.s35 && e.target === img.s25)).toBe(true);
-    expect(third.addEdges.some((e) => e.source === img.s25 && e.target === img.s15)).toBe(true);
+    expect(third.addEdges.some((e) => e.source === img.s15 && e.target === img.s25)).toBe(true);
+    expect(third.addEdges.some((e) => e.source === img.s25 && e.target === img.s35)).toBe(true);
+  });
+
+  it("al reordenar y volver a generar, la cadena sigue el nuevo orden sin crear imágenes", () => {
+    const first = planCharacterMaterialize(character(stages), [character(stages)], [], { idPrefix: "a" });
+    const state = apply([character(stages)], [], first);
+    const data = state.nodes.find((n) => n.id === "char")!.data as unknown as CharacterNodeData;
+    // Nuevo orden: 35 → 15 → 5 (parte por la etapa actual).
+    const reversed = [...data.stages].reverse();
+    const char2 = { ...state.nodes.find((n) => n.id === "char")!, data: { ...data, stages: reversed, chainStale: true } as unknown as Record<string, unknown> };
+    const plan = planCharacterMaterialize(char2, state.nodes.map((n) => (n.id === "char" ? char2 : n)), state.edges, { idPrefix: "b" });
+    const img = Object.fromEntries(plan.characterData.stages.map((s) => [s.id, s.imageNodeId!]));
+    expect(plan.addNodes).toHaveLength(0);
+    expect(plan.addEdges.map((e) => [e.source, e.target])).toEqual([
+      [img.s35, img.s15],
+      [img.s15, img.s5],
+    ]);
+    expect(plan.removeEdgeIds).toHaveLength(2);
+    expect(plan.characterData.chainStale).toBe(false);
   });
 
   it("al borrar una etapa elimina su imagen solo si nunca se generó", () => {

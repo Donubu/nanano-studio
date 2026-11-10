@@ -241,9 +241,9 @@ export const MAX_SCENES_PER_SCRIPT = 30;
 // (edad, época…) tiene su texto y las fotos elegidas de esas galerías.
 // "Generar etapas" crea un nodo imagen por etapa: al ejecutar, cada uno recibe
 // de este nodo ADN + estilo + el texto de SU etapa y sus fotos (prioridad 1),
-// todo leído en ese momento (vínculo vivo), más la imagen de la etapa
-// siguiente más reciente como referencia de continuidad. Las etapas van de la
-// más antigua (índice 0) a la más reciente; la cadena parte por la más reciente.
+// todo leído en ese momento (vínculo vivo), más la imagen de la etapa ANTERIOR
+// de la lista como referencia de continuidad: la etapa 1 se genera primero y
+// es la referencia de la 2, la 2 de la 3, y así. El orden lo define el usuario.
 export interface CharacterReferenceImage {
   // Nodo conectado a la entrada de galerías del que viene la foto.
   nodeId: string;
@@ -267,6 +267,9 @@ export interface CharacterNodeData extends BaseNodeData {
   // (para reconciliar al volver a generar sin tocar lo que hizo el usuario).
   generatedImageIds?: string[];
   managedEdgeIds?: string[];
+  // true si se reordenaron etapas que ya tenían imagen: la cadena de
+  // continuidad no coincide con el orden hasta volver a "Generar etapas".
+  chainStale?: boolean;
 }
 
 export const MAX_CHARACTER_STAGES = 20;

@@ -489,7 +489,13 @@ export function buildAssistPlan(
         const patch = fieldsFor(type, op, base);
         if (type === "character") {
           const st = stagesFor(op, snap.stages ?? [], id);
-          if (st) patch.stages = st;
+          if (st) {
+            patch.stages = st;
+            // Etapas con imagen reordenadas o quitadas: la cadena queda
+            // desalineada hasta volver a "Generar etapas".
+            const withImage = (list: AssistSnapshotStage[]) => list.filter((x) => x.imageNodeId).map((x) => x.imageNodeId).join(",");
+            if (withImage(st) !== withImage(snap.stages ?? [])) patch.chainStale = true;
+          }
           markGenerate(op, id);
         }
         if (Object.keys(patch).length === 0) break;

@@ -141,7 +141,9 @@ interface DesiredEdge {
 /**
  * Plan para "Generar etapas": una imagen por etapa (reusa la que ya tenga),
  * conectada al Personaje (que al ejecutar le entrega texto y fotos de su
- * etapa) y a la imagen de la etapa siguiente más reciente (continuidad). Reconcilia solo lo que puso "Generar etapas" antes (ids en
+ * etapa) y a la imagen de la etapa anterior de la lista (continuidad: la 1 es
+ * referencia de la 2, la 2 de la 3…). Reconcilia solo lo que puso
+ * "Generar etapas" antes (ids en
  * managedEdgeIds / generatedImageIds); las conexiones del usuario no se tocan.
  * Las imágenes de etapas borradas se eliminan solo si nunca se generaron.
  */
@@ -163,9 +165,9 @@ export function planCharacterMaterialize(
   const stageImage = new Map<string, string>();
   const charW = (typeof character.width === "number" ? character.width : character.measured?.width) ?? DEFAULT_CHARACTER_W;
   const columnX = character.position.x + charW + IMAGE_GAP_X;
-  // La más reciente arriba: es la primera que se genera.
-  const newestFirst = [...stages].reverse();
-  newestFirst.forEach((stage, slot) => {
+  // En el orden de la lista, de arriba hacia abajo: la primera se genera
+  // primero y alimenta a la siguiente.
+  stages.forEach((stage, slot) => {
     const existing = stage.imageNodeId ? byId.get(stage.imageNodeId) : undefined;
     if (existing && existing.type === "image") {
       stageImage.set(stage.id, existing.id);
@@ -177,7 +179,7 @@ export function planCharacterMaterialize(
       id,
       type: "image",
       position: { x: columnX, y: character.position.y + slot * IMAGE_SLOT_Y },
-      data: { ...base, label: `${charLabel} · ${stage.name.trim() || `Etapa ${stages.indexOf(stage) + 1}`}`, aspectRatio: "3:4" },
+      data: { ...base, label: `${charLabel} · ${stage.name.trim() || `Etapa ${slot + 1}`}`, aspectRatio: "3:4" },
     });
     stageImage.set(stage.id, id);
   });
@@ -189,10 +191,10 @@ export function planCharacterMaterialize(
   stages.forEach((stage, i) => {
     const img = stageImage.get(stage.id)!;
     desired.push({ source: character.id, sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER, target: img, targetHandle: HANDLE_IDS.INPUT_PROMPT, priority: null });
-    const newer = stages[i + 1];
-    if (newer) {
+    const previous = stages[i - 1];
+    if (previous) {
       desired.push({
-        source: stageImage.get(newer.id)!,
+        source: stageImage.get(previous.id)!,
         sourceHandle: HANDLE_IDS.OUTPUT_IMAGE,
         target: img,
         targetHandle: HANDLE_IDS.INPUT_REFERENCE,
@@ -287,6 +289,7 @@ export function planCharacterMaterialize(
     stages: (data.stages ?? []).map((s) => (stageImage.has(s.id) ? { ...s, imageNodeId: stageImage.get(s.id) } : s)),
     generatedImageIds: [...generated],
     managedEdgeIds: managedIds.filter((id) => !finalRemoveEdgeIds.includes(id)),
+    chainStale: false,
   };
 
   return {

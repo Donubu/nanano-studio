@@ -647,7 +647,8 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     const parts: string[] = [];
     if (plan.addNodes.length) parts.push(`${plan.addNodes.length} ${plan.addNodes.length === 1 ? "imagen nueva" : "imágenes nuevas"}`);
     if (removeNodes.size) parts.push(`${removeNodes.size} sin usar ${removeNodes.size === 1 ? "eliminada" : "eliminadas"}`);
-    if (plan.addEdges.length) parts.push(`${plan.addEdges.length} ${plan.addEdges.length === 1 ? "conexión" : "conexiones"}`);
+    if (plan.addEdges.length) parts.push(`${plan.addEdges.length} ${plan.addEdges.length === 1 ? "conexión nueva" : "conexiones nuevas"}`);
+    if (explicitEdgeRemovals.length) parts.push(`${explicitEdgeRemovals.length} ${explicitEdgeRemovals.length === 1 ? "conexión quitada" : "conexiones quitadas"}`);
     if (plan.addNodes.length > 0) {
       setTimeout(() => fitView({ nodes: [characterId, ...plan.addNodes.map((n) => n.id)].map((id) => ({ id })), padding: 0.2, duration: 500, maxZoom: 1 }), 120);
     }
