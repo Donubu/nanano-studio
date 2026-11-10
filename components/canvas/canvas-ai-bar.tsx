@@ -21,12 +21,17 @@ export interface CanvasAiResult {
 interface Props {
   canEdit: boolean;
   selectedCount: number;
+  // Nombres de los nodos seleccionados (para mostrar sobre qué se envió).
+  selectedLabels?: string[];
   onSubmit: (instruction: string, signal: AbortSignal) => Promise<CanvasAiResult>;
   canUndo: boolean;
   onUndo: () => Promise<void>;
 }
 
-export function CanvasAiBar({ canEdit, selectedCount, onSubmit, canUndo, onUndo }: Props) {
+export function CanvasAiBar({ canEdit, selectedCount, selectedLabels = [], onSubmit, canUndo, onUndo }: Props) {
+  // Selección con la que se envió el pedido en curso: el pedido queda
+  // amarrado a esos nodos aunque el usuario seleccione otros mientras espera.
+  const [sentOn, setSentOn] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState<"ask" | "undo" | null>(null);
@@ -46,6 +51,7 @@ export function CanvasAiBar({ canEdit, selectedCount, onSubmit, canUndo, onUndo 
     if (text.length > MAX_ASSIST_INSTRUCTION_CHARS) return; // el contador ya avisa
     setBusy("ask");
     setResult(null);
+    setSentOn(selectedLabels);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     try {
@@ -118,10 +124,18 @@ export function CanvasAiBar({ canEdit, selectedCount, onSubmit, canUndo, onUndo 
           disabled={!canEdit || busy === "ask"}
           className="min-w-0 flex-1 resize-none bg-transparent py-1.5 text-sm leading-relaxed placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-60"
         />
-        {selectedCount > 0 && (
-          <span className="mt-2 shrink-0 text-[10px] text-violet-700 dark:text-violet-300">
-            {selectedCount === 1 ? "sobre el nodo seleccionado" : `sobre ${selectedCount} nodos`}
-          </span>
+        {busy === "ask" ? (
+          sentOn.length > 0 && (
+            <span className="mt-2 max-w-[180px] shrink-0 truncate text-[10px] text-violet-700 dark:text-violet-300" title={sentOn.join(", ")}>
+              Trabajando sobre: {sentOn.join(", ")}
+            </span>
+          )
+        ) : (
+          selectedCount > 0 && (
+            <span className="mt-2 max-w-[180px] shrink-0 truncate text-[10px] text-violet-700 dark:text-violet-300" title={selectedLabels.join(", ")}>
+              {selectedCount === 1 ? `sobre ${selectedLabels[0] ?? "el nodo seleccionado"}` : `sobre ${selectedCount} nodos`}
+            </span>
+          )
         )}
         {busy === "ask" ? (
           <button

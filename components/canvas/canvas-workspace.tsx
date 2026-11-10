@@ -590,6 +590,14 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     () => nodes.filter((n) => n.selected || n.id === selectedNodeId).map((n) => n.id),
     [nodes, selectedNodeId],
   );
+  const aiSelectedLabels = useMemo(
+    () =>
+      aiSelectedIds.map((nid) => {
+        const n = nodes.find((x) => x.id === nid);
+        return String((n?.data as Record<string, unknown> | undefined)?.label || n?.type || nid);
+      }),
+    [aiSelectedIds, nodes],
+  );
 
   // "Generar etapas" de un Personaje: crea/actualiza una imagen por etapa y
   // sus conexiones (ver lib/character.ts), persistido y compartido.
@@ -790,6 +798,11 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     }
     setAiUndo(undoRecord);
 
+    if (newNodes.length === 0 && updates.length > 0) {
+      // Solo ediciones: se lleva la vista a lo editado (el usuario pudo haberse
+      // movido a otra parte del canvas mientras esperaba).
+      setTimeout(() => fitView({ nodes: updates.map((u) => ({ id: u.id })), padding: 0.3, duration: 500, maxZoom: 1 }), 80);
+    }
     if (newNodes.length > 0) {
       // Cuando el navegador ya midió los nodos nuevos, se re-ordena el bloque
       // con sus tamaños reales (sin reordenar todo el canvas, solo si no
@@ -816,7 +829,10 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     const parts: string[] = [];
     const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
     if (newNodes.length) parts.push(plural(newNodes.length, "nodo nuevo", "nodos nuevos"));
-    if (updates.length) parts.push(plural(updates.length, "editado", "editados"));
+    if (updates.length) {
+      const names = updates.map((u) => String((byId.get(u.id)?.data as Record<string, unknown> | undefined)?.label || u.id));
+      parts.push(`${plural(updates.length, "editado", "editados")}: ${names.slice(0, 3).join(", ")}${names.length > 3 ? "…" : ""}`);
+    }
     if (removeIds.size) parts.push(plural(removeIds.size, "borrado", "borrados"));
     if (addEdges.length) parts.push(plural(addEdges.length, "conexión", "conexiones"));
     if (removedExplicit.length) parts.push(plural(removedExplicit.length, "conexión quitada", "conexiones quitadas"));
@@ -1515,6 +1531,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
             <CanvasAiBar
               canEdit={canEdit}
               selectedCount={aiSelectedIds.length}
+              selectedLabels={aiSelectedLabels}
               onSubmit={runCanvasAssist}
               canUndo={aiUndo !== null}
               onUndo={undoCanvasAssist}
