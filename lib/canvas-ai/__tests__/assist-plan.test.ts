@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildAssistPlan, planIsEmpty, type AssistModels } from "../assist-plan";
+import { buildAssistPlan, dropInventedStageText, pickResultImages, planIsEmpty, type AssistModels } from "../assist-plan";
 import { placeNewNodes } from "@/components/canvas/lib/ai-assist-apply";
 import { HANDLE_IDS } from "@/components/canvas/lib/canvas-types";
 
@@ -268,5 +268,80 @@ describe("placeNewNodes", () => {
   it("con el canvas vacío parte en el punto de respaldo", () => {
     const pos = placeNewNodes([], [{ id: "n1", type: "note", data: {} }], [], { x: 50, y: 70 });
     expect(pos.get("n1")).toEqual({ x: 50, y: 70 });
+  });
+});
+
+
+describe("Personaje · edición, textos inventados y resultados", () => {
+  const charSnap = {
+    id: "char", type: "character", label: "Ana",
+    stages: [
+      { id: "st-1", name: "Niña", text: "con mochila roja", imageNodeId: "img-1" },
+      { id: "st-2", name: "Adulta", text: "con lentes", imageNodeId: "img-2" },
+    ],
+  };
+  const snapshot = {
+    nodes: [
+      charSnap,
+      { id: "img-1", type: "image", outputUrl: "https://storage.googleapis.com/b/1.png" },
+      { id: "img-2", type: "image", outputUrl: "https://storage.googleapis.com/b/2.png" },
+      { id: "img-x", type: "image", label: "Otra", outputUrl: "https://storage.googleapis.com/b/x.png" },
+    ],
+    edges: [],
+  };
+
+  it("renombrar una etapa por id conserva su imagen", () => {
+    const plan = buildAssistPlan(
+      { ops: [{ op: "update_node", node: "char", stages: [
+        { id: "st-1", name: "Infancia", text: "con mochila roja" },
+        { id: "st-2", name: "Adulta", text: "con lentes" },
+      ] }] },
+      snapshot,
+      models,
+    );
+    const st = plan.updates[0].patch.stages as { id: string; name: string; imageNodeId?: string }[];
+    expect(st[0]).toMatchObject({ id: "st-1", name: "Infancia", imageNodeId: "img-1" });
+    expect(plan.updates[0].patch.chainStale).toBeUndefined();
+  });
+
+  it("vacía textos de etapa inventados si el pedido solo las nombra", () => {
+    const plan = buildAssistPlan(
+      { ops: [{ op: "add_node", ref: "c", node_type: "character", stages: [
+        { name: "Ninfa", text: "pequeña, sin alas desarrolladas, cuerpo estilizado y traslúcido" },
+        { name: "Adulta", text: "adulta" },
+      ] }] },
+      { nodes: [], edges: [] },
+      models,
+    );
+    const instruction = "Crea un personaje mantis con 2 etapas: ninfa y adulta";
+    expect(dropInventedStageText(plan, instruction, { nodes: [] })).toBe(1);
+    expect((plan.addNodes[0].data.stages as { text: string }[]).map((s) => s.text)).toEqual(["", "adulta"]);
+  });
+
+  it("respeta los textos pegados o pedidos explícitamente", () => {
+    const pasted = buildAssistPlan(
+      { ops: [{ op: "add_node", ref: "c", node_type: "character", stages: [{ name: "16", text: "Adolescente con pelo largo hasta los hombros y frenillos" }] }] },
+      { nodes: [], edges: [] },
+      models,
+    );
+    expect(dropInventedStageText(pasted, "A los 16: pelo largo hasta los hombros, polerón de banda, frenillos", { nodes: [] })).toBe(0);
+    const asked = buildAssistPlan(
+      { ops: [{ op: "add_node", ref: "c", node_type: "character", stages: [{ name: "Ninfa", text: "pequeña y traslúcida" }] }] },
+      { nodes: [], edges: [] },
+      models,
+    );
+    expect(dropInventedStageText(asked, "crea un personaje y describe cada etapa", { nodes: [] })).toBe(0);
+  });
+
+  it("elige qué resultados mostrarle al modelo", () => {
+    // Personaje seleccionado: sus imágenes de etapa, con etapa en la leyenda.
+    const sel = pickResultImages(snapshot, ["char"], "mejora el resultado");
+    expect(sel.map((p) => p.nodeId)).toEqual(["img-1", "img-2"]);
+    expect(sel[1].caption).toContain('etapa 2 "Adulta" (id=st-2)');
+    // Imagen suelta seleccionada.
+    expect(pickResultImages(snapshot, ["img-x"], "x").map((p) => p.nodeId)).toEqual(["img-x"]);
+    // Sin selección: por nombre del Personaje solo si habla de resultados.
+    expect(pickResultImages(snapshot, [], "cómo quedó Ana en la etapa adulta").map((p) => p.nodeId)).toEqual(["img-1", "img-2"]);
+    expect(pickResultImages(snapshot, [], "agrega una etapa a Ana")).toEqual([]);
   });
 });

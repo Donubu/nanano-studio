@@ -13,6 +13,8 @@ import pool from "@/lib/db";
 import { generateJson } from "@/lib/production/gemini-json";
 import {
   buildAssistPlan,
+  dropInventedStageText,
+  pickResultImages,
   planIsEmpty,
   type AssistModel,
   type AssistModels,
@@ -21,6 +23,9 @@ import {
   type AssistSnapshotNode,
 } from "@/lib/canvas-ai/assist-plan";
 import { ASSIST_SCHEMA, ASSIST_SYSTEM_INSTRUCTION, buildAssistUserText } from "@/lib/canvas-ai/assist-prompt";
+import { downloadReference } from "@/lib/production/reference-images";
+import sharp from "sharp";
+import type { Part } from "@google/genai";
 
 export const maxDuration = 120;
 
@@ -64,6 +69,7 @@ function cleanSnapshot(raw: unknown): { nodes: AssistSnapshotNode[]; edges: Assi
       resolution: typeof o.resolution === "string" ? o.resolution : undefined,
       duration: typeof o.duration === "number" ? o.duration : undefined,
       hasOutput: o.hasOutput === true,
+      outputUrl: typeof o.outputUrl === "string" && /^https:\/\//.test(o.outputUrl) ? o.outputUrl : undefined,
       locked: o.locked === true,
       stages: Array.isArray(o.stages)
         ? (o.stages as unknown[]).slice(0, 30).flatMap((st) => {
@@ -133,6 +139,38 @@ async function loadProjectModels(projectId: number | null): Promise<AssistModels
     });
   }
   return out;
+}
+
+// Imágenes generadas que el asistente puede ver (cada una ~1k tokens).
+const MAX_RESULT_IMAGES = 4;
+const RESULT_IMAGE_MAX_SIDE = 1024;
+
+async function loadResultImages(
+  snapshot: { nodes: AssistSnapshotNode[] },
+  selectedIds: string[],
+  instruction: string,
+): Promise<Part[]> {
+  const picks = pickResultImages(snapshot, selectedIds, instruction).slice(0, MAX_RESULT_IMAGES);
+  const parts = await Promise.all(
+    picks.map(async (p) => {
+      try {
+        // Solo nuestro bucket (downloadReference lo exige); se achica a JPEG.
+        const ref = await downloadReference(p.url);
+        const small = await sharp(Buffer.from(ref.data, "base64"))
+          .resize(RESULT_IMAGE_MAX_SIDE, RESULT_IMAGE_MAX_SIDE, { fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 80 })
+          .toBuffer();
+        return [
+          { text: `Imagen generada · ${p.caption}` },
+          { inlineData: { mimeType: "image/jpeg", data: small.toString("base64") } },
+        ] as Part[];
+      } catch (err) {
+        console.warn(`[canvas-ai] no se pudo cargar el resultado de ${p.nodeId}`, err);
+        return [];
+      }
+    }),
+  );
+  return parts.flat();
 }
 
 async function logInvocation(row: {
@@ -220,11 +258,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   };
 
   try {
+    const resultImages = await loadResultImages(snapshot, selectedIds, instruction);
     const { data, usage } = await generateJson<AssistResponse>({
       model: MODEL,
       systemInstruction: ASSIST_SYSTEM_INSTRUCTION,
       schema: ASSIST_SCHEMA,
-      parts: [{ text: buildAssistUserText({ instruction, ...snapshot, selectedIds, models }) }],
+      parts: [
+        { text: buildAssistUserText({ instruction, ...snapshot, selectedIds, models }) },
+        ...(resultImages.length ? [{ text: "## Resultados generados (imágenes)" }, ...resultImages] : []),
+      ],
       temperature: 0.4,
       maxOutputTokens: 32768,
       operationName: "canvasAssist",
@@ -237,6 +279,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       data.relayout = "none";
     }
     const plan = buildAssistPlan(data, snapshot, models);
+    dropInventedStageText(plan, instruction, snapshot);
     await logInvocation({
       ...base,
       inputTokens: usage.inputTokens,

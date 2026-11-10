@@ -97,8 +97,14 @@ ${Object.entries(INPUT_DOCS).map(([k, v]) => `- ${k}: ${v}`).join("\n")}
 - Separa el texto pegado: lo que se repite en todas las etapas (rasgos físicos permanentes, nombre, personalidad visible) va al campo dna del character; el estilo de ilustración, colores o tipo de imagen va a un static-text "Estilo global" conectado a character_style (si ya existe un texto de estilo en el canvas, conéctalo en vez de crear otro); cada etapa conserva solo lo propio (edad, ropa, pelo, contexto), con las palabras del usuario: no agregues detalles que el usuario no dijo ni repitas en la etapa lo que ya está en el ADN. Si el usuario solo nombra la etapa ("juvenil", "ninfa recién nacida"), su text es exactamente eso: no la describas tú.
 - Respeta el orden en que el usuario da las etapas: es el orden de generación y de la cadena de referencias. Si el usuario pide un orden explícito ("parte por mi foto de hoy y ve hacia más joven", "de niño a adulto"), úsalo. La etapa 1 suele ser la que tiene la referencia más fuerte (por ejemplo una foto real). name: corto ("5 años", "Adolescencia").
 - Si el usuario indica fotos para una etapa ("la foto 2 de la galería Fotos para la actual"), ponlas en photos de esa etapa con el id de la galería y su número (aparecen numeradas en el canvas actual). Si no indica cuáles, no elijas fotos por tu cuenta.
-- Para editar etapas de un character existente, manda update_node con la lista COMPLETA de stages (las que no cambian, igual que estaban).
+- Para editar etapas de un character existente, manda update_node con la lista COMPLETA de stages (las que no cambian, igual que estaban) y el id de cada etapa existente (aparece en el canvas actual), así renombrar una etapa no pierde su imagen. Las etapas nuevas van sin id.
 - generate_stages=true si el usuario pide generar, crear las imágenes o "armar todo"; si solo pide definir o separar etapas, false.
+
+## Resultados generados
+- Si el mensaje trae imágenes generadas (cada una indica su nodo y, si corresponde, su Personaje y etapa), míralas y compáralas con lo pedido: ADN, estilo, texto de la etapa y fotos de referencia.
+- Cuando el usuario pida mejorar o ajustar un resultado, propone cambios concretos en los textos que lo producen: dna o stages del character (update_node), el texto de estilo global (update_node del static-text), o el prompt del nodo imagen. En reply di en una o dos frases qué viste y qué cambiaste.
+- No puedes regenerar imágenes: el usuario vuelve a ejecutar con RUN después de tus cambios.
+- Si el usuario pregunta por un resultado pero no hay imágenes en el mensaje, pídele que seleccione el Personaje o las imágenes y vuelva a preguntar.
 
 ## Reglas
 - Reutiliza los nodos que ya existen: no dupliques algo que el usuario ya tiene; conéctalo o edítalo.
@@ -146,6 +152,7 @@ export const ASSIST_SCHEMA = {
             items: {
               type: "object",
               properties: {
+                id: { type: "string" },
                 name: { type: "string" },
                 text: { type: "string" },
                 photos: {
@@ -220,7 +227,7 @@ export function buildAssistUserText(params: {
     const stageLines = (n.stages ?? [])
       .map((st, i) => {
         const photos = (st.referenceImages ?? []).map((r) => photoName(r.url)).join(", ");
-        return `\n    etapa ${i + 1}: name=${JSON.stringify(st.name)} text=${JSON.stringify(st.text.slice(0, 300))}${photos ? ` fotos=${photos}` : ""}${st.imageNodeId ? ` imagen=${st.imageNodeId}` : ""}`;
+        return `\n    etapa ${i + 1}: id=${st.id} name=${JSON.stringify(st.name)} text=${JSON.stringify(st.text.slice(0, 300))}${photos ? ` fotos=${photos}` : ""}${st.imageNodeId ? ` imagen=${st.imageNodeId}` : ""}`;
       })
       .join("");
     const images = n.images?.length ? `\n    ${n.images.length} ${n.images.length === 1 ? "foto" : "fotos"} (numeradas 1..${n.images.length})` : "";

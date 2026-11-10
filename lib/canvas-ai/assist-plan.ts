@@ -40,6 +40,8 @@ export interface AssistSnapshotNode {
   dna?: string;
   // Fotos de una galería / imagen estática / imagen generada, en orden.
   images?: string[];
+  // Resultado de un nodo imagen (para que el asistente pueda verlo).
+  outputUrl?: string;
 }
 
 export interface AssistSnapshotStage {
@@ -114,7 +116,7 @@ export interface AssistOp {
   input?: string;
   // character: ADN y etapas de la más antigua a la más reciente.
   dna?: string;
-  stages?: { name?: string; text?: string; photos?: { gallery: string; number: number }[] }[];
+  stages?: { id?: string; name?: string; text?: string; photos?: { gallery: string; number: number }[] }[];
   generate_stages?: boolean;
 }
 
@@ -374,13 +376,20 @@ export function buildAssistPlan(
   let stageSeq = 0;
   const stagesFor = (op: AssistOp, previous: AssistSnapshotStage[], characterId: string): AssistSnapshotStage[] | null => {
     if (!Array.isArray(op.stages)) return null;
+    // Una etapa existente se reconoce por su id (así renombrarla no pierde su
+    // imagen) y, si el modelo no lo manda, por el nombre.
+    const byId = new Map(previous.map((st) => [st.id, st]));
     const byName = new Map(previous.map((st) => [st.name.trim().toLowerCase(), st]));
+    const used = new Set<string>();
     const out: AssistSnapshotStage[] = [];
     for (const raw of op.stages.slice(0, MAX_CHARACTER_STAGES)) {
       const name = clip((raw.name ?? "").trim(), MAX_LABEL_CHARS);
       const text = clip((raw.text ?? "").trim(), MAX_PROMPT_CHARS);
       if (!name && !text) continue;
-      const prev = byName.get(name.toLowerCase());
+      let prev = raw.id ? byId.get(raw.id.trim()) : undefined;
+      if (!prev) prev = byName.get(name.toLowerCase());
+      if (prev && used.has(prev.id)) prev = undefined;
+      if (prev) used.add(prev.id);
       stageSeq += 1;
       const stage: AssistSnapshotStage = prev ? { ...prev, name, text } : { id: `st-${prefix}-${stageSeq}`, name, text };
       if (Array.isArray(raw.photos)) {
@@ -585,4 +594,118 @@ export function planIsEmpty(plan: AssistPlan): boolean {
     plan.materializeCharacterIds.length === 0 &&
     !plan.relayout
   );
+}
+
+
+// ---------------------------------------------------------------------------
+// Textos de etapa inventados
+// ---------------------------------------------------------------------------
+
+const DESCRIBE_REQUEST = /\b(describ|redact|escrib|invent|prop[oó]n|suger|complet|detall|desarroll|mejor|ajust|corrig|cambi|reescrib|agreg|añad)/i;
+const STOPWORDS = new Set([
+  "para", "como", "pero", "este", "esta", "esto", "estos", "estas", "sobre", "entre", "desde", "hasta",
+  "cuando", "donde", "todo", "toda", "todos", "todas", "cada", "tambien", "porque", "tiene", "tienen",
+  "solo", "sola", "unos", "unas", "otro", "otra", "otros", "otras", "mismo", "misma", "etapa", "etapas",
+]);
+
+function contentWords(text: string): string[] {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .split(/[^a-z0-9ñ]+/)
+    .filter((w) => w.length >= 4 && !STOPWORDS.has(w));
+}
+
+/**
+ * El modelo tiende a "describir" etapas que el usuario solo nombró ("adulta"
+ * → "adulta completamente desarrollada con alas…"). Si el pedido no pide
+ * describir/mejorar, un texto de etapa cuyas palabras casi no aparecen en el
+ * pedido ni en el canvas se deja vacío. Muta el plan y devuelve cuántos
+ * textos se vaciaron.
+ */
+export function dropInventedStageText(
+  plan: AssistPlan,
+  instruction: string,
+  snapshot: { nodes: AssistSnapshotNode[] },
+): number {
+  if (DESCRIBE_REQUEST.test(instruction)) return 0;
+  const vocab = new Set(contentWords(instruction));
+  for (const n of snapshot.nodes) {
+    for (const t of [n.text, n.dna, ...(n.stages ?? []).flatMap((st) => [st.name, st.text])]) {
+      if (t) contentWords(t).forEach((w) => vocab.add(w));
+    }
+  }
+  const previousText = new Map<string, string>();
+  for (const n of snapshot.nodes) for (const st of n.stages ?? []) previousText.set(st.id, st.text);
+
+  let dropped = 0;
+  const clean = (stages: unknown) => {
+    if (!Array.isArray(stages)) return;
+    for (const st of stages as AssistSnapshotStage[]) {
+      if (!st.text || previousText.get(st.id) === st.text) continue;
+      const words = contentWords(st.text);
+      if (words.length === 0) continue;
+      const known = words.filter((w) => vocab.has(w)).length;
+      if (known / words.length < 0.6) {
+        st.text = "";
+        dropped += 1;
+      }
+    }
+  };
+  for (const n of plan.addNodes) if (n.type === "character") clean(n.data.stages);
+  for (const u of plan.updates) clean(u.patch.stages);
+  return dropped;
+}
+
+
+// ---------------------------------------------------------------------------
+// Resultados que el asistente puede ver
+// ---------------------------------------------------------------------------
+
+const RESULT_HINT = /\b(result|gener[oóa]|qued[oó]|sali[oó]|imagen|imágenes|foto|se ve|parec|mejor|ajust|corrig|arregl)/i;
+
+/**
+ * Imágenes generadas que se le muestran al modelo, en orden de relevancia:
+ * los nodos imagen seleccionados, las imágenes de etapa de los Personajes
+ * seleccionados y, sin selección, las de un Personaje cuyo nombre aparece en
+ * el pedido (si el pedido habla de resultados).
+ */
+export function pickResultImages(
+  snapshot: { nodes: AssistSnapshotNode[] },
+  selectedIds: string[],
+  instruction: string,
+): { nodeId: string; url: string; caption: string }[] {
+  const byId = new Map(snapshot.nodes.map((n) => [n.id, n]));
+  const stageOf = new Map<string, { character: AssistSnapshotNode; stage: AssistSnapshotStage; index: number }>();
+  for (const n of snapshot.nodes) {
+    (n.stages ?? []).forEach((stage, index) => {
+      if (stage.imageNodeId) stageOf.set(stage.imageNodeId, { character: n, stage, index });
+    });
+  }
+  const out: { nodeId: string; url: string; caption: string }[] = [];
+  const add = (id: string) => {
+    const n = byId.get(id);
+    if (!n?.outputUrl || out.some((o) => o.nodeId === id)) return;
+    const st = stageOf.get(id);
+    const caption = st
+      ? `nodo ${id} · Personaje "${st.character.label ?? st.character.id}" (${st.character.id}) · etapa ${st.index + 1} "${st.stage.name}" (id=${st.stage.id})`
+      : `nodo ${id}${n.label ? ` "${n.label}"` : ""}`;
+    out.push({ nodeId: id, url: n.outputUrl, caption });
+  };
+  const characterImages = (c: AssistSnapshotNode) => (c.stages ?? []).forEach((st) => st.imageNodeId && add(st.imageNodeId));
+
+  for (const id of selectedIds) {
+    const n = byId.get(id);
+    if (!n) continue;
+    if (n.type === "character") characterImages(n);
+    else add(id);
+  }
+  if (out.length === 0 && RESULT_HINT.test(instruction)) {
+    const low = instruction.toLowerCase();
+    for (const n of snapshot.nodes) {
+      if (n.type === "character" && n.label && low.includes(n.label.toLowerCase())) characterImages(n);
+    }
+  }
+  return out;
 }

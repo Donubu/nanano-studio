@@ -38,6 +38,7 @@ export function buildAssistSnapshot(nodes: Node[], edges: Edge[]): {
         locked: d.locked === true,
         ...(n.type === "character" && Array.isArray(d.stages) ? { stages: d.stages as AssistSnapshotNode["stages"] } : {}),
         ...(n.type === "character" && typeof d.dna === "string" && d.dna ? { dna: d.dna } : {}),
+        ...(n.type === "image" && typeof d.outputUrl === "string" && d.outputUrl ? { outputUrl: d.outputUrl } : {}),
         ...(REFERENCE_SOURCE_TYPES.has(n.type ?? "")
           ? { images: galleryImagesOf({ type: n.type, data: d }).map((i) => i.url).slice(0, 24) }
           : {}),
