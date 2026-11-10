@@ -1135,14 +1135,14 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     }
   }, [realConversationId, nodes, edges, projectId, generationConfig]);
 
-  // Auto-layout: reposition every node into columns based on topological depth
+  // Auto-layout: reordena todo el canvas (ver lib/auto-layout.ts)
   const reorderNodes = useCallback(() => {
     if (!canEdit || nodes.length === 0) return;
     const confirmed = window.confirm(
       "¿Reordenar todos los nodos?\n\n" +
-      "Se reorganizarán en formato timeline vertical (de arriba hacia abajo): " +
-      "los orígenes quedan arriba y sus dependientes bajan en la misma columna. " +
-      "Cuando un nodo tiene varios hijos, las ramas extras se abren a la derecha.\n\n" +
+      "Cada flujo se ordena de arriba hacia abajo: cada nodo queda debajo de lo que lo alimenta " +
+      "y las referencias justo encima del nodo que las usa. Los flujos separados se acomodan " +
+      "como bloques uno al lado del otro y en filas.\n\n" +
       "Las posiciones actuales se perderán (puedes deshacer con Ctrl+Z)."
     );
     if (!confirmed) return;
