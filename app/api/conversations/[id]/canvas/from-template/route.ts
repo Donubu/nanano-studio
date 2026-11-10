@@ -73,9 +73,8 @@ export async function POST(
       return NextResponse.json({ error: "El template no tiene nodos" }, { status: 400 });
     }
 
-    // IDs frescos por inserción. No siguen el contador node-N del cliente
-    // (el sufijo no-numérico hace que loadCanvas los ignore al recalcular el
-    // contador), así que dos inserciones del mismo template tampoco chocan.
+    // IDs frescos por inserción (sello de tiempo), así que dos inserciones del
+    // mismo template no chocan entre sí ni con los nodos del canvas.
     const stamp = Date.now().toString(36);
     const idMap = new Map<string, string>();
     templateNodes.forEach((node, i) => {

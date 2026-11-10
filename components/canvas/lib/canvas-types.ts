@@ -338,6 +338,21 @@ export function baseHandleId(handleId: string | null | undefined): string | null
     : handleId;
 }
 
+// --- IDs de nodos nuevos ---
+/**
+ * Id único para un nodo creado en el cliente. Antes era `node-N` con un
+ * contador calculado desde los nodos vigentes: reutilizaba ids de nodos
+ * borrados (soft delete), y el upsert por (id, conversation_id) reescribía esa
+ * fila; y como no veía los nodos que llegan por colaboración, un nuevo editor
+ * podía generar un id ya usado. Los nodos existentes conservan su id.
+ */
+export function newCanvasNodeId(): string {
+  const rand = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID().replace(/-/g, "").slice(0, 8)
+    : Math.random().toString(36).slice(2, 10);
+  return `node-${Date.now().toString(36)}${rand}`;
+}
+
 // --- Default configs for new nodes ---
 export function getDefaultNodeData(type: CanvasNodeType): CanvasNodeData {
   const base: BaseNodeData = {

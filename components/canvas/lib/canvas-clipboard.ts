@@ -119,8 +119,7 @@ export function readCanvasClipboard(): CanvasClipboardPayload | null {
 
 /**
  * Remapea el payload a IDs frescos para pegar sin colisiones (mismo esquema
- * que la inserción de templates: sufijo no numérico que el contador node-N
- * del cliente ignora). `anchor` (coords de flow) ancla la esquina
+ * que la inserción de templates: un sello de tiempo por pegado). `anchor` (coords de flow) ancla la esquina
  * superior-izquierda del bounding box; el layout relativo se preserva.
  *
  * `existingNodeIds` = nodos presentes en el canvas destino. Los edges de

@@ -48,7 +48,7 @@ import { useCanvasExecution } from "./hooks/use-canvas-execution";
 import { useUndoRedo } from "./hooks/use-undo-redo";
 import { isValidConnection, wouldCreateCycle, getCompatibleTargetTypes, getCompatibleSourceTypes } from "./lib/connection-rules";
 import { autoLayoutPositions } from "./lib/auto-layout";
-import { getDefaultNodeData, type CanvasNodeType, type CanvasNodeData, type CanvasEdge, HANDLE_IDS } from "./lib/canvas-types";
+import { getDefaultNodeData, newCanvasNodeId, type CanvasNodeType, type CanvasNodeData, type CanvasEdge, HANDLE_IDS } from "./lib/canvas-types";
 import { getDescendantNodes } from "./lib/topological-sort";
 import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Type, Settings, Bot, Sparkles, Film, Play, Loader2, UserRound } from "lucide-react";
 import { CanvasProvider } from "./canvas-context";
@@ -260,7 +260,6 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     }
   }, [onEdgesChangeBase, takeSnapshot]);
   const [realConversationId, setRealConversationId] = useState(conversationId);
-  const nodeIdCounter = useRef(0);
   const creatingConvRef = useRef(false);
   // Espejo síncrono de realConversationId. La persistencia lee de acá: cuando
   // ensureConversation crea la conversación, el ref se setea ANTES del
@@ -342,11 +341,6 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
         const loadedEdges: Edge[] = data.edges || [];
         setNodes(loadedNodes);
         setEdges(loadedEdges);
-        const maxId = loadedNodes.reduce((max: number, n: Node) => {
-          const num = parseInt(n.id.replace("node-", ""), 10);
-          return isNaN(num) ? max : Math.max(max, num);
-        }, 0);
-        nodeIdCounter.current = maxId;
       }
     } catch (err) {
       console.error("Error loading canvas:", err);
@@ -368,7 +362,6 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     setNodes([]);
     setEdges([]);
     setSelectedNodeId(null);
-    nodeIdCounter.current = 0;
 
     if (!realConversationId) {
       setIsLoaded(true);
@@ -1049,8 +1042,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
       if (!canEdit) return;
       await ensureConversation();
       takeSnapshot();
-      nodeIdCounter.current += 1;
-      const id = `node-${nodeIdCounter.current}`;
+      const id = newCanvasNodeId();
       const data = getDefaultNodeData(type);
       // Convert toolbar area (screen coords) to flow coords
       const flowPos = screenToFlowPosition({ x: 120, y: 120 });
@@ -1177,8 +1169,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
 
       await ensureConversation();
       takeSnapshot();
-      nodeIdCounter.current += 1;
-      const newId = `node-${nodeIdCounter.current}`;
+      const newId = newCanvasNodeId();
       const data = getDefaultNodeData(option.type as CanvasNodeType);
       const newNode: Node<CanvasNodeData> = {
         id: newId,
