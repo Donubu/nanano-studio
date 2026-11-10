@@ -1,10 +1,10 @@
 "use client";
 
-// Sección "Heredado del Personaje" del panel de una imagen de etapa: muestra
-// y deja editar, sin ir al nodo Personaje, lo que esa imagen recibe al
-// ejecutar (texto de la etapa, ADN y estilo global) más sus fotos y el prompt
-// final. Los cambios se guardan en el Personaje (o en el texto de estilo):
-// es el mismo vínculo vivo, así que aplican en la próxima ejecución.
+// Sección "Heredado del Personaje" del panel de una imagen de etapa: deja
+// editar el nombre y texto de SU etapa sin ir al nodo Personaje (se guarda
+// en el Personaje: mismo vínculo vivo) y muestra en solo lectura el ADN y el
+// estilo global, con un botón que lleva a su nodo, más las fotos de la etapa
+// y el prompt final.
 
 import { useMemo, useState } from "react";
 import type { Node } from "@xyflow/react";
@@ -26,9 +26,10 @@ interface Props {
   nodes: Node[];
   edges: Array<{ source: string; target: string; targetHandle?: string | null }>;
   onUpdateData: (nodeId: string, updates: Partial<CanvasNodeData>) => void;
+  onFocusNode?: (nodeId: string) => void;
 }
 
-export function CharacterInheritedSection({ imageNode, nodes, edges, onUpdateData }: Props) {
+export function CharacterInheritedSection({ imageNode, nodes, edges, onUpdateData, onFocusNode }: Props) {
   const [showPreview, setShowPreview] = useState(false);
 
   const info = useMemo(() => {
@@ -144,42 +145,28 @@ export function CharacterInheritedSection({ imageNode, nodes, edges, onUpdateDat
         </div>
       )}
 
+      {/* ADN y estilo: solo lectura aquí (afectan a todas las etapas o a varios
+          Personajes); se editan en su nodo. */}
       <div className="space-y-1.5">
-        <Label className="flex items-center gap-1 text-xs">
-          <Dna className="h-3 w-3 text-pink-500" /> ADN (todas las etapas)
-        </Label>
-        <Textarea
-          value={data.dna ?? ""}
-          onChange={(e) => onUpdateData(character.id, { dna: e.target.value } as Partial<CanvasNodeData>)}
-          placeholder="Rasgos que no cambian entre etapas"
-          className="min-h-[60px] resize-y text-sm"
+        <InheritedLine
+          icon={<Dna className="h-3 w-3 shrink-0 text-pink-500" />}
+          label="ADN"
+          text={data.dna}
+          empty="Sin ADN"
+          action="Editar en el Personaje"
+          onAction={onFocusNode ? () => onFocusNode(character.id) : undefined}
         />
+        {styleNode && (
+          <InheritedLine
+            icon={<Palette className="h-3 w-3 shrink-0 text-blue-500" />}
+            label={styleSharedWith > 0 ? `Estilo global (compartido con ${styleSharedWith} más)` : "Estilo global"}
+            text={styleText}
+            empty="Sin resultado todavía"
+            action="Editar estilo"
+            onAction={onFocusNode ? () => onFocusNode(styleNode.id) : undefined}
+          />
+        )}
       </div>
-
-      {styleNode && (
-        <div className="space-y-1.5">
-          <Label className="flex items-center gap-1 text-xs">
-            <Palette className="h-3 w-3 text-blue-500" /> Estilo global
-            {styleSharedWith > 0 && (
-              <span className="font-normal text-muted-foreground">
-                · compartido con {styleSharedWith} {styleSharedWith === 1 ? "personaje más" : "personajes más"}
-              </span>
-            )}
-          </Label>
-          {styleNode.type === "static-text" ? (
-            <Textarea
-              value={styleText}
-              onChange={(e) => onUpdateData(styleNode.id, { content: e.target.value } as Partial<CanvasNodeData>)}
-              placeholder="Estilo de ilustración, paleta, encuadre…"
-              className="min-h-[60px] resize-y text-sm"
-            />
-          ) : (
-            <p className="whitespace-pre-wrap rounded-md bg-muted/40 p-2 text-xs text-muted-foreground">
-              {styleText || "Lo genera un nodo de IA conectado (todavía sin resultado)."}
-            </p>
-          )}
-        </div>
-      )}
 
       <div>
         <button
@@ -196,6 +183,43 @@ export function CharacterInheritedSection({ imageNode, nodes, edges, onUpdateDat
           </pre>
         )}
       </div>
+    </div>
+  );
+}
+
+function InheritedLine({
+  icon,
+  label,
+  text,
+  empty,
+  action,
+  onAction,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  text?: string;
+  empty: string;
+  action: string;
+  onAction?: () => void;
+}) {
+  return (
+    <div className="flex items-start gap-1.5 rounded-md bg-muted/40 px-2 py-1.5 text-[11px]">
+      <span className="mt-0.5">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <div className="font-medium text-foreground">{label}</div>
+        <div className="truncate text-muted-foreground" title={text || empty}>
+          {text?.trim() || empty}
+        </div>
+      </div>
+      {onAction && (
+        <button
+          type="button"
+          onClick={onAction}
+          className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/10"
+        >
+          {action} →
+        </button>
+      )}
     </div>
   );
 }

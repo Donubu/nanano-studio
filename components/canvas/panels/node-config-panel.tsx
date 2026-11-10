@@ -20,6 +20,8 @@ interface NodeConfigPanelProps {
   generationConfig: CanvasGenerationConfig[];
   edges: Array<{ id?: string; source: string; target: string; targetHandle?: string | null; data?: { priority?: number | null } | null }>;
   onUpdateData: (nodeId: string, updates: Partial<CanvasNodeData>) => void;
+  // Lleva la vista a otro nodo y lo selecciona.
+  onFocusNode?: (nodeId: string) => void;
   onUpdateEdgePriority?: (edgeId: string, priority: number | null) => void;
   onDelete: (nodeId: string) => void;
   onExecute: (nodeId: string) => void;
@@ -57,6 +59,7 @@ export function NodeConfigPanel({
   onExecute,
   isExecuting,
   onClose,
+  onFocusNode,
 }: NodeConfigPanelProps) {
   const { canEdit } = useCanvasContext();
   const data = node.data as unknown as CanvasNodeData;
@@ -169,7 +172,7 @@ export function NodeConfigPanel({
       <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${isLocked ? "opacity-50 pointer-events-none" : !canEdit ? "pointer-events-none" : ""}`}>
         {/* Imagen de una etapa de Personaje: lo heredado, editable aquí mismo */}
         {type === "image" && inheritsFromCharacter && (
-          <CharacterInheritedSection imageNode={node} nodes={nodes} edges={edges} onUpdateData={onUpdateData} />
+          <CharacterInheritedSection imageNode={node} nodes={nodes} edges={edges} onUpdateData={onUpdateData} onFocusNode={onFocusNode} />
         )}
 
         {/* Prompt - always editable (unless locked) */}

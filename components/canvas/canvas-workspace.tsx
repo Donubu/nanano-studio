@@ -1087,6 +1087,18 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     [canEdit, setNodes, persist, collab.emitNodeData]
   );
 
+  // Lleva la vista a un nodo y lo deja seleccionado (ej. "Editar en el
+  // Personaje" desde el panel de una imagen de etapa).
+  const focusNode = useCallback(
+    (nodeId: string) => {
+      setNodes((nds) => nds.map((n) => (n.selected !== (n.id === nodeId) ? { ...n, selected: n.id === nodeId } : n)));
+      setSelectedNodeId(nodeId);
+      collab.emitNodeSelect(nodeId);
+      setTimeout(() => fitView({ nodes: [{ id: nodeId }], padding: 0.4, duration: 500, maxZoom: 1 }), 30);
+    },
+    [setNodes, fitView, collab.emitNodeSelect],
+  );
+
   // Delete node — el backend soft-deletea también los edges incidentes.
   const deleteNode = useCallback(
     (nodeId: string) => {
@@ -1559,6 +1571,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
           onExecute={executeNode}
           isExecuting={isExecuting}
           onClose={() => setSelectedNodeId(null)}
+          onFocusNode={focusNode}
         />
       )}
 
