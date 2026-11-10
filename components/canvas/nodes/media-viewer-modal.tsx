@@ -708,7 +708,7 @@ export function MediaViewerModal({
                                 setNewTagName(e.target.value.toUpperCase())
                               }
                               placeholder="NOMBRE"
-                              className="flex-1 text-[11px] bg-muted rounded px-1.5 py-1 outline-none placeholder:text-muted-foreground/40"
+                              className="flex-1 text-[11px] bg-muted rounded px-1.5 py-1 outline-none placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/40"
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();

@@ -104,7 +104,7 @@ export const NodeLabel = memo(function NodeLabel({ value, placeholder, onChange,
             }
           }}
           placeholder={placeholder}
-          className={`${base} placeholder:text-muted-foreground/50 ${className} nodrag`}
+          className={`${base} placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50 ${className} nodrag`}
         />
       ) : (
         <span

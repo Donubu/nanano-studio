@@ -640,7 +640,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
           onChange={handlePromptChange}
           onKeyDown={stopProp}
           placeholder="Pega aquí el guion completo (opcional si vas a armar las escenas a mano)..."
-          className="nodrag w-full text-xs bg-muted/30 rounded-md px-2 py-1.5 border-none outline-none resize-y min-h-[80px] max-h-[200px] placeholder:text-muted-foreground/50"
+          className="nodrag w-full text-xs bg-muted/30 rounded-md px-2 py-1.5 border-none outline-none resize-y min-h-[80px] max-h-[200px] placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
           rows={4}
         />
         {canEdit && (
@@ -1071,7 +1071,7 @@ function SceneCard({
         onChange={onTextChange}
         onKeyDown={stopProp}
         placeholder="Texto de la escena..."
-        className="nodrag w-full text-[10px] bg-background/50 rounded px-1.5 py-1 border border-border/30 outline-none resize-y min-h-[60px] max-h-[160px] whitespace-pre-wrap placeholder:text-muted-foreground/50"
+        className="nodrag w-full text-[10px] bg-background/50 rounded px-1.5 py-1 border border-border/30 outline-none resize-y min-h-[60px] max-h-[160px] whitespace-pre-wrap placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
         rows={3}
       />
     </div>

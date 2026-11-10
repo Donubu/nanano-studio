@@ -110,13 +110,14 @@ export function CanvasAiBar({ canEdit, selectedCount, onSubmit, canUndo, onUndo 
               else setOpen(false);
             }
           }}
-          rows={instruction.length > 90 || instruction.includes("\n") ? 3 : 1}
+          // Mínimo 3 filas; crece con textos largos o pegados (hasta 8).
+          rows={Math.min(8, Math.max(3, instruction.split("\n").length + Math.floor(instruction.length / 90)))}
           placeholder={placeholder}
           disabled={!canEdit || busy === "ask"}
-          className="min-w-0 flex-1 resize-none bg-transparent py-1.5 text-sm placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-60"
+          className="min-w-0 flex-1 resize-none bg-transparent py-1.5 text-sm leading-relaxed placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-60"
         />
         {selectedCount > 0 && (
-          <span className="mt-2 shrink-0 text-[10px] text-violet-300">
+          <span className="mt-2 shrink-0 text-[10px] text-violet-700 dark:text-violet-300">
             {selectedCount === 1 ? "sobre el nodo seleccionado" : `sobre ${selectedCount} nodos`}
           </span>
         )}
@@ -151,7 +152,7 @@ export function CanvasAiBar({ canEdit, selectedCount, onSubmit, canUndo, onUndo 
       {(result || canUndo) && (
         <div className="space-y-1 border-t border-border/50 px-3 py-2 text-xs">
           {result && (
-            <div className={cn("flex items-start gap-2", result.error ? "text-amber-300" : "text-foreground/90")}>
+            <div className={cn("flex items-start gap-2", result.error ? "text-amber-700 dark:text-amber-300" : "text-foreground/90")}>
               <span className="min-w-0 flex-1">
                 {result.reply || (result.applied ? "Listo." : "La IA no propuso cambios.")}
                 {result.summary && <span className="ml-1 text-muted-foreground">({result.summary})</span>}
@@ -162,7 +163,7 @@ export function CanvasAiBar({ canEdit, selectedCount, onSubmit, canUndo, onUndo 
             </div>
           )}
           {result?.warnings.map((w, i) => (
-            <div key={i} className="text-[11px] text-amber-300/90">
+            <div key={i} className="text-[11px] text-amber-700 dark:text-amber-300/90">
               · {w}
             </div>
           ))}

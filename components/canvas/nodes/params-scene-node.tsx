@@ -169,7 +169,7 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
           onChange={handleContentChange}
           onKeyDown={stopProp}
           placeholder="Ej: cinematográfico, cámara handheld, paleta cálida, lente 35mm, 8K..."
-          className="nodrag w-full text-xs bg-muted/30 rounded-md px-2 py-1.5 border-none outline-none resize-y min-h-[80px] max-h-[200px] placeholder:text-muted-foreground/50"
+          className="nodrag w-full text-xs bg-muted/30 rounded-md px-2 py-1.5 border-none outline-none resize-y min-h-[80px] max-h-[200px] placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
           rows={4}
         />
         {hasGallery && canEdit && (
