@@ -12,6 +12,7 @@ import type { CanvasGenerationConfig, CanvasModel } from "../canvas-workspace";
 import { getVideoCapabilities, reconcileVideoSettings, veoForcesEightSeconds } from "../lib/video-capabilities";
 import { useCanvasContext } from "../canvas-context";
 import { supportsTextThinking } from "@/lib/text-thinking";
+import { CharacterInheritedSection } from "./character-inherited-section";
 
 interface NodeConfigPanelProps {
   node: Node;
@@ -63,6 +64,12 @@ export function NodeConfigPanel({
   const Icon = typeIcons[type] || MessageSquare;
   const isGenerating = data.status === "generating";
   const isLocked = data.locked === true;
+
+  // Imagen alimentada por un Personaje (etapa): el panel muestra lo heredado.
+  const inheritsFromCharacter = edges.some(
+    (e) => e.target === node.id && baseHandleId(e.targetHandle) === HANDLES.INPUT_PROMPT &&
+      nodes.find((n) => n.id === e.source)?.type === "character",
+  );
 
   // Check if a params node is connected (handle can come in from the left or top twin)
   const paramsEdge = edges.find((e) => e.target === node.id && baseHandleId(e.targetHandle) === HANDLES.INPUT_PARAMS);
@@ -160,9 +167,14 @@ export function NodeConfigPanel({
 
       {/* Content */}
       <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${isLocked ? "opacity-50 pointer-events-none" : !canEdit ? "pointer-events-none" : ""}`}>
+        {/* Imagen de una etapa de Personaje: lo heredado, editable aquí mismo */}
+        {type === "image" && inheritsFromCharacter && (
+          <CharacterInheritedSection imageNode={node} nodes={nodes} edges={edges} onUpdateData={onUpdateData} />
+        )}
+
         {/* Prompt - always editable (unless locked) */}
         <div className="space-y-1.5">
-          <Label className="text-xs">Prompt</Label>
+          <Label className="text-xs">{inheritsFromCharacter ? "Prompt propio (se agrega al heredado)" : "Prompt"}</Label>
           <Textarea
             value={nodeData.prompt || ""}
             onChange={(e) => onUpdateData(node.id, { prompt: e.target.value } as Partial<CanvasNodeData>)}
