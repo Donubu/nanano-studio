@@ -422,8 +422,15 @@ export function buildAssistPlan(
     }
     return out;
   };
-  const markGenerate = (op: AssistOp, id: string) => {
-    if (op.generate_stages && !plan.materializeCharacterIds.includes(id)) plan.materializeCharacterIds.push(id);
+  // generate_stages solo sirve si el Personaje termina con etapas: el modelo
+  // a veces lo marca sin mandar ninguna y responde que "las agregó".
+  const markGenerate = (op: AssistOp, id: string, stagesAfter: unknown) => {
+    if (!op.generate_stages) return;
+    if (!Array.isArray(stagesAfter) || stagesAfter.length === 0) {
+      warnings.push(`La IA no mandó etapas para ${nameOf(id)}: no se creó ninguna. Vuelve a pedirlo con el texto de las etapas.`);
+      return;
+    }
+    if (!plan.materializeCharacterIds.includes(id)) plan.materializeCharacterIds.push(id);
   };
 
   const ops = (response.ops ?? []).slice(0, MAX_OPS);
@@ -461,7 +468,7 @@ export function buildAssistPlan(
         if (ref) refToId.set(ref, id);
         if (type === "character") {
           data.stages = stagesFor(op, [], id) ?? [];
-          markGenerate(op, id);
+          markGenerate(op, id, data.stages);
         }
         break;
       }
@@ -479,7 +486,7 @@ export function buildAssistPlan(
           if (type === "character") {
             const st = stagesFor(op, (fresh.data.stages as AssistSnapshotStage[]) ?? [], id);
             if (st) fresh.data.stages = st;
-            markGenerate(op, id);
+            markGenerate(op, id, fresh.data.stages);
           }
           break;
         }
@@ -508,7 +515,7 @@ export function buildAssistPlan(
             const withImage = (list: AssistSnapshotStage[]) => list.filter((x) => x.imageNodeId).map((x) => x.imageNodeId).join(",");
             if (withImage(st) !== withImage(snap.stages ?? [])) patch.chainStale = true;
           }
-          markGenerate(op, id);
+          markGenerate(op, id, st ?? snap.stages);
         }
         if (Object.keys(patch).length === 0) break;
         const prev = plan.updates.find((u) => u.id === id);
@@ -587,7 +594,8 @@ export function buildAssistPlan(
   // Un Personaje nuevo sin etapas (el modelo a veces olvida mandarlas) se
   // avisa: "Generar etapas" no tendría nada que crear.
   for (const n of plan.addNodes) {
-    if (n.type === "character" && (!Array.isArray(n.data.stages) || n.data.stages.length === 0)) {
+    if (n.type === "character" && (!Array.isArray(n.data.stages) || n.data.stages.length === 0) &&
+        !warnings.some((w) => w.includes(nameOf(n.id)) && w.includes("no mandó etapas"))) {
       warnings.push(`El Personaje ${nameOf(n.id)} quedó sin etapas: agrégalas en el nodo o vuelve a pedírselas a la IA.`);
       plan.materializeCharacterIds = plan.materializeCharacterIds.filter((x) => x !== n.id);
     }
@@ -720,4 +728,56 @@ export function pickResultImages(
     }
   }
   return out;
+}
+
+
+/**
+ * Si el modelo mandó operaciones pero ninguna produjo un cambio aplicable, su
+ * respuesta ("Agregué las etapas…") sería falsa: se reemplaza por un mensaje
+ * que lo dice. Muta el plan.
+ */
+export function guardEmptyClaims(plan: AssistPlan, response: AssistResponse): void {
+  if ((response.ops?.length ?? 0) === 0 || !planIsEmpty(plan)) return;
+  plan.reply = "No se hizo ningún cambio: la IA respondió, pero no mandó cambios que se pudieran aplicar.";
+  if (plan.warnings.length === 0) {
+    plan.warnings.push("Vuelve a pedirlo; si es sobre un nodo, selecciónalo antes para que la IA sepa cuál es.");
+  }
+}
+
+
+/**
+ * true si alguna op sobre un character pide generar etapas (o crea un
+ * character) sin mandar stages y el Personaje no tiene ninguna: la respuesta
+ * del modelo quedó incompleta y conviene pedirle que corrija.
+ */
+// El pedido habla de imágenes (no solo de etapas): único caso en que se
+// honra generate_stages. "Genera/crea las etapas" = escribir las etapas.
+const IMAGE_REQUEST = /\b(im[aá]gen(es)?|fotos? (de|para) (cada|las) etapas?|arma(r)? todo|nodos? (de )?imagen)/i;
+
+/**
+ * Quita "Generar etapas" del plan si el pedido no menciona imágenes: el
+ * modelo confunde "genera las etapas" (escribirlas) con crear sus imágenes.
+ * Devuelve true si quitó algo.
+ */
+export function enforceStagesOnlyUnlessImages(plan: AssistPlan, instruction: string): boolean {
+  if (plan.materializeCharacterIds.length === 0 || IMAGE_REQUEST.test(instruction)) return false;
+  plan.materializeCharacterIds = [];
+  return true;
+}
+
+export function missingCharacterStages(
+  response: AssistResponse,
+  snapshot: { nodes: AssistSnapshotNode[] },
+): boolean {
+  const byId = new Map(snapshot.nodes.map((n) => [n.id, n]));
+  return (response.ops ?? []).some((op) => {
+    const hasStages = Array.isArray(op.stages) && op.stages.length > 0;
+    if (hasStages) return false;
+    if (op.op === "add_node" && op.node_type === "character") return !!op.generate_stages;
+    if (op.op === "update_node" && op.generate_stages) {
+      const n = op.node ? byId.get(op.node) : undefined;
+      return !n || n.type !== "character" || (n.stages ?? []).length === 0;
+    }
+    return false;
+  });
 }

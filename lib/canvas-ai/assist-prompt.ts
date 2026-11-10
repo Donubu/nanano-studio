@@ -98,7 +98,7 @@ ${Object.entries(INPUT_DOCS).map(([k, v]) => `- ${k}: ${v}`).join("\n")}
 - Respeta el orden en que el usuario da las etapas: es el orden de generación y de la cadena de referencias. Si el usuario pide un orden explícito ("parte por mi foto de hoy y ve hacia más joven", "de niño a adulto"), úsalo. La etapa 1 suele ser la que tiene la referencia más fuerte (por ejemplo una foto real). name: corto ("5 años", "Adolescencia").
 - Si el usuario indica fotos para una etapa ("la foto 2 de la galería Fotos para la actual"), ponlas en photos de esa etapa con el id de la galería y su número (aparecen numeradas en el canvas actual). Si no indica cuáles, no elijas fotos por tu cuenta.
 - Para editar etapas de un character existente, manda update_node con la lista COMPLETA de stages (las que no cambian, igual que estaban) y el id de cada etapa existente (aparece en el canvas actual), así renombrar una etapa no pierde su imagen. Las etapas nuevas van sin id.
-- generate_stages=true si el usuario pide generar, crear las imágenes o "armar todo"; si solo pide definir o separar etapas, false.
+- generate_stages NO escribe etapas: solo crea las IMÁGENES de las etapas que tú mandas en stages. Si el usuario dice "genera las etapas", "crea las etapas" o pega su texto, TÚ escribes cada etapa en stages (name + text, con sus palabras). Marca generate_stages=true solo si además pide las imágenes ("genera las imágenes", "arma todo") y siempre junto con stages.
 
 ## Resultados generados
 - Si el mensaje trae imágenes generadas (cada una indica su nodo y, si corresponde, su Personaje y etapa), míralas y compáralas con lo pedido: ADN, estilo, texto de la etapa y fotos de referencia.
@@ -114,7 +114,8 @@ ${Object.entries(INPUT_DOCS).map(([k, v]) => `- ${k}: ${v}`).join("\n")}
 - Respeta las capacidades de video de cada modelo (duraciones y proporciones permitidas).
 - No toques nodos bloqueados.
 - Si el pedido es ambiguo o no se puede hacer con estos nodos, no inventes: responde en reply qué falta y deja ops vacío.
-- reply: 1-2 frases, qué hiciste o qué necesitas. Sin listas ni markdown.`;
+- reply: 1-2 frases, qué hiciste o qué necesitas. Sin listas ni markdown. Nunca digas que hiciste algo que no esté en ops: si agregas etapas a un character existente, sus stages completas DEBEN ir en el update_node.
+- Si el texto que pega el usuario parece cortado (termina a mitad de una etapa), dilo en reply y arma solo lo que está completo.`;
 
 const OP_KINDS = ["add_node", "update_node", "remove_node", "connect", "disconnect"];
 

@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { buildAssistPlan, dropInventedStageText, pickResultImages, planIsEmpty, type AssistModels } from "../assist-plan";
+import {
+  buildAssistPlan,
+  dropInventedStageText,
+  enforceStagesOnlyUnlessImages,
+  guardEmptyClaims,
+  missingCharacterStages,
+  pickResultImages,
+  planIsEmpty,
+  type AssistModels,
+} from "../assist-plan";
 import { placeNewNodes } from "@/components/canvas/lib/ai-assist-apply";
 import { HANDLE_IDS } from "@/components/canvas/lib/canvas-types";
 
@@ -355,6 +364,62 @@ describe("Personaje sin etapas", () => {
       models,
     );
     expect(plan.materializeCharacterIds).toEqual([]);
-    expect(plan.warnings.join(" ")).toMatch(/quedó sin etapas/);
+    expect(plan.warnings.join(" ")).toMatch(/no mandó etapas/);
+    expect(plan.warnings).toHaveLength(1);
+  });
+});
+
+
+describe("respuestas que dicen haber hecho cambios sin hacerlos", () => {
+  const snapshot = { nodes: [{ id: "rena", type: "character", label: "Rena", stages: [] }], edges: [] };
+
+  it("generate_stages sin etapas en un Personaje existente: avisa y no genera", () => {
+    const response = { reply: "Agregué las 6 etapas a Rena.", ops: [{ op: "update_node" as const, node: "rena", generate_stages: true }] };
+    const plan = buildAssistPlan(response, snapshot, models);
+    guardEmptyClaims(plan, response);
+    expect(plan.materializeCharacterIds).toEqual([]);
+    expect(plan.reply).toMatch(/No se hizo ningún cambio/);
+    expect(plan.warnings.join(" ")).toMatch(/no mandó etapas para "Rena"/);
+  });
+
+  it("con etapas, genera y conserva la respuesta", () => {
+    const response = { reply: "Listo.", ops: [{ op: "update_node" as const, node: "rena", generate_stages: true, stages: [{ name: "18", text: "último día de colegio" }] }] };
+    const plan = buildAssistPlan(response, snapshot, models);
+    guardEmptyClaims(plan, response);
+    expect(plan.materializeCharacterIds).toEqual(["rena"]);
+    expect(plan.reply).toBe("Listo.");
+  });
+
+  it("sin operaciones (la IA pregunta algo) no toca la respuesta", () => {
+    const response = { reply: "¿Me pegas el texto completo?", ops: [] };
+    const plan = buildAssistPlan(response, snapshot, models);
+    guardEmptyClaims(plan, response);
+    expect(plan.reply).toBe("¿Me pegas el texto completo?");
+  });
+});
+
+
+describe("etapas sin imágenes salvo que se pidan", () => {
+  const snapshot = { nodes: [{ id: "rena", type: "character", label: "Rena", stages: [] }], edges: [] };
+  const response = { ops: [{ op: "update_node" as const, node: "rena", generate_stages: true, stages: [{ name: "18", text: "colegio" }] }] };
+
+  it("'genera las etapas' escribe las etapas pero no crea imágenes", () => {
+    const plan = buildAssistPlan(response, snapshot, models);
+    expect(enforceStagesOnlyUnlessImages(plan, "genera las etapas: === AGE 18 ===")).toBe(true);
+    expect(plan.materializeCharacterIds).toEqual([]);
+    expect(plan.updates).toHaveLength(1);
+  });
+
+  it("si el pedido menciona imágenes, sí las crea", () => {
+    const plan = buildAssistPlan(response, snapshot, models);
+    expect(enforceStagesOnlyUnlessImages(plan, "crea las etapas y genera las imágenes")).toBe(false);
+    expect(plan.materializeCharacterIds).toEqual(["rena"]);
+  });
+
+  it("detecta respuestas a las que les faltan las etapas", () => {
+    expect(missingCharacterStages({ ops: [{ op: "update_node", node: "rena", generate_stages: true }] }, snapshot)).toBe(true);
+    expect(missingCharacterStages({ ops: [{ op: "add_node", node_type: "character", generate_stages: true }] }, snapshot)).toBe(true);
+    expect(missingCharacterStages(response, snapshot)).toBe(false);
+    expect(missingCharacterStages({ ops: [{ op: "update_node", node: "rena", label: "Rena B" }] }, snapshot)).toBe(false);
   });
 });

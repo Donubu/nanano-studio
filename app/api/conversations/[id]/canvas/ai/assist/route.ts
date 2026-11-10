@@ -15,6 +15,9 @@ import {
   MAX_ASSIST_INSTRUCTION_CHARS,
   buildAssistPlan,
   dropInventedStageText,
+  enforceStagesOnlyUnlessImages,
+  guardEmptyClaims,
+  missingCharacterStages,
   pickResultImages,
   planIsEmpty,
   type AssistModel,
@@ -263,19 +266,42 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   try {
     const resultImages = await loadResultImages(snapshot, selectedIds, instruction);
-    const { data, usage } = await generateJson<AssistResponse>({
-      model: MODEL,
-      systemInstruction: ASSIST_SYSTEM_INSTRUCTION,
-      schema: ASSIST_SCHEMA,
-      parts: [
-        { text: buildAssistUserText({ instruction, ...snapshot, selectedIds, models }) },
-        ...(resultImages.length ? [{ text: "## Resultados generados (imágenes)" }, ...resultImages] : []),
-      ],
-      temperature: 0.4,
-      maxOutputTokens: 32768,
-      operationName: "canvasAssist",
-      abortSignal: request.signal,
-    });
+    const baseParts: Part[] = [
+      { text: buildAssistUserText({ instruction, ...snapshot, selectedIds, models }) },
+      ...(resultImages.length ? [{ text: "## Resultados generados (imágenes)" }, ...resultImages] : []),
+    ];
+    const ask = (parts: Part[]) =>
+      generateJson<AssistResponse>({
+        model: MODEL,
+        systemInstruction: ASSIST_SYSTEM_INSTRUCTION,
+        schema: ASSIST_SCHEMA,
+        parts,
+        temperature: 0.4,
+        maxOutputTokens: 32768,
+        operationName: "canvasAssist",
+        abortSignal: request.signal,
+      });
+    let { data, usage } = await ask(baseParts);
+
+    // El modelo a veces marca generate_stages o dice "agregué las etapas" sin
+    // mandar stages. Se le pide UNA vez que corrija, con su respuesta a la vista.
+    if (missingCharacterStages(data, snapshot)) {
+      const retry = await ask([
+        ...baseParts,
+        {
+          text:
+            "## Corrección\nTu respuesta anterior no incluyó las etapas (stages) del character aunque el pedido las requiere:\n" +
+            JSON.stringify(data).slice(0, 4000) +
+            "\nVuelve a responder completo, con las stages (name + text, con las palabras del usuario) dentro del add_node o update_node del character. generate_stages solo si el usuario pidió imágenes.",
+        },
+      ]);
+      usage = {
+        inputTokens: usage.inputTokens + retry.usage.inputTokens,
+        outputTokens: usage.outputTokens + retry.usage.outputTokens,
+        estimatedCost: usage.estimatedCost + retry.usage.estimatedCost,
+      };
+      data = retry.data;
+    }
 
     // Reordenar mueve los nodos del usuario: solo si el pedido lo menciona,
     // aunque el modelo lo proponga por su cuenta.
@@ -284,6 +310,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
     const plan = buildAssistPlan(data, snapshot, models);
     dropInventedStageText(plan, instruction, snapshot);
+    enforceStagesOnlyUnlessImages(plan, instruction);
+    guardEmptyClaims(plan, data);
     await logInvocation({
       ...base,
       inputTokens: usage.inputTokens,
@@ -314,6 +342,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     });
     if (request.signal.aborted) return NextResponse.json({ error: "Pedido cancelado" }, { status: 499 });
     console.error("[canvas-ai] assist failed", e);
+    if (/PROHIBITED_CONTENT|SAFETY|blockReason|rechazó el pedido/i.test(e.message)) {
+      return NextResponse.json(
+        {
+          error:
+            "El filtro de seguridad de Gemini bloqueó la respuesta (a veces pasa con descripciones de menores de edad o temas sensibles, y no siempre igual). Intenta de nuevo; si se repite, selecciona solo el nodo sobre el que trabajas o reformula esa parte.",
+          code: "CANVAS_AI_BLOCKED",
+        },
+        { status: 422 },
+      );
+    }
     return NextResponse.json({ error: `La IA no pudo procesar el pedido: ${e.message}` }, { status: 502 });
   }
 }
