@@ -184,6 +184,12 @@ Production runs on Coolify from `docker-compose.coolify.yml` (see the file's hea
 - Body size limit: 50MB (middleware + server actions)
 - Env files: `.env.local` (dev), `.env.production` (mirror of production values — the live env vars are defined in the Coolify UI), `.env.gcp` / `.env.private` (legacy, outdated — do not trust for current infra)
 
+## Canvas — asistente IA ("Pídele a la IA")
+- Barra en la parte inferior del canvas (`components/canvas/canvas-ai-bar.tsx`). `POST /api/conversations/[id]/canvas/ai/assist` recibe el pedido + un snapshot compacto del canvas y llama a Gemini (`CANVAS_AI_ASSIST_MODEL`, default `gemini-3.8-flash`) vía `lib/production/gemini-json.ts`. Devuelve un plan validado, NO escribe el canvas.
+- `lib/canvas-ai/assist-plan.ts` (puro, con tests) valida las ops (add/update/remove node, connect/disconnect) con `VALID_CONNECTIONS`, `isValidConnection`, `wouldCreateCycle` y `reconcileVideoSettings`; no crea escenas ni toca nodos bloqueados. El manual que recibe el modelo se genera desde esas mismas reglas (`assist-prompt.ts`).
+- El cliente aplica el plan con la persistencia granular y los eventos de colaboración de siempre; los nodos nuevos se ubican a la derecha de lo existente (`ai-assist-apply.ts`). "Deshacer lo que hizo la IA" revierte y persiste solo lo que tocó la IA (un nivel). Reordenar todo el canvas solo si el pedido lo menciona.
+- Costo y límite: `canvas_ai_invocations` (migración 136); `CANVAS_AI_HOURLY_CALLS_PER_USER` (default 30, 0 desactiva).
+
 ## Production Templates — IA de producción
 
 ### Principio

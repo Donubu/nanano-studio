@@ -2,14 +2,14 @@ import type { Connection, Node } from "@xyflow/react";
 import type { CanvasNode, CanvasNodeData, CanvasEdge } from "./canvas-types";
 import { HANDLE_IDS, baseHandleId } from "./canvas-types";
 
-interface ConnectionRule {
+export interface ConnectionRule {
   sourceType: string;
   sourceHandle: string;
   targetType: string;
   targetHandle: string;
 }
 
-const VALID_CONNECTIONS: ConnectionRule[] = [
+export const VALID_CONNECTIONS: ConnectionRule[] = [
   // === AI Text output connections ===
   { sourceType: "text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "image", targetHandle: HANDLE_IDS.INPUT_PROMPT },
   { sourceType: "text", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: "video", targetHandle: HANDLE_IDS.INPUT_PROMPT },

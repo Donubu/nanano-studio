@@ -58,6 +58,9 @@ import { useCollaboration } from "./hooks/use-collaboration";
 import { SaveTemplateModal } from "./save-template-modal";
 import { TemplatePicker } from "./template-picker";
 import { buildClipboardPayload, writeCanvasClipboard, readCanvasClipboard, remapClipboardForPaste } from "./lib/canvas-clipboard";
+import { CanvasAiBar, type CanvasAiResult } from "./canvas-ai-bar";
+import { buildAssistSnapshot, placeNewNodes, relayoutMeasuredBlock, type AssistUndoRecord } from "./lib/ai-assist-apply";
+import type { AssistPlan } from "@/lib/canvas-ai/assist-plan";
 import { CursorOverlay } from "./collaboration/cursor-overlay";
 import { PresenceBar } from "./collaboration/presence-bar";
 import { ConnectorGhost } from "./collaboration/connector-ghost";
@@ -130,7 +133,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   // Undo/redo
   const { takeSnapshot, undo, redo } = useUndoRedo(nodes, edges, setNodes, setEdges);
 
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
 
   // Ref for collab emitters (avoids circular dependency with hooks declared later)
   const collabRef = useRef<{
@@ -566,6 +569,216 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
   });
   copyPasteRef.current.copy = copySelection;
   copyPasteRef.current.paste = pasteClipboard;
+
+  // --- Asistente IA del canvas ("Pídele a la IA") ---
+  // El pedido tarda unos segundos: el plan se aplica sobre el estado más
+  // reciente (refs), no sobre el de cuando se envió.
+  const latestNodesRef = useRef(nodes);
+  latestNodesRef.current = nodes;
+  const latestEdgesRef = useRef(edges);
+  latestEdgesRef.current = edges;
+  const [aiUndo, setAiUndo] = useState<AssistUndoRecord | null>(null);
+
+  const aiSelectedIds = useMemo(
+    () => nodes.filter((n) => n.selected || n.id === selectedNodeId).map((n) => n.id),
+    [nodes, selectedNodeId],
+  );
+
+  const runCanvasAssist = useCallback(async (instruction: string, signal: AbortSignal): Promise<CanvasAiResult> => {
+    if (!canEdit) throw new Error("Solo el editor del canvas puede usar la IA.");
+    const convId = await ensureConversation();
+    const res = await fetch(`/api/conversations/${convId}/canvas/ai/assist`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        instruction,
+        snapshot: buildAssistSnapshot(latestNodesRef.current, latestEdgesRef.current),
+        selected_ids: aiSelectedIds,
+      }),
+      signal,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body?.error || `Error ${res.status}`);
+    const plan = body.plan as AssistPlan;
+    if (body.empty) return { reply: plan.reply, warnings: plan.warnings, applied: false };
+
+    const curNodes = latestNodesRef.current;
+    const curEdges = latestEdgesRef.current;
+    const byId = new Map(curNodes.map((n) => [n.id, n]));
+
+    // Lo que ya no existe (otro cambio mientras pensaba la IA) se ignora.
+    const removeIds = new Set(plan.removeNodeIds.filter((id) => byId.has(id)));
+    const updates = plan.updates.filter((u) => byId.has(u.id) && !removeIds.has(u.id));
+    const newIds = new Set(plan.addNodes.map((n) => n.id));
+    const alive = (id: string) => (byId.has(id) && !removeIds.has(id)) || newIds.has(id);
+    const addEdges = plan.addEdges.filter((e) => alive(e.source) && alive(e.target));
+    const removedByNode = curEdges.filter((e) => removeIds.has(e.source) || removeIds.has(e.target));
+    const removedExplicit = curEdges.filter(
+      (e) => plan.removeEdgeIds.includes(e.id) && !removeIds.has(e.source) && !removeIds.has(e.target),
+    );
+    const removedEdgeIds = new Set([...removedByNode, ...removedExplicit].map((e) => e.id));
+
+    const keptNodes = curNodes.filter((n) => !removeIds.has(n.id));
+    const nextEdges: Edge[] = [
+      ...curEdges.filter((e) => !removedEdgeIds.has(e.id)),
+      ...addEdges.map((e) => ({ ...e, animated: false })),
+    ];
+
+    const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 3 });
+    const placed = placeNewNodes(keptNodes, plan.addNodes, nextEdges, center);
+    const newNodes: Node[] = plan.addNodes.map((n) => ({
+      id: n.id,
+      type: n.type,
+      position: placed.get(n.id) ?? center,
+      data: n.data,
+    }));
+    const patchById = new Map(updates.map((u) => [u.id, u.patch]));
+    let nextNodes: Node[] = [
+      ...keptNodes.map((n) => (patchById.has(n.id) ? { ...n, data: { ...n.data, ...patchById.get(n.id) } } : n)),
+      ...newNodes,
+    ];
+
+    const previousPositions: Record<string, { x: number; y: number }> = {};
+    if (plan.relayout) {
+      const positions = autoLayoutPositions(nextNodes, nextEdges);
+      nextNodes = nextNodes.map((n) => {
+        const pos = positions.get(n.id);
+        if (!pos) return n;
+        if (!newIds.has(n.id)) previousPositions[n.id] = { ...n.position };
+        return { ...n, position: pos };
+      });
+    }
+
+    takeSnapshot();
+    setNodes(nextNodes);
+    setEdges(nextEdges);
+
+    // Persistencia + colaboración: los nodos antes que sus conexiones.
+    const finalById = new Map(nextNodes.map((n) => [n.id, n]));
+    await Promise.all([
+      ...newNodes.map((n) => persist.saveNode(finalById.get(n.id)!)),
+      ...updates.map((u) => persist.saveNode(finalById.get(u.id)!)),
+    ]);
+    for (const n of newNodes) collab.emitNodeAdd(finalById.get(n.id)! as unknown as Record<string, unknown>);
+    for (const u of updates) collab.emitNodeData(u.id, u.patch);
+    for (const e of addEdges) {
+      const edge = nextEdges.find((x) => x.id === e.id)!;
+      persist.createEdge(edge);
+      collab.emitEdgeAdd(edge as unknown as Record<string, unknown>);
+    }
+    if (removeIds.size > 0) {
+      persist.deleteNodes([...removeIds]);
+      for (const id of removeIds) collab.emitNodeRemove(id);
+    }
+    if (removedExplicit.length > 0) {
+      persist.deleteEdges(removedExplicit.map((e) => e.id));
+      for (const e of removedExplicit) collab.emitEdgeRemove(e.id);
+    }
+    for (const id of Object.keys(previousPositions)) {
+      const pos = finalById.get(id)!.position;
+      persist.moveNode(id, pos.x, pos.y);
+      collab.emitNodeMove(id, pos.x, pos.y);
+    }
+
+    setAiUndo({
+      addedNodeIds: newNodes.map((n) => n.id),
+      addedEdgeIds: addEdges.map((e) => e.id),
+      previousNodes: [...updates.map((u) => byId.get(u.id)!), ...[...removeIds].map((id) => byId.get(id)!)],
+      removedEdges: [...removedByNode, ...removedExplicit],
+      previousPositions,
+    });
+
+    if (newNodes.length > 0) {
+      // Cuando el navegador ya midió los nodos nuevos, se re-ordena el bloque
+      // con sus tamaños reales (sin reordenar todo el canvas, solo si no
+      // hubo relayout completo) y se centra la vista en él.
+      setTimeout(() => {
+        if (!plan.relayout) {
+          const ids = new Set(newNodes.map((n) => n.id));
+          const block = latestNodesRef.current.filter((n) => ids.has(n.id));
+          const moves = relayoutMeasuredBlock(block, latestEdgesRef.current);
+          if (moves.size > 0) {
+            setNodes((nds) => nds.map((n) => (moves.has(n.id) ? { ...n, position: moves.get(n.id)! } : n)));
+            for (const [id, pos] of moves) {
+              persist.moveNode(id, pos.x, pos.y);
+              collab.emitNodeMove(id, pos.x, pos.y);
+            }
+          }
+        }
+        setTimeout(() => fitView({ nodes: newNodes.map((n) => ({ id: n.id })), padding: 0.25, duration: 500, maxZoom: 1 }), 60);
+      }, 250);
+    }
+
+    const parts: string[] = [];
+    const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+    if (newNodes.length) parts.push(plural(newNodes.length, "nodo nuevo", "nodos nuevos"));
+    if (updates.length) parts.push(plural(updates.length, "editado", "editados"));
+    if (removeIds.size) parts.push(plural(removeIds.size, "borrado", "borrados"));
+    if (addEdges.length) parts.push(plural(addEdges.length, "conexión", "conexiones"));
+    if (removedExplicit.length) parts.push(plural(removedExplicit.length, "conexión quitada", "conexiones quitadas"));
+    if (plan.relayout) parts.push("reordenado");
+    return { reply: plan.reply, warnings: plan.warnings, applied: true, summary: parts.join(", ") };
+  }, [canEdit, ensureConversation, aiSelectedIds, screenToFlowPosition, takeSnapshot, setNodes, setEdges, persist, collab.emitNodeAdd, collab.emitNodeData, collab.emitEdgeAdd, collab.emitNodeRemove, collab.emitEdgeRemove, collab.emitNodeMove, fitView]);
+
+  // Revierte exactamente lo que aplicó la IA (persistido y compartido), sin
+  // tocar lo que el usuario haya cambiado después en otros nodos.
+  const undoCanvasAssist = useCallback(async () => {
+    const rec = aiUndo;
+    if (!rec || !canEdit) return;
+    const curNodes = latestNodesRef.current;
+    const curEdges = latestEdgesRef.current;
+    const addedNodes = new Set(rec.addedNodeIds.filter((id) => curNodes.some((n) => n.id === id)));
+    const prevById = new Map(rec.previousNodes.map((n) => [n.id, n]));
+
+    let nextNodes = curNodes.filter((n) => !addedNodes.has(n.id));
+    nextNodes = nextNodes.map((n) => {
+      const prev = prevById.get(n.id);
+      const pos = rec.previousPositions[n.id];
+      if (prev) return { ...prev, position: pos ?? prev.position };
+      return pos ? { ...n, position: pos } : n;
+    });
+    const restoredRemoved = rec.previousNodes.filter((p) => !curNodes.some((n) => n.id === p.id));
+    nextNodes = [...nextNodes, ...restoredRemoved];
+    const ids = new Set(nextNodes.map((n) => n.id));
+
+    const addedEdgeSet = new Set(rec.addedEdgeIds);
+    const edgesToDelete = curEdges.filter((e) => addedEdgeSet.has(e.id) && !addedNodes.has(e.source) && !addedNodes.has(e.target));
+    let nextEdges = curEdges.filter((e) => !addedEdgeSet.has(e.id) && ids.has(e.source) && ids.has(e.target));
+    const edgesToRestore = rec.removedEdges.filter(
+      (e) => ids.has(e.source) && ids.has(e.target) && !nextEdges.some((x) => x.id === e.id),
+    );
+    nextEdges = [...nextEdges, ...edgesToRestore];
+
+    takeSnapshot();
+    setNodes(nextNodes);
+    setEdges(nextEdges);
+
+    if (addedNodes.size > 0) {
+      await persist.deleteNodes([...addedNodes]);
+      for (const id of addedNodes) collab.emitNodeRemove(id);
+    }
+    if (edgesToDelete.length > 0) {
+      await persist.deleteEdges(edgesToDelete.map((e) => e.id));
+      for (const e of edgesToDelete) collab.emitEdgeRemove(e.id);
+    }
+    const finalById = new Map(nextNodes.map((n) => [n.id, n]));
+    await Promise.all(rec.previousNodes.map((p) => persist.saveNode(finalById.get(p.id) ?? p)));
+    for (const p of rec.previousNodes) {
+      const node = finalById.get(p.id) ?? p;
+      if (restoredRemoved.includes(p)) collab.emitNodeAdd(node as unknown as Record<string, unknown>);
+      else collab.emitNodeData(p.id, node.data as Record<string, unknown>);
+    }
+    for (const e of edgesToRestore) {
+      persist.createEdge(e);
+      collab.emitEdgeAdd(e as unknown as Record<string, unknown>);
+    }
+    for (const [id, pos] of Object.entries(rec.previousPositions)) {
+      if (prevById.has(id) || !ids.has(id)) continue; // ya guardado con el nodo completo
+      persist.moveNode(id, pos.x, pos.y);
+      collab.emitNodeMove(id, pos.x, pos.y);
+    }
+    setAiUndo(null);
+  }, [aiUndo, canEdit, takeSnapshot, setNodes, setEdges, persist, collab.emitNodeRemove, collab.emitEdgeRemove, collab.emitNodeAdd, collab.emitNodeData, collab.emitEdgeAdd, collab.emitNodeMove]);
 
   // Sync collab ref for use in callbacks declared before collab hook
   collabRef.current.emitNodeMove = collab.emitNodeMove;
@@ -1180,6 +1393,15 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
               remoteUsers={collab.remoteUsers}
               localUser={collabUser && collab.myColor ? { name: collabUser.name, image: collabUser.image, color: collab.myColor } : undefined}
               isConnected={collab.isConnected}
+            />
+          </Panel>
+          <Panel position="bottom-center" className="!mb-4">
+            <CanvasAiBar
+              canEdit={canEdit}
+              selectedCount={aiSelectedIds.length}
+              onSubmit={runCanvasAssist}
+              canUndo={aiUndo !== null}
+              onUndo={undoCanvasAssist}
             />
           </Panel>
           <CursorOverlay remoteUsers={collab.remoteUsers} />
