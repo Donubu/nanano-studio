@@ -118,6 +118,27 @@ export function remapCharacterIds(
   };
 }
 
+/**
+ * Conexiones de la imagen de una etapa que NO puso "Generar etapas" (ni la
+ * del Personaje): las hizo el usuario, así que borrar la imagen las rompería.
+ * Devuelve los ids de los otros nodos conectados, sin repetir.
+ */
+export function externalConnections(
+  imageNodeId: string,
+  characterId: string,
+  data: Pick<CharacterNodeData, "managedEdgeIds">,
+  edges: { id: string; source: string; target: string }[],
+): string[] {
+  const managed = new Set(data.managedEdgeIds ?? []);
+  const others = new Set<string>();
+  for (const e of edges) {
+    if (managed.has(e.id)) continue;
+    if (e.source === imageNodeId && e.target !== characterId) others.add(e.target);
+    else if (e.target === imageNodeId && e.source !== characterId) others.add(e.source);
+  }
+  return [...others];
+}
+
 export interface CharacterMaterializePlan {
   addNodes: Node[];
   removeNodeIds: string[];
@@ -256,7 +277,9 @@ export function planCharacterMaterialize(
     .filter((e) => managed.has(e.id) && !keptEdgeIds.has(e.id))
     .map((e) => e.id);
 
-  // 4. Imágenes de etapas que ya no existen: fuera solo si nunca se generaron.
+  // 4. Imágenes de etapas que ya no existen: fuera solo si nunca se generaron
+  // y no tienen conexiones del usuario (borrarlas rompería el flujo de los
+  // nodos que alimentan o que las alimentan).
   const inUse = new Set(stageImage.values());
   const removeNodeIds: string[] = [];
   const generated = new Set([...(data.generatedImageIds ?? []), ...addNodes.map((n) => n.id)]);
@@ -268,11 +291,15 @@ export function planCharacterMaterialize(
       continue;
     }
     const d = n.data as Record<string, unknown>;
-    if (!d.outputUrl && !(Array.isArray(d.outputHistory) && d.outputHistory.length > 0)) {
+    const label = String(d.label ?? id);
+    const userLinks = externalConnections(id, character.id, data, edges);
+    if (userLinks.length > 0) {
+      warnings.push(`La imagen "${label}" quedó sin etapa; se conservó porque está conectada a otros nodos.`);
+    } else if (!d.outputUrl && !(Array.isArray(d.outputHistory) && d.outputHistory.length > 0)) {
       removeNodeIds.push(id);
       generated.delete(id);
     } else {
-      warnings.push(`La imagen "${String(d.label ?? id)}" quedó sin etapa; se conservó porque ya tiene resultados.`);
+      warnings.push(`La imagen "${label}" quedó sin etapa; se conservó porque ya tiene resultados.`);
     }
   }
   // Las conexiones hacia/desde imágenes eliminadas caen con ellas.

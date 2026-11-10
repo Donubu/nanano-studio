@@ -3,6 +3,7 @@ import type { Node, Edge } from "@xyflow/react";
 import { HANDLE_IDS, type CharacterNodeData, type CharacterStage } from "../canvas-types";
 import {
   composeCharacterPrompt,
+  externalConnections,
   galleryImagesOf,
   planCharacterMaterialize,
   remapCharacterIds,
@@ -120,6 +121,27 @@ describe("planCharacterMaterialize", () => {
     expect(plan.removeNodeIds).toEqual([img15]);
     expect(plan.warnings.join(" ")).toMatch(/se conservó/);
     for (const id of state.edges.filter((e) => e.target === img5).map((e) => e.id)) expect(plan.removeEdgeIds).toContain(id);
+  });
+
+  it("no borra la imagen de una etapa eliminada si tiene conexiones del usuario", () => {
+    const first = planCharacterMaterialize(character(stages), [character(stages)], [], { idPrefix: "a" });
+    const state = apply([character(stages)], [], first);
+    const data = state.nodes.find((n) => n.id === "char")!.data as unknown as CharacterNodeData;
+    const img15 = data.stages[1].imageNodeId!;
+    // El usuario usó la imagen de 15 años como primer cuadro de un video.
+    const video: Node = { id: "vid", type: "video", position: { x: 0, y: 0 }, data: { label: "Video" } };
+    const userEdge: Edge = { id: "u-vid", source: img15, target: "vid", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetHandle: HANDLE_IDS.INPUT_FIRST_FRAME };
+    const char2 = { ...state.nodes.find((n) => n.id === "char")!, data: { ...data, stages: [data.stages[0], data.stages[2]] } as unknown as Record<string, unknown> };
+    const nodes = [...state.nodes.map((n) => (n.id === "char" ? char2 : n)), video];
+    const plan = planCharacterMaterialize(char2, nodes, [...state.edges, userEdge], { idPrefix: "b" });
+    expect(plan.removeNodeIds).toEqual([]);
+    expect(plan.removeEdgeIds).not.toContain("u-vid");
+    expect(plan.warnings.join(" ")).toMatch(/conectada a otros nodos/);
+    // La cadena se reconecta saltándose la etapa borrada: 5 → 35.
+    const img = Object.fromEntries(plan.characterData.stages.map((st) => [st.id, st.imageNodeId!]));
+    expect(plan.addEdges.some((e) => e.source === img.s5 && e.target === img.s35)).toBe(true);
+    expect(externalConnections(img15, "char", data, [...state.edges, userEdge])).toEqual(["vid"]);
+    expect(externalConnections(img.s5, "char", data, state.edges)).toEqual([]);
   });
 
   it("no toca conexiones del usuario", () => {

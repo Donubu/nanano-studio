@@ -17,7 +17,7 @@ import {
   type CharacterReferenceImage,
   type CharacterStage,
 } from "../lib/canvas-types";
-import { galleryImagesOf, newStageId } from "../lib/character";
+import { externalConnections, galleryImagesOf, newStageId } from "../lib/character";
 import { NodeDeleteButton } from "./node-status";
 import { NodeLabel } from "./node-label";
 import { NodeTextarea } from "./node-textarea";
@@ -69,6 +69,34 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
   // Tamaño fijo = el usuario lo redimensionó (width/height explícitos en el
   // nodo). Las props width/height también llegan con la medida automática,
   // así que no sirven para distinguirlo.
+  // Por etapa: nodos conectados por el usuario a su imagen (los que puso
+  // "Generar etapas" no cuentan). Borrar esa etapa sin avisar rompería el flujo.
+  const managedKey = (nodeData.managedEdgeIds ?? []).join(",");
+  const stageLinksJson = useStore(
+    useCallback(
+      (state: {
+        edges: { id: string; source: string; target: string }[];
+        nodeLookup: Map<string, { type?: string; data: Record<string, unknown> }>;
+      }) => {
+        const out: Record<string, string[]> = {};
+        for (const st of stages) {
+          if (!st.imageNodeId) continue;
+          const ids = externalConnections(st.imageNodeId, id, { managedEdgeIds: managedKey ? managedKey.split(",") : [] }, state.edges);
+          if (ids.length) out[st.id] = ids.map((nid) => String(state.nodeLookup.get(nid)?.data.label || nid));
+        }
+        return JSON.stringify(out);
+      },
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [id, managedKey, stages.map((st) => `${st.id}:${st.imageNodeId ?? ""}`).join("|")],
+    ) as never,
+  ) as unknown as string;
+  const stageLinks = useMemo(() => JSON.parse(stageLinksJson) as Record<string, string[]>, [stageLinksJson]);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const removeStage = (stageId: string) => {
+    setPendingDelete(null);
+    update({ stages: stages.filter((st) => st.id !== stageId), ...(stages.some((st) => st.imageNodeId) ? { chainStale: true } : {}) });
+  };
+
   const hasFixedSize = useStore(
     useCallback(
       (state: { nodeLookup: Map<string, { width?: number; height?: number }> }) => {
@@ -302,12 +330,29 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
                       <button type="button" onClick={() => move(i, 1)} disabled={i === stages.length - 1} title="Bajar" className="nodrag p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30">
                         <ArrowDown className="h-3 w-3" />
                       </button>
-                      <button type="button" onClick={() => update({ stages: stages.filter((s) => s.id !== stage.id), ...(stages.some((s) => s.imageNodeId) ? { chainStale: true } : {}) })} title="Borrar etapa" className="nodrag p-0.5 text-muted-foreground hover:text-red-400">
+                      <button type="button" onClick={() => (stageLinks[stage.id] ? setPendingDelete(stage.id) : removeStage(stage.id))} title="Borrar etapa" className="nodrag p-0.5 text-muted-foreground hover:text-red-400">
                         <Trash2 className="h-3 w-3" />
                       </button>
                     </>
                   )}
                 </div>
+                {pendingDelete === stage.id && stageLinks[stage.id] && (
+                  <div className="space-y-1 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1.5 text-[10px] text-red-700 dark:text-red-300">
+                    <p>
+                      La imagen de esta etapa está conectada a: <strong>{stageLinks[stage.id].join(", ")}</strong>. Si
+                      borras la etapa, la imagen se conserva con esas conexiones, pero al volver a &quot;Generar etapas&quot;
+                      deja de recibir el ADN y el texto del Personaje.
+                    </p>
+                    <div className="flex gap-1.5">
+                      <button type="button" onClick={() => removeStage(stage.id)} className="nodrag rounded bg-red-600 px-2 py-0.5 text-white hover:bg-red-500">
+                        Borrar igual
+                      </button>
+                      <button type="button" onClick={() => setPendingDelete(null)} className="nodrag rounded bg-muted px-2 py-0.5 text-foreground hover:bg-muted/70">
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <NodeTextarea
                   value={stage.text}
                   onChange={(text) => patchStage(stage.id, { text })}

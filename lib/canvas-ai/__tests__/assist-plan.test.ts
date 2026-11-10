@@ -345,3 +345,16 @@ describe("Personaje · edición, textos inventados y resultados", () => {
     expect(pickResultImages(snapshot, [], "agrega una etapa a Ana")).toEqual([]);
   });
 });
+
+
+describe("Personaje sin etapas", () => {
+  it("avisa y no pide generar si el modelo no mandó etapas", () => {
+    const plan = buildAssistPlan(
+      { ops: [{ op: "add_node", ref: "c", node_type: "character", label: "Robot", dna: "robot amarillo", generate_stages: true }] },
+      { nodes: [], edges: [] },
+      models,
+    );
+    expect(plan.materializeCharacterIds).toEqual([]);
+    expect(plan.warnings.join(" ")).toMatch(/quedó sin etapas/);
+  });
+});

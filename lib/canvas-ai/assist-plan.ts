@@ -581,6 +581,15 @@ export function buildAssistPlan(
     }
   }
 
+  // Un Personaje nuevo sin etapas (el modelo a veces olvida mandarlas) se
+  // avisa: "Generar etapas" no tendría nada que crear.
+  for (const n of plan.addNodes) {
+    if (n.type === "character" && (!Array.isArray(n.data.stages) || n.data.stages.length === 0)) {
+      warnings.push(`El Personaje ${nameOf(n.id)} quedó sin etapas: agrégalas en el nodo o vuelve a pedírselas a la IA.`);
+      plan.materializeCharacterIds = plan.materializeCharacterIds.filter((x) => x !== n.id);
+    }
+  }
+
   return plan;
 }
 
