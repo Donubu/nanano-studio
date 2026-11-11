@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Trash2, History, X, Loader2, RotateCcw, ImageIcon, MessageSquare, Video, Type, ImagePlus, Images, Settings, Bot, Sparkles, Film, StickyNote, AlertTriangle } from "lucide-react";
+import { thumbUrl } from "../lib/thumb";
 
 interface TrashNode {
   id: string;
@@ -277,7 +278,7 @@ export function HistoryPanel({ conversationId, isOpen, onClose, onCanvasRestored
                           {previewImg && (
                             <div className="mt-1.5 w-full max-w-[200px] aspect-video bg-muted rounded overflow-hidden">
                               {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={previewImg} alt="" className="w-full h-full object-cover" loading="lazy" />
+                              <img src={thumbUrl(previewImg, 256)} alt="" className="w-full h-full object-cover" loading="lazy" />
                             </div>
                           )}
                           {!previewImg && previewText && (

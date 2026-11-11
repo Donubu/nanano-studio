@@ -12,6 +12,7 @@ import { useUpstreamPromptLabel } from "../hooks/use-upstream-prompt-label";
 import { useCanvasContext } from "../canvas-context";
 import { ResizeHandle, nodeSizeClass, standardMediaSize } from "./resize-handle";
 import { MediaViewerModal, type MediaViewerEntry } from "./media-viewer-modal";
+import { CanvasImg } from "./canvas-img";
 
 const statusColors: Record<string, string> = {
   idle: "border-border",
@@ -131,8 +132,9 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
               className={`rounded-md overflow-hidden bg-muted/50 relative ${isResized ? "flex-1 min-h-0" : "mx-auto"}`}
               style={isResized ? undefined : { width: stdSize.width, height: stdSize.height }}
             >
-              <img
+              <CanvasImg
                 src={displayUrl}
+                width={640}
                 alt="Generated"
                 className={
                   isResized

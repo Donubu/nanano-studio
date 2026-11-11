@@ -11,6 +11,7 @@ import { useNodeUpdate } from "../hooks/use-node-update";
 import { uploadFileToS3 } from "../lib/canvas-upload";
 import { ResizeHandle, nodeSizeClass } from "./resize-handle";
 import { MediaViewerModal } from "./media-viewer-modal";
+import { CanvasImg } from "./canvas-img";
 
 export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data, selected, width, height }: NodeProps) {
   const nodeData = data as unknown as StaticImageNodeData;
@@ -82,8 +83,9 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
         ) : nodeData.imageUrl ? (
           <div className={`space-y-1.5 ${isResized ? "flex-1 min-h-0 flex flex-col" : ""}`}>
             <div className={`group/img relative rounded-md overflow-hidden bg-muted/50 ${isResized ? "flex-1 min-h-0" : ""}`}>
-              <img
+              <CanvasImg
                 src={nodeData.imageUrl}
+                width={640}
                 alt={nodeData.caption || "Static"}
                 className={
                   isResized

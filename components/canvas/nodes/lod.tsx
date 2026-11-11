@@ -15,6 +15,7 @@
 import { memo, useEffect, type ComponentType, type RefObject } from "react";
 import { useStore, type NodeProps } from "@xyflow/react";
 import { galleryImagesOf } from "../lib/character";
+import { thumbUrl } from "../lib/thumb";
 
 export const LOD_ZOOM = 0.45;
 
@@ -107,7 +108,7 @@ const LodCard = memo(function LodCard({
       >
         {preview ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={preview} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" draggable={false} />
+          <img src={thumbUrl(preview, 384)} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" draggable={false} />
         ) : (
           // Sin imagen: el tipo al fondo de la tarjeta, achicado para que
           // quepa entero (cqw = ancho de la tarjeta).

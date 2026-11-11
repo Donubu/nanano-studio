@@ -20,6 +20,7 @@ import {
   type CharacterStage,
 } from "../lib/canvas-types";
 import { composeCharacterPrompt, stageReferenceUrls } from "../lib/character";
+import { thumbUrl } from "../lib/thumb";
 
 interface Props {
   imageNode: Node;
@@ -134,7 +135,7 @@ export function CharacterInheritedSection({ imageNode, nodes, edges, onUpdateDat
                 <span className="flex min-w-0 gap-0.5 overflow-hidden">
                   {photos.slice(0, 6).map((url) => (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img key={url} src={url} alt="" className="h-6 w-6 shrink-0 rounded object-cover" loading="lazy" />
+                    <img key={url} src={thumbUrl(url, 128)} alt="" className="h-6 w-6 shrink-0 rounded object-cover" loading="lazy" />
                   ))}
                 </span>
               </>

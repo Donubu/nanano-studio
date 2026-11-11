@@ -24,6 +24,7 @@ import { NodeTextarea } from "./node-textarea";
 import { ResizeHandle, nodeSizeClass } from "./resize-handle";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useCanvasContext } from "../canvas-context";
+import { thumbUrl } from "../lib/thumb";
 
 function stopProp(e: React.SyntheticEvent) {
   e.stopPropagation();
@@ -387,7 +388,7 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
                             .slice(0, 6)
                             .map((p) => (
                               // eslint-disable-next-line @next/next/no-img-element
-                              <img key={`${p.nodeId}|${p.url}`} src={p.url} alt="" className="h-5 w-5 shrink-0 rounded object-cover" loading="lazy" />
+                              <img key={`${p.nodeId}|${p.url}`} src={thumbUrl(p.url, 128)} alt="" className="h-5 w-5 shrink-0 rounded object-cover" loading="lazy" />
                             ))}
                         </span>
                       )}
@@ -406,7 +407,7 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
                             className={`relative h-12 w-12 rounded overflow-hidden border-2 ${on ? "border-pink-400" : "border-transparent opacity-60 hover:opacity-100"}`}
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={p.url} alt={p.caption ?? ""} className="h-full w-full object-cover" loading="lazy" />
+                            <img src={thumbUrl(p.url, 256)} alt={p.caption ?? ""} className="h-full w-full object-cover" loading="lazy" />
                             {on && (
                               <span className="absolute right-0.5 top-0.5 rounded-full bg-pink-500 p-px text-white">
                                 <Check className="h-2.5 w-2.5" />

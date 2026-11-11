@@ -11,6 +11,7 @@ import { useNodeUpdate } from "../hooks/use-node-update";
 import { uploadFileToS3 } from "../lib/canvas-upload";
 import { ResizeHandle, nodeSizeClass } from "./resize-handle";
 import { MediaViewerModal, type MediaViewerEntry } from "./media-viewer-modal";
+import { CanvasImg } from "./canvas-img";
 
 export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode({ id, data, selected, width, height }: NodeProps) {
   const nodeData = data as unknown as StaticImageGroupNodeData;
@@ -120,7 +121,7 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
             <div className="grid grid-cols-3 gap-1">
               {images.map((img, i) => (
                 <div key={i} className="relative rounded overflow-hidden bg-muted/50 group/img">
-                  <img src={img.url} alt="" className="w-full aspect-square object-cover" />
+                  <CanvasImg src={img.url} width={384} alt="" className="w-full aspect-square object-cover" loading="lazy" />
                   <button
                     onClick={(e) => { e.stopPropagation(); setViewerIndex(i); }}
                     className="nodrag absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/30 opacity-0 group-hover/img:opacity-100 transition-all"

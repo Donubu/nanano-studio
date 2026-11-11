@@ -13,6 +13,7 @@ import { getVideoCapabilities, reconcileVideoSettings, veoForcesEightSeconds } f
 import { useCanvasContext } from "../canvas-context";
 import { supportsTextThinking } from "@/lib/text-thinking";
 import { CharacterInheritedSection } from "./character-inherited-section";
+import { thumbUrl } from "../lib/thumb";
 
 interface NodeConfigPanelProps {
   node: Node;
@@ -276,7 +277,7 @@ export function NodeConfigPanel({
             )}
             {type === "image" && (data as ImageNodeData).outputUrl && (
               <img
-                src={(data as ImageNodeData).outputUrl}
+                src={thumbUrl((data as ImageNodeData).outputUrl, 828)}
                 alt="Generated"
                 className="w-full rounded-md"
               />
@@ -390,7 +391,7 @@ function ReferencePriorityList({
           return (
             <div key={edge.id} className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-1.5">
               {url ? (
-                <img src={url} alt={label} className="h-8 w-8 rounded object-cover shrink-0" />
+                <img src={thumbUrl(url, 128)} alt={label} className="h-8 w-8 rounded object-cover shrink-0" />
               ) : (
                 <div className="h-8 w-8 rounded bg-muted shrink-0" />
               )}

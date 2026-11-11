@@ -68,6 +68,10 @@ services:
     volumes:
       # Contenido se pega una vez en Coolify → Storages (ver header).
       - ./credentials.json:/run/secrets/credentials.json:ro
+      # Miniaturas del optimizador de imágenes de Next (/_next/image, las usa
+      # el canvas): sobreviven a los deploys. Solo la carpeta de imágenes, no
+      # toda .next/cache. Si crece demasiado se puede borrar: se regeneran.
+      - next_image_cache:/app/.next/cache/images
     # Sin ports: Traefik llega por la red interna de Coolify al 3000.
     expose:
       - "3000"
@@ -166,3 +170,4 @@ services:
 
 volumes:
   redis_data:
+  next_image_cache:
