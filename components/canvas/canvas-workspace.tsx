@@ -63,7 +63,7 @@ import { CanvasAiBar, type CanvasAiResult } from "./canvas-ai-bar";
 import { buildAssistSnapshot, placeNewNodes, relayoutMeasuredBlock, type AssistUndoRecord } from "./lib/ai-assist-apply";
 import type { AssistPlan } from "@/lib/canvas-ai/assist-plan";
 import { CharacterNodeComponent } from "./nodes/character-node";
-import { LodZoomVar, withLod } from "./nodes/lod";
+import { LodZoomVar, useIsZoomedOut, withLod } from "./nodes/lod";
 import { planCharacterMaterialize } from "./lib/character";
 import type { CharacterMaterializeResult } from "./canvas-context";
 import { CursorOverlay } from "./collaboration/cursor-overlay";
@@ -1338,6 +1338,8 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
 
   // Capture Escape inside the canvas to prevent it from closing the conversation
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+  // Solo re-renderiza al cruzar el umbral de la vista alejada.
+  const zoomedOut = useIsZoomedOut();
   useEffect(() => {
     const el = canvasContainerRef.current;
     if (!el) return;
@@ -1512,8 +1514,9 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
           <LodZoomVar target={canvasContainerRef} />
 
           {/* Botón "RUN ALL" por nodo raíz: corre solo el flujo de esa raíz.
-              Solo para el editor (en solo-ver no se ejecuta nada). */}
-          {canEdit && flowRoots.map((root) => (
+              Solo para el editor (en solo-ver no se ejecuta nada). Con la
+              vista alejada se ocultan: tapaban los nombres y entre sí. */}
+          {canEdit && !zoomedOut && flowRoots.map((root) => (
             <NodeToolbar
               key={`run-${root.id}`}
               nodeId={root.id}

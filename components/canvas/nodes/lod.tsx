@@ -94,25 +94,52 @@ const LodCard = memo(function LodCard({
   generating: boolean;
 }) {
   const style = (type && LOD_STYLES[type]) || FALLBACK_STYLE;
+  const name = label || style.label;
+  // Tamaños en px de PANTALLA (divididos por el zoom): se leen igual a 40%
+  // que al zoom mínimo.
+  const screenPx = (px: number) => `calc(${px}px / var(${ZOOM_CSS_VAR}, 0.3))`;
   return (
-    <div
-      className={`absolute inset-0 z-10 flex flex-col overflow-hidden rounded-lg border-4 bg-card ${style.border} ${
-        selected ? "ring-8 ring-primary/60" : ""
-      }`}
-    >
-      {/* Tamaño de letra en px de PANTALLA (dividido por el zoom): el título
-          se lee igual a 40% que a 10%. Si no cabe, se corta. */}
-      <div className={`shrink-0 px-[6%] py-[4%] ${style.bg}`} style={{ fontSize: `calc(13px / var(${ZOOM_CSS_VAR}, 0.3))` }}>
-        <div className="line-clamp-2 break-words font-semibold leading-tight text-foreground">{label || style.label}</div>
-        {label && <div className="text-[0.75em] text-muted-foreground">{style.label}</div>}
-      </div>
-      {preview && (
-        <div className="min-h-0 flex-1">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
+    <div className="absolute inset-0 z-10">
+      <div
+        className={`absolute inset-0 overflow-hidden rounded-lg border-4 bg-card ${style.border} ${style.bg} ${
+          selected ? "ring-8 ring-primary/60" : ""
+        }`}
+      >
+        {preview ? (
+          // eslint-disable-next-line @next/next/no-img-element
           <img src={preview} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" draggable={false} />
-        </div>
-      )}
-      {generating && <div className="absolute right-3 top-3 h-5 w-5 animate-pulse rounded-full bg-primary" />}
+        ) : (
+          // Sin imagen: el tipo al fondo de la tarjeta, achicado para que
+          // quepa entero (cqw = ancho de la tarjeta).
+          <div className="absolute inset-x-0 bottom-0 flex justify-center pb-[6%] [container-type:inline-size]">
+            <span
+              className="whitespace-nowrap text-muted-foreground"
+              style={{ fontSize: `min(${screenPx(10)}, ${Math.floor(140 / Math.max(style.label.length, 4))}cqw)` }}
+            >
+              {style.label}
+            </span>
+          </div>
+        )}
+        {generating && <div className="absolute right-3 top-3 h-5 w-5 animate-pulse rounded-full bg-primary" />}
+      </div>
+      {/* Nombre: una sola línea, sin partir palabras. Si la tarjeta es más
+          angosta que el nombre, la etiqueta sobresale a los lados en vez de
+          cortarse (los nodos chicos, como una galería o parámetros, quedan
+          de pocos px a zoom mínimo). Solo los nombres muy largos llevan "…". */}
+      <div className="pointer-events-none absolute inset-x-0 top-[4%] flex justify-center">
+        <span
+          title={name}
+          className={`shrink-0 overflow-hidden text-ellipsis whitespace-nowrap rounded-md border bg-card/95 font-semibold leading-tight text-foreground shadow-sm ${style.border}`}
+          style={{
+            fontSize: screenPx(12),
+            padding: `${screenPx(2)} ${screenPx(6)}`,
+            borderWidth: screenPx(1),
+            maxWidth: screenPx(220),
+          }}
+        >
+          {name}
+        </span>
+      </div>
     </div>
   );
 });
