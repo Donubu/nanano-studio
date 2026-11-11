@@ -9,7 +9,8 @@ import {
   type EdgeProps,
 } from "@xyflow/react";
 import { HANDLE_IDS, baseHandleId } from "../lib/canvas-types";
-import { useIsZoomedOut } from "../nodes/lod";
+import { ZOOM_CSS_VAR, useIsZoomedOut } from "../nodes/lod";
+import { useSelectedNodeIds } from "../canvas-context";
 
 const HANDLE_LABELS: Record<string, string> = {
   [HANDLE_IDS.INPUT_PROMPT]: "PROMPT",
@@ -83,17 +84,18 @@ export const LabeledEdge = memo(function LabeledEdge({
       ? ((data as { priority: number }).priority)
       : null;
 
-  // Animada solo si toca el nodo seleccionado o uno que se está generando:
-  // animar todas las conexiones repintaba cada línea en cada cuadro.
-  const active = useStore(
+  // Con nodos seleccionados, sus conexiones se destacan (más gruesas, color
+  // primario) y las demás se atenúan.
+  const selectedIds = useSelectedNodeIds();
+  const highlighted = selectedIds.has(source) || selectedIds.has(target);
+  const dimmed = selectedIds.size > 0 && !highlighted;
+  // Animada solo si toca un nodo que se está generando: animar todas las
+  // conexiones repintaba cada línea en cada cuadro.
+  const generating = useStore(
     useCallback(
-      (s: { nodeLookup: Map<string, { selected?: boolean; data: Record<string, unknown> }> }) => {
-        const isActive = (nid: string) => {
-          const n = s.nodeLookup.get(nid);
-          return !!n && (n.selected === true || n.data.status === "generating");
-        };
-        return isActive(source) || isActive(target);
-      },
+      (s: { nodeLookup: Map<string, { data: Record<string, unknown> }> }) =>
+        s.nodeLookup.get(source)?.data.status === "generating" ||
+        s.nodeLookup.get(target)?.data.status === "generating",
       [source, target],
     ) as never,
   ) as unknown as boolean;
@@ -105,13 +107,27 @@ export const LabeledEdge = memo(function LabeledEdge({
       <BaseEdge
         id={id}
         path={edgePath}
-        style={active ? { ...style, strokeDasharray: 5, animation: "dashdraw 0.5s linear infinite" } : style}
+        style={{
+          ...style,
+          ...(highlighted
+            ? {
+                stroke: "var(--color-primary)",
+                // Grosor en px de pantalla: se nota igual con el canvas alejado.
+                strokeWidth: `max(2.5px, calc(2.5px / var(${ZOOM_CSS_VAR}, 1)))`,
+              }
+            : {}),
+          ...(dimmed ? { opacity: 0.2 } : {}),
+          ...(generating ? { strokeDasharray: 5, animation: "dashdraw 0.5s linear infinite" } : {}),
+          transition: "opacity 150ms, stroke 150ms",
+        }}
         markerEnd={markerEnd}
       />
       {label && !zoomedOut && (
         <EdgeLabelRenderer>
           <div
-            className={`absolute text-[8px] font-bold px-1.5 py-0.5 rounded border pointer-events-none z-10 ${colorClass}`}
+            className={`absolute text-[12px] font-bold px-1.5 py-0.5 rounded border pointer-events-none z-10 ${colorClass} ${
+              dimmed ? "opacity-20" : ""
+            }`}
             style={{
               transform: `translate(-50%, -120%) translate(${labelX}px,${labelY}px)`,
             }}

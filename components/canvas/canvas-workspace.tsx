@@ -6,7 +6,6 @@ import {
   ReactFlow,
   ReactFlowProvider,
   Background,
-  Controls,
   MiniMap,
   useNodesState,
   useEdgesState,
@@ -52,7 +51,7 @@ import { autoLayoutPositions } from "./lib/auto-layout";
 import { getDefaultNodeData, newCanvasNodeId, type CanvasNodeType, type CanvasNodeData, type CanvasEdge, HANDLE_IDS } from "./lib/canvas-types";
 import { getDescendantNodes } from "./lib/topological-sort";
 import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Type, Settings, Bot, Sparkles, Film, Play, Loader2, UserRound } from "lucide-react";
-import { CanvasProvider } from "./canvas-context";
+import { CanvasProvider, SelectedNodesProvider } from "./canvas-context";
 import { LabeledEdge } from "./edges/labeled-edge";
 import { ImagePickerModal } from "@/components/chat/image-picker-modal";
 import { useCollaboration } from "./hooks/use-collaboration";
@@ -64,6 +63,7 @@ import { buildAssistSnapshot, placeNewNodes, relayoutMeasuredBlock, type AssistU
 import type { AssistPlan } from "@/lib/canvas-ai/assist-plan";
 import { CharacterNodeComponent } from "./nodes/character-node";
 import { LodZoomVar, useIsZoomedOut, withLod } from "./nodes/lod";
+import { ZoomControls } from "./zoom-controls";
 import { planCharacterMaterialize } from "./lib/character";
 import type { CharacterMaterializeResult } from "./canvas-context";
 import { CursorOverlay } from "./collaboration/cursor-overlay";
@@ -1338,6 +1338,13 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
 
   // Capture Escape inside the canvas to prevent it from closing the conversation
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+  // Nodos seleccionados (para destacar sus conexiones). El Set solo cambia
+  // cuando cambia la selección, no en cada movimiento.
+  const selectedKey = useMemo(
+    () => nodes.filter((n) => n.selected).map((n) => n.id).sort().join(","),
+    [nodes],
+  );
+  const selectedNodeIds = useMemo(() => new Set(selectedKey ? selectedKey.split(",") : []), [selectedKey]);
   // Solo re-renderiza al cruzar el umbral de la vista alejada.
   const zoomedOut = useIsZoomedOut();
   useEffect(() => {
@@ -1477,6 +1484,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
     <CanvasProvider value={canvasContextValue}>
     <div ref={canvasContainerRef} className="flex h-full w-full relative" tabIndex={-1}>
       <div className="flex-1 h-full">
+        <SelectedNodesProvider value={selectedNodeIds}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -1510,7 +1518,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
           selectionKeyCode={canvasMode === "select" ? null : "Shift"}
         >
           <Background variant={BackgroundVariant.Lines} gap={24} size={1} color="var(--color-border)" className="opacity-30" />
-          <Controls position="bottom-left" showInteractive={false} />
+          <ZoomControls />
           <LodZoomVar target={canvasContainerRef} />
 
           {/* Botón "RUN ALL" por nodo raíz: corre solo el flujo de esa raíz.
@@ -1577,6 +1585,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
           <CursorOverlay remoteUsers={collab.remoteUsers} />
           <ConnectorGhost remoteUsers={collab.remoteUsers} />
         </ReactFlow>
+        </SelectedNodesProvider>
       </div>
 
       {/* Drop-on-empty context menu */}

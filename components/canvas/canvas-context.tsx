@@ -39,4 +39,11 @@ const CanvasContext = createContext<CanvasContextValue>({
 });
 
 export const CanvasProvider = CanvasContext.Provider;
+
+// Ids de los nodos seleccionados, para que las conexiones se destaquen o se
+// atenúen. Contexto aparte del principal: cambia con cada selección y solo lo
+// leen las conexiones.
+const SelectedNodesContext = createContext<ReadonlySet<string>>(new Set());
+export const SelectedNodesProvider = SelectedNodesContext.Provider;
+export const useSelectedNodeIds = () => useContext(SelectedNodesContext);
 export const useCanvasContext = () => useContext(CanvasContext);

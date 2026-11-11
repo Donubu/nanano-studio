@@ -17,7 +17,7 @@ import { useStore, type NodeProps } from "@xyflow/react";
 import { galleryImagesOf } from "../lib/character";
 import { thumbUrl } from "../lib/thumb";
 
-export const LOD_ZOOM = 0.45;
+export const LOD_ZOOM = 0.33;
 
 /** Variable CSS con el zoom actual (escalonado), en el contenedor del canvas.
  *  La tarjeta la usa para que el título se lea igual a cualquier zoom sin
@@ -41,7 +41,10 @@ function useLodZoomVar(ref: RefObject<HTMLElement | null>) {
   }, [ref, zoom]);
 }
 
-const zoomedOutSelector = (s: { transform: [number, number, number] }) => s.transform[2] < LOD_ZOOM;
+// Se compara el % redondeado, el mismo que muestran los controles de zoom: con
+// "33%" en pantalla todavía se ven los nodos completos.
+const zoomedOutSelector = (s: { transform: [number, number, number] }) =>
+  Math.round(s.transform[2] * 100) < Math.round(LOD_ZOOM * 100);
 
 /** true si el canvas está bajo LOD_ZOOM. Solo re-renderiza al cruzar el umbral. */
 export function useIsZoomedOut(): boolean {
