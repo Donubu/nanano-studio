@@ -1,13 +1,15 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useCallback } from "react";
 import {
   BaseEdge,
+  useStore,
   EdgeLabelRenderer,
   getBezierPath,
   type EdgeProps,
 } from "@xyflow/react";
 import { HANDLE_IDS, baseHandleId } from "../lib/canvas-types";
+import { useIsZoomedOut } from "../nodes/lod";
 
 const HANDLE_LABELS: Record<string, string> = {
   [HANDLE_IDS.INPUT_PROMPT]: "PROMPT",
@@ -53,6 +55,8 @@ export const LabeledEdge = memo(function LabeledEdge({
   targetY,
   sourcePosition,
   targetPosition,
+  source,
+  target,
   targetHandleId,
   style,
   markerEnd,
@@ -79,10 +83,32 @@ export const LabeledEdge = memo(function LabeledEdge({
       ? ((data as { priority: number }).priority)
       : null;
 
+  // Animada solo si toca el nodo seleccionado o uno que se está generando:
+  // animar todas las conexiones repintaba cada línea en cada cuadro.
+  const active = useStore(
+    useCallback(
+      (s: { nodeLookup: Map<string, { selected?: boolean; data: Record<string, unknown> }> }) => {
+        const isActive = (nid: string) => {
+          const n = s.nodeLookup.get(nid);
+          return !!n && (n.selected === true || n.data.status === "generating");
+        };
+        return isActive(source) || isActive(target);
+      },
+      [source, target],
+    ) as never,
+  ) as unknown as boolean;
+  // Con el canvas alejado las etiquetas (PROMPT/REF…) no se leen.
+  const zoomedOut = useIsZoomedOut();
+
   return (
     <>
-      <BaseEdge id={id} path={edgePath} style={style} markerEnd={markerEnd} />
-      {label && (
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        style={active ? { ...style, strokeDasharray: 5, animation: "dashdraw 0.5s linear infinite" } : style}
+        markerEnd={markerEnd}
+      />
+      {label && !zoomedOut && (
         <EdgeLabelRenderer>
           <div
             className={`absolute text-[8px] font-bold px-1.5 py-0.5 rounded border pointer-events-none z-10 ${colorClass}`}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { useSession } from "next-auth/react";
 import {
   ReactFlow,
@@ -18,6 +18,7 @@ import {
   Position,
   type Connection,
   type NodeTypes,
+  type NodeProps,
   type OnConnect,
   type Node,
   type Edge,
@@ -62,6 +63,7 @@ import { CanvasAiBar, type CanvasAiResult } from "./canvas-ai-bar";
 import { buildAssistSnapshot, placeNewNodes, relayoutMeasuredBlock, type AssistUndoRecord } from "./lib/ai-assist-apply";
 import type { AssistPlan } from "@/lib/canvas-ai/assist-plan";
 import { CharacterNodeComponent } from "./nodes/character-node";
+import { LodZoomVar, withLod } from "./nodes/lod";
 import { planCharacterMaterialize } from "./lib/character";
 import type { CharacterMaterializeResult } from "./canvas-context";
 import { CursorOverlay } from "./collaboration/cursor-overlay";
@@ -72,28 +74,38 @@ const edgeTypes = {
   labeled: LabeledEdge,
 };
 
+// Las conexiones no se animan todas: con muchos nodos, redibujar cada línea
+// punteada en cada cuadro hacía pesado el canvas. LabeledEdge anima solo las
+// del nodo seleccionado o de uno que se está generando.
 const defaultEdgeOptions = {
   type: "labeled",
-  animated: true,
+  animated: false,
 };
 
-const nodeTypes: NodeTypes = {
-  text: TextNodeComponent,
-  "text-practicante": TextPracticanteNodeComponent,
-  image: ImageNodeComponent,
-  video: VideoNodeComponent,
-  "note": NoteNodeComponent,
-  "static-text": StaticTextNodeComponent,
-  "static-image": StaticImageNodeComponent,
-  "static-image-group": StaticImageGroupNodeComponent,
-  "params-text": ParamsNodeComponent,
-  "params-image": ParamsNodeComponent,
-  "params-video": ParamsNodeComponent,
-  "params-scene": ParamsSceneNodeComponent,
-  "script": ScriptNodeComponent,
-  "character": CharacterNodeComponent,
-  "scene": SceneNodeComponent,
-};
+const EMPTY_GENERATION_CONFIG: CanvasGenerationConfig[] = [];
+const noopImagePicker = () => {};
+
+// Cada tipo va envuelto en withLod: con el canvas muy alejado se dibuja una
+// tarjeta liviana en vez del nodo completo (ver nodes/lod.tsx).
+const nodeTypes: NodeTypes = Object.fromEntries(
+  Object.entries({
+    text: TextNodeComponent,
+    "text-practicante": TextPracticanteNodeComponent,
+    image: ImageNodeComponent,
+    video: VideoNodeComponent,
+    "note": NoteNodeComponent,
+    "static-text": StaticTextNodeComponent,
+    "static-image": StaticImageNodeComponent,
+    "static-image-group": StaticImageGroupNodeComponent,
+    "params-text": ParamsNodeComponent,
+    "params-image": ParamsNodeComponent,
+    "params-video": ParamsNodeComponent,
+    "params-scene": ParamsSceneNodeComponent,
+    "script": ScriptNodeComponent,
+    "character": CharacterNodeComponent,
+    "scene": SceneNodeComponent,
+  } as NodeTypes).map(([type, comp]) => [type, withLod(comp as ComponentType<NodeProps>)]),
+) as NodeTypes;
 
 export interface CanvasModel {
   id: number;
@@ -118,7 +130,7 @@ interface CanvasWorkspaceProps {
   openImagePicker?: (onSelect: (url: string) => void, title?: string) => void;
 }
 
-function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = [], onConversationCreated, emitNodeDataRef, openImagePicker }: CanvasWorkspaceProps) {
+function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EMPTY_GENERATION_CONFIG, onConversationCreated, emitNodeDataRef, openImagePicker }: CanvasWorkspaceProps) {
   const [nodes, setNodes, onNodesChangeBase] = useNodesState<Node>([] as Node[]);
   const [edges, setEdges, onEdgesChangeBase] = useEdgesState<Edge>([] as Edge[]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -1427,19 +1439,40 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
     collab.emitNodeData(nodeId, updates);
   }, [collab.emitNodeData]);
 
+  // Valor del context estable: si cambia, se re-renderizan TODOS los nodos
+  // (el memo de cada nodo no corta un cambio de context). updateNodeData y
+  // materializeCharacter cambian en cada render (dependen de `persist`), así
+  // que se pasan por refs.
+  const updateNodeDataRef = useRef(updateNodeData);
+  const materializeCharacterRef = useRef(materializeCharacter);
+  useEffect(() => {
+    updateNodeDataRef.current = updateNodeData;
+    materializeCharacterRef.current = materializeCharacter;
+  });
+  const persistNodeDataStable = useCallback(
+    (nodeId: string, updates: Partial<CanvasNodeData>) => updateNodeDataRef.current(nodeId, updates),
+    [],
+  );
+  const materializeCharacterStable = useCallback(
+    (characterId: string) => materializeCharacterRef.current(characterId),
+    [],
+  );
+  const canvasContextValue = useMemo(
+    () => ({
+      projectId,
+      conversationId: realConversationId,
+      generationConfig,
+      openImagePicker: openImagePicker || noopImagePicker,
+      emitNodeData: emitNodeDataStable,
+      persistNodeData: persistNodeDataStable,
+      canEdit,
+      materializeCharacter: materializeCharacterStable,
+    }),
+    [projectId, realConversationId, generationConfig, openImagePicker, emitNodeDataStable, persistNodeDataStable, canEdit, materializeCharacterStable],
+  );
+
   return (
-    <CanvasProvider
-      value={{
-        projectId,
-        conversationId: realConversationId,
-        generationConfig,
-        openImagePicker: openImagePicker || (() => {}),
-        emitNodeData: emitNodeDataStable,
-        persistNodeData: updateNodeData,
-        canEdit,
-        materializeCharacter,
-      }}
-    >
+    <CanvasProvider value={canvasContextValue}>
     <div ref={canvasContainerRef} className="flex h-full w-full relative" tabIndex={-1}>
       <div className="flex-1 h-full">
         <ReactFlow
@@ -1476,6 +1509,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = []
         >
           <Background variant={BackgroundVariant.Lines} gap={24} size={1} color="var(--color-border)" className="opacity-30" />
           <Controls position="bottom-left" showInteractive={false} />
+          <LodZoomVar target={canvasContainerRef} />
 
           {/* Botón "RUN ALL" por nodo raíz: corre solo el flujo de esa raíz.
               Solo para el editor (en solo-ver no se ejecuta nada). */}

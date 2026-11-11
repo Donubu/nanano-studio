@@ -1,6 +1,6 @@
 "use client";
 
-import { useReactFlow, useEdges } from "@xyflow/react";
+import { useReactFlow } from "@xyflow/react";
 import { Check, Loader2, AlertCircle, Trash2, Zap } from "lucide-react";
 import { useCanvasContext } from "../canvas-context";
 
@@ -26,8 +26,9 @@ export function AIBadge() {
 }
 
 export function NodeDeleteButton({ nodeId }: { nodeId: string }) {
-  const { deleteElements } = useReactFlow();
-  const edges = useEdges();
+  // getEdges al hacer click (y no useEdges): suscribirse a las conexiones
+  // re-renderizaba todos los nodos con cada cambio de cualquier conexión.
+  const { deleteElements, getEdges } = useReactFlow();
   const { canEdit } = useCanvasContext();
 
   // En solo-ver no se puede eliminar nodos.
@@ -35,7 +36,7 @@ export function NodeDeleteButton({ nodeId }: { nodeId: string }) {
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const connected = edges.some((edge) => edge.source === nodeId || edge.target === nodeId);
+    const connected = getEdges().some((edge) => edge.source === nodeId || edge.target === nodeId);
     if (connected) {
       if (!window.confirm("Este nodo tiene conexiones. ¿Eliminar?")) return;
     }
