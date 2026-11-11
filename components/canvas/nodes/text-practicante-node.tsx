@@ -87,14 +87,14 @@ export const TextPracticanteNodeComponent = memo(function TextPracticanteNode({ 
 
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
-        <Bot className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-        <span className="text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-400 shrink-0">practicante</span>
+        <Bot className="h-[18px] w-[18px] text-amber-400 shrink-0" />
+        <span className="text-[12px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-400 shrink-0">practicante</span>
         <NodeLabel
           value={nodeData.label || ""}
           placeholder="Practicante"
           onChange={(label) => updateNodeData(id, { ...nodeData, label })}
         />
-        <span className={`text-[9px] px-1 py-0.5 rounded shrink-0 ${
+        <span className={`text-[12px] px-1 py-0.5 rounded shrink-0 ${
           nodeData.outputAsPrompt !== false
             ? "bg-purple-500/15 text-purple-400"
             : "bg-blue-500/15 text-blue-400"
@@ -102,7 +102,7 @@ export const TextPracticanteNodeComponent = memo(function TextPracticanteNode({ 
           {nodeData.outputAsPrompt !== false ? "prompt" : "libre"}
         </span>
         {nodeData.dryRun && (
-          <FlaskConical className="h-3 w-3 text-purple-400 shrink-0" aria-label="Dry-run" />
+          <FlaskConical className="h-4 w-4 text-purple-400 shrink-0" aria-label="Dry-run" />
         )}
         <StatusIndicator status={status} />
         <NodeDeleteButton nodeId={id} />
@@ -111,24 +111,24 @@ export const TextPracticanteNodeComponent = memo(function TextPracticanteNode({ 
       {/* Body */}
       <div className="px-3 py-2 space-y-1.5">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[10px] text-muted-foreground truncate">
+          <span className="text-[13px] text-muted-foreground truncate">
             Agente: <span className="text-foreground">{agentLabel}</span>
           </span>
           {nodeData.delegatedTo && nodeData.delegatedTo !== agentLabel && (
-            <span className="text-[9px] text-muted-foreground truncate">→ {nodeData.delegatedTo}</span>
+            <span className="text-[12px] text-muted-foreground truncate">→ {nodeData.delegatedTo}</span>
           )}
         </div>
 
-        <p className={`text-xs line-clamp-2 ${nodeData.prompt ? "text-muted-foreground" : upstreamLabel ? "text-violet-400/80 italic" : "text-muted-foreground"}`}>
+        <p className={`text-[15px] line-clamp-2 ${nodeData.prompt ? "text-muted-foreground" : upstreamLabel ? "text-violet-400/80 italic" : "text-muted-foreground"}`}>
           {nodeData.prompt || upstreamLabel || "Sin prompt configurado"}
         </p>
 
         {displayText ? (
           <div className="mt-1 space-y-1">
             <div className="bg-muted/50 rounded-md p-2 relative">
-              <p className="text-xs line-clamp-3 whitespace-pre-wrap">{displayText}</p>
+              <p className="text-[15px] line-clamp-3 whitespace-pre-wrap">{displayText}</p>
               {!isViewingLatest && effectiveIndex >= 0 && (
-                <span className="absolute top-1 right-1 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded">
+                <span className="absolute top-1 right-1 bg-black/60 text-white text-[12px] px-1.5 py-0.5 rounded">
                   {history[effectiveIndex]?.modelName || "Anterior"}
                 </span>
               )}
@@ -136,21 +136,21 @@ export const TextPracticanteNodeComponent = memo(function TextPracticanteNode({ 
             <HistoryNav history={history} effectiveIndex={effectiveIndex} onNavigate={navigateTo} onDelete={deleteFromHistory} />
           </div>
         ) : status === "generating" ? (
-          <div className="flex items-center gap-1.5 text-xs text-amber-400">
-            <Loader2 className="h-3 w-3 animate-spin" />
+          <div className="flex items-center gap-1.5 text-[15px] text-amber-400">
+            <Loader2 className="h-4 w-4 animate-spin" />
             Ejecutando...
           </div>
         ) : null}
 
         {files.length > 0 && (
           <div className="mt-1 space-y-0.5">
-            <div className="text-[9px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+            <div className="text-[12px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
               <Paperclip className="h-2.5 w-2.5" />
               Archivos ({files.length})
             </div>
             <ul className="space-y-0.5">
               {files.map((f, i) => (
-                <li key={i} className="text-[10px] truncate">
+                <li key={i} className="text-[13px] truncate">
                   <a
                     href={f.url}
                     target="_blank"
@@ -169,7 +169,7 @@ export const TextPracticanteNodeComponent = memo(function TextPracticanteNode({ 
         {nodeData.toolsUsed && nodeData.toolsUsed.length > 0 && (
           <div className="flex flex-wrap gap-1 pt-1">
             {nodeData.toolsUsed.map((t, i) => (
-              <span key={i} className="text-[9px] px-1 py-0.5 rounded bg-blue-500/10 text-blue-300 truncate max-w-[120px]">
+              <span key={i} className="text-[12px] px-1 py-0.5 rounded bg-blue-500/10 text-blue-300 truncate max-w-[120px]">
                 {t}
               </span>
             ))}
@@ -177,8 +177,8 @@ export const TextPracticanteNodeComponent = memo(function TextPracticanteNode({ 
         )}
 
         {status === "error" && nodeData.errorMessage && (
-          <div className="flex items-center gap-1.5 text-xs text-red-400">
-            <AlertCircle className="h-3 w-3" />
+          <div className="flex items-center gap-1.5 text-[15px] text-red-400">
+            <AlertCircle className="h-4 w-4" />
             <span className="truncate">{nodeData.errorMessage}</span>
           </div>
         )}

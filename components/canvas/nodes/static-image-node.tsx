@@ -68,7 +68,7 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
     >
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
-        <ImagePlus className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+        <ImagePlus className="h-[18px] w-[18px] text-emerald-400 shrink-0" />
         <NodeLabel value={nodeData.label || ""} placeholder="Imagen" onChange={(label) => updateNodeData(id, { ...nodeData, imageUrl: nodeData.imageUrl, label })} />
         <NodeDeleteButton nodeId={id} />
       </div>
@@ -78,7 +78,7 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
         {uploading ? (
           <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin mb-1" />
-            <span className="text-[10px]">Subiendo...</span>
+            <span className="text-[13px]">Subiendo...</span>
           </div>
         ) : nodeData.imageUrl ? (
           <div className={`space-y-1.5 ${isResized ? "flex-1 min-h-0 flex flex-col" : ""}`}>
@@ -101,22 +101,22 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
                 className="nodrag absolute top-1 right-1 p-1.5 rounded-md bg-black/60 hover:bg-black/80 text-white opacity-0 group-hover/img:opacity-100 transition-opacity"
                 title="Ver en grande"
               >
-                <ZoomIn className="h-3.5 w-3.5" />
+                <ZoomIn className="h-[18px] w-[18px]" />
               </button>
             </div>
             {canEdit && (
               <div className="flex gap-1">
                 <button
                   onClick={() => inputRef.current?.click()}
-                  className="flex-1 py-1 text-[10px] rounded border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1 text-muted-foreground"
+                  className="flex-1 py-1 text-[13px] rounded border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1 text-muted-foreground"
                 >
-                  <Upload className="h-3 w-3" /> Subir
+                  <Upload className="h-4 w-4" /> Subir
                 </button>
                 <button
                   onClick={() => openImagePicker(setImage)}
-                  className="flex-1 py-1 text-[10px] rounded border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1 text-muted-foreground"
+                  className="flex-1 py-1 text-[13px] rounded border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1 text-muted-foreground"
                 >
-                  <FolderOpen className="h-3 w-3" /> Galería
+                  <FolderOpen className="h-4 w-4" /> Galería
                 </button>
               </div>
             )}
@@ -127,18 +127,18 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
               onClick={() => inputRef.current?.click()}
               className="w-full py-4 rounded-md border-2 border-dashed border-border hover:border-primary/50 transition-colors flex flex-col items-center gap-1 text-muted-foreground hover:text-foreground"
             >
-              <Upload className="h-4 w-4" />
-              <span className="text-[10px]">Click, pegar o arrastrar</span>
+              <Upload className="h-5 w-5" />
+              <span className="text-[13px]">Click, pegar o arrastrar</span>
             </button>
             <button
               onClick={() => openImagePicker(setImage)}
-              className="w-full py-2 rounded-md border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1.5 text-muted-foreground hover:text-foreground text-[11px]"
+              className="w-full py-2 rounded-md border border-border hover:bg-accent transition-colors flex items-center justify-center gap-1.5 text-muted-foreground hover:text-foreground text-[14px]"
             >
-              <FolderOpen className="h-3.5 w-3.5" /> Seleccionar de galería
+              <FolderOpen className="h-[18px] w-[18px]" /> Seleccionar de galería
             </button>
           </div>
         ) : (
-          <div className="py-6 text-center text-[10px] text-muted-foreground">Sin imagen</div>
+          <div className="py-6 text-center text-[13px] text-muted-foreground">Sin imagen</div>
         )}
         <input ref={inputRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden" />
       </div>

@@ -54,14 +54,14 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
     >
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
-        <Settings className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        <Icon className={`h-3.5 w-3.5 ${config.color} shrink-0`} />
+        <Settings className="h-[18px] w-[18px] text-muted-foreground shrink-0" />
+        <Icon className={`h-[18px] w-[18px] ${config.color} shrink-0`} />
         <NodeLabel
           value={nodeData.label || ""}
           placeholder={`Params ${config.label}`}
           onChange={(label) => update({ label } as Partial<ParamsData>)}
         />
-        <span className="text-[9px] px-1 py-0.5 rounded bg-muted text-muted-foreground shrink-0">PRESET</span>
+        <span className="text-[12px] px-1 py-0.5 rounded bg-muted text-muted-foreground shrink-0">PRESET</span>
         <NodeDeleteButton nodeId={id} />
       </div>
 
@@ -69,7 +69,7 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
       <div className="px-3 py-2 space-y-2">
         {/* Model */}
         <div className="space-y-1">
-          <label className="text-[10px] text-muted-foreground">Modelo</label>
+          <label className="text-[13px] text-muted-foreground">Modelo</label>
           <select
             value={nodeData.modelId || ""}
             onChange={(e) => {
@@ -86,7 +86,7 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
               }
               update(patch);
             }}
-            className="nodrag w-full h-7 rounded border border-input bg-background px-2 text-[11px]"
+            className="nodrag w-full h-7 rounded border border-input bg-background px-2 text-[14px]"
           >
             <option value="">
               {availableModels.find((m) => m.is_default)?.display_name || "Default"}
@@ -102,26 +102,26 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
           <>
             <div className="grid grid-cols-2 gap-1.5">
               <div className="space-y-0.5">
-                <label className="text-[10px] text-muted-foreground">Temp</label>
+                <label className="text-[13px] text-muted-foreground">Temp</label>
                 <input type="number" min={0} max={2} step={0.1}
                   value={(nodeData as ParamsTextNodeData).temperature ?? 1.0}
                   onChange={(e) => update({ temperature: parseFloat(e.target.value) })}
-                  className="nodrag w-full h-7 rounded border border-input bg-background px-2 text-[11px]"
+                  className="nodrag w-full h-7 rounded border border-input bg-background px-2 text-[14px]"
                 />
               </div>
               <div className="space-y-0.5">
-                <label className="text-[10px] text-muted-foreground">Max Tokens</label>
+                <label className="text-[13px] text-muted-foreground">Max Tokens</label>
                 <input type="number" min={1} max={1000000}
                   value={(nodeData as ParamsTextNodeData).maxOutputTokens ?? 8192}
                   onChange={(e) => update({ maxOutputTokens: parseInt(e.target.value) })}
-                  className="nodrag w-full h-7 rounded border border-input bg-background px-2 text-[11px]"
+                  className="nodrag w-full h-7 rounded border border-input bg-background px-2 text-[14px]"
                 />
               </div>
             </div>
             <div className="flex gap-1.5">
               {(["none", "low", "medium", "high"] as const).map((level) => (
                 <button key={level} onClick={() => update({ thinkingLevel: level })}
-                  className={`flex-1 py-1 text-[10px] rounded border transition-colors ${
+                  className={`flex-1 py-1 text-[13px] rounded border transition-colors ${
                     ((nodeData as ParamsTextNodeData).thinkingLevel || "none") === level
                       ? "bg-purple-500/15 text-purple-400 border-purple-500/30"
                       : "border-border hover:bg-accent"
@@ -131,12 +131,12 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
             </div>
             <div className="flex gap-1.5">
               <button onClick={() => update({ outputAsPrompt: true })}
-                className={`flex-1 py-1 text-[10px] rounded border transition-colors ${
+                className={`flex-1 py-1 text-[13px] rounded border transition-colors ${
                   (nodeData as ParamsTextNodeData).outputAsPrompt !== false
                     ? "bg-purple-500/15 text-purple-400 border-purple-500/30" : "border-border hover:bg-accent"
                 }`}>Prompt</button>
               <button onClick={() => update({ outputAsPrompt: false })}
-                className={`flex-1 py-1 text-[10px] rounded border transition-colors ${
+                className={`flex-1 py-1 text-[13px] rounded border transition-colors ${
                   (nodeData as ParamsTextNodeData).outputAsPrompt === false
                     ? "bg-blue-500/15 text-blue-400 border-blue-500/30" : "border-border hover:bg-accent"
                 }`}>Libre</button>
@@ -148,11 +148,11 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
         {type === "params-image" && (
           <>
             <div className="space-y-1">
-              <label className="text-[10px] text-muted-foreground">Aspect Ratio</label>
+              <label className="text-[13px] text-muted-foreground">Aspect Ratio</label>
               <div className="flex gap-1">
                 {["16:9", "9:16", "1:1", "4:3", "3:4"].map((ar) => (
                   <button key={ar} onClick={() => update({ aspectRatio: ar })}
-                    className={`flex-1 py-1 text-[10px] rounded border transition-colors ${
+                    className={`flex-1 py-1 text-[13px] rounded border transition-colors ${
                       (nodeData as ParamsImageNodeData).aspectRatio === ar
                         ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent"
                     }`}>{ar}</button>
@@ -160,11 +160,11 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
               </div>
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] text-muted-foreground">Resolution</label>
+              <label className="text-[13px] text-muted-foreground">Resolution</label>
               <div className="flex gap-1">
                 {["1K", "2K", "4K"].map((res) => (
                   <button key={res} onClick={() => update({ resolution: res })}
-                    className={`flex-1 py-1 text-[10px] rounded border transition-colors ${
+                    className={`flex-1 py-1 text-[13px] rounded border transition-colors ${
                       (nodeData as ParamsImageNodeData).resolution === res
                         ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent"
                     }`}>{res}</button>
@@ -181,11 +181,11 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
           return (
             <>
               <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">Duración</label>
+                <label className="text-[13px] text-muted-foreground">Duración</label>
                 <div className="flex gap-1 flex-wrap">
                   {caps.durations.map((d) => (
                     <button key={d} onClick={() => update({ duration: d })}
-                      className={`flex-1 py-1 text-[10px] rounded border transition-colors ${
+                      className={`flex-1 py-1 text-[13px] rounded border transition-colors ${
                         v.duration === d
                           ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent"
                       }`}>{d}s</button>
@@ -193,11 +193,11 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">Aspect Ratio</label>
+                <label className="text-[13px] text-muted-foreground">Aspect Ratio</label>
                 <div className="flex gap-1 flex-wrap">
                   {caps.aspectRatios.map((ar) => (
                     <button key={ar} onClick={() => update({ aspectRatio: ar })}
-                      className={`flex-1 py-1 text-[10px] rounded border transition-colors ${
+                      className={`flex-1 py-1 text-[13px] rounded border transition-colors ${
                         v.aspectRatio === ar
                           ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent"
                       }`}>{ar}</button>
@@ -205,11 +205,11 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">Resolution</label>
+                <label className="text-[13px] text-muted-foreground">Resolution</label>
                 <div className="flex gap-1 flex-wrap">
                   {caps.resolutions.map((res) => (
                     <button key={res} onClick={() => update({ resolution: res })}
-                      className={`flex-1 py-1 text-[10px] rounded border transition-colors ${
+                      className={`flex-1 py-1 text-[13px] rounded border transition-colors ${
                         v.resolution === res
                           ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent"
                       }`}>{res}</button>
@@ -220,7 +220,7 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
                 <div className="flex items-center gap-1.5">
                   <input type="checkbox" checked={v.audioEnabled}
                     onChange={(e) => update({ audioEnabled: e.target.checked })} className="rounded" />
-                  <label className="text-[10px]">Audio</label>
+                  <label className="text-[13px]">Audio</label>
                 </div>
               )}
             </>
@@ -228,7 +228,7 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
         })()}
 
         {selectedModel && (
-          <p className="text-[9px] text-muted-foreground">
+          <p className="text-[12px] text-muted-foreground">
             Modelo: <span className="text-foreground/70">{selectedModel.display_name}</span>
           </p>
         )}

@@ -108,10 +108,10 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
 
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
-        <ImageIcon className="h-3.5 w-3.5 text-purple-400 shrink-0" />
+        <ImageIcon className="h-[18px] w-[18px] text-purple-400 shrink-0" />
         <AIBadge />
         <NodeLabel value={nodeData.label || ""} placeholder="Imagen" onChange={(label) => updateNodeData(id, { ...nodeData, label })} />
-        <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+        <div className="flex items-center gap-1 text-[13px] text-muted-foreground">
           {nodeData.modelName && <span className="truncate max-w-[80px]">{nodeData.modelName}</span>}
           <span>{nodeData.aspectRatio}</span>
           <span>{nodeData.resolution}</span>
@@ -122,7 +122,7 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
 
       {/* Body */}
       <div className={`px-3 py-2 space-y-1.5 ${isResized ? "flex-1 min-h-0 flex flex-col" : ""}`}>
-        <p className={`text-xs line-clamp-2 ${nodeData.prompt ? "text-muted-foreground" : upstreamLabel ? "text-violet-400/80 italic" : "text-muted-foreground"}`}>
+        <p className={`text-[15px] line-clamp-2 ${nodeData.prompt ? "text-muted-foreground" : upstreamLabel ? "text-violet-400/80 italic" : "text-muted-foreground"}`}>
           {nodeData.prompt || upstreamLabel || "Sin prompt configurado"}
         </p>
 
@@ -143,7 +143,7 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
                 }
               />
               {!isViewingLatest && effectiveIndex >= 0 && (
-                <div className="absolute top-1 left-1 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded">
+                <div className="absolute top-1 left-1 bg-black/60 text-white text-[12px] px-1.5 py-0.5 rounded">
                   {history[effectiveIndex]?.modelName || "Anterior"}
                 </div>
               )}
@@ -155,21 +155,21 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
                 className="nodrag absolute top-1 right-1 p-1.5 rounded-md bg-black/60 hover:bg-black/80 text-white opacity-0 group-hover:opacity-100 transition-opacity"
                 title="Ver en grande"
               >
-                <ZoomIn className="h-3.5 w-3.5" />
+                <ZoomIn className="h-[18px] w-[18px]" />
               </button>
             </div>
             <HistoryNav history={history} effectiveIndex={effectiveIndex} onNavigate={navigateTo} onDelete={deleteFromHistory} />
           </div>
         ) : status === "generating" ? (
-          <div className="flex items-center gap-1.5 text-xs text-purple-400">
-            <Loader2 className="h-3 w-3 animate-spin" />
+          <div className="flex items-center gap-1.5 text-[15px] text-purple-400">
+            <Loader2 className="h-4 w-4 animate-spin" />
             Generando...
           </div>
         ) : null}
 
         {status === "error" && nodeData.errorMessage && (
-          <div className="flex items-center gap-1.5 text-xs text-red-400">
-            <AlertCircle className="h-3 w-3" />
+          <div className="flex items-center gap-1.5 text-[15px] text-red-400">
+            <AlertCircle className="h-4 w-4" />
             <span className="truncate">{nodeData.errorMessage}</span>
           </div>
         )}

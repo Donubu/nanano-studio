@@ -210,9 +210,9 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
 
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
-        <UserRound className="h-3.5 w-3.5 text-pink-400 shrink-0" />
+        <UserRound className="h-[18px] w-[18px] text-pink-400 shrink-0" />
         <NodeLabel value={nodeData.label || ""} placeholder="Personaje" onChange={(label) => update({ label })} />
-        <span className="text-[9px] px-1 py-0.5 rounded bg-pink-400/15 text-pink-700 dark:text-pink-300 shrink-0">
+        <span className="text-[12px] px-1 py-0.5 rounded bg-pink-400/15 text-pink-700 dark:text-pink-300 shrink-0">
           {filledStages} {filledStages === 1 ? "etapa" : "etapas"}
         </span>
         <NodeDeleteButton nodeId={id} />
@@ -224,13 +224,13 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
       <div
         className={`nowheel px-3 py-2 space-y-2 overflow-y-auto ${hasFixedSize ? "flex-1 min-h-0" : "max-h-[720px]"}`}
       >
-        <div className="space-y-0.5 text-[10px]">
+        <div className="space-y-0.5 text-[13px]">
           <div className={`flex items-center gap-1 ${styleConnections.length ? "text-blue-700 dark:text-blue-300" : "text-muted-foreground"}`}>
-            <Palette className="h-3 w-3" />
+            <Palette className="h-4 w-4" />
             {styleConnections.length ? "Estilo global conectado" : "Conecta un texto con el estilo global (opcional)"}
           </div>
           <div className={`flex items-center gap-1 ${galleryConnections.length ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground"}`}>
-            <Images className="h-3 w-3" />
+            <Images className="h-4 w-4" />
             {galleryConnections.length
               ? `${photos.length} ${photos.length === 1 ? "foto disponible" : "fotos disponibles"} en ${galleryConnections.length} ${galleryConnections.length === 1 ? "galería" : "galerías"}`
               : "Conecta una galería para elegir fotos de referencia por etapa"}
@@ -239,8 +239,8 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
 
         {/* ADN */}
         <div className="space-y-1">
-          <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-muted-foreground">
-            <Dna className="h-3 w-3 text-pink-400" /> ADN del personaje
+          <div className="flex items-center gap-1 text-[12px] uppercase tracking-wider text-muted-foreground">
+            <Dna className="h-4 w-4 text-pink-400" /> ADN del personaje
           </div>
           <NodeTextarea
             value={nodeData.dna ?? ""}
@@ -248,23 +248,23 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
             onKeyDown={stopProp}
             disabled={!canEdit}
             placeholder="Rasgos que no cambian entre etapas: rostro, ojos, pelo, marcas, contextura…"
-            className="nodrag w-full text-xs bg-muted/30 rounded-md px-2 py-1.5 border-none outline-none resize-y min-h-[56px] max-h-[200px] placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
+            className="nodrag w-full text-[15px] bg-muted/30 rounded-md px-2 py-1.5 border-none outline-none resize-y min-h-[56px] max-h-[200px] placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
             rows={3}
           />
         </div>
 
-        <div className="text-[9px] uppercase tracking-wider text-muted-foreground">
+        <div className="text-[12px] uppercase tracking-wider text-muted-foreground">
           Etapas · cada una usa la anterior como referencia
         </div>
 
         {nodeData.chainStale && (
-          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-700 dark:text-amber-300">
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[13px] text-amber-700 dark:text-amber-300">
             Cambiaste el orden: presiona &quot;Generar etapas&quot; para reconectar la cadena.
           </div>
         )}
 
         {stages.length === 0 && (
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-[14px] text-muted-foreground">
             Agrega etapas en el orden en que quieres generarlas (por ejemplo hoy, 25 años, 15 años, 5 años). Cada una genera su imagen.
           </p>
         )}
@@ -306,39 +306,39 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
                       title="Arrastra para reordenar"
                       className="nodrag cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground shrink-0"
                     >
-                      <GripVertical className="h-3.5 w-3.5" />
+                      <GripVertical className="h-[18px] w-[18px]" />
                     </span>
                   )}
-                  <span className="text-[10px] text-muted-foreground w-4 shrink-0">{i + 1}.</span>
+                  <span className="text-[13px] text-muted-foreground w-4 shrink-0">{i + 1}.</span>
                   <input
                     value={stage.name}
                     onChange={(e) => patchStage(stage.id, { name: e.target.value })}
                     onKeyDown={stopProp}
                     disabled={!canEdit}
                     placeholder="Nombre de la etapa (ej. 12 años)"
-                    className="nodrag min-w-0 flex-1 bg-transparent text-xs font-medium outline-none placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
+                    className="nodrag min-w-0 flex-1 bg-transparent text-[15px] font-medium outline-none placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
                   />
                   {stage.imageNodeId && (
                     <span title="Ya tiene su nodo imagen" className="text-emerald-400">
-                      <Check className="h-3 w-3" />
+                      <Check className="h-4 w-4" />
                     </span>
                   )}
                   {canEdit && (
                     <>
                       <button type="button" onClick={() => move(i, -1)} disabled={i === 0} title="Subir" className="nodrag p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30">
-                        <ArrowUp className="h-3 w-3" />
+                        <ArrowUp className="h-4 w-4" />
                       </button>
                       <button type="button" onClick={() => move(i, 1)} disabled={i === stages.length - 1} title="Bajar" className="nodrag p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30">
-                        <ArrowDown className="h-3 w-3" />
+                        <ArrowDown className="h-4 w-4" />
                       </button>
                       <button type="button" onClick={() => (stageLinks[stage.id] ? setPendingDelete(stage.id) : removeStage(stage.id))} title="Borrar etapa" className="nodrag p-0.5 text-muted-foreground hover:text-red-400">
-                        <Trash2 className="h-3 w-3" />
+                        <Trash2 className="h-4 w-4" />
                       </button>
                     </>
                   )}
                 </div>
                 {pendingDelete === stage.id && stageLinks[stage.id] && (
-                  <div className="space-y-1 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1.5 text-[10px] text-red-700 dark:text-red-300">
+                  <div className="space-y-1 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1.5 text-[13px] text-red-700 dark:text-red-300">
                     <p>
                       La imagen de esta etapa está conectada a: <strong>{stageLinks[stage.id].join(", ")}</strong>. Si
                       borras la etapa, la imagen se conserva con esas conexiones, pero al volver a &quot;Generar etapas&quot;
@@ -360,7 +360,7 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
                   onKeyDown={stopProp}
                   disabled={!canEdit}
                   placeholder="Cómo es el personaje en esta etapa: edad, ropa, pelo, contexto…"
-                  className="nodrag w-full text-xs bg-muted/30 rounded-md px-2 py-1.5 border-none outline-none resize-y min-h-[52px] max-h-[200px] placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
+                  className="nodrag w-full text-[15px] bg-muted/30 rounded-md px-2 py-1.5 border-none outline-none resize-y min-h-[52px] max-h-[200px] placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
                   rows={2}
                 />
                 {photos.length > 0 ? (
@@ -371,9 +371,9 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
                       type="button"
                       onClick={() => toggleExpanded(stage.id)}
                       aria-expanded={expandedStages.has(stage.id)}
-                      className="nodrag flex w-full items-center gap-1 text-left text-[10px] text-muted-foreground hover:text-foreground"
+                      className="nodrag flex w-full items-center gap-1 text-left text-[13px] text-muted-foreground hover:text-foreground"
                     >
-                      <ChevronRight className={`h-3 w-3 shrink-0 transition-transform ${expandedStages.has(stage.id) ? "rotate-90" : ""}`} />
+                      <ChevronRight className={`h-4 w-4 shrink-0 transition-transform ${expandedStages.has(stage.id) ? "rotate-90" : ""}`} />
                       <span className="shrink-0">
                         {selectedCount > 0
                           ? `${selectedCount} ${selectedCount === 1 ? "foto de referencia" : "fotos de referencia"}`
@@ -420,7 +420,7 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
                     )}
                   </div>
                 ) : (stage.referenceImages ?? []).length > 0 ? (
-                  <div className="text-[10px] text-amber-700 dark:text-amber-300">
+                  <div className="text-[13px] text-amber-700 dark:text-amber-300">
                     Las fotos elegidas ya no están en una galería conectada.
                   </div>
                 ) : null}
@@ -435,25 +435,25 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
               type="button"
               onClick={addStage}
               disabled={stages.length >= MAX_CHARACTER_STAGES}
-              className="nodrag flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs rounded-md bg-muted/40 hover:bg-muted/70 disabled:opacity-40"
+              className="nodrag flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[15px] rounded-md bg-muted/40 hover:bg-muted/70 disabled:opacity-40"
             >
-              <Plus className="h-3 w-3" /> Agregar etapa
+              <Plus className="h-4 w-4" /> Agregar etapa
             </button>
             <button
               type="button"
               onClick={generate}
               disabled={busy || filledStages === 0}
-              className="nodrag flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs rounded-md bg-pink-500/20 text-pink-700 dark:text-pink-200 hover:bg-pink-500/30 disabled:opacity-40"
+              className="nodrag flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[15px] rounded-md bg-pink-500/20 text-pink-700 dark:text-pink-200 hover:bg-pink-500/30 disabled:opacity-40"
             >
-              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
               Generar etapas
             </button>
           </div>
         )}
         {message && (
-          <p className={`text-[10px] ${message.tone === "ok" ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-300"}`}>{message.text}</p>
+          <p className={`text-[13px] ${message.tone === "ok" ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-300"}`}>{message.text}</p>
         )}
-        <p className="text-[9px] text-muted-foreground">
+        <p className="text-[12px] text-muted-foreground">
           Crea una imagen por etapa, en orden: la etapa 1 se genera primero y es la referencia de la 2, la 2 de la 3, y
           así. Cada una recibe además ADN + estilo + su texto y sus fotos (prioridad 1). Luego ejecútalas con RUN.
         </p>

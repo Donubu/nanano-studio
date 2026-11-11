@@ -63,7 +63,7 @@ export function HistoryNav({ history, effectiveIndex, onNavigate, onDelete }: Hi
         className="nodrag p-1.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
         title="Descargar"
       >
-        <Download className="h-4 w-4" />
+        <Download className="h-5 w-5" />
       </button>
       {!isSingle && (
         <>
@@ -73,9 +73,9 @@ export function HistoryNav({ history, effectiveIndex, onNavigate, onDelete }: Hi
             className="nodrag p-1.5 rounded hover:bg-accent disabled:opacity-30 disabled:cursor-default transition-colors"
             title="Anterior"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="h-5 w-5" />
           </button>
-          <span className="text-xs font-medium text-muted-foreground tabular-nums min-w-[32px] text-center">
+          <span className="text-[15px] font-medium text-muted-foreground tabular-nums min-w-[32px] text-center">
             {effectiveIndex + 1}/{total}
           </span>
           <button
@@ -84,7 +84,7 @@ export function HistoryNav({ history, effectiveIndex, onNavigate, onDelete }: Hi
             className="nodrag p-1.5 rounded hover:bg-accent disabled:opacity-30 disabled:cursor-default transition-colors"
             title="Siguiente"
           >
-            <ChevronRight className="h-4 w-4" />
+            <ChevronRight className="h-5 w-5" />
           </button>
         </>
       )}
@@ -94,7 +94,7 @@ export function HistoryNav({ history, effectiveIndex, onNavigate, onDelete }: Hi
           className="nodrag p-1.5 rounded hover:bg-red-500/15 text-muted-foreground hover:text-red-400 transition-colors"
           title={isSingle ? "Eliminar generación" : "Eliminar del historial"}
         >
-          <Trash2 className="h-4 w-4" />
+          <Trash2 className="h-5 w-5" />
         </button>
       )}
     </div>

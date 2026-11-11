@@ -83,7 +83,7 @@ export const NodeLabel = memo(function NodeLabel({ value, placeholder, onChange,
     }
   };
 
-  const base = "text-xs font-medium w-full min-w-0 bg-transparent border-none outline-none truncate";
+  const base = "text-[15px] font-medium w-full min-w-0 bg-transparent border-none outline-none truncate";
 
   return (
     <span ref={wrapperRef} className="flex-1 min-w-0 flex items-center">

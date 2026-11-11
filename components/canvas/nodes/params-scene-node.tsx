@@ -138,14 +138,14 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
 
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
-        <Settings className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        <Palette className="h-3.5 w-3.5 text-yellow-400 shrink-0" />
+        <Settings className="h-[18px] w-[18px] text-muted-foreground shrink-0" />
+        <Palette className="h-[18px] w-[18px] text-yellow-400 shrink-0" />
         <NodeLabel
           value={nodeData.label || ""}
           placeholder="Params Escena"
           onChange={(label) => updateNodeData(id, { ...nodeData, label })}
         />
-        <span className="text-[9px] px-1 py-0.5 rounded bg-yellow-400/15 text-yellow-400 shrink-0">
+        <span className="text-[12px] px-1 py-0.5 rounded bg-yellow-400/15 text-yellow-400 shrink-0">
           PRESET
         </span>
         <NodeDeleteButton nodeId={id} />
@@ -154,11 +154,11 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
       {/* Body */}
       <div className="px-3 py-2 space-y-1.5">
         <div className="flex items-center justify-between">
-          <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
+          <span className="text-[12px] uppercase tracking-wider text-muted-foreground">
             Estilo / Visual / Técnica
           </span>
           {hasGallery && (
-            <span className="text-[9px] text-emerald-400 inline-flex items-center gap-0.5">
+            <span className="text-[12px] text-emerald-400 inline-flex items-center gap-0.5">
               <Palette className="h-2.5 w-2.5" />
               galería
             </span>
@@ -169,35 +169,35 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
           onChange={handleContentChange}
           onKeyDown={stopProp}
           placeholder="Ej: cinematográfico, cámara handheld, paleta cálida, lente 35mm, 8K..."
-          className="nodrag w-full text-xs bg-muted/30 rounded-md px-2 py-1.5 border-none outline-none resize-y min-h-[80px] max-h-[200px] placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
+          className="nodrag w-full text-[15px] bg-muted/30 rounded-md px-2 py-1.5 border-none outline-none resize-y min-h-[80px] max-h-[200px] placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
           rows={4}
         />
         {hasGallery && canEdit && (
           <button
             onClick={handleExtractStyle}
             disabled={isExtracting}
-            className="nodrag w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded-md bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="nodrag w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[15px] rounded-md bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {isExtracting ? (
               <>
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
                 Extrayendo estilo...
               </>
             ) : (
               <>
-                <Wand2 className="h-3 w-3" />
+                <Wand2 className="h-4 w-4" />
                 {nodeData.content ? "Re-extraer estilo desde galería" : "Extraer estilo desde galería"}
               </>
             )}
           </button>
         )}
         {extractError && (
-          <div className="flex items-start gap-1 text-[10px] text-red-400">
-            <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
+          <div className="flex items-start gap-1 text-[13px] text-red-400">
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
             <span>{extractError}</span>
           </div>
         )}
-        <p className="text-[9px] text-muted-foreground">
+        <p className="text-[12px] text-muted-foreground">
           Se concatena al contexto de cada nodo destino aguas abajo de las Escenas conectadas.
         </p>
       </div>

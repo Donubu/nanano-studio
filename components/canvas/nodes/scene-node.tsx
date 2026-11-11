@@ -72,14 +72,14 @@ export const SceneNodeComponent = memo(function SceneNode({ id, data, selected, 
 
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
-        <Film className="h-3.5 w-3.5 text-violet-400 shrink-0" />
-        <span className="text-xs font-medium flex-1 truncate">
+        <Film className="h-[18px] w-[18px] text-violet-400 shrink-0" />
+        <span className="text-[15px] font-medium flex-1 truncate">
           Escena {nodeData.sceneIndex}
           <span className="text-muted-foreground">/{nodeData.totalScenes}</span>
         </span>
         {TargetIcon && (
           <span
-            className="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1 py-0.5 rounded bg-violet-500/10 text-violet-400 shrink-0"
+            className="inline-flex items-center gap-0.5 text-[12px] font-semibold px-1 py-0.5 rounded bg-violet-500/10 text-violet-400 shrink-0"
             title={`Conectado a: ${targetLabelMap[targetType]}`}
           >
             <TargetIcon className="h-2.5 w-2.5" />
@@ -92,7 +92,7 @@ export const SceneNodeComponent = memo(function SceneNode({ id, data, selected, 
       {/* Body: literal scene text (read-only) */}
       <div className="px-3 py-2">
         <div className="nowheel bg-muted/40 rounded-md p-2 max-h-[180px] overflow-y-auto">
-          <p className="text-xs whitespace-pre-wrap">{nodeData.text || "(sin texto)"}</p>
+          <p className="text-[15px] whitespace-pre-wrap">{nodeData.text || "(sin texto)"}</p>
         </div>
       </div>
 

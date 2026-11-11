@@ -27,7 +27,7 @@ export const NoteNodeComponent = memo(function NoteNode({ id, data, selected, wi
     >
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-amber-300/30 dark:border-amber-700/30">
-        <StickyNote className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+        <StickyNote className="h-[18px] w-[18px] text-amber-500 shrink-0" />
         <NodeLabel value={nodeData.label || ""} placeholder="Nota" onChange={(label) => updateNodeData(id, { ...nodeData, content: nodeData.content, label })} className="text-amber-700 dark:text-amber-400" />
         <NodeDeleteButton nodeId={id} />
       </div>
@@ -39,7 +39,7 @@ export const NoteNodeComponent = memo(function NoteNode({ id, data, selected, wi
           onChange={handleChange}
           readOnly={!canEdit}
           placeholder="Escribe una nota..."
-          className="nodrag nowheel w-full text-xs bg-transparent border-none outline-none resize-y min-h-[40px] max-h-[200px] text-amber-900 dark:text-amber-200 placeholder:text-amber-400/50"
+          className="nodrag nowheel w-full text-[15px] bg-transparent border-none outline-none resize-y min-h-[40px] max-h-[200px] text-amber-900 dark:text-amber-200 placeholder:text-amber-400/50"
           rows={2}
         />
       </div>

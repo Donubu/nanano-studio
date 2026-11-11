@@ -7,11 +7,11 @@ import { useCanvasContext } from "../canvas-context";
 export function StatusIndicator({ status }: { status: string }) {
   switch (status) {
     case "generating":
-      return <Loader2 className="h-3 w-3 text-blue-400 animate-spin shrink-0" />;
+      return <Loader2 className="h-4 w-4 text-blue-400 animate-spin shrink-0" />;
     case "completed":
-      return <Check className="h-3.5 w-3.5 text-green-500 shrink-0" />;
+      return <Check className="h-[18px] w-[18px] text-green-500 shrink-0" />;
     case "error":
-      return <AlertCircle className="h-3 w-3 text-red-500 shrink-0" />;
+      return <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />;
     default:
       return <div className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />;
   }
@@ -19,7 +19,7 @@ export function StatusIndicator({ status }: { status: string }) {
 
 export function AIBadge() {
   return (
-    <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1 py-0.5 rounded bg-primary/10 text-primary shrink-0">
+    <span className="inline-flex items-center gap-0.5 text-[12px] font-semibold px-1 py-0.5 rounded bg-primary/10 text-primary shrink-0">
       <Zap className="h-2.5 w-2.5" />IA
     </span>
   );
@@ -49,7 +49,7 @@ export function NodeDeleteButton({ nodeId }: { nodeId: string }) {
       className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-red-500/15 text-muted-foreground hover:text-red-400 shrink-0"
       title="Eliminar nodo"
     >
-      <Trash2 className="h-3 w-3" />
+      <Trash2 className="h-4 w-4" />
     </button>
   );
 }

@@ -44,7 +44,7 @@ export const StaticTextNodeComponent = memo(function StaticTextNode({ id, data, 
     >
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
-        <Type className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+        <Type className="h-[18px] w-[18px] text-blue-400 shrink-0" />
         <NodeLabel value={nodeData.label || ""} placeholder="Texto" onChange={(label) => updateNodeData(id, { label })} />
         <NodeDeleteButton nodeId={id} />
       </div>
@@ -56,7 +56,7 @@ export const StaticTextNodeComponent = memo(function StaticTextNode({ id, data, 
           onChange={handleContentChange}
           readOnly={!canEdit}
           placeholder="Escribe texto que se usará como input..."
-          className="nodrag nowheel w-full text-xs bg-transparent border-none outline-none resize-y min-h-[50px] max-h-[200px] placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
+          className="nodrag nowheel w-full text-[15px] bg-transparent border-none outline-none resize-y min-h-[50px] max-h-[200px] placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
           rows={3}
         />
       </div>

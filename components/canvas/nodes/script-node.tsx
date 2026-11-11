@@ -613,7 +613,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
     >
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
-        <Sparkles className="h-3.5 w-3.5 text-fuchsia-400 shrink-0" />
+        <Sparkles className="h-[18px] w-[18px] text-fuchsia-400 shrink-0" />
         <AIBadge />
         <NodeLabel
           value={nodeData.label || ""}
@@ -621,7 +621,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
           onChange={(label) => updateNodeData(id, { ...nodeData, label })}
         />
         {nodeData.modelName && (
-          <span className="text-[10px] text-muted-foreground truncate max-w-[80px]">
+          <span className="text-[13px] text-muted-foreground truncate max-w-[80px]">
             {nodeData.modelName}
           </span>
         )}
@@ -632,15 +632,15 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
       {/* Prompt input */}
       <div className="px-3 py-2 space-y-1.5 border-b border-border/40">
         <div className="flex items-center gap-1.5">
-          <FileText className="h-3 w-3 text-muted-foreground" />
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Guion</span>
+          <FileText className="h-4 w-4 text-muted-foreground" />
+          <span className="text-[13px] uppercase tracking-wider text-muted-foreground">Guion</span>
         </div>
         <NodeTextarea
           value={nodeData.prompt || ""}
           onChange={handlePromptChange}
           onKeyDown={stopProp}
           placeholder="Pega aquí el guion completo (opcional si vas a armar las escenas a mano)..."
-          className="nodrag w-full text-xs bg-muted/30 rounded-md px-2 py-1.5 border-none outline-none resize-y min-h-[80px] max-h-[200px] placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
+          className="nodrag w-full text-[15px] bg-muted/30 rounded-md px-2 py-1.5 border-none outline-none resize-y min-h-[80px] max-h-[200px] placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
           rows={4}
         />
         {canEdit && (
@@ -649,17 +649,17 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
             <button
               onClick={handleReadScript}
               disabled={isAnalyzing || isStaging || isMaterializing || !nodeData.prompt?.trim()}
-              className="nodrag flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded-md bg-fuchsia-500/15 text-fuchsia-400 hover:bg-fuchsia-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="nodrag flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-[15px] rounded-md bg-fuchsia-500/15 text-fuchsia-400 hover:bg-fuchsia-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               title="Segmenta el texto actual literalmente en escenas (3 alternativas)"
             >
               {isAnalyzing ? (
                 <>
-                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                   Leyendo...
                 </>
               ) : (
                 <>
-                  <Wand2 className="h-3 w-3" />
+                  <Wand2 className="h-4 w-4" />
                   {hasAnalysis ? "Re-leer guion" : "Leer guion"}
                 </>
               )}
@@ -667,17 +667,17 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
             <button
               onClick={handleStageScript}
               disabled={isStaging || isAnalyzing || isMaterializing || !nodeData.prompt?.trim()}
-              className="nodrag flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded-md bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="nodrag flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-[15px] rounded-md bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               title="Transforma el texto en guion estructurado (locación, acción, VO, S.I)"
             >
               {isStaging ? (
                 <>
-                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                   Escenificando...
                 </>
               ) : (
                 <>
-                  <Drama className="h-3 w-3" />
+                  <Drama className="h-4 w-4" />
                   Escenificar
                 </>
               )}
@@ -687,29 +687,29 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
             <button
               onClick={() => addSceneAt(0)}
               disabled={isAnalyzing || isStaging || isMaterializing}
-              className="nodrag w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded-md bg-muted/40 hover:bg-muted/60 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="nodrag w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[15px] rounded-md bg-muted/40 hover:bg-muted/60 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               title="Agregar escena manual sin leer ni escenificar"
             >
-              <Plus className="h-3 w-3" />
+              <Plus className="h-4 w-4" />
               Empezar manual
             </button>
           )}
         </div>
         )}
         {!hasAnalysis && !isAnalyzing && promptPreview && (
-          <p className="text-[10px] text-muted-foreground line-clamp-2">{promptPreview}</p>
+          <p className="text-[13px] text-muted-foreground line-clamp-2">{promptPreview}</p>
         )}
         {analysisError && (
-          <div className="flex items-start gap-1 text-[10px] text-red-400">
-            <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
+          <div className="flex items-start gap-1 text-[13px] text-red-400">
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
             <span>{analysisError}</span>
           </div>
         )}
         {warnings.length > 0 && (
-          <div className="text-[10px] text-amber-400 space-y-0.5">
+          <div className="text-[13px] text-amber-400 space-y-0.5">
             {warnings.map((w, i) => (
               <div key={i} className="flex items-start gap-1">
-                <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
                 <span>{w}</span>
               </div>
             ))}
@@ -727,7 +727,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
                 <button
                   key={i}
                   onClick={() => handleSelectAlternative(i)}
-                  className={`nodrag flex-1 px-2 py-1.5 text-[10px] rounded transition-colors ${
+                  className={`nodrag flex-1 px-2 py-1.5 text-[13px] rounded transition-colors ${
                     isActive
                       ? "bg-fuchsia-500/20 text-fuchsia-400 font-semibold"
                       : "text-muted-foreground hover:bg-muted/60"
@@ -736,7 +736,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
                 >
                   <div className="flex flex-col items-center leading-tight">
                     <span>{alt.label || `Alt ${i + 1}`}</span>
-                    <span className="text-[9px] opacity-70">{alt.scenes.length} esc</span>
+                    <span className="text-[12px] opacity-70">{alt.scenes.length} esc</span>
                   </div>
                 </button>
               );
@@ -747,7 +747,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
               nodeData.scriptAnalysisAlternatives[nodeData.activeAnalysisIndex ?? 0];
             if (!activeAlt?.approach) return null;
             return (
-              <p className="text-[10px] text-muted-foreground italic px-1">{activeAlt.approach}</p>
+              <p className="text-[13px] text-muted-foreground italic px-1">{activeAlt.approach}</p>
             );
           })()}
         </div>
@@ -761,9 +761,9 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
             <>
               <button
                 onClick={() => setGeneralOpen((v) => !v)}
-                className="nodrag flex items-center gap-1.5 w-full text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+                className="nodrag flex items-center gap-1.5 w-full text-[13px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
               >
-                {generalOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                {generalOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                 <span>Información general</span>
                 {generalSummary && (
                   <span className="ml-auto normal-case text-muted-foreground/70 truncate">
@@ -772,7 +772,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
                 )}
               </button>
               {generalOpen && (
-                <div className="bg-muted/30 rounded-md p-2 space-y-1.5 text-[11px]">
+                <div className="bg-muted/30 rounded-md p-2 space-y-1.5 text-[14px]">
                   {analysis!.generalInfo.synopsis && (
                     <div>
                       <span className="text-muted-foreground">Sinopsis: </span>
@@ -781,22 +781,22 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
                   )}
                   <div className="flex flex-wrap gap-1">
                     {analysis!.generalInfo.tone && (
-                      <span className="px-1.5 py-0.5 rounded bg-background text-[10px]">
+                      <span className="px-1.5 py-0.5 rounded bg-background text-[13px]">
                         Tono: {analysis!.generalInfo.tone}
                       </span>
                     )}
                     {analysis!.generalInfo.genre && (
-                      <span className="px-1.5 py-0.5 rounded bg-background text-[10px]">
+                      <span className="px-1.5 py-0.5 rounded bg-background text-[13px]">
                         Género: {analysis!.generalInfo.genre}
                       </span>
                     )}
                   </div>
                   {analysis!.generalInfo.characters?.length > 0 && (
                     <div>
-                      <span className="text-muted-foreground text-[10px]">Personajes:</span>
+                      <span className="text-muted-foreground text-[13px]">Personajes:</span>
                       <ul className="mt-0.5 space-y-0.5">
                         {analysis!.generalInfo.characters.map((c, i) => (
-                          <li key={i} className="text-[10px]">
+                          <li key={i} className="text-[13px]">
                             <span className="font-medium">{c.name}:</span>{" "}
                             <span className="text-muted-foreground">{c.description}</span>
                           </li>
@@ -812,7 +812,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
           {/* Scenes list */}
           <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span className="text-[13px] uppercase tracking-wider text-muted-foreground">
                 Escenas ({sceneCount})
               </span>
             </div>
@@ -842,7 +842,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
           </div>
 
           {/* Continuity toggle */}
-          <label className="nodrag flex items-start gap-1.5 text-[10px] text-muted-foreground cursor-pointer select-none px-1 py-1 rounded hover:bg-muted/30 transition-colors">
+          <label className="nodrag flex items-start gap-1.5 text-[13px] text-muted-foreground cursor-pointer select-none px-1 py-1 rounded hover:bg-muted/30 transition-colors">
             <input
               type="checkbox"
               checked={!!nodeData.linkPreviousOutput}
@@ -867,16 +867,16 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
             <button
               onClick={handleMaterialize}
               disabled={isMaterializing || isAnalyzing || isStaging || sceneCount === 0}
-              className="nodrag w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded-md bg-violet-500/15 text-violet-400 hover:bg-violet-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="nodrag w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[15px] rounded-md bg-violet-500/15 text-violet-400 hover:bg-violet-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isMaterializing ? (
                 <>
-                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                   Generando escenas...
                 </>
               ) : (
                 <>
-                  <Sparkles className="h-3 w-3" />
+                  <Sparkles className="h-4 w-4" />
                   Generar {sceneCount} escena{sceneCount === 1 ? "" : "s"}
                 </>
               )}
@@ -886,8 +886,8 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
       )}
 
       {status === "error" && nodeData.errorMessage && !analysisError && (
-        <div className="px-3 py-2 flex items-center gap-1.5 text-xs text-red-400">
-          <AlertCircle className="h-3 w-3" />
+        <div className="px-3 py-2 flex items-center gap-1.5 text-[15px] text-red-400">
+          <AlertCircle className="h-4 w-4" />
           <span className="truncate">{nodeData.errorMessage}</span>
         </div>
       )}
@@ -979,7 +979,7 @@ function InsertButton({ onClick, label }: { onClick: () => void; label: string }
       <div className="flex-1 h-px bg-border/30 group-hover/insert:bg-violet-500/30 transition-colors" />
       <button
         onClick={onClick}
-        className="nodrag flex items-center gap-0.5 text-[9px] text-muted-foreground hover:text-violet-400 transition-colors px-1.5 py-0.5 rounded"
+        className="nodrag flex items-center gap-0.5 text-[12px] text-muted-foreground hover:text-violet-400 transition-colors px-1.5 py-0.5 rounded"
         title={label}
       >
         <Plus className="h-2.5 w-2.5" />
@@ -1019,10 +1019,10 @@ function SceneCard({
   return (
     <div className="bg-muted/30 rounded-md p-2 space-y-1 border border-border/30">
       <div className="flex items-center gap-1">
-        <span className="text-[10px] font-semibold text-fuchsia-400 shrink-0">
+        <span className="text-[13px] font-semibold text-fuchsia-400 shrink-0">
           Escena {scene.index}
         </span>
-        <span className="text-[9px] text-muted-foreground inline-flex items-center gap-0.5 ml-1">
+        <span className="text-[12px] text-muted-foreground inline-flex items-center gap-0.5 ml-1">
           {targetIcon}
         </span>
         <select
@@ -1030,7 +1030,7 @@ function SceneCard({
           onChange={(e) => onTargetChange(e.target.value as SceneTargetNodeType)}
           onKeyDown={stopProp}
           disabled={!canEdit}
-          className="nodrag ml-auto text-[10px] bg-background border border-border rounded px-1 py-0.5 disabled:opacity-60"
+          className="nodrag ml-auto text-[13px] bg-background border border-border rounded px-1 py-0.5 disabled:opacity-60"
         >
           {targetTypeOptions.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -1071,7 +1071,7 @@ function SceneCard({
         onChange={onTextChange}
         onKeyDown={stopProp}
         placeholder="Texto de la escena..."
-        className="nodrag w-full text-[10px] bg-background/50 rounded px-1.5 py-1 border border-border/30 outline-none resize-y min-h-[60px] max-h-[160px] whitespace-pre-wrap placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
+        className="nodrag w-full text-[13px] bg-background/50 rounded px-1.5 py-1 border border-border/30 outline-none resize-y min-h-[60px] max-h-[160px] whitespace-pre-wrap placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
         rows={3}
       />
     </div>
