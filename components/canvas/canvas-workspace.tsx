@@ -25,6 +25,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { SnapGuidesOverlay, useSnapPrefs } from "./snap-guides-overlay";
+import { usePinchZoomOverNodes } from "./hooks/use-pinch-zoom-over-nodes";
 import { computeSnap, intersects, unionBox, type Box, type Guide } from "./lib/snap-guides";
 
 import { TextNodeComponent } from "./nodes/text-node";
@@ -1506,6 +1507,8 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
 
   // Capture Escape inside the canvas to prevent it from closing the conversation
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+  // Pellizco del trackpad para hacer zoom también con el puntero sobre un nodo.
+  usePinchZoomOverNodes(canvasContainerRef, 0.1, 2);
   // Nodos seleccionados (para destacar sus conexiones). El Set solo cambia
   // cuando cambia la selección, no en cada movimiento.
   const selectedKey = useMemo(
