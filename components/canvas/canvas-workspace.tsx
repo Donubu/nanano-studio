@@ -70,8 +70,9 @@ import { CharacterNodeComponent } from "./nodes/character-node";
 import { LodZoomVar, useIsZoomedOut, withLod } from "./nodes/lod";
 import { ZoomControls } from "./zoom-controls";
 import { planCharacterMaterialize } from "./lib/character";
+import { planScriptMaterialize } from "./lib/script-materialize";
 import { computeLinkPatches, fetchLinkResolutions } from "./lib/linked-sync";
-import type { CharacterMaterializeResult } from "./canvas-context";
+import type { CharacterMaterializeResult, ScriptMaterializeOptions } from "./canvas-context";
 import { CursorOverlay } from "./collaboration/cursor-overlay";
 import { PresenceBar } from "./collaboration/presence-bar";
 import { ConnectorGhost } from "./collaboration/connector-ghost";
@@ -801,6 +802,83 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
       nodes: nextNodes,
       edges: nextEdges,
     };
+  }, [canEdit, ensureConversation, takeSnapshot, setNodes, setEdges, persist, collab.emitNodeData, collab.emitNodeAdd, collab.emitNodeRemove, collab.emitEdgeRemove, collab.emitEdgeAdd, fitView]);
+
+  // "Generar escenas" de un Guión: plan incremental (lib/script-materialize.ts)
+  // aplicado con la persistencia granular y la colaboración de siempre. Nunca
+  // borra nodos con resultados ni conexiones del usuario.
+  const materializeScript = useCallback(async (scriptId: string, opts: ScriptMaterializeOptions) => {
+    if (!canEdit) throw new Error("Solo el editor del canvas puede generar escenas.");
+    await ensureConversation();
+    const curNodes = latestNodesRef.current;
+    const curEdges = latestEdgesRef.current;
+    const script = curNodes.find((n) => n.id === scriptId);
+    if (!script || script.type !== "script") throw new Error("El Guión ya no existe.");
+    const plan = planScriptMaterialize(script, curNodes, curEdges, opts);
+
+    const removeNodes = new Set(plan.removeNodeIds);
+    const removeEdges = new Set(plan.removeEdgeIds);
+    const updated = new Map(plan.updateNodes.map((u) => [u.id, u.data]));
+    const updatedEdges = new Map(plan.updateEdges.map((e) => [e.id, e]));
+    const updatedScript: Node = { ...script, data: plan.scriptData as unknown as Record<string, unknown> };
+    const changedNodes: Node[] = [];
+    const nextNodes = [
+      ...curNodes
+        .filter((n) => !removeNodes.has(n.id))
+        .map((n) => {
+          if (n.id === scriptId) return updatedScript;
+          const data = updated.get(n.id);
+          if (!data) return n;
+          const next = { ...n, data };
+          changedNodes.push(next);
+          return next;
+        }),
+      ...plan.addNodes,
+    ];
+    const nextEdges = [
+      ...curEdges.filter((e) => !removeEdges.has(e.id)).map((e) => updatedEdges.get(e.id) ?? e),
+      ...plan.addEdges,
+    ];
+
+    takeSnapshot();
+    setNodes(nextNodes);
+    setEdges(nextEdges);
+
+    persist.saveNodeData(updatedScript);
+    collab.emitNodeData(scriptId, plan.scriptData as unknown as Record<string, unknown>);
+    for (const n of changedNodes) {
+      persist.saveNodeData(n);
+      collab.emitNodeData(n.id, n.data as Record<string, unknown>);
+    }
+    await Promise.all(plan.addNodes.map((n) => persist.saveNode(n)));
+    for (const n of plan.addNodes) collab.emitNodeAdd(n as unknown as Record<string, unknown>);
+    if (removeNodes.size > 0) {
+      persist.deleteNodes([...removeNodes]);
+      for (const id of removeNodes) collab.emitNodeRemove(id);
+    }
+    const explicitEdgeRemovals = plan.removeEdgeIds.filter((id) => {
+      const e = curEdges.find((x) => x.id === id);
+      return e && !removeNodes.has(e.source) && !removeNodes.has(e.target);
+    });
+    if (explicitEdgeRemovals.length > 0) {
+      persist.deleteEdges(explicitEdgeRemovals);
+      for (const id of explicitEdgeRemovals) collab.emitEdgeRemove(id);
+    }
+    for (const e of [...plan.updateEdges, ...plan.addEdges]) {
+      persist.createEdge(e);
+      collab.emitEdgeAdd(e as unknown as Record<string, unknown>);
+    }
+
+    const c = plan.counts;
+    const parts: string[] = [];
+    if (c.scenesAdded) parts.push(`${c.scenesAdded} ${c.scenesAdded === 1 ? "escena nueva" : "escenas nuevas"}`);
+    if (c.scenesUpdated) parts.push(`${c.scenesUpdated} ${c.scenesUpdated === 1 ? "escena actualizada" : "escenas actualizadas"}`);
+    if (c.scenesRemoved) parts.push(`${c.scenesRemoved} ${c.scenesRemoved === 1 ? "escena quitada" : "escenas quitadas"}`);
+    if (c.targetsAdded) parts.push(`${c.targetsAdded} ${c.targetsAdded === 1 ? "destino nuevo" : "destinos nuevos"}`);
+    if (plan.addNodes.length > 0) {
+      setTimeout(() => fitView({ nodes: [scriptId, ...plan.addNodes.map((n) => n.id)].map((id) => ({ id })), padding: 0.2, duration: 500, maxZoom: 1 }), 120);
+    }
+    return { summary: parts.length ? `Listo: ${parts.join(", ")}.` : "Las escenas ya estaban al día.", warnings: plan.warnings };
   }, [canEdit, ensureConversation, takeSnapshot, setNodes, setEdges, persist, collab.emitNodeData, collab.emitNodeAdd, collab.emitNodeRemove, collab.emitEdgeRemove, collab.emitEdgeAdd, fitView]);
 
   const materializeCharacter = useCallback(async (characterId: string): Promise<CharacterMaterializeResult> => {
@@ -1625,10 +1703,16 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
   // que se pasan por refs.
   const updateNodeDataRef = useRef(updateNodeData);
   const materializeCharacterRef = useRef(materializeCharacter);
+  const materializeScriptRef = useRef(materializeScript);
   useEffect(() => {
     updateNodeDataRef.current = updateNodeData;
     materializeCharacterRef.current = materializeCharacter;
+    materializeScriptRef.current = materializeScript;
   });
+  const materializeScriptStable = useCallback(
+    (scriptId: string, opts: ScriptMaterializeOptions) => materializeScriptRef.current(scriptId, opts),
+    [],
+  );
 
   // Actualiza los nodos vinculados con su origen: persiste si soy el editor;
   // en solo-ver, solo en pantalla.
@@ -1671,8 +1755,9 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
       persistNodeData: persistNodeDataStable,
       canEdit,
       materializeCharacter: materializeCharacterStable,
+      materializeScript: materializeScriptStable,
     }),
-    [projectId, realConversationId, generationConfig, openImagePicker, emitNodeDataStable, persistNodeDataStable, canEdit, materializeCharacterStable],
+    [projectId, realConversationId, generationConfig, openImagePicker, emitNodeDataStable, persistNodeDataStable, canEdit, materializeCharacterStable, materializeScriptStable],
   );
 
   return (

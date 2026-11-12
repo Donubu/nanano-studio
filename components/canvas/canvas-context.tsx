@@ -25,6 +25,14 @@ interface CanvasContextValue {
   canEdit: boolean;
   // "Generar etapas" de un nodo Personaje.
   materializeCharacter: (characterId: string) => Promise<CharacterMaterializeResult>;
+  // "Generar escenas" de un Guión (incremental: actualiza, no rehace).
+  materializeScript: (scriptId: string, opts: ScriptMaterializeOptions) => Promise<{ summary: string; warnings: string[] }>;
+}
+
+export interface ScriptMaterializeOptions {
+  linkPreviousOutput?: boolean;
+  visualReferenceSourceId?: string | null;
+  paramsSceneSourceId?: string | null;
 }
 
 const CanvasContext = createContext<CanvasContextValue>({
@@ -36,6 +44,7 @@ const CanvasContext = createContext<CanvasContextValue>({
   persistNodeData: () => {},
   canEdit: true,
   materializeCharacter: async () => ({ summary: "", warnings: [], addedNodeIds: [], addedEdgeIds: [] }),
+  materializeScript: async () => ({ summary: "", warnings: [] }),
 });
 
 export const CanvasProvider = CanvasContext.Provider;

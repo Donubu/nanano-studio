@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, memo, useCallback, useMemo, useRef, useState } from "react";
-import { Handle, Position, useHandleConnections, useReactFlow, type NodeProps, type Edge, type Node as RFNode } from "@xyflow/react";
+import { Handle, Position, useHandleConnections, type NodeProps } from "@xyflow/react";
 import { Loader2, AlertCircle, FileText, Sparkles, Wand2, ChevronDown, ChevronRight, ImageIcon, Video, Bot, MinusCircle, ArrowUp, ArrowDown, X, Plus, Drama } from "lucide-react";
 import { HANDLE_IDS, topHandleId, type ScriptAnalysis, type ScriptAnalysisAlt, type ScriptNodeData, type ScriptSceneAnalysis, type SceneTargetNodeType } from "../lib/canvas-types";
 import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
@@ -78,12 +78,12 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
   const nodeData = data as unknown as ScriptNodeData;
   const status = nodeData.status || "idle";
   const { updateNodeData } = useNodeUpdate();
-  const { conversationId, canEdit } = useCanvasContext();
-  const { setNodes, setEdges } = useReactFlow();
+  const { conversationId, canEdit, materializeScript } = useCanvasContext();
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isStaging, setIsStaging] = useState(false);
   const [isMaterializing, setIsMaterializing] = useState(false);
+  const [materializeMessage, setMaterializeMessage] = useState<{ text: string; tone: "ok" | "warn" } | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [generalOpen, setGeneralOpen] = useState(false);
@@ -467,122 +467,31 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
 
   // --- Materialize scenes into canvas nodes ---
 
+  // Incremental (como "Generar etapas" del Personaje): actualiza el texto de
+  // las escenas existentes, crea solo las que faltan, reusa los destinos con
+  // sus resultados y reconcilia solo las conexiones que pone el Guión. Ver
+  // lib/script-materialize.ts.
   const handleMaterialize = useCallback(async () => {
     if (!analysis || analysis.scenes.length === 0) return;
-    if (!conversationId) return;
-
-    // Persist any pending edits first via PUT of the entire canvas would be heavy;
-    // instead we rely on autosave and on the client-side scriptAnalysis we send to
-    // the endpoint. The endpoint reads from DB though — so we need to ensure DB is
-    // up-to-date. We force a PATCH of just the script node's config before materializing.
     setIsMaterializing(true);
     setAnalysisError(null);
+    setMaterializeMessage(null);
     try {
-      // Sync the current analysis to DB so materialize sees latest manual edits.
-      await fetch(`/api/conversations/${conversationId}/canvas/nodes`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nodeId: id,
-          updates: {
-            config: {
-              prompt: nodeData.prompt,
-              modelId: nodeData.modelId,
-              modelName: nodeData.modelName,
-              temperature: nodeData.temperature,
-              maxOutputTokens: nodeData.maxOutputTokens,
-              systemInstruction: nodeData.systemInstruction,
-              thinkingLevel: nodeData.thinkingLevel,
-              scriptAnalysis: analysis,
-            },
-          },
-        }),
+      const r = await materializeScript(id, {
+        linkPreviousOutput: !!nodeData.linkPreviousOutput,
+        visualReferenceSourceId,
+        paramsSceneSourceId,
       });
-
-      // Preview cascade
-      const previewRes = await fetch(
-        `/api/conversations/${conversationId}/canvas/script/materialize?scriptNodeId=${id}`
+      setMaterializeMessage(
+        r.warnings.length ? { text: `${r.summary} ${r.warnings.join(" · ")}`, tone: "warn" } : { text: r.summary, tone: "ok" },
       );
-      const preview = await previewRes.json();
-      const downstreamCount = Array.isArray(preview.nodes) ? preview.nodes.length : 0;
-
-      if (downstreamCount > 0) {
-        const confirmed = window.confirm(
-          `Esto eliminará ${downstreamCount} nodo(s) actualmente conectado(s) al guion (incluida toda la cascada aguas abajo).\n\n¿Continuar?`
-        );
-        if (!confirmed) {
-          setIsMaterializing(false);
-          return;
-        }
-      }
-
-      const sceneTargets = analysis.scenes.map((s, i) => ({
-        sceneIndex: i + 1,
-        targetNodeType: s.targetNodeType,
-      }));
-      const res = await fetch(`/api/conversations/${conversationId}/canvas/script/materialize`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          scriptNodeId: id,
-          sceneTargets,
-          linkPreviousOutput: !!nodeData.linkPreviousOutput,
-          visualReferenceSourceId,
-          paramsSceneSourceId,
-        }),
-      });
-      const body = await res.json();
-      if (!res.ok) {
-        throw new Error(body.error || `Error ${res.status}`);
-      }
-
-      const deletedNodeIds = new Set<string>(body.deletedNodeIds || []);
-      const deletedEdgeIds = new Set<string>(body.deletedEdgeIds || []);
-      const newNodes = (body.addedNodes || []) as Array<{
-        id: string;
-        type: string;
-        position: { x: number; y: number };
-        data: Record<string, unknown>;
-      }>;
-      const newEdges = (body.addedEdges || []) as Array<{
-        id: string;
-        source: string;
-        sourceHandle: string;
-        target: string;
-        targetHandle: string;
-      }>;
-
-      setNodes((nds: RFNode[]) => {
-        const filtered = nds.filter((n) => !deletedNodeIds.has(n.id));
-        const fresh = newNodes.map((n) => ({
-          id: n.id,
-          type: n.type,
-          position: n.position,
-          data: n.data,
-        }));
-        return [...filtered, ...fresh] as RFNode[];
-      });
-      setEdges((eds: Edge[]) => {
-        const filtered = eds.filter((e) => !deletedEdgeIds.has(e.id));
-        const cleaned = filtered.filter(
-          (e) => !deletedNodeIds.has(e.source) && !deletedNodeIds.has(e.target)
-        );
-        const fresh = newEdges.map((e) => ({
-          id: e.id,
-          source: e.source,
-          sourceHandle: e.sourceHandle,
-          target: e.target,
-          targetHandle: e.targetHandle,
-        }));
-        return [...cleaned, ...fresh] as Edge[];
-      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Error generando escenas";
       setAnalysisError(msg);
     } finally {
       setIsMaterializing(false);
     }
-  }, [analysis, conversationId, id, nodeData, setNodes, setEdges, visualReferenceSourceId, paramsSceneSourceId]);
+  }, [analysis, id, materializeScript, nodeData.linkPreviousOutput, visualReferenceSourceId, paramsSceneSourceId]);
 
   const promptPreview = nodeData.prompt
     ? nodeData.prompt.length > 120
@@ -882,6 +791,11 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
                 </>
               )}
             </button>
+          )}
+          {materializeMessage && (
+            <p className={`text-[13px] ${materializeMessage.tone === "ok" ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-300"}`}>
+              {materializeMessage.text}
+            </p>
           )}
         </div>
       )}

@@ -213,8 +213,8 @@ export interface ScriptNodeData extends BaseNodeData {
   systemInstruction?: string;
   thinkingLevel?: string;
   // Active analysis (mirrors scriptAnalysisAlternatives[activeAnalysisIndex]).
-  // The materialize endpoint reads this field — keeping it in sync makes that
-  // path agnostic to the multi-alternative feature.
+  // "Generar escenas" (lib/script-materialize.ts) reads this field — keeping
+  // it in sync makes that path agnostic to the multi-alternative feature.
   scriptAnalysis?: ScriptAnalysis;
   // Up to 3 segmentation alternatives produced by "Leer guion".
   scriptAnalysisAlternatives?: ScriptAnalysisAlt[];
@@ -225,6 +225,9 @@ export interface ScriptNodeData extends BaseNodeData {
   // del siguiente para mantener continuidad visual (image→image como REFERENCE,
   // image→video como FIRST_FRAME, etc.).
   linkPreviousOutput?: boolean;
+  // Destino de cada escena creado por "Generar escenas" (índice → id de nodo).
+  // Sin entrada se asume el id fijo `dst-<guion>-<N>` (canvas anteriores).
+  sceneTargetIds?: Record<string, string>;
 }
 
 export interface SceneNodeData extends BaseNodeData {
