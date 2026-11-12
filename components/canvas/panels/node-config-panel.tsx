@@ -118,6 +118,12 @@ export function NodeConfigPanel({
     : [];
   const supportsRefMentions = type === "video" && !!videoCaps?.supportsRefMentions;
   const showReferenceSection = referenceEdges.length >= 1;
+  // Fotogramas inicial/final del video (inicial primero).
+  const frameEdges = type === "video"
+    ? videoInputEdges
+        .filter((e) => [HANDLES.INPUT_FIRST_FRAME, HANDLES.INPUT_LAST_FRAME].includes(baseHandleId(e.targetHandle) as never))
+        .sort((a, b) => (baseHandleId(a.targetHandle) === HANDLES.INPUT_FIRST_FRAME ? 0 : 1) - (baseHandleId(b.targetHandle) === HANDLES.INPUT_FIRST_FRAME ? 0 : 1))
+    : [];
 
   return (
     <div className="w-[360px] h-full border-l border-border bg-background flex flex-col overflow-hidden">
@@ -208,6 +214,8 @@ export function NodeConfigPanel({
         {/* Prioridad de referencias — opt-in: todo parte en Neutro (orden de
             conexión, sin nota en el prompt). Al asignar un número a alguna,
             las referencias se reordenan y se inyecta la nota de prioridad. */}
+        {frameEdges.length > 0 && <FrameInputsList frameEdges={frameEdges} nodes={nodes} edges={edges} />}
+
         {showReferenceSection && onUpdateEdgePriority && (
           <ReferencePriorityList
             referenceEdges={referenceEdges}
@@ -327,6 +335,80 @@ export function NodeConfigPanel({
   );
 }
 
+// Qué imagen trae una conexión de imagen (referencia o fotograma): miniatura,
+// nombre del origen y cuántas imágenes aporta.
+function imageSourceInfo(
+  edge: { id?: string; source: string; sourceHandle?: string | null },
+  nodes: Node[],
+  edges: Array<{ id?: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }>,
+): { url: string | null; label: string; count: number } {
+  const sourceId = edge.source;
+  const source = nodes.find((n) => n.id === sourceId);
+  if (!source) return { url: null, label: sourceId, count: 0 };
+  const d = source.data as Record<string, unknown>;
+  const label = (d.label as string) || source.type || sourceId;
+  // Salida IMAGEN de un Personaje (local o vinculado): la etapa elegida en la conexión.
+  if (baseHandleId(edge.sourceHandle) === HANDLES.OUTPUT_CHARACTER_IMAGE && edge.id) {
+    if (source.type === "linked") {
+      const stage = linkedStageForEdge(d as unknown as LinkedNodeData, edge.id);
+      return { url: stage?.imageUrl ?? null, label: stage ? `${label} · ${stage.name}` : label, count: stage?.imageUrl ? 1 : 0 };
+    }
+    const stage = stageForImageOutput(d as unknown as CharacterNodeData, edge.id);
+    const img = stage?.imageNodeId ? nodes.find((n) => n.id === stage.imageNodeId) : undefined;
+    const url = ((img?.data as Record<string, unknown> | undefined)?.outputUrl as string) || null;
+    return { url, label: stage ? `${label} · ${stage.name}` : label, count: url ? 1 : 0 };
+  }
+  if (source.type === "static-image") {
+    const url = (d.imageUrl as string) || null;
+    return { url, label, count: url ? 1 : 0 };
+  }
+  if (source.type === "static-image-group") {
+    const images = galleryOutput(source as never, lookupFrom(nodes as never), edges as never);
+    return { url: images[0]?.url || null, label: `${label} (${images.length})`, count: images.length };
+  }
+  if (source.type === "image") {
+    const url = (d.outputUrl as string) || null;
+    return { url, label, count: url ? 1 : 0 };
+  }
+  return { url: null, label, count: 0 };
+}
+
+// Fotogramas inicial/final conectados a un video (solo se ven; no tienen prioridad).
+function FrameInputsList({
+  frameEdges,
+  nodes,
+  edges,
+}: {
+  frameEdges: Array<{ id?: string; source: string; sourceHandle?: string | null; targetHandle?: string | null }>;
+  nodes: Node[];
+  edges: Array<{ id?: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }>;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs">Fotogramas</Label>
+      <div className="space-y-1">
+        {frameEdges.map((edge) => {
+          const { url, label } = imageSourceInfo(edge, nodes, edges);
+          const kind = baseHandleId(edge.targetHandle) === HANDLES.INPUT_FIRST_FRAME ? "Inicial" : "Final";
+          return (
+            <div key={edge.id ?? edge.source} className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-1.5">
+              {url ? (
+                <img src={thumbUrl(url, 128)} alt={label} className="h-8 w-8 rounded object-cover shrink-0" />
+              ) : (
+                <div className="h-8 w-8 rounded bg-muted shrink-0" />
+              )}
+              <div className="flex flex-col flex-1 min-w-0">
+                <span className="text-xs truncate" title={label}>{label}</span>
+                <span className="text-[10px] text-muted-foreground">{url ? kind : `${kind} · sin imagen aún`}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // --- Prioridad de referencias ---
 
 function ReferencePriorityList({
@@ -348,37 +430,7 @@ function ReferencePriorityList({
 }) {
   const anyPrioritized = referenceEdges.some((e) => e.data?.priority != null);
 
-  const infoFor = (edge: { id?: string; source: string; sourceHandle?: string | null }): { url: string | null; label: string; count: number } => {
-    const sourceId = edge.source;
-    const source = nodes.find((n) => n.id === sourceId);
-    if (!source) return { url: null, label: sourceId, count: 0 };
-    const d = source.data as Record<string, unknown>;
-    const label = (d.label as string) || source.type || sourceId;
-    // Salida IMAGEN de un Personaje (local o vinculado): la etapa elegida en la conexión.
-    if (baseHandleId(edge.sourceHandle) === HANDLES.OUTPUT_CHARACTER_IMAGE && edge.id) {
-      if (source.type === "linked") {
-        const stage = linkedStageForEdge(d as unknown as LinkedNodeData, edge.id);
-        return { url: stage?.imageUrl ?? null, label: stage ? `${label} · ${stage.name}` : label, count: stage?.imageUrl ? 1 : 0 };
-      }
-      const stage = stageForImageOutput(d as unknown as CharacterNodeData, edge.id);
-      const img = stage?.imageNodeId ? nodes.find((n) => n.id === stage.imageNodeId) : undefined;
-      const url = ((img?.data as Record<string, unknown> | undefined)?.outputUrl as string) || null;
-      return { url, label: stage ? `${label} · ${stage.name}` : label, count: url ? 1 : 0 };
-    }
-    if (source.type === "static-image") {
-      const url = (d.imageUrl as string) || null;
-      return { url, label, count: url ? 1 : 0 };
-    }
-    if (source.type === "static-image-group") {
-      const images = galleryOutput(source as never, lookupFrom(nodes as never), edges as never);
-      return { url: images[0]?.url || null, label: `${label} (${images.length})`, count: images.length };
-    }
-    if (source.type === "image") {
-      const url = (d.outputUrl as string) || null;
-      return { url, label, count: url ? 1 : 0 };
-    }
-    return { url: null, label, count: 0 };
-  };
+  const infoFor = (edge: { id?: string; source: string; sourceHandle?: string | null }) => imageSourceInfo(edge, nodes, edges);
 
   // Orden efectivo = el mismo que usa la ejecución: prioridad asc primero,
   // neutras después en orden de conexión (sort estable). Los nombres @refN
