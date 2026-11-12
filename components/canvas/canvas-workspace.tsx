@@ -24,6 +24,8 @@ import {
   Panel,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { SnapGuidesOverlay, useSnapPrefs } from "./snap-guides-overlay";
+import { computeSnap, intersects, unionBox, type Box, type Guide } from "./lib/snap-guides";
 
 import { TextNodeComponent } from "./nodes/text-node";
 import { TextPracticanteNodeComponent } from "./nodes/text-practicante-node";
@@ -154,7 +156,102 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
   // Undo/redo
   const { takeSnapshot, undo, redo } = useUndoRedo(nodes, edges, setNodes, setEdges);
 
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, fitView, getViewport } = useReactFlow();
+
+  // Ajuste al arrastrar: guías inteligentes (bordes/centros de otros nodos) y
+  // cuadrícula. Alt mientras se arrastra = movimiento libre.
+  const [snapPrefs, setSnapPrefs] = useSnapPrefs();
+  const snapPrefsRef = useRef(snapPrefs);
+  snapPrefsRef.current = snapPrefs;
+  const [snapGuides, setSnapGuides] = useState<Guide[]>([]);
+  const snapGuidesKeyRef = useRef("");
+  const altPressedRef = useRef(false);
+  const dragActiveRef = useRef(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      altPressedRef.current = e.altKey;
+    };
+    const onBlur = () => {
+      altPressedRef.current = false;
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKey);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKey);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+  const showGuides = useCallback((guides: Guide[]) => {
+    const key = JSON.stringify(guides);
+    if (key === snapGuidesKeyRef.current) return;
+    snapGuidesKeyRef.current = key;
+    setSnapGuides(guides);
+  }, []);
+
+  // Al soltar se borran las líneas (el cambio final ya pasó por el ajuste).
+  const endSnapDrag = useCallback(() => {
+    dragActiveRef.current = false;
+    showGuides([]);
+  }, [showGuides]);
+
+  /**
+   * Pega el bloque arrastrado (uno o varios nodos) a los bordes o centros de
+   * los nodos visibles. Se aplica a cada cuadro del arrastre y también al
+   * cambio final (dragging=false), que React Flow calcula sin el ajuste.
+   */
+  const applySnapGuides = useCallback(
+    (changes: Parameters<typeof onNodesChangeBase>[0]): Parameters<typeof onNodesChangeBase>[0] => {
+      const moves = changes.filter(
+        (c): c is Extract<typeof c, { type: "position" }> => c.type === "position" && !!c.position && c.dragging !== undefined,
+      );
+      if (moves.length === 0) return changes;
+      const dragging = moves.some((c) => c.dragging);
+      const wasDragging = dragActiveRef.current;
+      dragActiveRef.current = dragging;
+      // Teclado u otro cambio programático que no viene de un arrastre.
+      if (!dragging && !wasDragging) return changes;
+      if (!snapPrefsRef.current.guides || altPressedRef.current) {
+        showGuides([]);
+        return changes;
+      }
+      const byId = new Map(latestNodesRef.current.map((n) => [n.id, n]));
+      const size = (n: Node) => ({
+        w: n.measured?.width ?? n.width ?? 0,
+        h: n.measured?.height ?? n.height ?? 0,
+      });
+      const moving = unionBox(
+        moves.flatMap((c) => {
+          const n = byId.get(c.id);
+          return n ? [{ x: c.position!.x, y: c.position!.y, ...size(n) }] : [];
+        }),
+      );
+      if (!moving) return changes;
+      const { x: vx, y: vy, zoom } = getViewport();
+      const rect = canvasContainerRef.current?.getBoundingClientRect();
+      const view: Box = rect
+        ? { x: -vx / zoom, y: -vy / zoom, w: rect.width / zoom, h: rect.height / zoom }
+        : { x: -Infinity, y: -Infinity, w: Infinity, h: Infinity };
+      const movingIds = new Set(moves.map((c) => c.id));
+      const others: Box[] = [];
+      for (const n of latestNodesRef.current) {
+        if (movingIds.has(n.id) || n.hidden) continue;
+        const b = { x: n.position.x, y: n.position.y, ...size(n) };
+        if (b.w > 0 && b.h > 0 && intersects(b, view)) others.push(b);
+      }
+      // Umbral de 6 px en pantalla, a cualquier zoom.
+      const { dx, dy, guides } = computeSnap(moving, others, 6 / zoom);
+      showGuides(dragging ? guides : []);
+      if (dx === 0 && dy === 0) return changes;
+      return changes.map((c) =>
+        c.type === "position" && c.position && movingIds.has(c.id)
+          ? { ...c, position: { x: c.position.x + dx, y: c.position.y + dy } }
+          : c,
+      );
+    },
+    [getViewport, showGuides],
+  );
 
   // Ref for collab emitters (avoids circular dependency with hooks declared later)
   const collabRef = useRef<{
@@ -177,7 +274,8 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
   });
 
   // Wrap onNodesChange/onEdgesChange to take snapshots
-  const onNodesChange = useCallback((changes: Parameters<typeof onNodesChangeBase>[0]) => {
+  const onNodesChange = useCallback((rawChanges: Parameters<typeof onNodesChangeBase>[0]) => {
+    const changes = applySnapGuides(rawChanges);
     // Cascade-remove: when a script or scene is deleted, also remove all its
     // downstream descendants (chained scenes, generated targets, etc.).
     // Scenes can't live without their script.
@@ -258,7 +356,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
     if (removedNodeIds.length > 0) {
       persistRef.current.deleteNodes(removedNodeIds);
     }
-  }, [onNodesChangeBase, takeSnapshot, nodes, edges, setEdges]);
+  }, [onNodesChangeBase, takeSnapshot, nodes, edges, setEdges, applySnapGuides]);
 
   const onEdgesChange = useCallback((changes: Parameters<typeof onEdgesChangeBase>[0]) => {
     const hasMeaningful = changes.some((c) => c.type === "remove" || c.type === "add");
@@ -636,8 +734,20 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
     const removeEdges = new Set(plan.removeEdgeIds);
     const updatedEdges = new Map(plan.updateEdges.map((e) => [e.id, e]));
     const updatedCharacter: Node = { ...character, data: plan.characterData as unknown as Record<string, unknown> };
+    // Imágenes ya creadas cuya etapa cambió de título.
+    const renamed = new Map(plan.renameNodes.map((r) => [r.id, r.label]));
+    const renamedNodes: Node[] = [];
     const nextNodes = [
-      ...curNodes.filter((n) => !removeNodes.has(n.id)).map((n) => (n.id === characterId ? updatedCharacter : n)),
+      ...curNodes
+        .filter((n) => !removeNodes.has(n.id))
+        .map((n) => {
+          if (n.id === characterId) return updatedCharacter;
+          const label = renamed.get(n.id);
+          if (label === undefined) return n;
+          const next = { ...n, data: { ...n.data, label } };
+          renamedNodes.push(next);
+          return next;
+        }),
       ...plan.addNodes,
     ];
     const nextEdges = [
@@ -651,6 +761,10 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
 
     await Promise.all([persist.saveNode(updatedCharacter), ...plan.addNodes.map((n) => persist.saveNode(n))]);
     collab.emitNodeData(characterId, plan.characterData as unknown as Record<string, unknown>);
+    for (const n of renamedNodes) {
+      persist.saveNodeData(n);
+      collab.emitNodeData(n.id, { label: n.data.label });
+    }
     for (const n of plan.addNodes) collab.emitNodeAdd(n as unknown as Record<string, unknown>);
     if (removeNodes.size > 0) {
       persist.deleteNodes([...removeNodes]);
@@ -671,6 +785,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
 
     const parts: string[] = [];
     if (plan.addNodes.length) parts.push(`${plan.addNodes.length} ${plan.addNodes.length === 1 ? "imagen nueva" : "imágenes nuevas"}`);
+    if (renamedNodes.length) parts.push(`${renamedNodes.length} ${renamedNodes.length === 1 ? "imagen renombrada" : "imágenes renombradas"}`);
     if (removeNodes.size) parts.push(`${removeNodes.size} sin usar ${removeNodes.size === 1 ? "eliminada" : "eliminadas"}`);
     if (plan.addEdges.length) parts.push(`${plan.addEdges.length} ${plan.addEdges.length === 1 ? "conexión nueva" : "conexiones nuevas"}`);
     if (explicitEdgeRemovals.length) parts.push(`${explicitEdgeRemovals.length} ${explicitEdgeRemovals.length === 1 ? "conexión quitada" : "conexiones quitadas"}`);
@@ -1593,7 +1708,12 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
           selectionOnDrag={canvasMode === "select"}
           selectionMode={SelectionMode.Partial}
           selectionKeyCode={canvasMode === "select" ? null : "Shift"}
+          onNodeDragStop={endSnapDrag}
+          onSelectionDragStop={endSnapDrag}
+          snapToGrid={snapPrefs.grid}
+          snapGrid={[24, 24]}
         >
+          <SnapGuidesOverlay guides={snapGuides} />
           <Background variant={BackgroundVariant.Lines} gap={24} size={1} color="var(--color-border)" className="opacity-30" />
           <ZoomControls />
           <LodZoomVar target={canvasContainerRef} />
@@ -1631,6 +1751,9 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
               onSaveTemplate={() => setSaveTemplateOpen(true)}
               onOpenTemplates={() => setTemplatePickerOpen(true)}
               onOpenLinkPicker={openLinkPicker}
+              snapGuides={snapPrefs.guides}
+              snapGrid={snapPrefs.grid}
+              onSnapChange={setSnapPrefs}
               isExecuting={isExecuting}
               isAllLocked={isAllLocked}
               saveStatus={persist.saveStatus}

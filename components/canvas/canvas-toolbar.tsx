@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ImageIcon, Video, MessageSquare, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History, Eye, BookmarkPlus, LayoutTemplate, UserRound, Link2 } from "lucide-react";
+import { ImageIcon, Video, MessageSquare, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History, Eye, BookmarkPlus, LayoutTemplate, UserRound, Link2, Magnet, Grid3x3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CanvasNodeType } from "./lib/canvas-types";
 
@@ -13,6 +13,10 @@ interface CanvasToolbarProps {
   onSaveTemplate: () => void;
   onOpenTemplates: () => void;
   onOpenLinkPicker: () => void;
+  // Ajuste al arrastrar: guías inteligentes y cuadrícula.
+  snapGuides: boolean;
+  snapGrid: boolean;
+  onSnapChange: (patch: { guides?: boolean; grid?: boolean }) => void;
   isExecuting: boolean;
   isAllLocked: boolean;
   saveStatus?: "idle" | "saving" | "saved" | "error";
@@ -55,6 +59,9 @@ export function CanvasToolbar({
   onSaveTemplate,
   onOpenTemplates,
   onOpenLinkPicker,
+  snapGuides,
+  snapGrid,
+  onSnapChange,
   isExecuting,
   isAllLocked,
   saveStatus = "idle",
@@ -90,6 +97,29 @@ export function CanvasToolbar({
         >
           <MousePointer2 className="h-3.5 w-3.5" />
         </Button>
+        {canEdit && (
+          <>
+            <div className="w-px h-5 bg-border mx-0.5" />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onSnapChange({ guides: !snapGuides })}
+              className={`h-7 w-7 p-0 ${snapGuides ? "bg-accent text-foreground" : "text-muted-foreground"}`}
+              title={`Guías inteligentes: ${snapGuides ? "activadas" : "desactivadas"} (alinea con otros nodos; mantén Alt para mover libre)`}
+            >
+              <Magnet className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onSnapChange({ grid: !snapGrid })}
+              className={`h-7 w-7 p-0 ${snapGrid ? "bg-accent text-foreground" : "text-muted-foreground"}`}
+              title={`Ajustar a la cuadrícula: ${snapGrid ? "activado" : "desactivado"}`}
+            >
+              <Grid3x3 className="h-3.5 w-3.5" />
+            </Button>
+          </>
+        )}
       </div>
 
       {/* Solo-lectura: badge con quién está editando. No hay herramientas de escritura. */}
