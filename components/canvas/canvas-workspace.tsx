@@ -10,6 +10,7 @@ import {
   useNodesState,
   useEdgesState,
   useReactFlow,
+  useStoreApi,
   addEdge,
   BackgroundVariant,
   SelectionMode,
@@ -70,7 +71,9 @@ import type { AssistPlan } from "@/lib/canvas-ai/assist-plan";
 import { CharacterNodeComponent } from "./nodes/character-node";
 import { LodZoomVar, useIsZoomedOut, withLod } from "./nodes/lod";
 import { ZoomControls } from "./zoom-controls";
-import { planCharacterMaterialize } from "./lib/character";
+import { galleryImagesOf, planCharacterMaterialize } from "./lib/character";
+import { handleName, listConnectCandidates, nodeTypeLabel, type ConnectCandidate, type HandleRef } from "./lib/connect-candidates";
+import { ConnectPicker } from "./connect-picker";
 import { planScriptMaterialize } from "./lib/script-materialize";
 import { computeLinkPatches, fetchLinkResolutions } from "./lib/linked-sync";
 import type { CharacterMaterializeResult, ScriptMaterializeOptions } from "./canvas-context";
@@ -1486,6 +1489,155 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
 
   // (closeDropMenu moved earlier, before onPaneClick)
 
+  // --- "Conectar con…": clic (sin arrastrar) en un conector ---
+  // Lista los conectores de otros nodos con los que se puede conectar, así no
+  // hay que arrastrar la conexión a través de todo el canvas. Los conectores de
+  // cada nodo salen de lo que React Flow midió (solo los que el nodo muestra).
+  const storeApi = useStoreApi();
+  const [connectPicker, setConnectPicker] = useState<{
+    x: number;
+    y: number;
+    origin: HandleRef;
+    flowPosition: { x: number; y: number };
+    candidates: ConnectCandidate[];
+  } | null>(null);
+  const hoveredNodeElRef = useRef<HTMLElement | null>(null);
+
+  const clearPickerHover = useCallback(() => {
+    if (hoveredNodeElRef.current) hoveredNodeElRef.current.style.outline = "";
+    hoveredNodeElRef.current = null;
+  }, []);
+
+  const closeConnectPicker = useCallback(() => {
+    clearPickerHover();
+    setConnectPicker(null);
+  }, [clearPickerHover]);
+
+  const openConnectPicker = useCallback(
+    (origin: HandleRef, clientX: number, clientY: number) => {
+      const { nodeLookup } = storeApi.getState();
+      const handlesOf = (nodeId: string) => {
+        const hb = nodeLookup.get(nodeId)?.internals.handleBounds;
+        return {
+          source: (hb?.source ?? []).map((h) => h.id ?? "").filter(Boolean),
+          target: (hb?.target ?? []).map((h) => h.id ?? "").filter(Boolean),
+        };
+      };
+      const candidates = listConnectCandidates(origin, nodes, edges, handlesOf);
+      const flow = screenToFlowPosition({ x: clientX, y: clientY });
+      setConnectPicker({
+        x: clientX + 12,
+        y: clientY + 12,
+        origin,
+        flowPosition: { x: flow.x + (origin.handleType === "source" ? 120 : -460), y: flow.y - 40 },
+        candidates,
+      });
+    },
+    [storeApi, nodes, edges, screenToFlowPosition]
+  );
+
+  const connectPickerItems = useMemo(() => {
+    if (!connectPicker) return [];
+    return connectPicker.candidates.map((c) => {
+      const n = nodes.find((x) => x.id === c.nodeId);
+      const d = (n?.data ?? {}) as Record<string, unknown>;
+      return {
+        key: `${c.nodeId}|${c.handleId}`,
+        nodeLabel: (typeof d.label === "string" && d.label.trim()) || nodeTypeLabel(n?.type),
+        typeLabel: nodeTypeLabel(n?.type),
+        handleLabel: handleName(c.handleId),
+        thumb: n ? galleryImagesOf(n as never)[0]?.url ?? null : null,
+      };
+    });
+  }, [connectPicker, nodes]);
+
+  const connectPickerCreateOptions = useMemo(() => {
+    if (!connectPicker) return [];
+    const { origin } = connectPicker;
+    const type = nodes.find((n) => n.id === origin.nodeId)?.type;
+    if (!type) return [];
+    const opts = origin.handleType === "source"
+      ? getCompatibleTargetTypes(type, origin.handleId).map((o) => ({ type: o.type, label: o.label, handle: o.targetHandle }))
+      : getCompatibleSourceTypes(type, origin.handleId).map((o) => ({ type: o.type, label: o.label, handle: o.sourceHandle }));
+    return opts.map((o) => ({ ...o, key: `${o.type}|${o.handle}` }));
+  }, [connectPicker, nodes]);
+
+  const pickConnectCandidate = useCallback(
+    (key: string) => {
+      const c = connectPicker?.candidates.find((x) => `${x.nodeId}|${x.handleId}` === key);
+      closeConnectPicker();
+      if (c) onConnect(c.connection);
+    },
+    [connectPicker, closeConnectPicker, onConnect]
+  );
+
+  const createFromConnectPicker = useCallback(
+    (key: string) => {
+      const picker = connectPicker;
+      const option = connectPickerCreateOptions.find((o) => o.key === key);
+      closeConnectPicker();
+      if (!picker || !option) return;
+      pendingDropRef.current = { start: picker.origin, flowPosition: picker.flowPosition, options: [option] };
+      void handleDropMenuSelect(option);
+    },
+    [connectPicker, connectPickerCreateOptions, closeConnectPicker, handleDropMenuSelect]
+  );
+
+  const hoverConnectCandidate = useCallback(
+    (key: string | null) => {
+      clearPickerHover();
+      if (!key) return;
+      const nodeId = key.slice(0, key.lastIndexOf("|"));
+      const el = canvasContainerRef.current?.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(nodeId)}"]`);
+      if (el) {
+        el.style.outline = "3px solid #a855f7";
+        el.style.outlineOffset = "4px";
+        hoveredNodeElRef.current = el;
+      }
+    },
+    [clearPickerHover]
+  );
+
+  // Clic sin arrastre sobre un conector. React Flow no avisa de eso
+  // (connectOnClick va apagado), así que se escucha en el contenedor.
+  const openConnectPickerRef = useRef(openConnectPicker);
+  useEffect(() => {
+    openConnectPickerRef.current = openConnectPicker;
+  }, [openConnectPicker]);
+  useEffect(() => {
+    const el = canvasContainerRef.current;
+    if (!el || !canEdit) return;
+    let down: { x: number; y: number; handle: Element } | null = null;
+    const onDown = (e: PointerEvent) => {
+      const handle = (e.target as Element | null)?.closest?.(".react-flow__handle");
+      down = handle && e.button === 0 ? { x: e.clientX, y: e.clientY, handle } : null;
+    };
+    const onUp = (e: PointerEvent) => {
+      const start = down;
+      down = null;
+      if (!start || Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4) return;
+      const handle = (e.target as Element | null)?.closest?.(".react-flow__handle");
+      if (handle !== start.handle) return;
+      const nodeId = handle.getAttribute("data-nodeid");
+      const handleId = handle.getAttribute("data-handleid");
+      const handleType = handle.classList.contains("source") ? "source" : handle.classList.contains("target") ? "target" : null;
+      if (!nodeId || !handleId || !handleType) return;
+      const { clientX, clientY } = e;
+      // Después de que React Flow cierre su arrastre (y su menú de soltar, si se abrió).
+      setTimeout(() => {
+        pendingDropRef.current = null;
+        setDropMenu(null);
+        openConnectPickerRef.current({ nodeId, handleId, handleType }, clientX, clientY);
+      }, 0);
+    };
+    el.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("pointerup", onUp, true);
+    return () => {
+      el.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointerup", onUp, true);
+    };
+  }, [canEdit]);
+
   // Clone canvas into a new conversation
   const cloneCanvas = useCallback(async () => {
     if (!realConversationId || nodes.length === 0) return;
@@ -1786,6 +1938,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
           onConnect={onConnect}
           onConnectStart={onConnectStart}
           onConnectEnd={onConnectEnd}
+          connectOnClick={false}
           onNodeClick={onNodeClick}
           onPaneClick={onPaneClick}
           onMoveEnd={onMoveEnd}
@@ -1896,6 +2049,23 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
       </div>
 
       {/* Drop-on-empty context menu */}
+      {connectPicker && (
+        <ConnectPicker
+          x={connectPicker.x}
+          y={connectPicker.y}
+          title={connectPicker.origin.handleType === "source"
+            ? `Conectar ${handleName(connectPicker.origin.handleId)} con…`
+            : `Conectar a ${handleName(connectPicker.origin.handleId)} desde…`}
+          direction={connectPicker.origin.handleType === "source" ? "out" : "in"}
+          items={connectPickerItems}
+          createOptions={connectPickerCreateOptions}
+          onPick={pickConnectCandidate}
+          onCreate={createFromConnectPicker}
+          onHover={hoverConnectCandidate}
+          onClose={closeConnectPicker}
+        />
+      )}
+
       {dropMenu && pendingDropRef.current && (
         <>
           <div className="fixed inset-0 z-40" onClick={closeDropMenu} />

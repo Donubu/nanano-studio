@@ -201,6 +201,10 @@ Production runs on Coolify from `docker-compose.coolify.yml` (see the file's hea
 - Por defecto nada se colapsa. Barra: "Colapsar todos" / "Expandir todos" (todos los nodos del canvas, un solo deshacer).
 - "Reordenar" (`auto-layout.ts`) usa el alto real de los colapsados.
 
+## Canvas — "Conectar con…" (clic en un conector)
+- Clic sin arrastrar en un conector abre `ConnectPicker` (`components/canvas/connect-picker.tsx`): los conectores de otros nodos con los que se puede conectar, buscable y del más cercano al más lejano, más "Crear nodo nuevo". Arrastrar sigue igual (soltar en vacío abre el menú "Crear nodo").
+- `listConnectCandidates` (`lib/connect-candidates.ts`, puro y con tests) usa los conectores que React Flow midió en cada nodo (`internals.handleBounds`, solo los que el nodo muestra) y las mismas reglas del arrastre (`isValidConnection`, sin ciclos, sin repetir). Conectar pasa por `onConnect`. `connectOnClick` de React Flow va apagado; el clic se detecta en el contenedor.
+
 ## Canvas — guías inteligentes y cuadrícula
 - Botones en la barra (imán = guías, cuadrícula), preferencia por navegador (`useSnapPrefs`, localStorage `canvas-snap-prefs`; guías encendidas y cuadrícula apagada por defecto). Alt mientras se arrastra = movimiento libre.
 - Guías: `applySnapGuides` en `onNodesChange` del workspace pega el bloque arrastrado (uno o varios nodos) a bordes y centros de los nodos VISIBLES (umbral 6 px de pantalla) con `computeSnap` (`lib/snap-guides.ts`, puro y con tests); las líneas se dibujan con `SnapGuidesOverlay` (ViewportPortal). Se re-aplica al cambio final (`dragging: false`), que React Flow manda sin el ajuste; el teclado no se ajusta.
