@@ -212,6 +212,8 @@ export async function POST(
         };
 
         let placeholderId: number | undefined;
+        // Modelo de video resuelto (para el mensaje de error si falla antes del placeholder).
+        let generationModelDbId: number | undefined;
 
         try {
           // Resolver el modelo desde project_generation_models (selected_model_id → default → primero)
@@ -411,6 +413,8 @@ export async function POST(
               progress: progress.progress,
             });
           };
+
+          generationModelDbId = effectiveModelDbId;
 
           // Create placeholder message before generation starts
           const [placeholderResult] = await pool.execute<ResultSetHeader>(
@@ -977,12 +981,14 @@ export async function POST(
             const errorVideoAspectRatio = videoSettings?.aspectRatio || conversation.video_aspect_ratio || "16:9";
             const errorVideoDuration = videoSettings?.duration || conversation.video_duration || 8;
             const errorVideoHasAudio = videoSettings?.audioEnabled !== undefined ? videoSettings.audioEnabled : (conversation.video_audio_enabled !== false);
-            const errorModelId = conversation.model_id;
+            // El modelo de video que se usó; conversation.model_id es el de texto de la conversación.
+            const errorModelId = generationModelDbId ?? conversation.model_id;
 
             if (placeholderId) {
+              // El placeholder ya tiene el modelo de video: no se pisa.
               await pool.execute(
-                `UPDATE messages SET status = 'error', content = ?, model_id = ?, quality_tier = ?, video_aspect_ratio = ?, video_duration = ?, video_has_audio = ? WHERE id = ?`,
-                [`Error generando video: ${errorMessage}`, errorModelId, effectiveQualityTier, errorVideoAspectRatio, errorVideoDuration, errorVideoHasAudio, placeholderId]
+                `UPDATE messages SET status = 'error', content = ?, quality_tier = ?, video_aspect_ratio = ?, video_duration = ?, video_has_audio = ? WHERE id = ?`,
+                [`Error generando video: ${errorMessage}`, effectiveQualityTier, errorVideoAspectRatio, errorVideoDuration, errorVideoHasAudio, placeholderId]
               );
               sendEvent({ type: "error", message: errorMessage, id: placeholderId });
             } else {
