@@ -124,7 +124,10 @@ interface OmniInteraction {
   outputs?: OmniContentPart[];
   output_video?: { uri?: string; data?: string };
   usage?: OmniUsage;
-  error?: { message?: string } | string;
+  error?: { message?: string; code?: string | number; status?: string; details?: unknown } | string;
+  // Lo que manda hoy la API al fallar (2026-11-12): una lista, no `error`.
+  errors?: { message?: string; code?: string | number; status?: string }[];
+  [key: string]: unknown;
 }
 
 // ============================================
@@ -489,11 +492,55 @@ function findVideoPart(interaction: OmniInteraction): OmniContentPart | null {
 }
 
 function looksLikeSafetyBlock(interaction: OmniInteraction): boolean {
-  const errorMsg = typeof interaction.error === "string"
-    ? interaction.error
-    : interaction.error?.message ?? "";
+  const errorMsg = describeOmniFailure(interaction);
   const haystack = `${errorMsg} ${JSON.stringify(interaction.steps ?? []).slice(0, 2000)}`.toLowerCase();
   return /safety|blocked|prohibited|violat|rai/.test(haystack);
+}
+
+// JSON de la interaction sin datos base64 (para logs).
+function redactInteraction(interaction: OmniInteraction): string {
+  return JSON.stringify(interaction, (key, value) =>
+    key === "data" && typeof value === "string" && value.length > 200 ? `<${value.length} chars>` : value,
+  ).slice(0, 6000);
+}
+
+/**
+ * Motivo legible de una interaction fallida. Google no siempre llena
+ * `error.message`: se prueba código/estado del error, textos del modelo en los
+ * steps y campos de motivo (finish/block reason). Sin nada, al menos el estado
+ * y el id de la interaction para buscarla en los logs. Exportado para tests.
+ */
+export function describeOmniFailure(interaction: OmniInteraction): string {
+  const err = interaction.error;
+  if (typeof err === "string" && err.trim()) return err.trim();
+  const parts: string[] = [];
+  const errs = [...(err && typeof err === "object" ? [err] : []), ...(Array.isArray(interaction.errors) ? interaction.errors : [])];
+  for (const e of errs) {
+    const code = [e.status, e.code].filter((v) => v != null && v !== "").join(" ");
+    const msg = e.message?.trim() ?? "";
+    if (msg || code) parts.push(code ? `${msg} (${code})`.trim() : msg);
+  }
+  if (parts.length === 0) {
+    // Solo lo que escribió el modelo: los steps de entrada repiten el prompt.
+    const texts = (interaction.steps ?? [])
+      .filter((st) => st.type === "model_output")
+      .flatMap((st) => st.content ?? [])
+      .map((p) => (p.type === "text" || !p.type) && typeof p.text === "string" ? p.text.trim() : "")
+      .filter(Boolean);
+    if (texts.length) parts.push(texts.join(" ").slice(0, 300));
+  }
+  if (parts.length === 0) {
+    const reasons = new Set<string>();
+    JSON.stringify(interaction, (key, value) => {
+      if (/^(finish|block|stop)_?reason$|^status_message$/i.test(key) && typeof value === "string" && value) reasons.add(value);
+      return value;
+    });
+    if (reasons.size) parts.push([...reasons].join(", "));
+  }
+  if (parts.length === 0) {
+    return `sin detalle de Google (estado ${interaction.status ?? "?"}${interaction.id ? `, interacción ${interaction.id}` : ""})`;
+  }
+  return parts.join(" ");
 }
 
 async function extractAndDownloadVideo(
@@ -505,10 +552,10 @@ async function extractAndDownloadVideo(
   const status = (interaction.status ?? "").toLowerCase();
 
   if (FAILED_STATUSES.has(status)) {
-    const errorMsg = typeof interaction.error === "string"
-      ? interaction.error
-      : interaction.error?.message ?? "sin detalle";
-    console.error(`[Omni Video] Interaction ${interaction.id} failed:`, errorMsg);
+    const errorMsg = describeOmniFailure(interaction);
+    // La interaction completa (sin base64) para poder diagnosticar fallos sin mensaje.
+    console.error(`[Omni Video] Interaction ${interaction.id} failed (${status}):`, errorMsg);
+    console.error("[Omni Video] Failed interaction:", redactInteraction(interaction));
     if (looksLikeSafetyBlock(interaction)) {
       throw new Error("El video fue bloqueado por los filtros de seguridad de Google. Prueba ajustando tu prompt.");
     }
