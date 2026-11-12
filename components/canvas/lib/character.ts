@@ -57,6 +57,50 @@ export function newStageId(): string {
   return `st-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/**
+ * Etapa elegida en una conexión de la salida "imagen de una etapa". null si no
+ * se eligió o la etapa ya no existe.
+ */
+export function stageForImageOutput(data: CharacterNodeData, edgeId: string): CharacterStage | null {
+  const stageId = data.imageOutputs?.[edgeId];
+  if (!stageId) return null;
+  return (data.stages ?? []).find((s) => s.id === stageId) ?? null;
+}
+
+/**
+ * Reescribe cada conexión de la salida "imagen de una etapa" como si saliera
+ * de la imagen de la etapa elegida (mismo id, destino y prioridad). Así la
+ * ejecución (orden topológico, dependencias, referencias, frames) la trata
+ * igual que una imagen conectada directo y espera a que esa imagen termine.
+ * Las conexiones sin etapa elegida, o cuya etapa todavía no tiene imagen, se
+ * descartan: no entregan nada.
+ */
+export function resolveCharacterImageEdges<E extends Edge>(nodes: Pick<Node, "id" | "type" | "data">[], edges: E[]): E[] {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  let changed = false;
+  const out: E[] = [];
+  for (const e of edges) {
+    if (baseHandleId(e.sourceHandle) !== HANDLE_IDS.OUTPUT_CHARACTER_IMAGE) {
+      out.push(e);
+      continue;
+    }
+    const character = byId.get(e.source);
+    // Personaje vinculado: la imagen viene de su vista, no de un nodo de este
+    // canvas; la conexión queda tal cual y la lee resolveNodeInputs.
+    if (character?.type === "linked") {
+      out.push(e);
+      continue;
+    }
+    changed = true;
+    if (character?.type !== "character") continue;
+    const stage = stageForImageOutput(character.data as unknown as CharacterNodeData, e.id);
+    const imageId = stage?.imageNodeId;
+    if (!imageId || !byId.has(imageId) || imageId === e.target) continue;
+    out.push({ ...e, source: imageId, sourceHandle: HANDLE_IDS.OUTPUT_IMAGE });
+  }
+  return changed ? out : edges;
+}
+
 /** Etapa que alimenta a una imagen dada (por el id guardado en la etapa). */
 export function findStageForImage(data: CharacterNodeData, imageNodeId: string): CharacterStage | null {
   return (data.stages ?? []).find((s) => s.imageNodeId === imageNodeId) ?? null;
@@ -90,6 +134,18 @@ export function composeCharacterPrompt(params: {
   return parts.join("\n\n");
 }
 
+/** Remapea el mapa conexión → etapa al copiar/pegar o insertar plantillas. */
+export function remapImageOutputs(
+  map: Record<string, string> | undefined,
+  edgeIdMap?: Map<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(map ?? {})
+      .filter(([edgeId]) => edgeIdMap?.has(edgeId))
+      .map(([edgeId, stageId]) => [edgeIdMap!.get(edgeId)!, stageId]),
+  );
+}
+
 /**
  * Remapea los ids que guarda el Personaje (imagen y fotos de cada etapa,
  * registros de Generar) al copiar/pegar o insertar una plantilla. Las imágenes
@@ -115,6 +171,8 @@ export function remapCharacterIds(
     })),
     generatedImageIds: ((data.generatedImageIds as string[] | undefined) ?? []).filter((id) => idMap.has(id)).map((id) => idMap.get(id)!),
     managedEdgeIds: ((data.managedEdgeIds as string[] | undefined) ?? []).filter((id) => edgeIdMap?.has(id)).map((id) => edgeIdMap!.get(id)!),
+    // La etapa elegida en cada salida de imagen sigue a su conexión copiada.
+    imageOutputs: remapImageOutputs(data.imageOutputs as Record<string, string> | undefined, edgeIdMap),
   };
 }
 

@@ -11,6 +11,7 @@ import {
 import { HANDLE_IDS, baseHandleId } from "../lib/canvas-types";
 import { ZOOM_CSS_VAR, useIsZoomedOut } from "../nodes/lod";
 import { useSelectedNodeIds } from "../canvas-context";
+import { CharacterStagePicker } from "./character-stage-picker";
 
 const HANDLE_LABELS: Record<string, string> = {
   [HANDLE_IDS.INPUT_PROMPT]: "PROMPT",
@@ -58,6 +59,7 @@ export const LabeledEdge = memo(function LabeledEdge({
   targetPosition,
   source,
   target,
+  sourceHandleId,
   targetHandleId,
   style,
   markerEnd,
@@ -101,6 +103,17 @@ export const LabeledEdge = memo(function LabeledEdge({
   ) as unknown as boolean;
   // Con el canvas alejado las etiquetas (PROMPT/REF…) no se leen.
   const zoomedOut = useIsZoomedOut();
+  // Salida "imagen de una etapa" del Personaje: la conexión lleva su selector.
+  // También la salida PROMPT de un Personaje vinculado (elige la etapa).
+  const baseSource = baseHandleId(sourceHandleId);
+  const linkedPrompt = useStore(
+    useCallback(
+      (s: { nodeLookup: Map<string, { type?: string }> }) =>
+        baseSource === HANDLE_IDS.OUTPUT_CHARACTER && s.nodeLookup.get(source)?.type === "linked",
+      [baseSource, source],
+    ) as never,
+  ) as unknown as boolean;
+  const stagePicker = baseSource === HANDLE_IDS.OUTPUT_CHARACTER_IMAGE || linkedPrompt;
 
   return (
     <>
@@ -122,6 +135,16 @@ export const LabeledEdge = memo(function LabeledEdge({
         }}
         markerEnd={markerEnd}
       />
+      {stagePicker && !zoomedOut && (
+        <EdgeLabelRenderer>
+          <div
+            className="absolute z-10"
+            style={{ transform: `translate(-50%, 15%) translate(${labelX}px,${labelY}px)` }}
+          >
+            <CharacterStagePicker edgeId={id} characterId={source} targetId={target} dimmed={dimmed} promptOutput={linkedPrompt} />
+          </div>
+        </EdgeLabelRenderer>
+      )}
       {label && !zoomedOut && (
         <EdgeLabelRenderer>
           <div

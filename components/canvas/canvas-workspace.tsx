@@ -48,15 +48,17 @@ import { useCanvasExecution } from "./hooks/use-canvas-execution";
 import { useUndoRedo } from "./hooks/use-undo-redo";
 import { isValidConnection, wouldCreateCycle, getCompatibleTargetTypes, getCompatibleSourceTypes } from "./lib/connection-rules";
 import { autoLayoutPositions } from "./lib/auto-layout";
-import { getDefaultNodeData, newCanvasNodeId, type CanvasNodeType, type CanvasNodeData, type CanvasEdge, HANDLE_IDS } from "./lib/canvas-types";
+import { getDefaultNodeData, newCanvasNodeId, type CanvasNodeType, type CanvasNodeData, type LinkedNodeData, type CanvasEdge, HANDLE_IDS } from "./lib/canvas-types";
 import { getDescendantNodes } from "./lib/topological-sort";
-import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Type, Settings, Bot, Sparkles, Film, Play, Loader2, UserRound } from "lucide-react";
+import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Type, Settings, Bot, Sparkles, Film, Play, Loader2, UserRound, Link2 } from "lucide-react";
 import { CanvasProvider, SelectedNodesProvider } from "./canvas-context";
 import { LabeledEdge } from "./edges/labeled-edge";
 import { ImagePickerModal } from "@/components/chat/image-picker-modal";
 import { useCollaboration } from "./hooks/use-collaboration";
 import { SaveTemplateModal } from "./save-template-modal";
 import { TemplatePicker } from "./template-picker";
+import { LinkPicker } from "./link-picker";
+import { LinkedNodeComponent } from "./nodes/linked-node";
 import { buildClipboardPayload, writeCanvasClipboard, readCanvasClipboard, remapClipboardForPaste } from "./lib/canvas-clipboard";
 import { CanvasAiBar, type CanvasAiResult } from "./canvas-ai-bar";
 import { buildAssistSnapshot, placeNewNodes, relayoutMeasuredBlock, type AssistUndoRecord } from "./lib/ai-assist-apply";
@@ -65,6 +67,7 @@ import { CharacterNodeComponent } from "./nodes/character-node";
 import { LodZoomVar, useIsZoomedOut, withLod } from "./nodes/lod";
 import { ZoomControls } from "./zoom-controls";
 import { planCharacterMaterialize } from "./lib/character";
+import { computeLinkPatches, fetchLinkResolutions } from "./lib/linked-sync";
 import type { CharacterMaterializeResult } from "./canvas-context";
 import { CursorOverlay } from "./collaboration/cursor-overlay";
 import { PresenceBar } from "./collaboration/presence-bar";
@@ -104,6 +107,7 @@ const nodeTypes: NodeTypes = Object.fromEntries(
     "script": ScriptNodeComponent,
     "character": CharacterNodeComponent,
     "scene": SceneNodeComponent,
+    "linked": LinkedNodeComponent,
   } as NodeTypes).map(([type, comp]) => [type, withLod(comp as ComponentType<NodeProps>)]),
 ) as NodeTypes;
 
@@ -139,6 +143,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
   const [historyOpen, setHistoryOpen] = useState(false);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   // Toast transitorio para feedback de copy/paste de nodos.
   const [copyToast, setCopyToast] = useState<string | null>(null);
   const copyToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -978,12 +983,18 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
   }, [setNodes, setEdges]);
 
   // Execution
+  // Nodos vinculados a otro canvas: la implementación se asigna más abajo
+  // (necesita updateNodeData); acá va estable para la ejecución.
+  const syncLinkedRef = useRef<(list: Node[]) => Promise<Map<string, Record<string, unknown>>>>(async () => new Map());
+  const syncLinkedNodes = useCallback((list: Node[]) => syncLinkedRef.current(list), []);
+
   const { executeNode, executeFromRoot, isExecuting } = useCanvasExecution({
     conversationId: realConversationId,
     nodes,
     edges,
     setNodes,
     generationConfig,
+    syncLinkedNodes,
   });
 
   // Nodos raíz (sin edges entrantes) cuya clausura de descendientes contiene al
@@ -1090,6 +1101,48 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
       collab.emitNodeAdd(newNode as unknown as Record<string, unknown>);
     },
     [setNodes, ensureConversation, takeSnapshot, screenToFlowPosition, persist, collab.emitNodeAdd]
+  );
+
+  // "Vincular de otro canvas": crea un nodo vinculado (solo lectura) con la
+  // vista del original ya resuelta, al centro de la pantalla.
+  const openLinkPicker = useCallback(async () => {
+    if (!canEdit) return;
+    await ensureConversation();
+    setLinkPickerOpen(true);
+  }, [canEdit, ensureConversation]);
+
+  const addLinkedNode = useCallback(
+    async (source: { conversationId: number; nodeId: string }) => {
+      if (!canEdit) return;
+      const convId = await ensureConversation();
+      const [r] = await fetchLinkResolutions(convId, [source]);
+      if (!r || r.state !== "ok" || !r.snapshot) {
+        throw new Error(r?.state === "forbidden" ? "No tienes acceso a ese canvas." : "Ese Personaje ya no existe.");
+      }
+      takeSnapshot();
+      const id = newCanvasNodeId();
+      const flowPos = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+      const data: LinkedNodeData = {
+        ...(getDefaultNodeData("linked") as LinkedNodeData),
+        sourceType: "character",
+        sourceConversationId: source.conversationId,
+        sourceNodeId: source.nodeId,
+        sourceCanvasTitle: r.sourceCanvasTitle,
+        label: r.snapshot.label,
+        linkSnapshot: r.snapshot,
+        linkHash: r.hash,
+        linkState: "ok",
+        linkSyncedAt: new Date().toISOString(),
+        imageOutputs: {},
+      };
+      const newNode: Node<CanvasNodeData> = { id, type: "linked", position: flowPos, data };
+      setNodes((nds) => [...nds, newNode]);
+      setSelectedNodeId(id);
+      persist.saveNode(newNode);
+      collab.emitNodeAdd(newNode as unknown as Record<string, unknown>);
+      setLinkPickerOpen(false);
+    },
+    [canEdit, ensureConversation, takeSnapshot, screenToFlowPosition, setNodes, persist, collab.emitNodeAdd],
   );
 
   // Update node data — persiste el nodo completo tras el merge (UPSERT
@@ -1458,6 +1511,30 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
     updateNodeDataRef.current = updateNodeData;
     materializeCharacterRef.current = materializeCharacter;
   });
+
+  // Actualiza los nodos vinculados con su origen: persiste si soy el editor;
+  // en solo-ver, solo en pantalla.
+  useEffect(() => {
+    syncLinkedRef.current = async (list: Node[]) => {
+      const patches = await computeLinkPatches(realConversationId, list);
+      for (const [id, patch] of patches) {
+        if (canEdit) updateNodeDataRef.current(id, patch as Partial<CanvasNodeData>);
+        else setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)));
+      }
+      return patches as Map<string, Record<string, unknown>>;
+    };
+  });
+  // Al abrir el canvas (y otra vez si recién paso a ser el editor, para
+  // persistir lo que cambió).
+  const linkSyncKeyRef = useRef("");
+  useEffect(() => {
+    if (!isLoaded || !realConversationId) return;
+    const key = `${realConversationId}:${canEdit}`;
+    if (linkSyncKeyRef.current === key) return;
+    linkSyncKeyRef.current = key;
+    if (!latestNodesRef.current.some((n) => n.type === "linked")) return;
+    syncLinkedRef.current(latestNodesRef.current).catch((err) => console.warn("[canvas] vinculados:", err));
+  }, [isLoaded, realConversationId, canEdit]);
   const persistNodeDataStable = useCallback(
     (nodeId: string, updates: Partial<CanvasNodeData>) => updateNodeDataRef.current(nodeId, updates),
     [],
@@ -1553,6 +1630,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
               onReorder={reorderNodes}
               onSaveTemplate={() => setSaveTemplateOpen(true)}
               onOpenTemplates={() => setTemplatePickerOpen(true)}
+              onOpenLinkPicker={openLinkPicker}
               isExecuting={isExecuting}
               isAllLocked={isAllLocked}
               saveStatus={persist.saveStatus}
@@ -1600,8 +1678,8 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
               Crear nodo
             </div>
             {pendingDropRef.current.options.map(({ type, label, handle }) => {
-              const iconMap: Record<string, typeof MessageSquare> = { text: MessageSquare, "text-practicante": Bot, image: ImageIcon, video: Video, note: StickyNote, "static-text": Type, "static-image": ImagePlus, "static-image-group": Images, "params-text": Settings, "params-image": Settings, "params-video": Settings, "params-scene": Settings, script: Sparkles, scene: Film, character: UserRound };
-              const colorMap: Record<string, string> = { text: "text-blue-400", "text-practicante": "text-amber-400", image: "text-purple-400", video: "text-amber-400", note: "text-amber-500", "static-text": "text-blue-400", "static-image": "text-emerald-400", "static-image-group": "text-teal-400", "params-text": "text-yellow-400", "params-image": "text-yellow-400", "params-video": "text-yellow-400", "params-scene": "text-yellow-400", script: "text-fuchsia-400", scene: "text-violet-400", character: "text-pink-400" };
+              const iconMap: Record<string, typeof MessageSquare> = { text: MessageSquare, "text-practicante": Bot, image: ImageIcon, video: Video, note: StickyNote, "static-text": Type, "static-image": ImagePlus, "static-image-group": Images, "params-text": Settings, "params-image": Settings, "params-video": Settings, "params-scene": Settings, script: Sparkles, scene: Film, character: UserRound, linked: Link2 };
+              const colorMap: Record<string, string> = { text: "text-blue-400", "text-practicante": "text-amber-400", image: "text-purple-400", video: "text-amber-400", note: "text-amber-500", "static-text": "text-blue-400", "static-image": "text-emerald-400", "static-image-group": "text-teal-400", "params-text": "text-yellow-400", "params-image": "text-yellow-400", "params-video": "text-yellow-400", "params-scene": "text-yellow-400", script: "text-fuchsia-400", scene: "text-violet-400", character: "text-pink-400", linked: "text-pink-400" };
               const isAI = !type.startsWith("static-") && type !== "scene" && type !== "note";
               const Icon = iconMap[type] || MessageSquare;
               const color = colorMap[type] || "text-muted-foreground";
@@ -1696,6 +1774,15 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
           onClose={() => setTemplatePickerOpen(false)}
           onUseTemplate={applyTemplate}
           emptyCanvas={nodes.length === 0}
+        />
+      )}
+
+      {canEdit && realConversationId > 0 && (
+        <LinkPicker
+          isOpen={linkPickerOpen}
+          conversationId={realConversationId}
+          onClose={() => setLinkPickerOpen(false)}
+          onLink={addLinkedNode}
         />
       )}
 

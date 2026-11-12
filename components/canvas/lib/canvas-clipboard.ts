@@ -1,5 +1,5 @@
 import type { Node, Edge } from "@xyflow/react";
-import { remapCharacterIds } from "./character";
+import { remapCharacterIds, remapImageOutputs } from "./character";
 
 // Clipboard de nodos del canvas. Vive en localStorage (no en el clipboard del
 // sistema) para poder pegar en el mismo canvas, en otro canvas o en otra
@@ -156,6 +156,8 @@ export function remapClipboardForPaste(
       data.scriptNodeId = idMap.get(data.scriptNodeId)!;
     }
     if (node.type === "character") Object.assign(data, remapCharacterIds(data, idMap, edgeIdMap));
+    // Vinculado: sigue apuntando al mismo original; la etapa de cada conexión viaja con ella.
+    if (node.type === "linked") data.imageOutputs = remapImageOutputs(data.imageOutputs as Record<string, string> | undefined, edgeIdMap);
     return {
       ...node,
       id: idMap.get(node.id)!,

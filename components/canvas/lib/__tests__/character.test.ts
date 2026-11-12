@@ -7,6 +7,7 @@ import {
   galleryImagesOf,
   planCharacterMaterialize,
   remapCharacterIds,
+  resolveCharacterImageEdges,
   stageReferenceUrls,
 } from "../character";
 
@@ -198,5 +199,44 @@ describe("remapCharacterIds", () => {
     expect(paste.managedEdgeIds).toEqual(["f1"]);
     const tpl = remapCharacterIds(data, idMap, undefined, { keepExternalRefs: false });
     expect(tpl.stages![0].referenceImages).toEqual([{ nodeId: "n2", url: "u1" }]);
+  });
+});
+
+describe("resolveCharacterImageEdges", () => {
+  const imgNode = (id: string): Node => ({ id, type: "image", position: { x: 0, y: 0 }, data: { status: "completed", outputUrl: `https://x/${id}.png` } });
+  const out = (id: string, target: string, targetHandle: string = HANDLE_IDS.INPUT_FIRST_FRAME): Edge => ({
+    id, source: "char", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE, target, targetHandle, data: { priority: 2 },
+  });
+  const twoStages: CharacterStage[] = [
+    { id: "a", name: "niña", text: "", imageNodeId: "imgA" },
+    { id: "b", name: "adulta", text: "", imageNodeId: "imgB" },
+    { id: "c", name: "vieja", text: "" },
+  ];
+  const prompt: Edge = { id: "p", source: "char", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER, target: "imgA", targetHandle: HANDLE_IDS.INPUT_PROMPT };
+
+  it("cada conexión sale de la imagen de su etapa elegida, conservando id, destino y prioridad", () => {
+    const ch = character(twoStages, { imageOutputs: { o1: "b", o2: "a" } });
+    const nodes = [ch, imgNode("imgA"), imgNode("imgB"), imgNode("vid")];
+    const r = resolveCharacterImageEdges(nodes, [prompt, out("o1", "vid"), out("o2", "vid", HANDLE_IDS.INPUT_LAST_FRAME)]);
+    expect(r[0]).toBe(prompt);
+    expect(r[1]).toMatchObject({ id: "o1", source: "imgB", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, target: "vid", data: { priority: 2 } });
+    expect(r[2]).toMatchObject({ id: "o2", source: "imgA", targetHandle: HANDLE_IDS.INPUT_LAST_FRAME });
+  });
+
+  it("descarta conexiones sin etapa elegida, con etapa sin imagen, borrada o hacia su propia imagen", () => {
+    const ch = character(twoStages, { imageOutputs: { o2: "c", o3: "zz", o4: "a" } });
+    const nodes = [ch, imgNode("imgA"), imgNode("imgB"), imgNode("vid")];
+    const r = resolveCharacterImageEdges(nodes, [out("o1", "vid"), out("o2", "vid"), out("o3", "vid"), out("o4", "imgA", HANDLE_IDS.INPUT_REFERENCE)]);
+    expect(r).toEqual([]);
+  });
+
+  it("sin salidas de imagen devuelve el mismo array", () => {
+    const edges = [prompt];
+    expect(resolveCharacterImageEdges([character(twoStages)], edges)).toBe(edges);
+  });
+
+  it("remapCharacterIds lleva la etapa elegida a la conexión copiada", () => {
+    const r = remapCharacterIds({ stages: [], imageOutputs: { o1: "a", gone: "b" } }, new Map(), new Map([["o1", "o9"]]));
+    expect(r.imageOutputs).toEqual({ o9: "a" });
   });
 });

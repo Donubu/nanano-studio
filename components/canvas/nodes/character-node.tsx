@@ -466,6 +466,19 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
         className="!w-3 !h-3 !bg-pink-400 !border-2 !border-background"
         title="Etapas → imágenes"
       />
+      {/* Imagen de UNA etapa hacia otro nodo (referencia, frame de video…);
+          la etapa se elige en el selector de cada conexión. */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        id={HANDLE_IDS.OUTPUT_CHARACTER_IMAGE}
+        className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background"
+        style={{ top: 72 }}
+        title="Imagen de una etapa (eliges cuál en la conexión)"
+      />
+      <span className="pointer-events-none absolute right-2 top-[64px] text-[11px] font-bold text-purple-500 dark:text-purple-300">
+        IMAGEN
+      </span>
       <ResizeHandle minWidth={340} minHeight={220} />
     </div>
   );

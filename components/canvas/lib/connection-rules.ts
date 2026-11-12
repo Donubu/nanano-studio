@@ -107,6 +107,29 @@ export const VALID_CONNECTIONS: ConnectionRule[] = [
 
   // === Personaje → imagen de cada etapa (ADN + estilo + texto de la etapa) ===
   { sourceType: "character", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER, targetType: "image", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+
+  // === Personaje → imagen de una etapa (se elige en la conexión) ===
+  // Mismos destinos que una imagen generada.
+  { sourceType: "character", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE, targetType: "image", targetHandle: HANDLE_IDS.INPUT_REFERENCE },
+  { sourceType: "character", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_FIRST_FRAME },
+  { sourceType: "character", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_LAST_FRAME },
+  { sourceType: "character", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_REFERENCE },
+  { sourceType: "character", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE, targetType: "text", targetHandle: HANDLE_IDS.INPUT_MEDIA },
+  { sourceType: "character", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE, targetType: "text-practicante", targetHandle: HANDLE_IDS.INPUT_MEDIA },
+
+  // === Personaje vinculado de otro canvas (solo lectura) ===
+  // PROMPT: ADN + estilo + la etapa elegida en la conexión.
+  { sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER, targetType: "image", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+  { sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER, targetType: "video", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+  { sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER, targetType: "text", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+  { sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER, targetType: "text-practicante", targetHandle: HANDLE_IDS.INPUT_PROMPT },
+  // IMAGEN: la imagen de la etapa elegida en la conexión.
+  { sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE, targetType: "image", targetHandle: HANDLE_IDS.INPUT_REFERENCE },
+  { sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_FIRST_FRAME },
+  { sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_LAST_FRAME },
+  { sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_REFERENCE },
+  { sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE, targetType: "text", targetHandle: HANDLE_IDS.INPUT_MEDIA },
+  { sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE, targetType: "text-practicante", targetHandle: HANDLE_IDS.INPUT_MEDIA },
 ];
 
 /**
@@ -178,7 +201,7 @@ export function getCompatibleTargetTypes(
 ): { type: string; label: string; targetHandle: string }[] {
   const seen = new Set<string>();
   const results: { type: string; label: string; targetHandle: string }[] = [];
-  const labels: Record<string, string> = { text: "Texto", "text-practicante": "Practicante", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video", "params-scene": "Params Escena", script: "Guión", scene: "Escena", character: "Personaje" };
+  const labels: Record<string, string> = { text: "Texto", "text-practicante": "Practicante", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video", "params-scene": "Params Escena", script: "Guión", scene: "Escena", character: "Personaje", linked: "Vinculado" };
   const baseSource = baseHandleId(sourceHandle);
 
   for (const rule of VALID_CONNECTIONS) {
@@ -206,7 +229,7 @@ export function getCompatibleSourceTypes(
 ): { type: string; label: string; sourceHandle: string }[] {
   const seen = new Set<string>();
   const results: { type: string; label: string; sourceHandle: string }[] = [];
-  const labels: Record<string, string> = { text: "Texto", "text-practicante": "Practicante", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video", "params-scene": "Params Escena", script: "Guión", scene: "Escena", character: "Personaje" };
+  const labels: Record<string, string> = { text: "Texto", "text-practicante": "Practicante", image: "Imagen", video: "Video", "static-text": "Texto", "static-image": "Imagen estática", "static-image-group": "Galería", "params-text": "Params Texto", "params-image": "Params Imagen", "params-video": "Params Video", "params-scene": "Params Escena", script: "Guión", scene: "Escena", character: "Personaje", linked: "Vinculado" };
   const baseTarget = baseHandleId(targetHandle);
 
   for (const rule of VALID_CONNECTIONS) {

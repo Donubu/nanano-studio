@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ImageIcon, Video, MessageSquare, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History, Eye, BookmarkPlus, LayoutTemplate, UserRound } from "lucide-react";
+import { ImageIcon, Video, MessageSquare, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History, Eye, BookmarkPlus, LayoutTemplate, UserRound, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CanvasNodeType } from "./lib/canvas-types";
 
@@ -12,6 +12,7 @@ interface CanvasToolbarProps {
   onReorder: () => void;
   onSaveTemplate: () => void;
   onOpenTemplates: () => void;
+  onOpenLinkPicker: () => void;
   isExecuting: boolean;
   isAllLocked: boolean;
   saveStatus?: "idle" | "saving" | "saved" | "error";
@@ -53,6 +54,7 @@ export function CanvasToolbar({
   onReorder,
   onSaveTemplate,
   onOpenTemplates,
+  onOpenLinkPicker,
   isExecuting,
   isAllLocked,
   saveStatus = "idle",
@@ -220,6 +222,18 @@ export function CanvasToolbar({
         >
           <LayoutTemplate className="h-3.5 w-3.5" />
           Insertar
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onOpenLinkPicker}
+          disabled={isExecuting}
+          className="gap-1.5 text-xs"
+          title="Vincular un Personaje de otro canvas del proyecto (solo lectura, sigue al original)"
+        >
+          <Link2 className="h-3.5 w-3.5" />
+          Vincular
         </Button>
 
         <div className="w-px h-5 bg-border" />

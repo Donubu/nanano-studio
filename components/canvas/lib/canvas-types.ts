@@ -270,13 +270,64 @@ export interface CharacterNodeData extends BaseNodeData {
   // true si se reordenaron etapas que ya tenían imagen: la cadena de
   // continuidad no coincide con el orden hasta volver a "Generar etapas".
   chainStale?: boolean;
+  // Salida "imagen de una etapa": id de conexión → id de la etapa elegida en
+  // esa conexión. Vive en el Personaje porque canvas_edges solo guarda la
+  // prioridad. Sin entrada = todavía no se eligió (la conexión no entrega nada).
+  imageOutputs?: Record<string, string>;
 }
 
 export const MAX_CHARACTER_STAGES = 20;
 
+// --- Linked Node (nodo vinculado a otro canvas) ---
+// Muestra, sin poder editarlo, un nodo que vive en otro canvas del mismo
+// proyecto. El servidor arma una vista resuelta (todo lo que el nodo necesita
+// de su canvas: estilo conectado, fotos, imágenes de etapas) y queda guardada
+// en `linkSnapshot`; se actualiza al abrir el canvas y antes de ejecutar.
+export type LinkedSourceType = "character";
+
+export interface LinkedCharacterStage {
+  id: string;
+  name: string;
+  text: string;
+  // Fotos elegidas para la etapa (de galerías todavía conectadas).
+  photoUrls: string[];
+  // Imagen generada de la etapa en el canvas de origen (null si no hay).
+  imageUrl: string | null;
+}
+
+export interface LinkedCharacterSnapshot {
+  kind: "character";
+  label: string;
+  dna: string;
+  style: string;
+  stages: LinkedCharacterStage[];
+}
+
+export type LinkedSnapshot = LinkedCharacterSnapshot;
+
+// ok = vista al día; deleted = el original se borró (queda la última vista);
+// forbidden = sin acceso al canvas de origen (otro proyecto o sin permiso).
+export type LinkState = "ok" | "deleted" | "forbidden";
+
+export interface LinkedNodeData extends BaseNodeData {
+  type: "linked";
+  sourceType: LinkedSourceType;
+  sourceConversationId: number;
+  sourceNodeId: string;
+  sourceCanvasTitle?: string;
+  linkSnapshot?: LinkedSnapshot | null;
+  linkHash?: string;
+  linkState?: LinkState;
+  linkSyncedAt?: string;
+  // Etapa elegida en cada conexión (id de conexión → id de etapa), para las
+  // salidas IMAGEN y PROMPT. Sin entrada: IMAGEN no entrega nada y PROMPT
+  // entrega solo ADN + estilo.
+  imageOutputs?: Record<string, string>;
+}
+
 // --- Union Types ---
-export type CanvasNodeData = TextNodeData | TextPracticanteNodeData | ImageNodeData | VideoNodeData | NoteNodeData | StaticTextNodeData | StaticImageNodeData | StaticImageGroupNodeData | ParamsTextNodeData | ParamsImageNodeData | ParamsVideoNodeData | ParamsSceneNodeData | ScriptNodeData | SceneNodeData | CharacterNodeData;
-export type CanvasNodeType = "text" | "text-practicante" | "image" | "video" | "note" | "static-text" | "static-image" | "static-image-group" | "params-text" | "params-image" | "params-video" | "params-scene" | "script" | "scene" | "character";
+export type CanvasNodeData = TextNodeData | TextPracticanteNodeData | ImageNodeData | VideoNodeData | NoteNodeData | StaticTextNodeData | StaticImageNodeData | StaticImageGroupNodeData | ParamsTextNodeData | ParamsImageNodeData | ParamsVideoNodeData | ParamsSceneNodeData | ScriptNodeData | SceneNodeData | CharacterNodeData | LinkedNodeData;
+export type CanvasNodeType = "text" | "text-practicante" | "image" | "video" | "note" | "static-text" | "static-image" | "static-image-group" | "params-text" | "params-image" | "params-video" | "params-scene" | "script" | "scene" | "character" | "linked";
 
 export type TextNode = Node<TextNodeData, "text">;
 export type TextPracticanteNode = Node<TextPracticanteNodeData, "text-practicante">;
@@ -293,7 +344,8 @@ export type ParamsSceneNode = Node<ParamsSceneNodeData, "params-scene">;
 export type ScriptNode = Node<ScriptNodeData, "script">;
 export type SceneNode = Node<SceneNodeData, "scene">;
 export type CharacterNode = Node<CharacterNodeData, "character">;
-export type CanvasNode = TextNode | TextPracticanteNode | ImageNode | VideoNode | NoteNode | StaticTextNode | StaticImageNode | StaticImageGroupNode | ParamsTextNode | ParamsImageNode | ParamsVideoNode | ParamsSceneNode | ScriptNode | SceneNode | CharacterNode;
+export type LinkedNode = Node<LinkedNodeData, "linked">;
+export type CanvasNode = TextNode | TextPracticanteNode | ImageNode | VideoNode | NoteNode | StaticTextNode | StaticImageNode | StaticImageGroupNode | ParamsTextNode | ParamsImageNode | ParamsVideoNode | ParamsSceneNode | ScriptNode | SceneNode | CharacterNode | LinkedNode;
 
 export type CanvasEdge = Edge;
 
@@ -318,6 +370,9 @@ export const HANDLE_IDS = {
   INPUT_CHARACTER_STYLE: "input-character-style",
   INPUT_CHARACTER_GALLERY: "input-character-gallery",
   OUTPUT_CHARACTER: "output-character",
+  // Imagen de UNA etapa del Personaje (la conexión elige cuál, ver
+  // CharacterNodeData.imageOutputs).
+  OUTPUT_CHARACTER_IMAGE: "output-character-image",
 } as const;
 
 // Input handles are rendered twice: once on the left edge and once on the top
@@ -503,6 +558,18 @@ export function getDefaultNodeData(type: CanvasNodeType): CanvasNodeData {
         status: "completed",
         dna: "",
         stages: [],
+      };
+    case "linked":
+      // Se crea desde "Vincular de otro canvas", que completa el origen y la
+      // vista; esto es solo el esqueleto.
+      return {
+        ...base,
+        type: "linked",
+        label: "Vinculado",
+        status: "completed",
+        sourceType: "character",
+        sourceConversationId: 0,
+        sourceNodeId: "",
       };
   }
 }

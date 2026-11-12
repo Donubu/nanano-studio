@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { Node } from "@xyflow/react";
 import type { CanvasNodeData, CanvasNodeStatus, ExecutionProgress, ImageNodeData, TextNodeData, TextPracticanteNodeData, VideoNodeData, StaticTextNodeData, StaticImageNodeData, StaticImageGroupNodeData, OutputHistoryEntry, PracticanteFile, SceneNodeData, ParamsSceneNodeData, CharacterNodeData } from "../lib/canvas-types";
 import { HANDLE_IDS, baseHandleId } from "../lib/canvas-types";
 import { topologicalSort, getDirectInputs, getDescendantNodes } from "../lib/topological-sort";
-import { OWN_REFERENCE_PRIORITY, composeCharacterPrompt, findStageForImage, stageReferenceUrls } from "../lib/character";
-import type { CanvasEdge } from "../lib/canvas-types";
+import { OWN_REFERENCE_PRIORITY, composeCharacterPrompt, findStageForImage, resolveCharacterImageEdges, stageReferenceUrls } from "../lib/character";
+import type { CanvasEdge, LinkedNodeData } from "../lib/canvas-types";
+import { linkedImageForEdge, linkedPromptForEdge, linkedStageForEdge } from "../lib/linked";
 import type { CanvasGenerationConfig } from "../canvas-workspace";
 
 type SetNodesFn = (updater: (nds: Node[]) => Node[]) => void;
@@ -65,6 +66,10 @@ interface UseCanvasExecutionOptions {
   edges: CanvasEdge[];
   setNodes: SetNodesFn;
   generationConfig: CanvasGenerationConfig[];
+  // Actualiza los nodos vinculados con su origen antes de ejecutar (persiste
+  // en el workspace) y devuelve los cambios para aplicarlos a la foto de la
+  // corrida. Si falla, se ejecuta con la vista guardada.
+  syncLinkedNodes?: (nodes: Node[]) => Promise<Map<string, Record<string, unknown>>>;
 }
 
 /**
@@ -218,6 +223,17 @@ function resolveNodeInputs(
         });
         return composed || null;
       }
+      if (sourceNode.type === "linked" && baseHandleId(input.sourceHandle) === HANDLE_IDS.OUTPUT_CHARACTER) {
+        // Personaje de otro canvas: ADN + estilo + la etapa elegida en ESTA
+        // conexión, desde la vista guardada en el nodo.
+        const linkData = sourceData as LinkedNodeData;
+        const stage = linkedStageForEdge(linkData, input.edgeId);
+        return linkedPromptForEdge(
+          linkData,
+          input.edgeId,
+          (stage?.photoUrls.length ?? 0) > 0 || inputs.some((i) => i.targetHandle === HANDLE_IDS.INPUT_REFERENCE),
+        ) || null;
+      }
       return null;
     };
 
@@ -229,6 +245,9 @@ function resolveNodeInputs(
         return group.images?.[0]?.url || null;
       }
       if (sourceNode.type === "image") return (sourceData as ImageNodeData).outputUrl || null;
+      if (sourceNode.type === "linked" && baseHandleId(input.sourceHandle) === HANDLE_IDS.OUTPUT_CHARACTER_IMAGE) {
+        return linkedImageForEdge(sourceData as LinkedNodeData, input.edgeId);
+      }
       return null;
     };
 
@@ -250,6 +269,14 @@ function resolveNodeInputs(
       // como referencia con prioridad 1 (por delante de la continuidad).
       if (sourceNode.type === "character") {
         const photos = characterStagePhotos(sourceNode, nodeId, nodes, edges);
+        if (photos.length > 0) {
+          referenceImageUrl = referenceImageUrl ?? photos[0];
+          referenceGroups.push({ urls: photos, priority: OWN_REFERENCE_PRIORITY });
+        }
+      }
+      // Personaje vinculado: lo mismo con las fotos de la etapa elegida.
+      if (sourceNode.type === "linked" && baseHandleId(input.sourceHandle) === HANDLE_IDS.OUTPUT_CHARACTER) {
+        const photos = linkedStageForEdge(sourceData as LinkedNodeData, input.edgeId)?.photoUrls ?? [];
         if (photos.length > 0) {
           referenceImageUrl = referenceImageUrl ?? photos[0];
           referenceGroups.push({ urls: photos, priority: OWN_REFERENCE_PRIORITY });
@@ -551,14 +578,36 @@ function areUpstreamReady(
 export function useCanvasExecution({
   conversationId,
   nodes,
-  edges,
+  edges: rawEdges,
   setNodes,
   generationConfig,
+  syncLinkedNodes,
 }: UseCanvasExecutionOptions) {
+  // La salida "imagen de una etapa" del Personaje se ejecuta como si la
+  // conexión saliera de la imagen de esa etapa: orden, dependencias y
+  // referencias funcionan sin casos especiales.
+  const edges = useMemo(() => resolveCharacterImageEdges(nodes, rawEdges), [nodes, rawEdges]);
   const [isExecuting, setIsExecuting] = useState(false);
   const [executionProgress, setExecutionProgress] = useState<ExecutionProgress | null>(null);
   const abortRef = useRef(false);
   const currentRunIdRef = useRef<string | null>(null);
+
+  // Trae la última versión de los Personajes vinculados a la foto de la
+  // corrida, así nunca se genera con un ADN o una etapa viejos.
+  const syncLinkedRef = useRef(syncLinkedNodes);
+  syncLinkedRef.current = syncLinkedNodes;
+  const refreshLinked = useCallback(async (liveNodes: Node[]) => {
+    if (!syncLinkedRef.current || !liveNodes.some((n) => n.type === "linked")) return;
+    try {
+      const patches = await syncLinkedRef.current(liveNodes);
+      for (const n of liveNodes) {
+        const patch = patches.get(n.id);
+        if (patch) n.data = { ...n.data, ...patch };
+      }
+    } catch (err) {
+      console.warn("[canvas] No se pudo actualizar los vinculados; se usa la vista guardada", err);
+    }
+  }, []);
 
   /**
    * Execute a single node. Uses `liveNodes` for resolving inputs —
@@ -882,9 +931,10 @@ export function useCanvasExecution({
     async (nodeId: string) => {
       currentRunIdRef.current = null; // Single node execution, no run group
       const snapshot = nodes.map((n) => ({ ...n, data: { ...n.data } }));
+      await refreshLinked(snapshot);
       await runNode(nodeId, snapshot, false);
     },
-    [nodes, runNode]
+    [nodes, runNode, refreshLinked]
   );
 
   /**
@@ -904,6 +954,7 @@ export function useCanvasExecution({
 
     // Create a mutable snapshot
     const liveNodes = nodes.map((n) => ({ ...n, data: { ...n.data } }));
+    await refreshLinked(liveNodes);
 
     // Reset all AI nodes to idle (history is preserved, new outputs appended on completion)
     const aiNodeTypes = new Set(["text", "text-practicante", "image", "video"]);
@@ -951,7 +1002,7 @@ export function useCanvasExecution({
       setIsExecuting(false);
       setExecutionProgress(null);
     }
-  }, [nodes, edges, runNode]);
+  }, [nodes, edges, runNode, refreshLinked]);
 
   /**
    * Ejecuta SOLO el flujo de una raíz: el nodo raíz y toda su clausura de
@@ -979,6 +1030,7 @@ export function useCanvasExecution({
     let completed = 0;
 
     const liveNodes = nodes.map((n) => ({ ...n, data: { ...n.data } }));
+    await refreshLinked(liveNodes);
 
     const aiNodeTypes = new Set(["text", "text-practicante", "image", "video"]);
     const resetData: Partial<CanvasNodeData> = {
@@ -1025,7 +1077,7 @@ export function useCanvasExecution({
       setIsExecuting(false);
       setExecutionProgress(null);
     }
-  }, [nodes, edges, runNode]);
+  }, [nodes, edges, runNode, refreshLinked]);
 
   return { executeNode, executeAll, executeFromRoot, isExecuting, executionProgress };
 }

@@ -122,10 +122,11 @@ export function getDescendantNodes(
 export function getDirectInputs(
   nodeId: string,
   edges: CanvasEdge[]
-): { sourceNodeId: string; sourceHandle: string | null; targetHandle: string | null; priority: number | null }[] {
+): { edgeId: string; sourceNodeId: string; sourceHandle: string | null; targetHandle: string | null; priority: number | null }[] {
   return edges
     .filter((e) => e.target === nodeId)
     .map((e) => ({
+      edgeId: e.id,
       sourceNodeId: e.source,
       sourceHandle: e.sourceHandle || null,
       // Normalize the top-edge twin (e.g. "input-prompt__top") back to its base

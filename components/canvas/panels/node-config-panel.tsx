@@ -14,6 +14,9 @@ import { useCanvasContext } from "../canvas-context";
 import { supportsTextThinking } from "@/lib/text-thinking";
 import { CharacterInheritedSection } from "./character-inherited-section";
 import { thumbUrl } from "../lib/thumb";
+import type { CharacterNodeData, LinkedNodeData } from "../lib/canvas-types";
+import { stageForImageOutput } from "../lib/character";
+import { linkedStageForEdge } from "../lib/linked";
 
 interface NodeConfigPanelProps {
   node: Node;
@@ -331,7 +334,7 @@ function ReferencePriorityList({
   showRefNames = false,
   maxReferences,
 }: {
-  referenceEdges: Array<{ id?: string; source: string; data?: { priority?: number | null } | null }>;
+  referenceEdges: Array<{ id?: string; source: string; sourceHandle?: string | null; data?: { priority?: number | null } | null }>;
   nodes: Node[];
   onUpdateEdgePriority: (edgeId: string, priority: number | null) => void;
   // Video Omni / Seedance: muestra el nombre @refN de cada referencia
@@ -341,11 +344,23 @@ function ReferencePriorityList({
 }) {
   const anyPrioritized = referenceEdges.some((e) => e.data?.priority != null);
 
-  const infoFor = (sourceId: string): { url: string | null; label: string; count: number } => {
+  const infoFor = (edge: { id?: string; source: string; sourceHandle?: string | null }): { url: string | null; label: string; count: number } => {
+    const sourceId = edge.source;
     const source = nodes.find((n) => n.id === sourceId);
     if (!source) return { url: null, label: sourceId, count: 0 };
     const d = source.data as Record<string, unknown>;
     const label = (d.label as string) || source.type || sourceId;
+    // Salida IMAGEN de un Personaje (local o vinculado): la etapa elegida en la conexión.
+    if (baseHandleId(edge.sourceHandle) === HANDLES.OUTPUT_CHARACTER_IMAGE && edge.id) {
+      if (source.type === "linked") {
+        const stage = linkedStageForEdge(d as unknown as LinkedNodeData, edge.id);
+        return { url: stage?.imageUrl ?? null, label: stage ? `${label} · ${stage.name}` : label, count: stage?.imageUrl ? 1 : 0 };
+      }
+      const stage = stageForImageOutput(d as unknown as CharacterNodeData, edge.id);
+      const img = stage?.imageNodeId ? nodes.find((n) => n.id === stage.imageNodeId) : undefined;
+      const url = ((img?.data as Record<string, unknown> | undefined)?.outputUrl as string) || null;
+      return { url, label: stage ? `${label} · ${stage.name}` : label, count: url ? 1 : 0 };
+    }
     if (source.type === "static-image") {
       const url = (d.imageUrl as string) || null;
       return { url, label, count: url ? 1 : 0 };
@@ -371,7 +386,7 @@ function ReferencePriorityList({
   const nameByEdgeId = new Map<string, string | null>();
   let refIdx = 1;
   for (const edge of ordered) {
-    const { count } = infoFor(edge.source);
+    const { count } = infoFor(edge);
     if (count === 0) {
       nameByEdgeId.set(edge.id!, null);
       continue;
@@ -385,7 +400,7 @@ function ReferencePriorityList({
       <Label className="text-xs">{showRefNames ? "Referencias" : "Prioridad de referencias"}</Label>
       <div className="space-y-1">
         {ordered.map((edge) => {
-          const { url, label } = infoFor(edge.source);
+          const { url, label } = infoFor(edge);
           const priority = edge.data?.priority ?? null;
           const refName = nameByEdgeId.get(edge.id!) ?? null;
           return (

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
-import { remapCharacterIds } from "@/components/canvas/lib/character";
+import { remapCharacterIds, remapImageOutputs } from "@/components/canvas/lib/character";
 import type { TemplateNode, TemplateEdge } from "@/lib/canvas-templates";
 
 interface ConversationCheckRow extends RowDataPacket {
@@ -103,6 +103,11 @@ export async function POST(
       // una referencia a un nodo fuera del template no existe en este canvas.
       if (node.type === "character") {
         Object.assign(data, remapCharacterIds(data, idMap, edgeIdMap, { keepExternalRefs: false }));
+      }
+      // Vinculado: conserva su original (si este canvas no tiene acceso,
+      // queda en "sin acceso" al sincronizar).
+      if (node.type === "linked") {
+        data.imageOutputs = remapImageOutputs(data.imageOutputs as Record<string, string> | undefined, edgeIdMap);
       }
       return {
         ...node,

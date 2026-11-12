@@ -68,6 +68,7 @@ Usa español de Chile (tuteo), nunca voseo.
 ## Tipos de nodo que puedes crear
 ${CREATABLE_TYPES.map((t) => `- ${t}: ${TYPE_DOCS[t]}`).join("\n")}
 - scene: ${TYPE_DOCS.scene}
+- linked: Personaje vinculado desde otro canvas (solo lectura: no se crea ni se edita aquí; se edita en su canvas). Se conecta como prompt (ADN + estilo + una etapa) o como imagen de una etapa (reference, first_frame, last_frame, media); la etapa la elige el usuario en la conexión, tú no.
 
 ## Conexiones válidas (origen → destino.entrada)
 ${connectionManual()}

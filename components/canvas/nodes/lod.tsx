@@ -17,7 +17,7 @@ import { useStore, type NodeProps } from "@xyflow/react";
 import { galleryImagesOf } from "../lib/character";
 import { thumbUrl } from "../lib/thumb";
 
-export const LOD_ZOOM = 0.33;
+export const LOD_ZOOM = 0.3;
 
 /** Variable CSS con el zoom actual (escalonado), en el contenedor del canvas.
  *  La tarjeta la usa para que el título se lea igual a cualquier zoom sin
@@ -42,7 +42,7 @@ function useLodZoomVar(ref: RefObject<HTMLElement | null>) {
 }
 
 // Se compara el % redondeado, el mismo que muestran los controles de zoom: con
-// "33%" en pantalla todavía se ven los nodos completos.
+// "30%" en pantalla todavía se ven los nodos completos.
 const zoomedOutSelector = (s: { transform: [number, number, number] }) =>
   Math.round(s.transform[2] * 100) < Math.round(LOD_ZOOM * 100);
 
@@ -72,6 +72,7 @@ const LOD_STYLES: Record<string, LodStyle> = {
   "params-video": { label: "Parámetros", border: "border-amber-400", bg: "bg-amber-400/10" },
   "params-scene": { label: "Parámetros", border: "border-amber-400", bg: "bg-amber-400/10" },
   character: { label: "Personaje", border: "border-pink-400", bg: "bg-pink-400/10" },
+  linked: { label: "Vinculado", border: "border-pink-400", bg: "bg-pink-400/10" },
   scene: { label: "Escena", border: "border-amber-500", bg: "bg-amber-500/10" },
 };
 
@@ -80,6 +81,11 @@ const FALLBACK_STYLE: LodStyle = { label: "Nodo", border: "border-border", bg: "
 /** Imagen que representa al nodo en la vista alejada (o null). */
 export function lodPreviewUrl(type: string | undefined, data: Record<string, unknown>): string | null {
   if (type === "video") return null; // el video no tiene miniatura; se ve el tipo
+  if (type === "linked") {
+    // Personaje vinculado: la primera etapa con imagen.
+    const stages = (data.linkSnapshot as { stages?: { imageUrl?: string | null }[] } | undefined)?.stages ?? [];
+    return stages.find((s) => s.imageUrl)?.imageUrl ?? null;
+  }
   const first = galleryImagesOf({ type, data })[0];
   return first?.url ?? null;
 }

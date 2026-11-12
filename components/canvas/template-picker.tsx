@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, Loader2, LayoutTemplate, Trash2, Workflow, MessageSquare, ImageIcon, Video, Bot, Sparkles, Film, StickyNote, Type, ImagePlus, Images, Settings, Palette, UserRound, FilePlus2 } from "lucide-react";
+import { X, Loader2, LayoutTemplate, Trash2, Workflow, MessageSquare, ImageIcon, Video, Bot, Sparkles, Film, StickyNote, Type, ImagePlus, Images, Settings, Palette, UserRound, FilePlus2, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export interface CanvasTemplateSummary {
@@ -41,6 +41,7 @@ const typeIconMap: Record<string, typeof MessageSquare> = {
   script: Sparkles,
   scene: Film,
   character: UserRound,
+  linked: Link2,
 };
 
 // Overlay de templates: se auto-abre en canvas vacío (punto de partida) y se
