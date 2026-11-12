@@ -22,7 +22,7 @@ import { useNodeUpdate } from "../hooks/use-node-update";
 import { galleryOutput } from "../lib/node-outputs";
 import { useCanvasContext } from "../canvas-context";
 import { NodeTextarea } from "./node-textarea";
-import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { ResizeHandle, nodeSizeClass, useHasFixedSize } from "./resize-handle";
 
 function stopProp(e: React.SyntheticEvent) {
   e.stopPropagation();
@@ -32,9 +32,8 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
   id,
   data,
   selected,
-  width,
-  height,
 }: NodeProps) {
+  const hasFixedSize = useHasFixedSize(id);
   const nodeData = data as unknown as ParamsSceneNodeData;
   const { updateNodeData } = useNodeUpdate();
   const { conversationId, canEdit } = useCanvasContext();
@@ -115,7 +114,7 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
     <div
       className={`group bg-card rounded-xl border-2 border-dashed border-yellow-400/40 ${
         selected ? "ring-2 ring-yellow-400/40" : ""
-      } transition-all ${nodeSizeClass(width, height, "min-w-[260px] max-w-[320px]")}`}
+      } transition-all ${nodeSizeClass(hasFixedSize, "min-w-[260px] max-w-[320px]")}`}
     >
       {/* Input handle: gallery / static-image as visual reference for "Extract style" */}
       <Handle

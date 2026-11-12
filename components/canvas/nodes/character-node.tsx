@@ -22,7 +22,7 @@ import { nodeImages, type OutEdge } from "../lib/node-outputs";
 import { NodeDeleteButton } from "./node-status";
 import { NodeLabel } from "./node-label";
 import { NodeTextarea } from "./node-textarea";
-import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { ResizeHandle, nodeSizeClass, useHasFixedSize } from "./resize-handle";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useCanvasContext } from "../canvas-context";
 import { thumbUrl } from "../lib/thumb";
@@ -38,7 +38,7 @@ interface GalleryPhoto {
   caption?: string;
 }
 
-export const CharacterNodeComponent = memo(function CharacterNode({ id, data, selected, width, height }: NodeProps) {
+export const CharacterNodeComponent = memo(function CharacterNode({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as CharacterNodeData;
   const stages = nodeData.stages ?? [];
   const { updateNodeData } = useNodeUpdate();
@@ -101,15 +101,7 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
     update({ stages: stages.filter((st) => st.id !== stageId), ...(stages.some((st) => st.imageNodeId) ? { chainStale: true } : {}) });
   };
 
-  const hasFixedSize = useStore(
-    useCallback(
-      (state: { nodeLookup: Map<string, { width?: number; height?: number }> }) => {
-        const n = state.nodeLookup.get(id);
-        return !!n && (n.width != null || n.height != null);
-      },
-      [id],
-    ) as never,
-  ) as unknown as boolean;
+  const hasFixedSize = useHasFixedSize(id);
 
   const update = useCallback(
     (patch: Partial<CharacterNodeData>) => updateNodeData(id, { ...nodeData, ...patch }),
@@ -187,7 +179,7 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
 
   return (
     <div
-      className={`group bg-card rounded-xl border-2 border-pink-400/40 ${selected ? "ring-2 ring-pink-400/40" : ""} transition-all ${nodeSizeClass(width, height, "min-w-[360px] max-w-[480px]")}`}
+      className={`group bg-card rounded-xl border-2 border-pink-400/40 ${selected ? "ring-2 ring-pink-400/40" : ""} transition-all ${nodeSizeClass(hasFixedSize, "min-w-[360px] max-w-[480px]")}`}
     >
       {/* Entradas: estilo global y galerías de referencia (más sus gemelos superiores) */}
       <Handle

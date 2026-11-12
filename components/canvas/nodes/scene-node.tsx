@@ -5,7 +5,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Film, ImageIcon, Video, Bot } from "lucide-react";
 import { HANDLE_IDS, topHandleId, type SceneNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
-import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { ResizeHandle, nodeSizeClass, useHasFixedSize } from "./resize-handle";
 
 const targetIconMap = {
   image: ImageIcon,
@@ -21,7 +21,8 @@ const targetLabelMap: Record<string, string> = {
   none: "—",
 };
 
-export const SceneNodeComponent = memo(function SceneNode({ id, data, selected, width, height }: NodeProps) {
+export const SceneNodeComponent = memo(function SceneNode({ id, data, selected }: NodeProps) {
+  const hasFixedSize = useHasFixedSize(id);
   const nodeData = data as unknown as SceneNodeData;
   const targetType = nodeData.targetNodeType || "none";
   const TargetIcon = targetIconMap[targetType];
@@ -30,7 +31,7 @@ export const SceneNodeComponent = memo(function SceneNode({ id, data, selected, 
     <div
       className={`group bg-card rounded-xl border-2 border-violet-500/40 ${
         selected ? "ring-2 ring-violet-500/50" : ""
-      } transition-all ${nodeSizeClass(width, height, "min-w-[240px] max-w-[300px]")}`}
+      } transition-all ${nodeSizeClass(hasFixedSize, "min-w-[240px] max-w-[300px]")}`}
     >
       {/* Input handle: chain from script or previous scene */}
       <Handle

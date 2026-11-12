@@ -10,7 +10,7 @@ import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useUpstreamPromptLabel } from "../hooks/use-upstream-prompt-label";
 import { useCanvasContext } from "../canvas-context";
-import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { ResizeHandle, nodeSizeClass, useHasFixedSize } from "./resize-handle";
 import { MediaViewerModal, type MediaViewerEntry } from "./media-viewer-modal";
 
 const statusColors: Record<string, string> = {
@@ -20,7 +20,8 @@ const statusColors: Record<string, string> = {
   error: "border-red-500",
 };
 
-export const VideoNodeComponent = memo(function VideoNode({ id, data, selected, width, height }: NodeProps) {
+export const VideoNodeComponent = memo(function VideoNode({ id, data, selected }: NodeProps) {
+  const hasFixedSize = useHasFixedSize(id);
   const nodeData = data as unknown as VideoNodeData;
   const status = nodeData.status || "idle";
   const { updateNodeData, updateNodeDataLocal } = useNodeUpdate();
@@ -66,7 +67,7 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected, 
   const displayUrl = nodeData.outputUrl;
   const isViewingLatest = effectiveIndex === totalOutputs - 1;
   const isVertical = nodeData.aspectRatio === "9:16";
-  const isResized = width != null || height != null;
+  const isResized = hasFixedSize;
 
   const [viewerOpen, setViewerOpen] = useState(false);
   const viewerEntries: MediaViewerEntry[] = history
@@ -83,7 +84,7 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected, 
     <div
       className={`group bg-card rounded-xl border-2 ${statusColors[status]} ${
         selected ? "ring-2 ring-primary/50" : ""
-      } transition-all ${nodeSizeClass(width, height, isVertical ? "min-w-[200px] max-w-[220px]" : "min-w-[260px] max-w-[300px]")}`}
+      } transition-all ${nodeSizeClass(hasFixedSize, isVertical ? "min-w-[200px] max-w-[220px]" : "min-w-[260px] max-w-[300px]")}`}
     >
       {/* Input handles */}
       <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_PROMPT}

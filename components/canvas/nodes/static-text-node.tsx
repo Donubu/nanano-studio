@@ -9,9 +9,10 @@ import { NodeDeleteButton } from "./node-status";
 import { NodeLabel } from "./node-label";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useCanvasContext } from "../canvas-context";
-import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { ResizeHandle, nodeSizeClass, useHasFixedSize } from "./resize-handle";
 
-export const StaticTextNodeComponent = memo(function StaticTextNode({ id, data, selected, width, height }: NodeProps) {
+export const StaticTextNodeComponent = memo(function StaticTextNode({ id, data, selected }: NodeProps) {
+  const hasFixedSize = useHasFixedSize(id);
   const nodeData = data as unknown as StaticTextNodeData;
   const { updateNodeData } = useNodeUpdate();
   const { canEdit } = useCanvasContext();
@@ -79,7 +80,7 @@ export const StaticTextNodeComponent = memo(function StaticTextNode({ id, data, 
     <div
       className={`group bg-card rounded-xl border-2 border-blue-400/30 ${
         selected ? "ring-2 ring-blue-400/50" : ""
-      } transition-all ${nodeSizeClass(width, height, "min-w-[200px] max-w-[300px]")}`}
+      } transition-all ${nodeSizeClass(hasFixedSize, "min-w-[200px] max-w-[300px]")}`}
     >
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">

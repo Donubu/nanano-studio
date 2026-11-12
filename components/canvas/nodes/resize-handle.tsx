@@ -1,6 +1,7 @@
 "use client";
 
-import { NodeResizeControl } from "@xyflow/react";
+import { useCallback } from "react";
+import { NodeResizeControl, useStore } from "@xyflow/react";
 import { useCanvasContext } from "../canvas-context";
 
 interface ResizeHandleProps {
@@ -78,18 +79,33 @@ export function ResizeHandle({
  *   created before resize support existed.
  *
  * Usage:
- *   const sizeClass = nodeSizeClass(width, height, "min-w-[260px] max-w-[300px]");
- *   <div className={`... ${sizeClass}`}>
+ *   const hasFixedSize = useHasFixedSize(id);
+ *   <div className={`... ${nodeSizeClass(hasFixedSize, "min-w-[260px] max-w-[300px]")}`}>
+ *
+ * OJO: no usar las props width/height del nodo para esto. React Flow las
+ * llena SIEMPRE con la medida automática, así que todos los nodos parecían
+ * redimensionados y perdían su ancho máximo (una Escena con texto largo se
+ * estiraba hasta el ancho del canvas y cambiaba al abrir/cerrar el panel).
  */
-export function nodeSizeClass(
-  width: number | undefined,
-  height: number | undefined,
-  defaults: string
-): string {
-  const customSize = width != null || height != null;
-  return customSize
-    ? "w-full h-full overflow-hidden flex flex-col"
-    : defaults;
+export function nodeSizeClass(hasFixedSize: boolean, defaults: string): string {
+  return hasFixedSize ? "w-full h-full overflow-hidden flex flex-col" : defaults;
+}
+
+/**
+ * true si el nodo tiene tamaño fijo: lo redimensionó el usuario (o se cargó
+ * con un tamaño guardado). La medición automática solo llena `measured`, no
+ * `width`/`height` del nodo.
+ */
+export function useHasFixedSize(id: string): boolean {
+  return useStore(
+    useCallback(
+      (state: { nodeLookup: Map<string, { width?: number; height?: number }> }) => {
+        const n = state.nodeLookup.get(id);
+        return !!n && (n.width != null || n.height != null);
+      },
+      [id],
+    ) as never,
+  ) as unknown as boolean;
 }
 
 /**

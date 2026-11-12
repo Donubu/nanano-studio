@@ -10,11 +10,12 @@ import { NodeLabel } from "./node-label";
 import { useCanvasContext } from "../canvas-context";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { uploadFileToS3 } from "../lib/canvas-upload";
-import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { ResizeHandle, nodeSizeClass, useHasFixedSize } from "./resize-handle";
 import { MediaViewerModal, type MediaViewerEntry } from "./media-viewer-modal";
 import { CanvasImg } from "./canvas-img";
 
-export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode({ id, data, selected, width, height }: NodeProps) {
+export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode({ id, data, selected }: NodeProps) {
+  const hasFixedSize = useHasFixedSize(id);
   const nodeData = data as unknown as StaticImageGroupNodeData;
   const { updateNodeData } = useNodeUpdate();
   const { openImagePicker, projectId, canEdit } = useCanvasContext();
@@ -114,7 +115,7 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
     <div
       className={`group bg-card rounded-xl border-2 border-border ${
         selected ? "ring-2 ring-primary/50" : ""
-      } transition-all ${nodeSizeClass(width, height, "w-[260px]")}`}
+      } transition-all ${nodeSizeClass(hasFixedSize, "w-[260px]")}`}
       onPaste={handlePaste}
     >
       {/* Header */}

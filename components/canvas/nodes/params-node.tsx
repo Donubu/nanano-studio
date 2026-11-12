@@ -9,7 +9,7 @@ import { NodeLabel } from "./node-label";
 import { useCanvasContext } from "../canvas-context";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import type { CanvasGenerationConfig } from "../canvas-workspace";
-import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { ResizeHandle, nodeSizeClass, useHasFixedSize } from "./resize-handle";
 import { getVideoCapabilities, reconcileVideoSettings } from "../lib/video-capabilities";
 
 type ParamsData = ParamsTextNodeData | ParamsImageNodeData | ParamsVideoNodeData;
@@ -27,7 +27,8 @@ const paramsToGenType: Record<string, string> = {
   "params-video": "video",
 };
 
-export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected, type, width, height }: NodeProps) {
+export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected, type }: NodeProps) {
+  const hasFixedSize = useHasFixedSize(id);
   const nodeData = data as unknown as ParamsData;
   const { updateNodeData } = useNodeUpdate();
   const { projectId, generationConfig } = useCanvasContext();
@@ -50,7 +51,7 @@ export const ParamsNodeComponent = memo(function ParamsNode({ id, data, selected
     <div
       className={`group bg-card rounded-xl border-2 border-dashed ${config.borderColor} ${
         selected ? "ring-2 ring-primary/50" : ""
-      } transition-all ${nodeSizeClass(width, height, "min-w-[240px] max-w-[300px]")}`}
+      } transition-all ${nodeSizeClass(hasFixedSize, "min-w-[240px] max-w-[300px]")}`}
     >
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">

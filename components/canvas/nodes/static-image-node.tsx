@@ -9,18 +9,19 @@ import { NodeLabel } from "./node-label";
 import { useCanvasContext } from "../canvas-context";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { uploadFileToS3 } from "../lib/canvas-upload";
-import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { ResizeHandle, nodeSizeClass, useHasFixedSize } from "./resize-handle";
 import { MediaViewerModal } from "./media-viewer-modal";
 import { CanvasImg } from "./canvas-img";
 
-export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data, selected, width, height }: NodeProps) {
+export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data, selected }: NodeProps) {
+  const hasFixedSize = useHasFixedSize(id);
   const nodeData = data as unknown as StaticImageNodeData;
   const { updateNodeData } = useNodeUpdate();
   const { openImagePicker, projectId, canEdit } = useCanvasContext();
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
-  const isResized = width != null || height != null;
+  const isResized = hasFixedSize;
 
   const setImage = useCallback((url: string) => {
     updateNodeData(id, { ...nodeData, imageUrl: url });
@@ -63,7 +64,7 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
     <div
       className={`group bg-card rounded-xl border-2 border-border ${
         selected ? "ring-2 ring-primary/50" : ""
-      } transition-all ${nodeSizeClass(width, height, "min-w-[200px] max-w-[300px]")}`}
+      } transition-all ${nodeSizeClass(hasFixedSize, "min-w-[200px] max-w-[300px]")}`}
       onPaste={handlePaste}
     >
       {/* Header */}

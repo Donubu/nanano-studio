@@ -10,7 +10,7 @@ import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useUpstreamPromptLabel } from "../hooks/use-upstream-prompt-label";
 import { useCanvasContext } from "../canvas-context";
-import { ResizeHandle, nodeSizeClass, standardMediaSize } from "./resize-handle";
+import { ResizeHandle, nodeSizeClass, useHasFixedSize, standardMediaSize } from "./resize-handle";
 import { MediaViewerModal, type MediaViewerEntry } from "./media-viewer-modal";
 import { CanvasImg } from "./canvas-img";
 
@@ -21,7 +21,8 @@ const statusColors: Record<string, string> = {
   error: "border-red-500",
 };
 
-export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, width, height }: NodeProps) {
+export const ImageNodeComponent = memo(function ImageNode({ id, data, selected }: NodeProps) {
+  const hasFixedSize = useHasFixedSize(id);
   const nodeData = data as unknown as ImageNodeData;
   const status = nodeData.status || "idle";
   const { updateNodeData, updateNodeDataLocal } = useNodeUpdate();
@@ -68,7 +69,7 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
 
   const displayUrl = nodeData.outputUrl;
   const isViewingLatest = effectiveIndex === totalOutputs - 1;
-  const isResized = width != null || height != null;
+  const isResized = hasFixedSize;
   // Caja de tamaño estándar según la relación de aspecto (16:9, 9:16, 1:1...),
   // para que los nodos no crezcan desproporcionadamente al recibir la imagen.
   const stdSize = standardMediaSize(nodeData.aspectRatio);
@@ -88,7 +89,7 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected, 
     <div
       className={`group bg-card rounded-xl border-2 ${statusColors[status]} ${
         selected ? "ring-2 ring-primary/50" : ""
-      } transition-all ${nodeSizeClass(width, height, "min-w-[260px] max-w-[300px]")}`}
+      } transition-all ${nodeSizeClass(hasFixedSize, "min-w-[260px] max-w-[300px]")}`}
     >
       {/* Input handles */}
       <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_PROMPT}

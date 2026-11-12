@@ -9,7 +9,7 @@ import { NodeLabel } from "./node-label";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useCanvasContext } from "../canvas-context";
 import { NodeTextarea } from "./node-textarea";
-import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { ResizeHandle, nodeSizeClass, useHasFixedSize } from "./resize-handle";
 
 const statusColors: Record<string, string> = {
   idle: "border-fuchsia-500/40",
@@ -73,7 +73,8 @@ async function parseResponse(res: Response): Promise<{ error?: string; [k: strin
   }
 }
 
-export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected, width, height }: NodeProps) {
+export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected }: NodeProps) {
+  const hasFixedSize = useHasFixedSize(id);
   const nodeData = data as unknown as ScriptNodeData;
   const status = nodeData.status || "idle";
   const { updateNodeData } = useNodeUpdate();
@@ -609,7 +610,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
       onKeyDown={handleNodeKeyDown}
       className={`group bg-card rounded-xl border-2 ${statusColors[status]} ${
         selected ? "ring-2 ring-fuchsia-500/40" : ""
-      } transition-all ${nodeSizeClass(width, height, "min-w-[340px] max-w-[380px]")}`}
+      } transition-all ${nodeSizeClass(hasFixedSize, "min-w-[340px] max-w-[380px]")}`}
     >
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">

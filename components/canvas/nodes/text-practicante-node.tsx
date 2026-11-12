@@ -10,7 +10,7 @@ import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useUpstreamPromptLabel } from "../hooks/use-upstream-prompt-label";
 import { useCanvasContext } from "../canvas-context";
-import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { ResizeHandle, nodeSizeClass, useHasFixedSize } from "./resize-handle";
 
 const statusColors: Record<string, string> = {
   idle: "border-border",
@@ -19,7 +19,8 @@ const statusColors: Record<string, string> = {
   error: "border-red-500",
 };
 
-export const TextPracticanteNodeComponent = memo(function TextPracticanteNode({ id, data, selected, width, height }: NodeProps) {
+export const TextPracticanteNodeComponent = memo(function TextPracticanteNode({ id, data, selected }: NodeProps) {
+  const hasFixedSize = useHasFixedSize(id);
   const nodeData = data as unknown as TextPracticanteNodeData;
   const status = nodeData.status || "idle";
   const { updateNodeData, updateNodeDataLocal } = useNodeUpdate();
@@ -71,7 +72,7 @@ export const TextPracticanteNodeComponent = memo(function TextPracticanteNode({ 
     <div
       className={`group bg-card rounded-xl border-2 ${statusColors[status]} ${
         selected ? "ring-2 ring-primary/50" : ""
-      } transition-all ${nodeSizeClass(width, height, "min-w-[260px] max-w-[300px]")}`}
+      } transition-all ${nodeSizeClass(hasFixedSize, "min-w-[260px] max-w-[300px]")}`}
     >
       {/* Input handles */}
       <Handle type="target" position={Position.Left} id={HANDLE_IDS.INPUT_PROMPT}

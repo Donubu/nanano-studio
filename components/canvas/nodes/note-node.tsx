@@ -8,9 +8,10 @@ import { NodeDeleteButton } from "./node-status";
 import { NodeLabel } from "./node-label";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useCanvasContext } from "../canvas-context";
-import { ResizeHandle, nodeSizeClass } from "./resize-handle";
+import { ResizeHandle, nodeSizeClass, useHasFixedSize } from "./resize-handle";
 
-export const NoteNodeComponent = memo(function NoteNode({ id, data, selected, width, height }: NodeProps) {
+export const NoteNodeComponent = memo(function NoteNode({ id, data, selected }: NodeProps) {
+  const hasFixedSize = useHasFixedSize(id);
   const nodeData = data as unknown as NoteNodeData;
   const { updateNodeData } = useNodeUpdate();
   const { canEdit } = useCanvasContext();
@@ -23,7 +24,7 @@ export const NoteNodeComponent = memo(function NoteNode({ id, data, selected, wi
     <div
       className={`group bg-amber-50 dark:bg-amber-950/30 rounded-xl border-2 border-amber-300/50 dark:border-amber-700/50 ${
         selected ? "ring-2 ring-amber-400/50" : ""
-      } transition-all ${nodeSizeClass(width, height, "min-w-[180px] max-w-[280px]")}`}
+      } transition-all ${nodeSizeClass(hasFixedSize, "min-w-[180px] max-w-[280px]")}`}
     >
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-amber-300/30 dark:border-amber-700/30">
