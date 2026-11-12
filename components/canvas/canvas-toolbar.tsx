@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ImageIcon, Video, MessageSquare, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History, Eye, BookmarkPlus, LayoutTemplate, UserRound, Link2, Magnet, Grid3x3 } from "lucide-react";
+import { ImageIcon, Video, MessageSquare, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History, Eye, BookmarkPlus, LayoutTemplate, UserRound, Link2, Magnet, Grid3x3, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CanvasNodeType } from "./lib/canvas-types";
 
@@ -10,6 +10,11 @@ interface CanvasToolbarProps {
   onClone: () => void;
   onLockAll: () => void;
   onReorder: () => void;
+  // Colapsar / expandir todos los nodos (solo el título).
+  onCollapseAll: () => void;
+  onExpandAll: () => void;
+  canCollapseAll: boolean;
+  canExpandAll: boolean;
   onSaveTemplate: () => void;
   onOpenTemplates: () => void;
   onOpenLinkPicker: () => void;
@@ -56,6 +61,10 @@ export function CanvasToolbar({
   onClone,
   onLockAll,
   onReorder,
+  onCollapseAll,
+  onExpandAll,
+  canCollapseAll,
+  canExpandAll,
   onSaveTemplate,
   onOpenTemplates,
   onOpenLinkPicker,
@@ -210,6 +219,29 @@ export function CanvasToolbar({
         >
           <LayoutGrid className="h-3.5 w-3.5" />
           Reordenar
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onCollapseAll}
+          disabled={!canCollapseAll}
+          className="gap-1.5 text-xs"
+          title="Colapsar todos los nodos (solo el título). Cada nodo también tiene su propio botón."
+        >
+          <ChevronsDownUp className="h-3.5 w-3.5" />
+          Colapsar todos
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onExpandAll}
+          disabled={!canExpandAll}
+          className="gap-1.5 text-xs"
+          title="Expandir todos los nodos"
+        >
+          <ChevronsUpDown className="h-3.5 w-3.5" />
+          Expandir todos
         </Button>
 
         <div className="w-px h-5 bg-border" />

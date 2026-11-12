@@ -16,6 +16,8 @@ import { memo, useEffect, type ComponentType, type RefObject } from "react";
 import { useStore, type NodeProps } from "@xyflow/react";
 import { galleryImagesOf } from "../lib/character";
 import { thumbUrl } from "../lib/thumb";
+import { ChevronsDownUp, ChevronsUpDown } from "lucide-react";
+import { useCanvasContext } from "../canvas-context";
 
 export const LOD_ZOOM = 0.3;
 
@@ -164,11 +166,17 @@ export function withLod(Comp: ComponentType<NodeProps>) {
   const Wrapped = memo(function LodNode(props: NodeProps) {
     const zoomedOut = useIsZoomedOut();
     const data = props.data as Record<string, unknown>;
+    // Colapsado: solo el encabezado (CSS .canvas-node-collapsed en globals.css).
+    const collapsed = data.collapsed === true;
     return (
       <>
-        <div style={{ display: "contents", visibility: zoomedOut ? "hidden" : undefined }}>
+        <div
+          className={collapsed ? "canvas-node-collapsed" : undefined}
+          style={{ display: "contents", visibility: zoomedOut ? "hidden" : undefined }}
+        >
           <Comp {...props} />
         </div>
+        {!zoomedOut && <CollapseToggle id={props.id} collapsed={collapsed} />}
         {zoomedOut && (
           <LodCard
             type={props.type}
@@ -183,4 +191,48 @@ export function withLod(Comp: ComponentType<NodeProps>) {
   });
   Wrapped.displayName = `Lod(${Comp.displayName || Comp.name || "Node"})`;
   return Wrapped;
+}
+
+/** Botón sobre el borde superior del nodo para colapsarlo a su encabezado. */
+const CollapseToggle = memo(function CollapseToggle({ id, collapsed }: { id: string; collapsed: boolean }) {
+  const { canEdit, persistNodeData } = useCanvasContext();
+  if (!canEdit) return null;
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        persistNodeData(id, { collapsed: !collapsed });
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+      title={collapsed ? "Expandir el nodo" : "Colapsar el nodo (solo el título)"}
+      // Tamaño legible en pantalla con el canvas alejado (crece al alejar, nunca se achica).
+      style={{ scale: `max(1, calc(1 / var(${ZOOM_CSS_VAR}, 1)))`, transformOrigin: "bottom right" }}
+      className="canvas-collapse-toggle nodrag nopan absolute -top-6 right-1 z-10 flex items-center gap-0.5 rounded-md border border-border bg-background/95 px-1.5 py-0.5 text-[11px] text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-foreground"
+    >
+      {collapsed ? <ChevronsUpDown className="h-3.5 w-3.5" /> : <ChevronsDownUp className="h-3.5 w-3.5" />}
+      {collapsed ? "Expandir" : "Colapsar"}
+    </button>
+  );
+});
+
+// Estilos del nodo colapsado. Van en un <style> del propio canvas (no en
+// globals.css) para no depender de cómo se compila el CSS global.
+// Se ve solo el encabezado (el primer hijo del nodo que no es conector) y
+// todos los conectores se juntan a los costados de ese encabezado, así las
+// conexiones se siguen dibujando. Con tamaño fijo, el alto pasa a automático.
+const COLLAPSED_CSS = `
+.react-flow__node:has(> .canvas-node-collapsed) { height: auto !important; }
+.canvas-node-collapsed > * { height: auto !important; min-height: 0 !important; }
+.canvas-node-collapsed > * > :not(.react-flow__handle) ~ :not(.react-flow__handle) { display: none !important; }
+.canvas-node-collapsed > * > .react-flow__handle-left,
+.canvas-node-collapsed > * > .react-flow__handle-right { top: 50% !important; }
+.canvas-node-collapsed > * > .react-flow__handle-top,
+.canvas-node-collapsed > * > .react-flow__handle-bottom { left: 50% !important; }
+.react-flow__node:hover .canvas-collapse-toggle,
+.react-flow__node.selected .canvas-collapse-toggle { opacity: 1; }
+`;
+
+export function CollapsedNodeStyles() {
+  return <style dangerouslySetInnerHTML={{ __html: COLLAPSED_CSS }} />;
 }

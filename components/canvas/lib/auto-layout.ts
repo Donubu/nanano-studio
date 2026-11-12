@@ -52,7 +52,10 @@ export function autoLayoutPositions(
     boxes.set(n.id, {
       id: n.id,
       w: (typeof n.width === "number" ? n.width : undefined) ?? n.measured?.width ?? DEFAULT_W,
-      h: (typeof n.height === "number" ? n.height : undefined) ?? n.measured?.height ?? DEFAULT_H,
+      // Colapsado: cuenta su alto real (solo el encabezado), no el tamaño fijo.
+      h: (n.data as { collapsed?: unknown } | undefined)?.collapsed === true
+        ? n.measured?.height ?? 44
+        : (typeof n.height === "number" ? n.height : undefined) ?? n.measured?.height ?? DEFAULT_H,
       origX: n.position?.x ?? 0,
       origY: n.position?.y ?? 0,
     });

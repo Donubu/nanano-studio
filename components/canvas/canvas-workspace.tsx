@@ -25,6 +25,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { SnapGuidesOverlay, useSnapPrefs } from "./snap-guides-overlay";
+import { CollapsedNodeStyles } from "./nodes/lod";
 import { usePinchZoomOverNodes } from "./hooks/use-pinch-zoom-over-nodes";
 import { computeSnap, intersects, unionBox, type Box, type Guide } from "./lib/snap-guides";
 
@@ -1526,6 +1527,18 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
   }, [realConversationId, nodes, edges, projectId, generationConfig]);
 
   // Auto-layout: reordena todo el canvas (ver lib/auto-layout.ts)
+  // Colapsar / expandir TODOS los nodos del canvas (botones de la barra). Por
+  // nodo se hace con el botón sobre cada uno; por defecto nada se colapsa.
+  const setAllCollapsed = useCallback((collapsed: boolean) => {
+    if (!canEdit) return;
+    const targets = latestNodesRef.current.filter((n) => (n.data?.collapsed === true) !== collapsed);
+    if (targets.length === 0) return;
+    takeSnapshot();
+    for (const n of targets) updateNodeData(n.id, { collapsed } as Partial<CanvasNodeData>);
+  }, [canEdit, takeSnapshot, updateNodeData]);
+  const anyCollapsed = nodes.some((n) => n.data?.collapsed === true);
+  const anyExpanded = nodes.some((n) => n.data?.collapsed !== true);
+
   const reorderNodes = useCallback(() => {
     if (!canEdit || nodes.length === 0) return;
     const confirmed = window.confirm(
@@ -1802,6 +1815,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
           snapGrid={[24, 24]}
         >
           <SnapGuidesOverlay guides={snapGuides} />
+          <CollapsedNodeStyles />
           <Background variant={BackgroundVariant.Lines} gap={24} size={1} color="var(--color-border)" className="opacity-30" />
           <ZoomControls />
           <LodZoomVar target={canvasContainerRef} />
@@ -1836,6 +1850,10 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
               onClone={cloneCanvas}
               onLockAll={lockAllNodes}
               onReorder={reorderNodes}
+              onCollapseAll={() => setAllCollapsed(true)}
+              onExpandAll={() => setAllCollapsed(false)}
+              canCollapseAll={anyExpanded}
+              canExpandAll={anyCollapsed}
               onSaveTemplate={() => setSaveTemplateOpen(true)}
               onOpenTemplates={() => setTemplatePickerOpen(true)}
               onOpenLinkPicker={openLinkPicker}
