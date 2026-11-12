@@ -226,12 +226,21 @@ const COLLAPSED_CSS = `
 .canvas-node-collapsed > * { height: auto !important; min-height: 0 !important; }
 .canvas-node-collapsed > * > :not(.react-flow__handle) ~ :not(.react-flow__handle) { display: none !important; }
 .canvas-node-collapsed > * > .react-flow__handle-left,
-.canvas-node-collapsed > * > .react-flow__handle-right { top: 50% !important; }
+.canvas-node-collapsed > * > .react-flow__handle-right { top: var(--collapsed-pos, 50%) !important; }
 .canvas-node-collapsed > * > .react-flow__handle-top,
-.canvas-node-collapsed > * > .react-flow__handle-bottom { left: 50% !important; }
+.canvas-node-collapsed > * > .react-flow__handle-bottom { left: var(--collapsed-pos, 50%) !important; }
 .react-flow__node:hover .canvas-collapse-toggle,
 .react-flow__node.selected .canvas-collapse-toggle { opacity: 1; }
 `;
+
+/**
+ * Posición de un conector cuando el nodo está colapsado (en su lado: top para
+ * izquierda/derecha, left para arriba/abajo). Sin esto todos los del mismo
+ * lado quedan al 50%, uno encima del otro.
+ */
+export function collapsedPos(pos: string): Record<string, string> {
+  return { "--collapsed-pos": pos };
+}
 
 export function CollapsedNodeStyles() {
   return <style dangerouslySetInnerHTML={{ __html: COLLAPSED_CSS }} />;

@@ -26,6 +26,7 @@ import { ResizeHandle, nodeSizeClass, useHasFixedSize } from "./resize-handle";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useCanvasContext } from "../canvas-context";
 import { thumbUrl } from "../lib/thumb";
+import { collapsedPos } from "./lod";
 
 function stopProp(e: React.SyntheticEvent) {
   e.stopPropagation();
@@ -187,7 +188,7 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
         position={Position.Left}
         id={HANDLE_IDS.INPUT_CHARACTER_STYLE}
         className="!w-3 !h-3 !bg-blue-400 !border-2 !border-background"
-        style={{ top: 60 }}
+        style={{ top: 60, ...collapsedPos("30%") }}
         title="Estilo global (texto)"
       />
       <Handle
@@ -195,7 +196,7 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
         position={Position.Left}
         id={HANDLE_IDS.INPUT_CHARACTER_GALLERY}
         className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background"
-        style={{ top: 84 }}
+        style={{ top: 84, ...collapsedPos("70%") }}
         title="Galerías o imágenes de referencia"
       />
       <Handle
@@ -203,7 +204,7 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
         position={Position.Top}
         id={topHandleId(HANDLE_IDS.INPUT_CHARACTER_STYLE)}
         className="!w-3 !h-3 !bg-blue-400 !border-2 !border-background"
-        style={{ left: "35%" }}
+        style={{ left: "35%", ...collapsedPos("35%") }}
         title="Estilo global (texto)"
       />
       <Handle
@@ -211,7 +212,7 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
         position={Position.Top}
         id={topHandleId(HANDLE_IDS.INPUT_CHARACTER_GALLERY)}
         className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background"
-        style={{ left: "65%" }}
+        style={{ left: "65%", ...collapsedPos("65%") }}
         title="Galerías o imágenes de referencia"
       />
 
@@ -495,6 +496,7 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
         position={Position.Right}
         id={HANDLE_IDS.OUTPUT_CHARACTER}
         className="!w-3 !h-3 !bg-pink-400 !border-2 !border-background"
+        style={collapsedPos("30%")}
         title="Etapas → imágenes"
       />
       {/* Imagen de UNA etapa hacia otro nodo (referencia, frame de video…);
@@ -504,7 +506,7 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
         position={Position.Right}
         id={HANDLE_IDS.OUTPUT_CHARACTER_IMAGE}
         className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background"
-        style={{ top: 72 }}
+        style={{ top: 72, ...collapsedPos("70%") }}
         title="Imagen de una etapa (eliges cuál en la conexión)"
       />
       <span className="pointer-events-none absolute right-2 top-[64px] text-[11px] font-bold text-purple-500 dark:text-purple-300">

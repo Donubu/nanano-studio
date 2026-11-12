@@ -7,8 +7,8 @@
 // el contexto del guion al ejecutar). Se actualiza al abrir el canvas, antes
 // de ejecutar y con el botón.
 
-import { memo, useState } from "react";
-import { Handle, Position, useReactFlow, type NodeProps } from "@xyflow/react";
+import { memo, useEffect, useState } from "react";
+import { Handle, Position, useReactFlow, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import { AlertTriangle, Dna, Film, Link2, Loader2, Palette, RefreshCw, UserRound } from "lucide-react";
 import { HANDLE_IDS, type LinkedNodeData } from "../lib/canvas-types";
 import { computeLinkPatches } from "../lib/linked-sync";
@@ -16,9 +16,18 @@ import { NodeDeleteButton } from "./node-status";
 import { useCanvasContext } from "../canvas-context";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { thumbUrl } from "../lib/thumb";
+import { collapsedPos } from "./lod";
 
 export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected }: NodeProps) {
   const d = data as unknown as LinkedNodeData;
+  // Colapsado: PROMPT e IMAGEN a la derecha, ADN y ESTILO pasan arriba (cuatro
+  // conectores no caben en el costado del encabezado). React Flow debe volver
+  // a medir los conectores al cambiar de lado.
+  const collapsed = (data as { collapsed?: boolean }).collapsed === true;
+  const updateNodeInternals = useUpdateNodeInternals();
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [collapsed, id, updateNodeInternals]);
   const snap = d.linkSnapshot?.kind === "character" ? d.linkSnapshot : null;
   const scene = d.linkSnapshot?.kind === "scene" ? d.linkSnapshot : null;
   const isScene = scene != null || d.sourceType === "scene";
@@ -178,7 +187,7 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
             position={Position.Right}
             id={HANDLE_IDS.OUTPUT_CHARACTER}
             className="!w-3 !h-3 !bg-pink-400 !border-2 !border-background"
-            style={{ top: 60 }}
+            style={{ top: 60, ...collapsedPos("30%") }}
             title="Prompt: ADN + estilo + la etapa que elijas en la conexión"
           />
           <OutputLabel top={52} className="text-pink-500 dark:text-pink-300">PROMPT</OutputLabel>
@@ -187,25 +196,25 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
             position={Position.Right}
             id={HANDLE_IDS.OUTPUT_CHARACTER_IMAGE}
             className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background"
-            style={{ top: 88 }}
+            style={{ top: 88, ...collapsedPos("70%") }}
             title="Imagen de una etapa (eliges cuál en la conexión)"
           />
           <OutputLabel top={80} className="text-purple-500 dark:text-purple-300">IMAGEN</OutputLabel>
           <Handle
             type="source"
-            position={Position.Right}
+            position={collapsed ? Position.Top : Position.Right}
             id={HANDLE_IDS.OUTPUT_CHARACTER_DNA}
             className="!w-3 !h-3 !bg-pink-300 !border-2 !border-background"
-            style={{ top: 116 }}
+            style={collapsed ? collapsedPos("35%") : { top: 116 }}
             title="Solo el ADN (rasgos permanentes), como texto"
           />
           <OutputLabel top={108} className="text-pink-500 dark:text-pink-300">ADN</OutputLabel>
           <Handle
             type="source"
-            position={Position.Right}
+            position={collapsed ? Position.Top : Position.Right}
             id={HANDLE_IDS.OUTPUT_CHARACTER_STYLE}
             className="!w-3 !h-3 !bg-blue-400 !border-2 !border-background"
-            style={{ top: 144 }}
+            style={collapsed ? collapsedPos("65%") : { top: 144 }}
             title="Solo el estilo global, como texto (también sirve de estilo para un Personaje de este canvas)"
           />
           <OutputLabel top={136} className="text-blue-500 dark:text-blue-300">ESTILO</OutputLabel>
