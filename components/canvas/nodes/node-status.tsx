@@ -1,8 +1,8 @@
 "use client";
 
 import { useReactFlow } from "@xyflow/react";
-import { Check, Loader2, AlertCircle, Trash2, Zap } from "lucide-react";
-import { useCanvasContext } from "../canvas-context";
+import { Check, Loader2, AlertCircle, AlertTriangle, Trash2, Zap } from "lucide-react";
+import { useCanvasContext, useStaleMessage } from "../canvas-context";
 
 export function StatusIndicator({ status }: { status: string }) {
   switch (status) {
@@ -15,6 +15,26 @@ export function StatusIndicator({ status }: { status: string }) {
     default:
       return <div className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />;
   }
+}
+
+/**
+ * Estado del nodo; si el resultado quedó desactualizado (cambió un Personaje
+ * o Escena vinculada que lo alimenta), un aviso ámbar en vez del check.
+ */
+export function NodeStatus({ nodeId, status }: { nodeId: string; status: string }) {
+  const stale = useStaleMessage(nodeId);
+  if (stale && status === "completed") {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-[12px] font-medium px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 shrink-0"
+        title={`${stale}. Vuelve a ejecutarlo para actualizarlo.`}
+      >
+        <AlertTriangle className="h-3.5 w-3.5" />
+        Desactualizado
+      </span>
+    );
+  }
+  return <StatusIndicator status={status} />;
 }
 
 export function AIBadge() {

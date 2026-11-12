@@ -56,7 +56,10 @@ import { autoLayoutPositions } from "./lib/auto-layout";
 import { getDefaultNodeData, newCanvasNodeId, type CanvasNodeType, type CanvasNodeData, type LinkedNodeData, type CanvasEdge, HANDLE_IDS } from "./lib/canvas-types";
 import { getDescendantNodes } from "./lib/topological-sort";
 import { MessageSquare, ImageIcon, Video, Zap, StickyNote, ImagePlus, Images, Type, Settings, Bot, Sparkles, Film, Play, Loader2, UserRound, Link2 } from "lucide-react";
-import { CanvasProvider, SelectedNodesProvider } from "./canvas-context";
+import { CanvasProvider, SelectedNodesProvider, StaleNodesProvider } from "./canvas-context";
+import { describeStale, staleInputs } from "./lib/input-stamps";
+import type { LinkUsage } from "./lib/canvas-types";
+import { lookupFrom } from "./lib/node-outputs";
 import { LabeledEdge } from "./edges/labeled-edge";
 import { ImagePickerModal } from "@/components/chat/image-picker-modal";
 import { useCollaboration } from "./hooks/use-collaboration";
@@ -140,9 +143,14 @@ interface CanvasWorkspaceProps {
   onConversationCreated?: (newId: number) => void;
   emitNodeDataRef?: React.MutableRefObject<(nodeId: string, updates: Record<string, unknown>) => void>;
   openImagePicker?: (onSelect: (url: string) => void, title?: string) => void;
+  // Abre otro canvas (vinculados: "Abrir original", "Usado en…").
+  onOpenCanvas?: (conversationId: number, focusNodeId?: string) => void;
+  // Nodo a centrar y seleccionar al cargar (al llegar desde otro canvas).
+  focusNodeId?: string;
+  onFocusHandled?: () => void;
 }
 
-function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EMPTY_GENERATION_CONFIG, onConversationCreated, emitNodeDataRef, openImagePicker }: CanvasWorkspaceProps) {
+function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EMPTY_GENERATION_CONFIG, onConversationCreated, emitNodeDataRef, openImagePicker, onOpenCanvas, focusNodeId, onFocusHandled }: CanvasWorkspaceProps) {
   const [nodes, setNodes, onNodesChangeBase] = useNodesState<Node>([] as Node[]);
   const [edges, setEdges, onEdgesChangeBase] = useEdgesState<Edge>([] as Edge[]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -1759,6 +1767,95 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
     [nodes],
   );
   const selectedNodeIds = useMemo(() => new Set(selectedKey ? selectedKey.split(",") : []), [selectedKey]);
+  // --- Uso en otros canvas (vinculados) ---
+  // Dónde se usan los Personajes / Escenas de este canvas. Se carga al abrir y
+  // al volver a la ventana (otro canvas pudo vincular o desconectar algo).
+  const [linkUsage, setLinkUsage] = useState<LinkUsage>({});
+  const hasLinkableNodes = useMemo(() => nodes.some((n) => n.type === "character" || n.type === "scene"), [nodes]);
+  useEffect(() => {
+    if (!isLoaded || !realConversationId || !hasLinkableNodes) return;
+    let cancelled = false;
+    const load = () => {
+      fetch(`/api/conversations/${realConversationId}/canvas/links/usage`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((json) => {
+          if (!cancelled && json?.usage) setLinkUsage(json.usage as LinkUsage);
+        })
+        .catch(() => {});
+    };
+    load();
+    const onFocus = () => load();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [isLoaded, realConversationId, hasLinkableNodes]);
+
+  // Borrar un Personaje / Escena vinculado en otros canvas: esos vinculados
+  // quedan con su última vista y sin poder actualizarse. Se pide confirmación.
+  const confirmLinkedDelete = useCallback(
+    async ({ nodes: toDelete, edges: edgesToDelete }: { nodes: Node[]; edges: Edge[] }) => {
+      const used = toDelete.filter((n) => (linkUsage[n.id]?.length ?? 0) > 0);
+      if (used.length === 0) return { nodes: toDelete, edges: edgesToDelete };
+      const lines = used.map((n) => {
+        const label = String((n.data as Record<string, unknown>).label || (n.type === "scene" ? "Escena" : "Personaje"));
+        const where = linkUsage[n.id].map((u) => `${u.title} (${u.connections} ${u.connections === 1 ? "conexión" : "conexiones"})`).join(", ");
+        return `• ${label}: ${where}`;
+      });
+      const ok = window.confirm(
+        `Estos nodos están vinculados en otros canvas:\n${lines.join("\n")}\n\nSi los borras, esos vinculados conservan su última versión pero ya no se actualizan. ¿Borrar igual?`,
+      );
+      return ok ? { nodes: toDelete, edges: edgesToDelete } : false;
+    },
+    [linkUsage]
+  );
+
+  // Estable para el contexto (el padre pasa una función nueva en cada render).
+  const onOpenCanvasRef = useRef(onOpenCanvas);
+  useEffect(() => {
+    onOpenCanvasRef.current = onOpenCanvas;
+  }, [onOpenCanvas]);
+  const hasOpenCanvas = !!onOpenCanvas;
+  const openCanvasStable = useCallback((id: number, nodeId?: string) => onOpenCanvasRef.current?.(id, nodeId), []);
+
+  // Al llegar desde otro canvas: centra y selecciona el nodo pedido.
+  useEffect(() => {
+    if (!isLoaded || !focusNodeId) return;
+    const target = nodes.find((n) => n.id === focusNodeId);
+    onFocusHandled?.();
+    if (!target) return;
+    // Después de que se asiente la carga (la sincronización inicial reemplaza los nodos).
+    setTimeout(() => {
+      setNodes((nds) => nds.map((n) => (n.selected === (n.id === focusNodeId) ? n : { ...n, selected: n.id === focusNodeId })));
+      setSelectedNodeId(focusNodeId);
+      fitView({ nodes: [{ id: focusNodeId }], padding: 0.4, duration: 500, maxZoom: 1 });
+    }, 400);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al cargar o al pedir otro nodo
+  }, [isLoaded, focusNodeId]);
+
+  // Generaciones desactualizadas (lib/input-stamps.ts). Se recalcula con los
+  // nodos, pero el objeto solo cambia cuando cambian los avisos, así los
+  // nodos no se re-renderizan al arrastrar.
+  const staleKey = useMemo(() => {
+    if (!nodes.some((n) => (n.data as Record<string, unknown>).inputStamps)) return "{}";
+    const lookup = lookupFrom(nodes as never);
+    const out: Record<string, string> = {};
+    for (const n of nodes) {
+      if (!(n.data as Record<string, unknown>).inputStamps) continue;
+      const items = staleInputs(n as never, lookup, edges as never);
+      if (items.length > 0) out[n.id] = describeStale(items);
+    }
+    return JSON.stringify(out);
+  }, [nodes, edges]);
+  const staleMessages = useMemo(() => JSON.parse(staleKey) as Record<string, string>, [staleKey]);
+  const staleIds = useMemo(() => Object.keys(staleMessages), [staleMessages]);
+  const showStaleNodes = useCallback(() => {
+    if (staleIds.length === 0) return;
+    const ids = new Set(staleIds);
+    setNodes((nds) => nds.map((n) => ({ ...n, selected: ids.has(n.id) })));
+    fitView({ nodes: staleIds.map((id) => ({ id })), padding: 0.3, duration: 500, maxZoom: 1 });
+  }, [staleIds, setNodes, fitView]);
   // Solo re-renderiza al cruzar el umbral de la vista alejada.
   const zoomedOut = useIsZoomedOut();
   useEffect(() => {
@@ -1921,8 +2018,10 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
       canEdit,
       materializeCharacter: materializeCharacterStable,
       materializeScript: materializeScriptStable,
+      linkUsage,
+      openCanvas: hasOpenCanvas ? openCanvasStable : undefined,
     }),
-    [projectId, realConversationId, generationConfig, openImagePicker, emitNodeDataStable, persistNodeDataStable, canEdit, materializeCharacterStable, materializeScriptStable],
+    [projectId, realConversationId, generationConfig, openImagePicker, emitNodeDataStable, persistNodeDataStable, canEdit, materializeCharacterStable, materializeScriptStable, linkUsage, hasOpenCanvas, openCanvasStable],
   );
 
   return (
@@ -1930,6 +2029,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
     <div ref={canvasContainerRef} className="flex h-full w-full relative" tabIndex={-1}>
       <div className="flex-1 h-full">
         <SelectedNodesProvider value={selectedNodeIds}>
+        <StaleNodesProvider value={staleMessages}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -1938,6 +2038,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
           onConnect={onConnect}
           onConnectStart={onConnectStart}
           onConnectEnd={onConnectEnd}
+          onBeforeDelete={confirmLinkedDelete}
           connectOnClick={false}
           onNodeClick={onNodeClick}
           onPaneClick={onPaneClick}
@@ -2007,6 +2108,8 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
               onExpandAll={() => setAllCollapsed(false)}
               canCollapseAll={anyExpanded}
               canExpandAll={anyCollapsed}
+              staleCount={staleIds.length}
+              onShowStale={showStaleNodes}
               onSaveTemplate={() => setSaveTemplateOpen(true)}
               onOpenTemplates={() => setTemplatePickerOpen(true)}
               onOpenLinkPicker={openLinkPicker}
@@ -2045,6 +2148,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
           <CursorOverlay remoteUsers={collab.remoteUsers} />
           <ConnectorGhost remoteUsers={collab.remoteUsers} />
         </ReactFlow>
+        </StaleNodesProvider>
         </SelectedNodesProvider>
       </div>
 

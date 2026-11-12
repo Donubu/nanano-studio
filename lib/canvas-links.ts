@@ -8,7 +8,7 @@
 import { createHash } from "crypto";
 import type { RowDataPacket } from "mysql2";
 import pool from "@/lib/db";
-import { HANDLE_IDS, baseHandleId, type CharacterNodeData, type LinkState, type LinkedSnapshot, type SceneNodeData } from "@/components/canvas/lib/canvas-types";
+import { HANDLE_IDS, baseHandleId, type CharacterNodeData, type LinkState, type LinkedSnapshot, type LinkUsage, type LinkUsageCanvas, type SceneNodeData } from "@/components/canvas/lib/canvas-types";
 import { buildCharacterSnapshot } from "@/components/canvas/lib/linked";
 import { collectSceneContext } from "@/components/canvas/lib/scene-context";
 import { galleryOutput, lookupFrom, nodeTextOutput, type NodeLookup, type OutEdge } from "@/components/canvas/lib/node-outputs";
@@ -332,4 +332,71 @@ export async function listLinkables(targetConversationId: number, user: LinkUser
       return !!b && (b.characters.length > 0 || b.scenes.length > 0);
     })
     .map((c) => ({ conversationId: c.id, title: c.title || `Canvas ${c.id}`, ...byConv.get(c.id)! }));
+}
+
+
+/**
+ * Uso de los nodos de un canvas como vinculados en OTROS canvas del mismo
+ * proyecto. Mismo acceso que leer el canvas de origen (admin, dueño o miembro
+ * del proyecto); sin ser miembro solo se ven los canvas propios.
+ */
+export async function listLinkUsage(sourceConversationId: number, user: LinkUser): Promise<LinkUsage | null> {
+  const source = await loadConversation(sourceConversationId);
+  if (!source) return null;
+  if (source.project_id == null) return {};
+  const isMember = user.isAdmin || (await isProjectMember(source.project_id, user.id));
+  if (!isMember && source.user_id !== user.id) return {};
+
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT n.id, n.conversation_id, c.title, c.user_id,
+            JSON_UNQUOTE(JSON_EXTRACT(n.config, '$.sourceNodeId')) AS source_node_id,
+            JSON_EXTRACT(n.config, '$.imageOutputs') AS image_outputs
+     FROM canvas_nodes n
+     JOIN conversations c ON c.id = n.conversation_id
+     WHERE c.project_id = ? AND c.deleted_at IS NULL AND c.id <> ?
+       AND n.type = 'linked' AND n.deleted_at IS NULL
+       AND JSON_EXTRACT(n.config, '$.sourceConversationId') = ?`,
+    [source.project_id, sourceConversationId, sourceConversationId],
+  );
+  const visible = rows.filter((r) => isMember || r.user_id === user.id);
+  if (visible.length === 0) return {};
+
+  const convIds = [...new Set(visible.map((r) => r.conversation_id as number))];
+  const linkedIds = visible.map((r) => r.id as string);
+  const [edgeRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id, conversation_id, source_node_id FROM canvas_edges
+     WHERE deleted_at IS NULL
+       AND conversation_id IN (${convIds.map(() => "?").join(",")})
+       AND source_node_id IN (${linkedIds.map(() => "?").join(",")})`,
+    [...convIds, ...linkedIds],
+  );
+  const edgesOf = new Map<string, string[]>();
+  for (const e of edgeRows) {
+    const key = `${e.conversation_id}|${e.source_node_id}`;
+    edgesOf.set(key, [...(edgesOf.get(key) ?? []), e.id as string]);
+  }
+
+  const usage: LinkUsage = {};
+  for (const r of visible) {
+    const sourceNodeId = r.source_node_id as string | null;
+    if (!sourceNodeId) continue;
+    const convId = r.conversation_id as number;
+    const raw = r.image_outputs;
+    const outputs: Record<string, string> = (typeof raw === "string" ? JSON.parse(raw || "null") : raw) ?? {};
+    const edgeIds = edgesOf.get(`${convId}|${r.id}`) ?? [];
+    const list = (usage[sourceNodeId] ??= []);
+    let entry = list.find((u) => u.conversationId === convId);
+    if (!entry) {
+      entry = { conversationId: convId, title: (r.title as string) || `Canvas ${convId}`, linkedNodeIds: [], connections: 0, stageUses: {} };
+      list.push(entry);
+    }
+    entry.linkedNodeIds.push(r.id as string);
+    entry.connections += edgeIds.length;
+    for (const edgeId of edgeIds) {
+      const stageId = outputs[edgeId];
+      if (stageId) entry.stageUses[stageId] = (entry.stageUses[stageId] ?? 0) + 1;
+    }
+  }
+  for (const list of Object.values(usage)) list.sort((a, b) => a.title.localeCompare(b.title));
+  return usage;
 }

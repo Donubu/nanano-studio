@@ -5,6 +5,7 @@ import type { Node } from "@xyflow/react";
 import type { CanvasNodeData, CanvasNodeStatus, ExecutionProgress, ImageNodeData, TextNodeData, TextPracticanteNodeData, VideoNodeData, StaticTextNodeData, StaticImageNodeData, StaticImageGroupNodeData, OutputHistoryEntry, PracticanteFile, SceneNodeData, ParamsSceneNodeData, CharacterNodeData } from "../lib/canvas-types";
 import { HANDLE_IDS, baseHandleId } from "../lib/canvas-types";
 import { topologicalSort, getDirectInputs, getDescendantNodes } from "../lib/topological-sort";
+import { computeInputStamps } from "../lib/input-stamps";
 import { OWN_REFERENCE_PRIORITY, composeCharacterPrompt, findStageForImage, resolveCharacterImageEdges, stageReferenceUrls } from "../lib/character";
 import type { CanvasEdge, LinkedNodeData } from "../lib/canvas-types";
 import { linkedImageForEdge, linkedStageForEdge, linkedTextForHandle } from "../lib/linked";
@@ -492,6 +493,9 @@ export function useCanvasExecution({
       // Resolve inputs from the live snapshot
       const { promptContext, referenceImageUrl, firstFrameUrl, lastFrameUrl, referenceImageUrls, referencesPrioritized, mediaUrls, paramsOverride } = resolveNodeInputs(nodeId, liveNodes, edges);
       const scriptContext = resolveScriptContext(nodeId, liveNodes, edges);
+      // Huella de lo que entregan los Personajes / Escenas vinculadas (sobre las
+      // conexiones originales), para avisar después si cambiaron.
+      const inputStamps = computeInputStamps(nodeId, lookupFrom(liveNodes as never), rawEdges as never);
 
       // Set generating
       updateNodeStatus(setNodes, nodeId, { status: "generating", errorMessage: undefined } as Partial<CanvasNodeData>);
@@ -696,7 +700,8 @@ export function useCanvasExecution({
           outputMessageId: result.messageId,
           errorMessage: undefined,
           outputHistory: updatedHistory,
-        };
+          inputStamps,
+        } as Partial<CanvasNodeData>;
 
         // Update React state
         updateNodeStatus(setNodes, nodeId, completedData);
@@ -780,7 +785,7 @@ export function useCanvasExecution({
         }).catch(() => {});
       }
     },
-    [conversationId, edges, setNodes]
+    [conversationId, edges, rawEdges, setNodes]
   );
 
   /**

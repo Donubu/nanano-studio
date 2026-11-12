@@ -4,7 +4,7 @@ import { memo, useCallback } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Loader2, AlertCircle, Brain, Sparkles, FileText } from "lucide-react";
 import { HANDLE_IDS, topHandleId, type TextNodeData } from "../lib/canvas-types";
-import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
+import { NodeStatus, NodeDeleteButton, AIBadge } from "./node-status";
 import { NodeLabel } from "./node-label";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
@@ -110,7 +110,7 @@ export const TextNodeComponent = memo(function TextNode({ id, data, selected }: 
         {nodeData.thinkingLevel && nodeData.thinkingLevel !== "none" && (
           <Brain className="h-4 w-4 text-purple-400 shrink-0" />
         )}
-        <StatusIndicator status={status} />
+        <NodeStatus nodeId={id} status={status} />
         <NodeDeleteButton nodeId={id} />
       </div>
 

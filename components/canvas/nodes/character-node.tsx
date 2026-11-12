@@ -8,7 +8,7 @@
 
 import { memo, useCallback, useMemo, useState } from "react";
 import { Handle, Position, useHandleConnections, useStore, type NodeProps } from "@xyflow/react";
-import { ArrowDown, ArrowUp, Check, ChevronRight, Copy, Dna, GripVertical, Images, Loader2, Palette, Plus, Trash2, UserRound, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronRight, Copy, Dna, GripVertical, Images, Link2, Loader2, Palette, Plus, Trash2, UserRound, Wand2 } from "lucide-react";
 import {
   HANDLE_IDS,
   MAX_CHARACTER_STAGES,
@@ -27,6 +27,7 @@ import { useNodeUpdate } from "../hooks/use-node-update";
 import { useCanvasContext } from "../canvas-context";
 import { thumbUrl } from "../lib/thumb";
 import { collapsedPos } from "./lod";
+import { LinkUsageRow, stageUsageText, useLinkUsage } from "./link-usage";
 
 function stopProp(e: React.SyntheticEvent) {
   e.stopPropagation();
@@ -97,6 +98,8 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
   ) as unknown as string;
   const stageLinks = useMemo(() => JSON.parse(stageLinksJson) as Record<string, string[]>, [stageLinksJson]);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  // Uso de cada etapa como vinculada en otros canvas (Acto 1, Acto 2…).
+  const linkedUsage = useLinkUsage(id);
   const removeStage = (stageId: string) => {
     setPendingDelete(null);
     update({ stages: stages.filter((st) => st.id !== stageId), ...(stages.some((st) => st.imageNodeId) ? { chainStale: true } : {}) });
@@ -232,6 +235,7 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
       <div
         className={`nowheel px-3 py-2 space-y-2 overflow-y-auto ${hasFixedSize ? "flex-1 min-h-0" : "max-h-[720px]"}`}
       >
+        <LinkUsageRow nodeId={id} kind="character" />
         <div className="space-y-0.5 text-[13px]">
           <div className={`flex items-center gap-1 ${styleConnections.length ? "text-blue-700 dark:text-blue-300" : "text-muted-foreground"}`}>
             <Palette className="h-4 w-4" />
@@ -303,6 +307,7 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
 
         <div className="space-y-2">
           {stages.map((stage, i) => {
+            const usedElsewhere = stageUsageText(linkedUsage, stage.id);
             const selectedCount = (stage.referenceImages ?? []).filter((r) => photos.some((p) => p.nodeId === r.nodeId && p.url === r.url)).length;
             return (
               <div
@@ -350,6 +355,11 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
                     placeholder="Nombre de la etapa (ej. 12 años)"
                     className="nodrag min-w-0 flex-1 bg-transparent text-[15px] font-medium outline-none placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
                   />
+                  {usedElsewhere && (
+                    <span title={`Usada como vinculada en: ${usedElsewhere}`} className="text-pink-400">
+                      <Link2 className="h-4 w-4" />
+                    </span>
+                  )}
                   {stage.imageNodeId && (
                     <span title="Ya tiene su nodo imagen" className="text-emerald-400">
                       <Check className="h-4 w-4" />
@@ -363,19 +373,27 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
                       <button type="button" onClick={() => move(i, 1)} disabled={i === stages.length - 1} title="Bajar" className="nodrag p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30">
                         <ArrowDown className="h-4 w-4" />
                       </button>
-                      <button type="button" onClick={() => (stageLinks[stage.id] ? setPendingDelete(stage.id) : removeStage(stage.id))} title="Borrar etapa" className="nodrag p-0.5 text-muted-foreground hover:text-red-400">
+                      <button type="button" onClick={() => (stageLinks[stage.id] || usedElsewhere ? setPendingDelete(stage.id) : removeStage(stage.id))} title="Borrar etapa" className="nodrag p-0.5 text-muted-foreground hover:text-red-400">
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </>
                   )}
                 </div>
-                {pendingDelete === stage.id && stageLinks[stage.id] && (
+                {pendingDelete === stage.id && (stageLinks[stage.id] || usedElsewhere) && (
                   <div className="space-y-1 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1.5 text-[13px] text-red-700 dark:text-red-300">
-                    <p>
-                      La imagen de esta etapa está conectada a: <strong>{stageLinks[stage.id].join(", ")}</strong>. Si
-                      borras la etapa, la imagen se conserva con esas conexiones, pero al volver a &quot;Generar etapas&quot;
-                      deja de recibir el ADN y el texto del Personaje.
-                    </p>
+                    {stageLinks[stage.id] && (
+                      <p>
+                        La imagen de esta etapa está conectada a: <strong>{stageLinks[stage.id].join(", ")}</strong>. Si
+                        borras la etapa, la imagen se conserva con esas conexiones, pero al volver a &quot;Generar etapas&quot;
+                        deja de recibir el ADN y el texto del Personaje.
+                      </p>
+                    )}
+                    {usedElsewhere && (
+                      <p>
+                        Se usa como vinculada en <strong>{usedElsewhere}</strong> (conexiones). Si la borras, esas
+                        conexiones dejan de entregar su imagen y su texto, y lo generado con ella queda desactualizado.
+                      </p>
+                    )}
                     <div className="flex gap-1.5">
                       <button type="button" onClick={() => removeStage(stage.id)} className="nodrag rounded bg-red-600 px-2 py-0.5 text-white hover:bg-red-500">
                         Borrar igual

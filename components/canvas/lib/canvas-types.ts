@@ -342,6 +342,20 @@ export interface LinkedSceneSnapshot {
 
 export type LinkedSnapshot = LinkedCharacterSnapshot | LinkedSceneSnapshot;
 
+export interface LinkUsageCanvas {
+  conversationId: number;
+  title: string;
+  /** Nodos vinculados a este original en ese canvas. */
+  linkedNodeIds: string[];
+  /** Conexiones que salen de esos vinculados. */
+  connections: number;
+  /** Conexiones por etapa elegida (id de etapa → cantidad). */
+  stageUses: Record<string, number>;
+}
+
+/** Dónde se usa cada Personaje / Escena de un canvas: id de nodo de origen → canvas que lo vinculan. */
+export type LinkUsage = Record<string, LinkUsageCanvas[]>;
+
 // ok = vista al día; deleted = el original se borró (queda la última vista);
 // forbidden = sin acceso al canvas de origen (otro proyecto o sin permiso).
 export type LinkState = "ok" | "deleted" | "forbidden";

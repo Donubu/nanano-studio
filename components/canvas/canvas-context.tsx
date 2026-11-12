@@ -3,6 +3,7 @@
 import { createContext, useContext } from "react";
 
 import type { CanvasGenerationConfig } from "./canvas-workspace";
+import type { LinkUsage } from "./lib/canvas-types";
 
 export interface CharacterMaterializeResult {
   summary: string;
@@ -27,6 +28,11 @@ interface CanvasContextValue {
   materializeCharacter: (characterId: string) => Promise<CharacterMaterializeResult>;
   // "Generar escenas" de un Guión (incremental: actualiza, no rehace).
   materializeScript: (scriptId: string, opts: ScriptMaterializeOptions) => Promise<{ summary: string; warnings: string[] }>;
+  // Dónde se usan los Personajes / Escenas de este canvas como vinculados en
+  // otros canvas del proyecto (id de nodo → canvas).
+  linkUsage: LinkUsage;
+  // Abre otro canvas en una pestaña y, si se indica, centra un nodo.
+  openCanvas?: (conversationId: number, focusNodeId?: string) => void;
 }
 
 export interface ScriptMaterializeOptions {
@@ -45,6 +51,7 @@ const CanvasContext = createContext<CanvasContextValue>({
   canEdit: true,
   materializeCharacter: async () => ({ summary: "", warnings: [], addedNodeIds: [], addedEdgeIds: [] }),
   materializeScript: async () => ({ summary: "", warnings: [] }),
+  linkUsage: {},
 });
 
 export const CanvasProvider = CanvasContext.Provider;
@@ -56,3 +63,10 @@ const SelectedNodesContext = createContext<ReadonlySet<string>>(new Set());
 export const SelectedNodesProvider = SelectedNodesContext.Provider;
 export const useSelectedNodeIds = () => useContext(SelectedNodesContext);
 export const useCanvasContext = () => useContext(CanvasContext);
+
+// Nodos desactualizados (id → aviso): un Personaje o Escena vinculada que les
+// entregó algo cambió desde que se generaron (lib/input-stamps.ts). Contexto
+// aparte: su valor solo cambia cuando cambia el conjunto de avisos.
+const StaleNodesContext = createContext<Readonly<Record<string, string>>>({});
+export const StaleNodesProvider = StaleNodesContext.Provider;
+export const useStaleMessage = (nodeId: string): string | undefined => useContext(StaleNodesContext)[nodeId];

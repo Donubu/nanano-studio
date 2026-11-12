@@ -9,7 +9,7 @@
 
 import { memo, useEffect, useState } from "react";
 import { Handle, Position, useReactFlow, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
-import { AlertTriangle, Dna, Film, Link2, Loader2, Palette, RefreshCw, UserRound } from "lucide-react";
+import { AlertTriangle, Dna, ExternalLink, Film, Link2, Loader2, Palette, RefreshCw, UserRound } from "lucide-react";
 import { HANDLE_IDS, type LinkedNodeData } from "../lib/canvas-types";
 import { computeLinkPatches } from "../lib/linked-sync";
 import { NodeDeleteButton } from "./node-status";
@@ -31,7 +31,7 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
   const snap = d.linkSnapshot?.kind === "character" ? d.linkSnapshot : null;
   const scene = d.linkSnapshot?.kind === "scene" ? d.linkSnapshot : null;
   const isScene = scene != null || d.sourceType === "scene";
-  const { conversationId, canEdit } = useCanvasContext();
+  const { conversationId, canEdit, openCanvas } = useCanvasContext();
   const { updateNodeData, updateNodeDataLocal } = useNodeUpdate();
   const { getNode } = useReactFlow();
   const [busy, setBusy] = useState(false);
@@ -84,6 +84,16 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
         </button>
+        {openCanvas && d.linkState !== "deleted" && d.linkState !== "forbidden" && (
+          <button
+            type="button"
+            onClick={() => openCanvas(d.sourceConversationId, d.sourceNodeId)}
+            title={`Abrir el original en "${d.sourceCanvasTitle || "su canvas"}"`}
+            className="nodrag p-0.5 text-muted-foreground hover:text-foreground"
+          >
+            <ExternalLink className="h-4 w-4" />
+          </button>
+        )}
         <NodeDeleteButton nodeId={id} />
       </div>
 

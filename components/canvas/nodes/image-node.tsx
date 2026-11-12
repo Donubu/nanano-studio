@@ -4,7 +4,7 @@ import { memo, useCallback, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { ImageIcon, Loader2, AlertCircle, ZoomIn } from "lucide-react";
 import { HANDLE_IDS, topHandleId, type ImageNodeData } from "../lib/canvas-types";
-import { StatusIndicator, NodeDeleteButton, AIBadge } from "./node-status";
+import { NodeStatus, NodeDeleteButton, AIBadge } from "./node-status";
 import { NodeLabel } from "./node-label";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
@@ -117,7 +117,7 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected }
           <span>{nodeData.aspectRatio}</span>
           <span>{nodeData.resolution}</span>
         </div>
-        <StatusIndicator status={status} />
+        <NodeStatus nodeId={id} status={status} />
         <NodeDeleteButton nodeId={id} />
       </div>
 

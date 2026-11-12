@@ -1676,6 +1676,24 @@ export function ChatInterface() {
         return null;
     };
 
+    // Canvas: abrir otro canvas desde un vinculado ("Abrir original", "Vinculado
+    // en…") y centrar ese nodo al cargar.
+    const [canvasFocus, setCanvasFocus] = useState<{ conversationId: number; nodeId: string } | null>(null);
+    const openCanvasById = async (conversationId: number, focusNodeId?: string) => {
+        let conv: Conversation | undefined =
+            conversations.find((c) => c.id === conversationId) ??
+            archivedConversations.find((c) => c.id === conversationId);
+        if (!conv) {
+            const res = await fetch(`/api/conversations/${conversationId}`).catch(() => null);
+            if (!res?.ok) return;
+            const json = await res.json();
+            delete json.messages;
+            conv = json as Conversation;
+        }
+        setCanvasFocus(focusNodeId ? { conversationId, nodeId: focusNodeId } : null);
+        openConversationInTab(conv);
+    };
+
     const openConversationInTab = (conversation: Conversation, skipNavigation = false) => {
         // Check if already open
         const existingTab = openTabs.find((t) => t.conversationId === conversation.id);
@@ -3917,6 +3935,9 @@ export function ChatInterface() {
                             conversationId={tabConversations[activeTabId]?.id || 0}
                             projectId={selectedProjectId!}
                             generationConfig={generationConfig}
+                            onOpenCanvas={openCanvasById}
+                            focusNodeId={canvasFocus && canvasFocus.conversationId === tabConversations[activeTabId]?.id ? canvasFocus.nodeId : undefined}
+                            onFocusHandled={() => setCanvasFocus(null)}
                             onConversationCreated={(newId: number) => {
                                 if (!activeTabId) return;
                                 setTabConversations((prev) => ({

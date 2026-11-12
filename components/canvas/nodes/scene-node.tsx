@@ -6,6 +6,7 @@ import { Film, ImageIcon, Video, Bot } from "lucide-react";
 import { HANDLE_IDS, topHandleId, type SceneNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
 import { ResizeHandle, nodeSizeClass, useHasFixedSize } from "./resize-handle";
+import { LinkUsageRow } from "./link-usage";
 
 const targetIconMap = {
   image: ImageIcon,
@@ -92,6 +93,9 @@ export const SceneNodeComponent = memo(function SceneNode({ id, data, selected }
 
       {/* Body: literal scene text (read-only) */}
       <div className="px-3 py-2">
+        <div className="mb-1.5 empty:hidden">
+          <LinkUsageRow nodeId={id} kind="scene" />
+        </div>
         <div className="nowheel bg-muted/40 rounded-md p-2 max-h-[180px] overflow-y-auto">
           <p className="text-[15px] whitespace-pre-wrap">{nodeData.text || "(sin texto)"}</p>
         </div>

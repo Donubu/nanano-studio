@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ImageIcon, Video, MessageSquare, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History, Eye, BookmarkPlus, LayoutTemplate, UserRound, Link2, Magnet, Grid3x3, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
+import { ImageIcon, Video, MessageSquare, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History, Eye, BookmarkPlus, LayoutTemplate, UserRound, Link2, Magnet, Grid3x3, ChevronsDownUp, ChevronsUpDown, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CanvasNodeType } from "./lib/canvas-types";
 
@@ -15,6 +15,9 @@ interface CanvasToolbarProps {
   onExpandAll: () => void;
   canCollapseAll: boolean;
   canExpandAll: boolean;
+  // Generaciones desactualizadas (un Personaje o Escena vinculada cambió).
+  staleCount?: number;
+  onShowStale?: () => void;
   onSaveTemplate: () => void;
   onOpenTemplates: () => void;
   onOpenLinkPicker: () => void;
@@ -65,6 +68,8 @@ export function CanvasToolbar({
   onExpandAll,
   canCollapseAll,
   canExpandAll,
+  staleCount = 0,
+  onShowStale,
   onSaveTemplate,
   onOpenTemplates,
   onOpenLinkPicker,
@@ -243,6 +248,19 @@ export function CanvasToolbar({
           <ChevronsUpDown className="h-3.5 w-3.5" />
           Expandir todos
         </Button>
+
+        {staleCount > 0 && onShowStale && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onShowStale}
+            className="gap-1.5 text-xs text-amber-700 dark:text-amber-300 hover:text-amber-700 dark:hover:text-amber-300"
+            title="Generaciones hechas con una versión anterior de un Personaje o Escena vinculada. Clic para seleccionarlas y verlas."
+          >
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {staleCount} {staleCount === 1 ? "desactualizado" : "desactualizados"}
+          </Button>
+        )}
 
         <div className="w-px h-5 bg-border" />
 
