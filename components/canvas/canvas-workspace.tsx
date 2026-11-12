@@ -1117,14 +1117,14 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
       const convId = await ensureConversation();
       const [r] = await fetchLinkResolutions(convId, [source]);
       if (!r || r.state !== "ok" || !r.snapshot) {
-        throw new Error(r?.state === "forbidden" ? "No tienes acceso a ese canvas." : "Ese Personaje ya no existe.");
+        throw new Error(r?.state === "forbidden" ? "No tienes acceso a ese canvas." : "Ese nodo ya no existe.");
       }
       takeSnapshot();
       const id = newCanvasNodeId();
       const flowPos = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
       const data: LinkedNodeData = {
         ...(getDefaultNodeData("linked") as LinkedNodeData),
-        sourceType: "character",
+        sourceType: r.snapshot.kind,
         sourceConversationId: source.conversationId,
         sourceNodeId: source.nodeId,
         sourceCanvasTitle: r.sourceCanvasTitle,

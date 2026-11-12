@@ -283,7 +283,7 @@ export const MAX_CHARACTER_STAGES = 20;
 // proyecto. El servidor arma una vista resuelta (todo lo que el nodo necesita
 // de su canvas: estilo conectado, fotos, imágenes de etapas) y queda guardada
 // en `linkSnapshot`; se actualiza al abrir el canvas y antes de ejecutar.
-export type LinkedSourceType = "character";
+export type LinkedSourceType = "character" | "scene";
 
 export interface LinkedCharacterStage {
   id: string;
@@ -303,7 +303,29 @@ export interface LinkedCharacterSnapshot {
   stages: LinkedCharacterStage[];
 }
 
-export type LinkedSnapshot = LinkedCharacterSnapshot;
+// Ingredientes del contexto de guion de una Escena (ver lib/scene-context.ts).
+export interface SceneContextInputs {
+  sceneIndex: number;
+  totalScenes: number;
+  generalInfo?: ScriptGeneralInfo;
+  // Escenas anteriores de la cadena, de la más antigua a la más reciente.
+  previousScenes: { sceneIndex: number; text: string }[];
+  // Contenido del Params Escena conectado a la escena (estilo / técnica).
+  sceneParamsContent: string | null;
+  // Reglas conectadas al Guión (entrada de reglas).
+  rulesText: string | null;
+}
+
+export interface LinkedSceneSnapshot {
+  kind: "scene";
+  label: string;
+  // Nombre del Guión de origen (para mostrar).
+  scriptLabel: string;
+  text: string;
+  context: SceneContextInputs;
+}
+
+export type LinkedSnapshot = LinkedCharacterSnapshot | LinkedSceneSnapshot;
 
 // ok = vista al día; deleted = el original se borró (queda la última vista);
 // forbidden = sin acceso al canvas de origen (otro proyecto o sin permiso).
@@ -373,6 +395,9 @@ export const HANDLE_IDS = {
   // Imagen de UNA etapa del Personaje (la conexión elige cuál, ver
   // CharacterNodeData.imageOutputs).
   OUTPUT_CHARACTER_IMAGE: "output-character-image",
+  // Personaje vinculado: ADN y estilo por separado (texto).
+  OUTPUT_CHARACTER_DNA: "output-character-dna",
+  OUTPUT_CHARACTER_STYLE: "output-character-style",
 } as const;
 
 // Input handles are rendered twice: once on the left edge and once on the top

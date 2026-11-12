@@ -1,14 +1,15 @@
 "use client";
 
-// Nodo vinculado: un Personaje que vive en otro canvas del mismo proyecto,
-// solo lectura. Muestra la vista guardada (linkSnapshot) y entrega PROMPT
-// (ADN + estilo + etapa) e IMAGEN (la imagen de una etapa); la etapa se elige
-// en cada conexión. Se actualiza solo al abrir el canvas y antes de ejecutar,
-// o con el botón.
+// Nodo vinculado: un Personaje o una Escena que vive en otro canvas del mismo
+// proyecto, solo lectura. Muestra la vista guardada (linkSnapshot).
+// Personaje: PROMPT (ADN + estilo + etapa), IMAGEN (imagen de una etapa), ADN
+// y ESTILO; la etapa se elige en cada conexión. Escena: PROMPT (su texto, con
+// el contexto del guion al ejecutar). Se actualiza al abrir el canvas, antes
+// de ejecutar y con el botón.
 
 import { memo, useState } from "react";
 import { Handle, Position, useReactFlow, type NodeProps } from "@xyflow/react";
-import { AlertTriangle, Dna, Link2, Loader2, Palette, RefreshCw, UserRound } from "lucide-react";
+import { AlertTriangle, Dna, Film, Link2, Loader2, Palette, RefreshCw, UserRound } from "lucide-react";
 import { HANDLE_IDS, type LinkedNodeData } from "../lib/canvas-types";
 import { computeLinkPatches } from "../lib/linked-sync";
 import { NodeDeleteButton } from "./node-status";
@@ -19,6 +20,8 @@ import { thumbUrl } from "../lib/thumb";
 export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected }: NodeProps) {
   const d = data as unknown as LinkedNodeData;
   const snap = d.linkSnapshot?.kind === "character" ? d.linkSnapshot : null;
+  const scene = d.linkSnapshot?.kind === "scene" ? d.linkSnapshot : null;
+  const isScene = scene != null || d.sourceType === "scene";
   const { conversationId, canEdit } = useCanvasContext();
   const { updateNodeData, updateNodeDataLocal } = useNodeUpdate();
   const { getNode } = useReactFlow();
@@ -50,12 +53,12 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
 
   return (
     <div
-      className={`group bg-card rounded-xl border-2 border-dashed border-pink-400/60 ${selected ? "ring-2 ring-pink-400/40" : ""} transition-all min-w-[300px] max-w-[380px]`}
+      className={`group bg-card rounded-xl border-2 border-dashed ${isScene ? "border-violet-400/60" : "border-pink-400/60"} ${selected ? (isScene ? "ring-2 ring-violet-400/40" : "ring-2 ring-pink-400/40") : ""} transition-all min-w-[300px] max-w-[380px]`}
     >
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
-        <UserRound className="h-[18px] w-[18px] text-pink-400 shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-[15px] font-semibold" title={snap?.label || d.label}>
-          {snap?.label || d.label || "Personaje"}
+        {isScene ? <Film className="h-[18px] w-[18px] text-violet-400 shrink-0" /> : <UserRound className="h-[18px] w-[18px] text-pink-400 shrink-0" />}
+        <span className="min-w-0 flex-1 truncate text-[15px] font-semibold" title={d.linkSnapshot?.label || d.label}>
+          {scene ? `Escena ${scene.context.sceneIndex}/${scene.context.totalScenes}` : snap?.label || d.label || "Personaje"}
         </span>
         <span
           className="flex shrink-0 items-center gap-0.5 rounded bg-pink-400/15 px-1 py-0.5 text-[12px] text-pink-700 dark:text-pink-300"
@@ -80,7 +83,11 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
         <div className="text-[12px] text-muted-foreground truncate" title={d.sourceCanvasTitle}>
           Desde <span className="font-medium text-foreground">{d.sourceCanvasTitle || `canvas ${d.sourceConversationId}`}</span>
           {" · "}
-          {snap ? `${snap.stages.length} ${snap.stages.length === 1 ? "etapa" : "etapas"}, ${withImage} con imagen` : "sin datos"}
+          {scene
+            ? scene.scriptLabel
+            : snap
+              ? `${snap.stages.length} ${snap.stages.length === 1 ? "etapa" : "etapas"}, ${withImage} con imagen`
+              : "sin datos"}
         </div>
 
         {state !== "ok" && (
@@ -129,33 +136,89 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
             </div>
           </>
         )}
+        {scene && (
+          <>
+            <p className="nowheel max-h-[220px] overflow-y-auto whitespace-pre-wrap text-[14px] text-foreground/90">{scene.text}</p>
+            {scene.context.sceneParamsContent && (
+              <div className="flex items-start gap-1 text-[13px] text-muted-foreground" title="Params Escena conectado a la escena original">
+                <Palette className="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
+                <span className="line-clamp-2">{scene.context.sceneParamsContent}</span>
+              </div>
+            )}
+            <div className="text-[12px] text-muted-foreground">
+              Lleva el contexto del guion: {scene.context.previousScenes.length} escena(s) anterior(es)
+              {scene.context.rulesText ? ", reglas" : ""}
+              {scene.context.sceneParamsContent ? ", estilo" : ""}.
+            </div>
+          </>
+        )}
         <p className="text-[12px] text-muted-foreground">
-          Conecta PROMPT o IMAGEN y elige la etapa en la conexión. Para cambiarlo, edítalo en su canvas.
+          {isScene
+            ? "Conecta PROMPT a una imagen, video o texto. Para cambiarla, edítala en su canvas."
+            : "PROMPT e IMAGEN eligen la etapa en la conexión; ADN y ESTILO van por separado. Para cambiarlo, edítalo en su canvas."}
         </p>
       </div>
 
-      <Handle
-        type="source"
-        position={Position.Right}
-        id={HANDLE_IDS.OUTPUT_CHARACTER}
-        className="!w-3 !h-3 !bg-pink-400 !border-2 !border-background"
-        style={{ top: 60 }}
-        title="Prompt: ADN + estilo + la etapa que elijas en la conexión"
-      />
-      <span className="pointer-events-none absolute right-2 top-[52px] text-[11px] font-bold text-pink-500 dark:text-pink-300">
-        PROMPT
-      </span>
-      <Handle
-        type="source"
-        position={Position.Right}
-        id={HANDLE_IDS.OUTPUT_CHARACTER_IMAGE}
-        className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background"
-        style={{ top: 88 }}
-        title="Imagen de una etapa (eliges cuál en la conexión)"
-      />
-      <span className="pointer-events-none absolute right-2 top-[80px] text-[11px] font-bold text-purple-500 dark:text-purple-300">
-        IMAGEN
-      </span>
+      {isScene ? (
+        <>
+          <Handle
+            type="source"
+            position={Position.Right}
+            id={HANDLE_IDS.OUTPUT_TEXT}
+            className="!w-3 !h-3 !bg-violet-400 !border-2 !border-background"
+            style={{ top: 60 }}
+            title="Prompt: el texto de la escena (con el contexto del guion al ejecutar)"
+          />
+          <OutputLabel top={52} className="text-violet-500 dark:text-violet-300">PROMPT</OutputLabel>
+        </>
+      ) : (
+        <>
+          <Handle
+            type="source"
+            position={Position.Right}
+            id={HANDLE_IDS.OUTPUT_CHARACTER}
+            className="!w-3 !h-3 !bg-pink-400 !border-2 !border-background"
+            style={{ top: 60 }}
+            title="Prompt: ADN + estilo + la etapa que elijas en la conexión"
+          />
+          <OutputLabel top={52} className="text-pink-500 dark:text-pink-300">PROMPT</OutputLabel>
+          <Handle
+            type="source"
+            position={Position.Right}
+            id={HANDLE_IDS.OUTPUT_CHARACTER_IMAGE}
+            className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background"
+            style={{ top: 88 }}
+            title="Imagen de una etapa (eliges cuál en la conexión)"
+          />
+          <OutputLabel top={80} className="text-purple-500 dark:text-purple-300">IMAGEN</OutputLabel>
+          <Handle
+            type="source"
+            position={Position.Right}
+            id={HANDLE_IDS.OUTPUT_CHARACTER_DNA}
+            className="!w-3 !h-3 !bg-pink-300 !border-2 !border-background"
+            style={{ top: 116 }}
+            title="Solo el ADN (rasgos permanentes), como texto"
+          />
+          <OutputLabel top={108} className="text-pink-500 dark:text-pink-300">ADN</OutputLabel>
+          <Handle
+            type="source"
+            position={Position.Right}
+            id={HANDLE_IDS.OUTPUT_CHARACTER_STYLE}
+            className="!w-3 !h-3 !bg-blue-400 !border-2 !border-background"
+            style={{ top: 144 }}
+            title="Solo el estilo global, como texto (también sirve de estilo para un Personaje de este canvas)"
+          />
+          <OutputLabel top={136} className="text-blue-500 dark:text-blue-300">ESTILO</OutputLabel>
+        </>
+      )}
     </div>
   );
 });
+
+function OutputLabel({ top, className, children }: { top: number; className: string; children: string }) {
+  return (
+    <span className={`pointer-events-none absolute right-2 text-[11px] font-bold ${className}`} style={{ top }}>
+      {children}
+    </span>
+  );
+}

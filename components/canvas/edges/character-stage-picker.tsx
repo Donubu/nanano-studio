@@ -46,7 +46,8 @@ export const CharacterStagePicker = memo(function CharacterStagePicker({
           // Vinculado: etapas de la vista guardada (sin ciclos posibles: sus
           // imágenes no son nodos de este canvas).
           const ld = node.data as unknown as LinkedNodeData;
-          stages = (ld.linkSnapshot?.stages ?? []).map((st, i) => ({
+          const snap = ld.linkSnapshot?.kind === "character" ? ld.linkSnapshot : null;
+          stages = (snap?.stages ?? []).map((st, i) => ({
             id: st.id,
             label: st.name.trim() || `Etapa ${i + 1}`,
             hasImage: !!st.imageUrl,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useHandleConnections, useNodeId, useReactFlow } from "@xyflow/react";
-import { HANDLE_IDS, type CharacterNodeData, type SceneNodeData } from "../lib/canvas-types";
+import { HANDLE_IDS, type CharacterNodeData, type LinkedNodeData, type SceneNodeData } from "../lib/canvas-types";
 import { findStageForImage } from "../lib/character";
 
 /**
@@ -36,6 +36,12 @@ export function useUpstreamPromptLabel(): string | null {
       return stage
         ? `${data.label || "Personaje"} · etapa "${stage.name}"`
         : `ADN y estilo de ${data.label || "Personaje"}`;
+    }
+    case "linked": {
+      const d = sourceNode.data as unknown as LinkedNodeData;
+      const snap = d.linkSnapshot;
+      if (snap?.kind === "scene") return `Escena ${snap.context.sceneIndex} vinculada de "${d.sourceCanvasTitle ?? "otro canvas"}"`;
+      return `${snap?.label || d.label || "Personaje"} (vinculado) conectado como prompt`;
     }
     case "text":
       return "Prompt generado por nodo Texto";

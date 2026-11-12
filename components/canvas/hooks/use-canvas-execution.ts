@@ -7,7 +7,8 @@ import { HANDLE_IDS, baseHandleId } from "../lib/canvas-types";
 import { topologicalSort, getDirectInputs, getDescendantNodes } from "../lib/topological-sort";
 import { OWN_REFERENCE_PRIORITY, composeCharacterPrompt, findStageForImage, resolveCharacterImageEdges, stageReferenceUrls } from "../lib/character";
 import type { CanvasEdge, LinkedNodeData } from "../lib/canvas-types";
-import { linkedImageForEdge, linkedPromptForEdge, linkedStageForEdge } from "../lib/linked";
+import { linkedImageForEdge, linkedStageForEdge, linkedTextForHandle, textOutputOf } from "../lib/linked";
+import { resolveScriptContext } from "../lib/scene-context";
 import type { CanvasGenerationConfig } from "../canvas-workspace";
 
 type SetNodesFn = (updater: (nds: Node[]) => Node[]) => void;
@@ -215,7 +216,7 @@ function resolveNodeInputs(
         const styleNode = styleInput ? nodes.find((n) => n.id === styleInput.sourceNodeId) : undefined;
         const composed = composeCharacterPrompt({
           dna: charData.dna,
-          style: styleNode ? plainTextOutput(styleNode) : null,
+          style: styleNode ? (styleNode.type === "linked" ? textOutputOf(styleNode, styleInput?.sourceHandle) : plainTextOutput(styleNode)) : null,
           stage: findStageForImage(charData, nodeId),
           hasReferences:
             characterStagePhotos(sourceNode, nodeId, nodes, edges).length > 0 ||
@@ -223,13 +224,14 @@ function resolveNodeInputs(
         });
         return composed || null;
       }
-      if (sourceNode.type === "linked" && baseHandleId(input.sourceHandle) === HANDLE_IDS.OUTPUT_CHARACTER) {
-        // Personaje de otro canvas: ADN + estilo + la etapa elegida en ESTA
-        // conexión, desde la vista guardada en el nodo.
+      if (sourceNode.type === "linked") {
+        // Vinculado de otro canvas (vista guardada en el nodo): Personaje →
+        // PROMPT con la etapa de ESTA conexión, ADN o Estilo; Escena → texto.
         const linkData = sourceData as LinkedNodeData;
         const stage = linkedStageForEdge(linkData, input.edgeId);
-        return linkedPromptForEdge(
+        return linkedTextForHandle(
           linkData,
+          input.sourceHandle,
           input.edgeId,
           (stage?.photoUrls.length ?? 0) > 0 || inputs.some((i) => i.targetHandle === HANDLE_IDS.INPUT_REFERENCE),
         ) || null;
@@ -406,156 +408,6 @@ function filterSceneTextForVisuals(text: string): string {
   return result || text;
 }
 
-/**
- * If the node receives input from a Scene on INPUT_PROMPT, build the full
- * script context (sent as systemInstruction to the destination model):
- *   - generalInfo of the script
- *   - literal text of all upstream scenes (chained via INPUT_SCRIPT_CHAIN)
- *   - Params Escena content (style/visual/technique) connected to the current Scene
- *   - the task instruction
- * The Scene's own text and the destination node's prompt remain in the
- * primary prompt — only narrative/style context lives here.
- * Returns null when there's no scene in the prompt path.
- */
-function resolveScriptContext(
-  nodeId: string,
-  nodes: Node[],
-  edges: CanvasEdge[]
-): string | null {
-  const inputs = getDirectInputs(nodeId, edges);
-  const promptInput = inputs.find((i) => i.targetHandle === HANDLE_IDS.INPUT_PROMPT);
-  if (!promptInput) return null;
-  const sceneNode = nodes.find((n) => n.id === promptInput.sourceNodeId);
-  if (!sceneNode || sceneNode.type !== "scene") return null;
-  const sceneData = sceneNode.data as SceneNodeData;
-
-  // Walk upstream through the chain to collect previous scenes (oldest first)
-  // and to identify the originating Script node so we can read its connected
-  // rules input.
-  const previousScenes: SceneNodeData[] = [];
-  let scriptNodeIdFound: string | null = null;
-  let cursor = sceneNode.id;
-  const visited = new Set<string>([cursor]);
-  while (true) {
-    const upChain = edges.find(
-      (e) => e.target === cursor && baseHandleId(e.targetHandle) === HANDLE_IDS.INPUT_SCRIPT_CHAIN
-    );
-    if (!upChain) break;
-    if (visited.has(upChain.source)) break;
-    visited.add(upChain.source);
-    const prev = nodes.find((n) => n.id === upChain.source);
-    if (!prev) break;
-    if (prev.type === "scene") {
-      previousScenes.unshift(prev.data as SceneNodeData);
-      cursor = prev.id;
-      continue;
-    }
-    if (prev.type === "script") {
-      scriptNodeIdFound = prev.id;
-    }
-    break;
-  }
-  // Fallback: scene data carries the originating scriptNodeId in case the
-  // chain is broken (manual disconnects).
-  if (!scriptNodeIdFound && sceneData.scriptNodeId) {
-    scriptNodeIdFound = sceneData.scriptNodeId;
-  }
-
-  // Look up extra rules text wired to the Script's INPUT_RULES handle. Source
-  // can be static-text (content), text (outputText after running), or
-  // text-practicante (outputText after running).
-  let rulesText: string | null = null;
-  if (scriptNodeIdFound) {
-    const rulesEdge = edges.find(
-      (e) => e.target === scriptNodeIdFound && baseHandleId(e.targetHandle) === HANDLE_IDS.INPUT_RULES
-    );
-    if (rulesEdge) {
-      const rulesNode = nodes.find((n) => n.id === rulesEdge.source);
-      if (rulesNode) {
-        let raw: string | undefined;
-        if (rulesNode.type === "static-text") {
-          raw = (rulesNode.data as StaticTextNodeData).content;
-        } else if (rulesNode.type === "text") {
-          raw = (rulesNode.data as TextNodeData).outputText;
-        } else if (rulesNode.type === "text-practicante") {
-          raw = (rulesNode.data as TextPracticanteNodeData).outputText;
-        }
-        if (raw && raw.trim()) rulesText = raw.trim();
-      }
-    }
-  }
-
-  // Look up Params Escena connected to the current Scene
-  let sceneParamsContent: string | null = null;
-  const paramsEdge = edges.find(
-    (e) => e.target === sceneNode.id && baseHandleId(e.targetHandle) === HANDLE_IDS.INPUT_SCENE_PARAMS
-  );
-  if (paramsEdge) {
-    const paramsNode = nodes.find((n) => n.id === paramsEdge.source);
-    if (paramsNode && paramsNode.type === "params-scene") {
-      const c = (paramsNode.data as ParamsSceneNodeData).content?.trim();
-      if (c && c.length > 0) sceneParamsContent = c;
-    }
-  }
-
-  const parts: string[] = [];
-  const generalInfo = sceneData.generalInfo;
-  if (generalInfo) {
-    const lines: string[] = ["[Información general del guion]"];
-    if (generalInfo.synopsis) lines.push(`Sinopsis: ${generalInfo.synopsis}`);
-    if (generalInfo.tone) lines.push(`Tono: ${generalInfo.tone}`);
-    if (generalInfo.genre) lines.push(`Género: ${generalInfo.genre}`);
-    if (generalInfo.visualStyle) lines.push(`Estilo visual: ${generalInfo.visualStyle}`);
-    if (generalInfo.characters?.length) {
-      lines.push("Personajes:");
-      for (const c of generalInfo.characters) lines.push(`- ${c.name}: ${c.description}`);
-    }
-    if (generalInfo.settings?.length) {
-      lines.push("Locaciones:");
-      for (const s of generalInfo.settings) lines.push(`- ${s.name}: ${s.description}`);
-    }
-    parts.push(lines.join("\n"));
-  }
-
-  if (previousScenes.length > 0) {
-    const lines: string[] = ["[Escenas anteriores (texto íntegro)]"];
-    for (const s of previousScenes) {
-      lines.push(`--- Escena ${s.sceneIndex} ---`);
-      lines.push(s.text);
-    }
-    parts.push(lines.join("\n"));
-  }
-
-  if (sceneParamsContent) {
-    parts.push(`[Estilo / Visual / Técnica]\n${sceneParamsContent}`);
-  }
-
-  if (rulesText) {
-    parts.push(
-      `[Reglas adicionales del usuario]\nRespeta estrictamente las siguientes indicaciones para todas las escenas. Tienen prioridad sobre interpretaciones libres del prompt:\n${rulesText}`
-    );
-  }
-
-  // Always-on guardrails for downstream visual generation.
-  parts.push(
-    `[Reglas obligatorias para la imagen/video generado]
-- REGLA DE ORO: NUNCA generes subtítulos, captions, leyendas, texto narrativo ni cartelas dentro de la imagen o frame del video. La salida es visualmente pura, sin texto sobre-impreso.
-- El prompt principal puede contener etiquetas tipo ACCIÓN, VO, DIÁLOGO, S.I, ESCENA. NO interpretes ningún texto que NO esté marcado como "Texto sobre-impreso" o "S.I" como algo a renderizar visualmente.
-- VO y DIÁLOGO son narración hablada FUERA de la imagen. JAMÁS los pongas como texto en pantalla.
-- Sólo es permitido renderizar exactamente UN bloque de texto sobre-impreso, y SÓLO si el prompt lo declara explícitamente con "S.I:", "SUPER:" o "Texto sobre-impreso". Una línea, contenido literal, sin agregados.
-- Si el prompt no menciona ningún S.I, la imagen va SIN ningún texto en pantalla. Cero. Ni firmas, ni marcas de agua, ni decoración tipográfica.
-- Si por límite del modelo no puedes evitar texto, prefiere imagen sin texto a imagen con texto inventado.`
-  );
-
-  // If we got nothing useful aside from the rules, don't inject empty context.
-  if (parts.length === 1) return null;
-
-  parts.push(
-    `[Tu tarea]\nVas a generar contenido para la Escena ${sceneData.sceneIndex} de ${sceneData.totalScenes}. El prompt que recibes es el texto literal de esa escena (más el prompt local del nodo si lo hay). Aplica la información general, las escenas anteriores y las directrices de estilo como contexto — no las repitas en la salida. Respeta SIEMPRE las reglas obligatorias de arriba.`
-  );
-
-  return parts.join("\n\n");
-}
 
 /**
  * Check if all upstream dependencies are completed.

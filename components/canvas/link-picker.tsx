@@ -1,11 +1,11 @@
 "use client";
 
-// "Vincular de otro canvas": lista los Personajes de los otros canvas del
-// mismo proyecto. Elegir uno crea en este canvas un nodo vinculado (solo
-// lectura) que sigue al original.
+// "Vincular de otro canvas": lista los Personajes y las Escenas de los otros
+// canvas del mismo proyecto. Elegir uno crea en este canvas un nodo vinculado
+// (solo lectura) que sigue al original.
 
 import { useEffect, useState } from "react";
-import { Link2, Loader2, UserRound, X } from "lucide-react";
+import { Film, Link2, Loader2, UserRound, X } from "lucide-react";
 import { thumbUrl } from "./lib/thumb";
 
 interface LinkableCharacter {
@@ -15,10 +15,20 @@ interface LinkableCharacter {
   thumbUrl: string | null;
 }
 
+interface LinkableScene {
+  nodeId: string;
+  label: string;
+  sceneIndex: number;
+  totalScenes: number;
+  scriptLabel: string;
+  excerpt: string;
+}
+
 interface LinkableCanvas {
   conversationId: number;
   title: string;
   characters: LinkableCharacter[];
+  scenes: LinkableScene[];
 }
 
 interface LinkPickerProps {
@@ -86,12 +96,12 @@ export function LinkPicker({ isOpen, conversationId, onClose, onLink }: LinkPick
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Cargando personajes...
+              Cargando personajes y escenas...
             </div>
           ) : canvases && canvases.length === 0 ? (
             <div className="text-center py-10 text-sm text-muted-foreground">
               <UserRound className="h-8 w-8 mx-auto mb-2 opacity-40" />
-              No hay Personajes en otros canvas de este proyecto.
+              No hay Personajes ni Escenas en otros canvas de este proyecto.
             </div>
           ) : (
             canvases?.map((c) => (
@@ -123,6 +133,34 @@ export function LinkPicker({ isOpen, conversationId, onClose, onLink }: LinkPick
                       </span>
                       {linking === key && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
                     </button>
+                  );
+                })}
+                {/* Escenas, agrupadas por Guión. */}
+                {c.scenes.map((sc, i) => {
+                  const key = `${c.conversationId}|${sc.nodeId}`;
+                  const newScript = i === 0 || c.scenes[i - 1].scriptLabel !== sc.scriptLabel;
+                  return (
+                    <div key={key}>
+                      {newScript && <div className="mt-2 mb-1 text-[11px] uppercase tracking-wider text-muted-foreground">{sc.scriptLabel}</div>}
+                      <button
+                        type="button"
+                        disabled={!!linking}
+                        onClick={() => handleLink(c.conversationId, sc.nodeId)}
+                        className="w-full flex items-center gap-3 border border-border rounded-lg p-2 text-left hover:border-primary/50 hover:bg-accent/50 transition-colors disabled:opacity-60"
+                      >
+                        <div className="h-10 w-10 rounded bg-violet-400/10 flex items-center justify-center shrink-0">
+                          <Film className="h-5 w-5 text-violet-400" />
+                        </div>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-medium truncate">
+                            Escena {sc.sceneIndex}/{sc.totalScenes}
+                            {sc.label && !/^Escena \d+$/.test(sc.label) ? ` · ${sc.label}` : ""}
+                          </span>
+                          <span className="block text-xs text-muted-foreground truncate">{sc.excerpt}</span>
+                        </span>
+                        {linking === key && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                      </button>
+                    </div>
                   );
                 })}
               </div>

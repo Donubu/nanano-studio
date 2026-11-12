@@ -3,6 +3,8 @@
 // conexión (en la ejecución y en la UI). Puro: sin React, fetch ni BD.
 
 import {
+  HANDLE_IDS,
+  baseHandleId,
   type CharacterNodeData,
   type LinkedCharacterSnapshot,
   type LinkedCharacterStage,
@@ -12,10 +14,14 @@ import { composeCharacterPrompt, stageReferenceUrls } from "./character";
 
 type NodeLike = { id: string; type?: string; data: Record<string, unknown> };
 
-/** Texto que entrega un nodo de texto conectado (estático, IA o Practicante). */
-export function textOutputOf(node: Pick<NodeLike, "type" | "data"> | null | undefined): string {
+/**
+ * Texto que entrega un nodo de texto conectado (estático, IA o Practicante),
+ * o un vinculado por su salida ADN / Estilo / texto de escena (`sourceHandle`).
+ */
+export function textOutputOf(node: Pick<NodeLike, "type" | "data"> | null | undefined, sourceHandle?: string | null): string {
   if (!node) return "";
   const d = node.data;
+  if (node.type === "linked") return linkedTextForHandle(d as unknown as LinkedNodeData, sourceHandle, "", false);
   if (node.type === "static-text") return typeof d.content === "string" ? d.content : "";
   if ((node.type === "text" || node.type === "text-practicante") && d.status === "completed") {
     return typeof d.outputText === "string" ? d.outputText : "";
@@ -31,6 +37,8 @@ export function textOutputOf(node: Pick<NodeLike, "type" | "data"> | null | unde
 export function buildCharacterSnapshot(params: {
   character: NodeLike;
   styleNode?: NodeLike | null;
+  // Salida del nodo de estilo (importa si es un vinculado: ADN/Estilo).
+  styleHandle?: string | null;
   galleries: NodeLike[];
   stageImages: NodeLike[];
 }): LinkedCharacterSnapshot {
@@ -51,7 +59,7 @@ export function buildCharacterSnapshot(params: {
     kind: "character",
     label: (typeof data.label === "string" && data.label.trim()) || "Personaje",
     dna: data.dna ?? "",
-    style: textOutputOf(params.styleNode),
+    style: textOutputOf(params.styleNode, params.styleHandle),
     stages,
   };
 }
@@ -82,4 +90,25 @@ export function linkedPromptForEdge(data: LinkedNodeData, edgeId: string, hasRef
     stage: stage ? { id: stage.id, name: stage.name, text: stage.text } : null,
     hasReferences,
   });
+}
+
+/**
+ * Texto que entrega un nodo vinculado por una de sus salidas:
+ * Personaje → PROMPT (ADN + estilo + etapa de la conexión), ADN o Estilo;
+ * Escena → su texto.
+ */
+export function linkedTextForHandle(
+  data: LinkedNodeData,
+  sourceHandle: string | null | undefined,
+  edgeId: string,
+  hasReferences: boolean,
+): string {
+  const snap = data.linkSnapshot;
+  if (!snap) return "";
+  const handle = baseHandleId(sourceHandle);
+  if (snap.kind === "scene") return handle === HANDLE_IDS.OUTPUT_TEXT ? snap.text : "";
+  if (handle === HANDLE_IDS.OUTPUT_CHARACTER) return linkedPromptForEdge(data, edgeId, hasReferences);
+  if (handle === HANDLE_IDS.OUTPUT_CHARACTER_DNA) return snap.dna;
+  if (handle === HANDLE_IDS.OUTPUT_CHARACTER_STYLE) return snap.style;
+  return "";
 }

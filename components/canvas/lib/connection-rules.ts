@@ -130,6 +130,18 @@ export const VALID_CONNECTIONS: ConnectionRule[] = [
   { sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE, targetType: "video", targetHandle: HANDLE_IDS.INPUT_REFERENCE },
   { sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE, targetType: "text", targetHandle: HANDLE_IDS.INPUT_MEDIA },
   { sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE, targetType: "text-practicante", targetHandle: HANDLE_IDS.INPUT_MEDIA },
+  // ADN y Estilo por separado: como un texto fijo (el estilo también puede
+  // ser el estilo global de un Personaje de este canvas).
+  ...[HANDLE_IDS.OUTPUT_CHARACTER_DNA, HANDLE_IDS.OUTPUT_CHARACTER_STYLE].flatMap((h) =>
+    (["image", "video", "text", "text-practicante"] as const).map((t) => ({
+      sourceType: "linked", sourceHandle: h, targetType: t, targetHandle: HANDLE_IDS.INPUT_PROMPT,
+    })),
+  ),
+  { sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_STYLE, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_STYLE },
+  // Escena vinculada: su texto como prompt, con el contexto del guion.
+  ...(["image", "video", "text", "text-practicante"] as const).map((t) => ({
+    sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: t, targetHandle: HANDLE_IDS.INPUT_PROMPT,
+  })),
 ];
 
 /**

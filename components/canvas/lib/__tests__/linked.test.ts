@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { HANDLE_IDS, type LinkedNodeData } from "../canvas-types";
-import { buildCharacterSnapshot, linkedImageForEdge, linkedPromptForEdge, linkedStageForEdge, textOutputOf } from "../linked";
+import { buildCharacterSnapshot, linkedImageForEdge, linkedPromptForEdge, linkedStageForEdge, linkedTextForHandle, textOutputOf } from "../linked";
 import { linkPatch } from "../linked-sync";
 import { resolveCharacterImageEdges } from "../character";
 
@@ -82,6 +82,19 @@ describe("lectura por conexión", () => {
     const noStage = linkedPromptForEdge(data, "otra", false);
     expect(noStage).toContain("pelo rizado");
     expect(noStage).not.toContain("Etapa:");
+  });
+
+  it("ADN y Estilo por separado; un vinculado como estilo entrega su estilo", () => {
+    expect(linkedTextForHandle(data, HANDLE_IDS.OUTPUT_CHARACTER_DNA, "e1", false)).toBe("pelo rizado");
+    expect(linkedTextForHandle(data, HANDLE_IDS.OUTPUT_CHARACTER_STYLE, "e1", false)).toBe("acuarela");
+    expect(linkedTextForHandle(data, HANDLE_IDS.OUTPUT_TEXT, "e1", false)).toBe("");
+    expect(textOutputOf({ type: "linked", data: data as unknown as Record<string, unknown> }, HANDLE_IDS.OUTPUT_CHARACTER_STYLE)).toBe("acuarela");
+  });
+
+  it("escena vinculada: su texto por la salida de texto", () => {
+    const scene = { linkSnapshot: { kind: "scene", label: "Escena 2", scriptLabel: "G", text: "ACCIÓN: x", context: {} } } as unknown as LinkedNodeData;
+    expect(linkedTextForHandle(scene, HANDLE_IDS.OUTPUT_TEXT, "e", false)).toBe("ACCIÓN: x");
+    expect(linkedTextForHandle(scene, HANDLE_IDS.OUTPUT_CHARACTER_DNA, "e", false)).toBe("");
   });
 
   it("resolveCharacterImageEdges deja tal cual las salidas de un vinculado", () => {
