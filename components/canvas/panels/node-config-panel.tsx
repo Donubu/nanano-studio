@@ -110,14 +110,14 @@ export function NodeConfigPanel({
   // negative prompt textarea renders outside VideoSettings.
   const videoCaps = type === "video" ? getVideoCapabilities(selectedModel) : null;
 
-  // Edges de referencia entrantes (para el control de prioridad). Priorizar
-  // tiene sentido con 2+ referencias; el arrobado @refN (video Omni y
-  // Seedance/OpenRouter) sirve desde la primera.
+  // Edges de referencia entrantes. La lista se muestra desde la primera (para
+  // ver qué imagen llega); el control de prioridad aparece con 2+ y el
+  // arrobado @refN (video Omni y Seedance/OpenRouter) desde la primera.
   const referenceEdges = (type === "image" || type === "video")
     ? edges.filter((e) => e.target === node.id && e.id && baseHandleId(e.targetHandle) === HANDLES.INPUT_REFERENCE)
     : [];
   const supportsRefMentions = type === "video" && !!videoCaps?.supportsRefMentions;
-  const showReferenceSection = referenceEdges.length >= 2 || (referenceEdges.length >= 1 && supportsRefMentions);
+  const showReferenceSection = referenceEdges.length >= 1;
 
   return (
     <div className="w-[360px] h-full border-l border-border bg-background flex flex-col overflow-hidden">
@@ -401,7 +401,7 @@ function ReferencePriorityList({
 
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs">{showRefNames ? "Referencias" : "Prioridad de referencias"}</Label>
+      <Label className="text-xs">{showRefNames || referenceEdges.length < 2 ? "Referencias" : "Prioridad de referencias"}</Label>
       <div className="space-y-1">
         {ordered.map((edge) => {
           const { url, label } = infoFor(edge);
