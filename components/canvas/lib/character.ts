@@ -176,6 +176,11 @@ export function remapCharacterIds(
     managedEdgeIds: ((data.managedEdgeIds as string[] | undefined) ?? []).filter((id) => edgeIdMap?.has(id)).map((id) => edgeIdMap!.get(id)!),
     // La etapa elegida en cada salida de imagen sigue a su conexión copiada.
     imageOutputs: remapImageOutputs(data.imageOutputs as Record<string, string> | undefined, edgeIdMap),
+    imageLabels: Object.fromEntries(
+      Object.entries((data.imageLabels as Record<string, string> | undefined) ?? {})
+        .filter(([id]) => idMap.has(id))
+        .map(([id, label]) => [idMap.get(id)!, label]),
+    ),
   };
 }
 
@@ -202,6 +207,8 @@ export function externalConnections(
 
 export interface CharacterMaterializePlan {
   addNodes: Node[];
+  // Imágenes existentes cuyo nombre se actualiza al título actual de su etapa.
+  renameNodes: { id: string; label: string }[];
   removeNodeIds: string[];
   addEdges: Edge[];
   // Conexiones existentes a las que solo les cambia la prioridad.
@@ -245,6 +252,10 @@ export function planCharacterMaterialize(
   // 1. Una imagen por etapa.
   const addNodes: Node[] = [];
   const stageImage = new Map<string, string>();
+  const renameNodes: { id: string; label: string }[] = [];
+  const imageLabels: Record<string, string> = {};
+  const generatedBefore = new Set(data.generatedImageIds ?? []);
+  const stageLabel = (stage: CharacterStage, slot: number) => `${charLabel} · ${stage.name.trim() || `Etapa ${slot + 1}`}`;
   const charW = (typeof character.width === "number" ? character.width : character.measured?.width) ?? DEFAULT_CHARACTER_W;
   const columnX = character.position.x + charW + IMAGE_GAP_X;
   // En el orden de la lista, de arriba hacia abajo: la primera se genera
@@ -253,6 +264,17 @@ export function planCharacterMaterialize(
     const existing = stage.imageNodeId ? byId.get(stage.imageNodeId) : undefined;
     if (existing && existing.type === "image") {
       stageImage.set(stage.id, existing.id);
+      // Renombrar solo si el nombre sigue siendo el que puso Generar (o, en
+      // imágenes generadas antes de guardar ese registro, si tiene la forma
+      // "Personaje · etapa"): un nombre puesto a mano se respeta.
+      const current = String((existing.data as Record<string, unknown>).label ?? "");
+      const assigned = data.imageLabels?.[existing.id];
+      const managed = assigned !== undefined ? current === assigned : generatedBefore.has(existing.id) && / · /.test(current);
+      const desired = stageLabel(stage, slot);
+      if (managed) {
+        if (current !== desired) renameNodes.push({ id: existing.id, label: desired });
+        imageLabels[existing.id] = desired;
+      }
       return;
     }
     const id = `node-${prefix}-${addNodes.length + 1}`;
@@ -261,9 +283,10 @@ export function planCharacterMaterialize(
       id,
       type: "image",
       position: { x: columnX, y: character.position.y + slot * IMAGE_SLOT_Y },
-      data: { ...base, label: `${charLabel} · ${stage.name.trim() || `Etapa ${slot + 1}`}`, aspectRatio: "3:4" },
+      data: { ...base, label: stageLabel(stage, slot), aspectRatio: "3:4" },
     });
     stageImage.set(stage.id, id);
+    imageLabels[id] = stageLabel(stage, slot);
   });
 
   // 2. Conexiones deseadas. Las fotos de cada etapa no van como conexión
@@ -377,11 +400,13 @@ export function planCharacterMaterialize(
     stages: (data.stages ?? []).map((s) => (stageImage.has(s.id) ? { ...s, imageNodeId: stageImage.get(s.id) } : s)),
     generatedImageIds: [...generated],
     managedEdgeIds: managedIds.filter((id) => !finalRemoveEdgeIds.includes(id)),
+    imageLabels,
     chainStale: false,
   };
 
   return {
     addNodes,
+    renameNodes,
     removeNodeIds,
     addEdges,
     updateEdges,
@@ -389,4 +414,17 @@ export function planCharacterMaterialize(
     characterData,
     warnings,
   };
+}
+
+/**
+ * Etapas como texto para copiar: solo los títulos (uno por línea) o títulos
+ * con su descripción (bloques separados por una línea en blanco). Omite las
+ * etapas vacías; una sin título usa "Etapa N".
+ */
+export function stagesAsText(stages: Pick<CharacterStage, "name" | "text">[], withText: boolean): string {
+  const filled = stages
+    .map((s, i) => ({ name: s.name.trim() || `Etapa ${i + 1}`, text: s.text.trim(), empty: !s.name.trim() && !s.text.trim() }))
+    .filter((s) => !s.empty);
+  if (!withText) return filled.map((s) => s.name).join("\n");
+  return filled.map((s) => (s.text ? `${s.name}\n${s.text}` : s.name)).join("\n\n");
 }

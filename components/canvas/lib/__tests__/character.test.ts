@@ -8,6 +8,7 @@ import {
   planCharacterMaterialize,
   remapCharacterIds,
   resolveCharacterImageEdges,
+  stagesAsText,
   stageReferenceUrls,
 } from "../character";
 
@@ -47,6 +48,31 @@ function apply(nodes: Node[], edges: Edge[], plan: ReturnType<typeof planCharact
 }
 
 describe("planCharacterMaterialize", () => {
+  it("al regenerar renombra las imágenes con el título nuevo de su etapa, salvo las renombradas a mano", () => {
+    const first = planCharacterMaterialize(character(stages), [character(stages), gallery], [], { idPrefix: "a" });
+    const state = apply([character(stages), gallery], [], first);
+    const img = Object.fromEntries(first.characterData.stages.map((s) => [s.id, s.imageNodeId!]));
+    expect(state.nodes.find((n) => n.id === img.s5)!.data.label).toBe("Ana · 5 años");
+    // El usuario renombra a mano la imagen de 15 años y cambia los títulos de 5 y 15.
+    const nodes = state.nodes.map((n) => (n.id === img.s15 ? { ...n, data: { ...n.data, label: "Mi favorita" } } : n));
+    const char = nodes.find((n) => n.id === "char")!;
+    const cd = char.data as unknown as CharacterNodeData;
+    const edited = { ...char, data: { ...cd, stages: cd.stages.map((s) => (s.id === "s5" ? { ...s, name: "Niñez" } : s.id === "s15" ? { ...s, name: "Juventud" } : s)) } as unknown as Record<string, unknown> };
+    const again = planCharacterMaterialize(edited, nodes.map((n) => (n.id === "char" ? edited : n)), state.edges, { idPrefix: "b" });
+    expect(again.addNodes).toHaveLength(0);
+    expect(again.renameNodes).toEqual([{ id: img.s5, label: "Ana · Niñez" }]);
+    expect(again.characterData.imageLabels?.[img.s5]).toBe("Ana · Niñez");
+    expect(again.characterData.imageLabels?.[img.s15]).toBeUndefined();
+  });
+
+  it("imágenes generadas antes del registro de nombres también se renombran si tienen la forma automática", () => {
+    const withImg = stages.map((s, i) => (i === 0 ? { ...s, name: "Niñez", imageNodeId: "old" } : s));
+    const char = character(withImg, { generatedImageIds: ["old"] });
+    const oldImg: Node = { id: "old", type: "image", position: { x: 0, y: 0 }, data: { label: "Ana · 5 años", status: "completed" } };
+    const plan = planCharacterMaterialize(char, [char, gallery, oldImg], [], { idPrefix: "c" });
+    expect(plan.renameNodes).toEqual([{ id: "old", label: "Ana · Niñez" }]);
+  });
+
   it("crea una imagen por etapa, encadenadas en el orden de la lista (1 → 2 → 3)", () => {
     const plan = planCharacterMaterialize(character(stages), [character(stages), gallery], [], { idPrefix: "t" });
     expect(plan.addNodes).toHaveLength(3);
@@ -238,5 +264,20 @@ describe("resolveCharacterImageEdges", () => {
   it("remapCharacterIds lleva la etapa elegida a la conexión copiada", () => {
     const r = remapCharacterIds({ stages: [], imageOutputs: { o1: "a", gone: "b" } }, new Map(), new Map([["o1", "o9"]]));
     expect(r.imageOutputs).toEqual({ o9: "a" });
+  });
+});
+
+describe("stagesAsText", () => {
+  const list = [
+    { name: "5 años", text: "niña con trenzas" },
+    { name: "", text: "" },
+    { name: "", text: "adolescente" },
+    { name: "adulta", text: "" },
+  ];
+  it("solo títulos, uno por línea, sin etapas vacías", () => {
+    expect(stagesAsText(list, false)).toBe("5 años\nEtapa 3\nadulta");
+  });
+  it("títulos con descripción en bloques", () => {
+    expect(stagesAsText(list, true)).toBe("5 años\nniña con trenzas\n\nEtapa 3\nadolescente\n\nadulta");
   });
 });

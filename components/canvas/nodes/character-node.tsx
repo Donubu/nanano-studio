@@ -8,7 +8,7 @@
 
 import { memo, useCallback, useMemo, useState } from "react";
 import { Handle, Position, useHandleConnections, useStore, type NodeProps } from "@xyflow/react";
-import { ArrowDown, ArrowUp, Check, ChevronRight, Dna, GripVertical, Images, Loader2, Palette, Plus, Trash2, UserRound, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronRight, Copy, Dna, GripVertical, Images, Loader2, Palette, Plus, Trash2, UserRound, Wand2 } from "lucide-react";
 import {
   HANDLE_IDS,
   MAX_CHARACTER_STAGES,
@@ -17,7 +17,7 @@ import {
   type CharacterReferenceImage,
   type CharacterStage,
 } from "../lib/canvas-types";
-import { externalConnections, newStageId } from "../lib/character";
+import { externalConnections, newStageId, stagesAsText } from "../lib/character";
 import { nodeImages, type OutEdge } from "../lib/node-outputs";
 import { NodeDeleteButton } from "./node-status";
 import { NodeLabel } from "./node-label";
@@ -173,6 +173,18 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
 
   const filledStages = stages.filter((s) => s.name.trim() || s.text.trim()).length;
 
+  // Copiar etapas al portapapeles (también en solo-ver: es una lectura).
+  const [copied, setCopied] = useState<"titles" | "full" | null>(null);
+  const copyStages = async (withText: boolean) => {
+    try {
+      await navigator.clipboard.writeText(stagesAsText(stages, withText));
+      setCopied(withText ? "full" : "titles");
+      setTimeout(() => setCopied(null), 1500);
+    } catch {
+      setMessage({ text: "No se pudo copiar al portapapeles.", tone: "warn" });
+    }
+  };
+
   return (
     <div
       className={`group bg-card rounded-xl border-2 border-pink-400/40 ${selected ? "ring-2 ring-pink-400/40" : ""} transition-all ${nodeSizeClass(width, height, "min-w-[360px] max-w-[480px]")}`}
@@ -256,8 +268,32 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
           />
         </div>
 
-        <div className="text-[12px] uppercase tracking-wider text-muted-foreground">
-          Etapas · cada una usa la anterior como referencia
+        <div className="flex items-center gap-1">
+          <div className="min-w-0 flex-1 text-[12px] uppercase tracking-wider text-muted-foreground">
+            Etapas · cada una usa la anterior como referencia
+          </div>
+          {filledStages > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => copyStages(false)}
+                title="Copiar los títulos de todas las etapas (uno por línea)"
+                className="nodrag flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[12px] text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+              >
+                {copied === "titles" ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                Títulos
+              </button>
+              <button
+                type="button"
+                onClick={() => copyStages(true)}
+                title="Copiar títulos y descripciones de todas las etapas"
+                className="nodrag flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[12px] text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+              >
+                {copied === "full" ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                + Descripción
+              </button>
+            </>
+          )}
         </div>
 
         {nodeData.chainStale && (

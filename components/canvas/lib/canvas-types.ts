@@ -272,6 +272,10 @@ export interface CharacterNodeData extends BaseNodeData {
   // (para reconciliar al volver a generar sin tocar lo que hizo el usuario).
   generatedImageIds?: string[];
   managedEdgeIds?: string[];
+  // Nombre que "Generar etapas" le puso a cada imagen (id → label). Si la
+  // imagen todavía lo tiene, al regenerar se renombra con el título actual de
+  // su etapa; si el usuario la renombró a mano, se respeta.
+  imageLabels?: Record<string, string>;
   // true si se reordenaron etapas que ya tenían imagen: la cadena de
   // continuidad no coincide con el orden hasta volver a "Generar etapas".
   chainStale?: boolean;
