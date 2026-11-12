@@ -39,9 +39,12 @@ export function galleryImagesOf(node: { type?: string; data: Record<string, unkn
 export function stageReferenceUrls(
   stage: CharacterStage | null | undefined,
   galleries: { id: string; type?: string; data: Record<string, unknown> }[],
+  // Fotos que entrega cada galería (por defecto, solo las propias; con
+  // node-outputs también las que recibe por su entrada de imágenes).
+  imagesOf: (g: { id: string; type?: string; data: Record<string, unknown> }) => { url: string }[] = galleryImagesOf,
 ): string[] {
   if (!stage?.referenceImages?.length) return [];
-  const available = new Map(galleries.map((g) => [g.id, new Set(galleryImagesOf(g).map((i) => i.url))]));
+  const available = new Map(galleries.map((g) => [g.id, new Set(imagesOf(g).map((i) => i.url))]));
   const out: string[] = [];
   for (const ref of stage.referenceImages) {
     if (available.get(ref.nodeId)?.has(ref.url) && !out.includes(ref.url)) out.push(ref.url);

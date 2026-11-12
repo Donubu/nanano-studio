@@ -19,6 +19,7 @@ import {
 import { NodeDeleteButton } from "./node-status";
 import { NodeLabel } from "./node-label";
 import { useNodeUpdate } from "../hooks/use-node-update";
+import { galleryOutput } from "../lib/node-outputs";
 import { useCanvasContext } from "../canvas-context";
 import { NodeTextarea } from "./node-textarea";
 import { ResizeHandle, nodeSizeClass } from "./resize-handle";
@@ -37,7 +38,7 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
   const nodeData = data as unknown as ParamsSceneNodeData;
   const { updateNodeData } = useNodeUpdate();
   const { conversationId, canEdit } = useCanvasContext();
-  const { getNode } = useReactFlow();
+  const { getNode, getEdges } = useReactFlow();
 
   const visualRefConnections = useHandleConnections({
     type: "target",
@@ -71,9 +72,9 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
       const sourceNode = getNode(conn.source);
       if (!sourceNode) continue;
       if (sourceNode.type === "static-image-group") {
-        const d = sourceNode.data as unknown as StaticImageGroupNodeData;
-        for (const img of d.images || []) {
-          if (img.url) urls.push(img.url);
+        // Con las imágenes conectadas a la galería.
+        for (const img of galleryOutput(sourceNode as never, (nid) => getNode(nid) as never, getEdges() as never)) {
+          if (img.url && !urls.includes(img.url)) urls.push(img.url);
         }
       } else if (sourceNode.type === "static-image") {
         const d = sourceNode.data as unknown as StaticImageNodeData;
@@ -108,7 +109,7 @@ export const ParamsSceneNodeComponent = memo(function ParamsSceneNode({
     } finally {
       setIsExtracting(false);
     }
-  }, [conversationId, getNode, id, nodeData, updateNodeData, visualRefConnections]);
+  }, [conversationId, getNode, getEdges, id, nodeData, updateNodeData, visualRefConnections]);
 
   return (
     <div

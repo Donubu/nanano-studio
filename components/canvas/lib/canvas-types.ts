@@ -103,6 +103,11 @@ export interface NoteNodeData extends BaseNodeData {
 export interface StaticTextNodeData extends BaseNodeData {
   type: "static-text";
   content: string;
+  // Orden de las piezas conectadas a su entrada TEXTOS (ids de conexión). La
+  // salida es: piezas en este orden + su propio texto al final (ver
+  // lib/node-outputs.ts). Las conexiones que no estén aquí van al final por
+  // orden de conexión.
+  partOrder?: string[];
 }
 
 export interface StaticImageNodeData extends BaseNodeData {
@@ -314,6 +319,9 @@ export interface SceneContextInputs {
   sceneParamsContent: string | null;
   // Reglas conectadas al Guión (entrada de reglas).
   rulesText: string | null;
+  // Imágenes conectadas a la entrada "Galería" del Guión: van como
+  // referencia a lo que genera cada escena.
+  scriptImageUrls?: string[];
 }
 
 export interface LinkedSceneSnapshot {
@@ -398,6 +406,10 @@ export const HANDLE_IDS = {
   // Personaje vinculado: ADN y estilo por separado (texto).
   OUTPUT_CHARACTER_DNA: "output-character-dna",
   OUTPUT_CHARACTER_STYLE: "output-character-style",
+  // Texto estático: textos que se concatenan antes del suyo.
+  INPUT_TEXT_PARTS: "input-text-parts",
+  // Galería y Guión: imágenes conectadas (imagen, galería, IMAGEN de etapa…).
+  INPUT_GALLERY_IMAGES: "input-gallery-images",
 } as const;
 
 // Input handles are rendered twice: once on the left edge and once on the top

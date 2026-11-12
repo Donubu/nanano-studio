@@ -91,6 +91,8 @@ export const INPUT_KINDS = {
   params_scene_ref: HANDLE_IDS.INPUT_PARAMS_SCENE_REF,
   character_style: HANDLE_IDS.INPUT_CHARACTER_STYLE,
   character_gallery: HANDLE_IDS.INPUT_CHARACTER_GALLERY,
+  text_parts: HANDLE_IDS.INPUT_TEXT_PARTS,
+  gallery_images: HANDLE_IDS.INPUT_GALLERY_IMAGES,
 } as const;
 export type InputKind = keyof typeof INPUT_KINDS;
 

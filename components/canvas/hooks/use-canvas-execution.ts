@@ -7,8 +7,9 @@ import { HANDLE_IDS, baseHandleId } from "../lib/canvas-types";
 import { topologicalSort, getDirectInputs, getDescendantNodes } from "../lib/topological-sort";
 import { OWN_REFERENCE_PRIORITY, composeCharacterPrompt, findStageForImage, resolveCharacterImageEdges, stageReferenceUrls } from "../lib/character";
 import type { CanvasEdge, LinkedNodeData } from "../lib/canvas-types";
-import { linkedImageForEdge, linkedStageForEdge, linkedTextForHandle, textOutputOf } from "../lib/linked";
-import { resolveScriptContext } from "../lib/scene-context";
+import { linkedImageForEdge, linkedStageForEdge, linkedTextForHandle } from "../lib/linked";
+import { resolveScriptContext, sceneReferenceImages } from "../lib/scene-context";
+import { galleryOutput, lookupFrom, nodeTextOutput, staticTextOutput } from "../lib/node-outputs";
 import type { CanvasGenerationConfig } from "../canvas-workspace";
 
 type SetNodesFn = (updater: (nds: Node[]) => Node[]) => void;
@@ -166,16 +167,8 @@ function characterStagePhotos(character: Node, imageNodeId: string, nodes: Node[
     .map((i) => nodes.find((n) => n.id === i.sourceNodeId))
     .filter((n): n is Node => !!n)
     .map((n) => ({ id: n.id, type: n.type, data: n.data as Record<string, unknown> }));
-  return stageReferenceUrls(stage, galleries);
-}
-
-/** Texto de salida de un nodo de texto (estático, IA o Practicante). */
-function plainTextOutput(node: Node): string | null {
-  const d = node.data as Record<string, unknown>;
-  if (d.status !== "completed") return null;
-  if (node.type === "static-text") return (d.content as string) || null;
-  if (node.type === "text" || node.type === "text-practicante") return (d.outputText as string) || null;
-  return null;
+  const lookup = lookupFrom(nodes);
+  return stageReferenceUrls(stage, galleries, (g) => galleryOutput(g, lookup, edges));
 }
 
 /**
@@ -187,6 +180,9 @@ function resolveNodeInputs(
   edges: CanvasEdge[]
 ): ResolvedInputs {
   const inputs = getDirectInputs(nodeId, edges);
+  // Salidas armadas (texto estático con sus piezas, galería con sus imágenes
+  // conectadas): siempre desde lib/node-outputs.ts.
+  const lookup = lookupFrom(nodes);
   let promptContext = "";
   let referenceImageUrl: string | null = null;
   let firstFrameUrl: string | null = null;
@@ -205,7 +201,7 @@ function resolveNodeInputs(
 
     // Helper: get text content from any text-producing node
     const getTextOutput = (): string | null => {
-      if (sourceNode.type === "static-text") return (sourceData as StaticTextNodeData).content || null;
+      if (sourceNode.type === "static-text") return staticTextOutput(sourceNode, lookup, edges) || null;
       if (sourceNode.type === "text") return (sourceData as TextNodeData).outputText || null;
       if (sourceNode.type === "text-practicante") return (sourceData as TextPracticanteNodeData).outputText || null;
       if (sourceNode.type === "scene") return (sourceData as SceneNodeData).text || null;
@@ -213,10 +209,10 @@ function resolveNodeInputs(
         // ADN + estilo global + la etapa de ESTA imagen, leídos al ejecutar.
         const charData = sourceData as CharacterNodeData;
         const styleInput = getDirectInputs(sourceNode.id, edges).find((i) => i.targetHandle === HANDLE_IDS.INPUT_CHARACTER_STYLE);
-        const styleNode = styleInput ? nodes.find((n) => n.id === styleInput.sourceNodeId) : undefined;
+        const styleNode = styleInput ? lookup(styleInput.sourceNodeId) : undefined;
         const composed = composeCharacterPrompt({
           dna: charData.dna,
-          style: styleNode ? (styleNode.type === "linked" ? textOutputOf(styleNode, styleInput?.sourceHandle) : plainTextOutput(styleNode)) : null,
+          style: styleNode ? nodeTextOutput(styleNode, lookup, edges, { id: styleInput!.edgeId, sourceHandle: styleInput!.sourceHandle }) : null,
           stage: findStageForImage(charData, nodeId),
           hasReferences:
             characterStagePhotos(sourceNode, nodeId, nodes, edges).length > 0 ||
@@ -243,8 +239,7 @@ function resolveNodeInputs(
     const getImageOutput = (): string | null => {
       if (sourceNode.type === "static-image") return (sourceData as StaticImageNodeData).imageUrl || null;
       if (sourceNode.type === "static-image-group") {
-        const group = sourceData as StaticImageGroupNodeData;
-        return group.images?.[0]?.url || null;
+        return galleryOutput(sourceNode, lookup, edges)[0]?.url || null;
       }
       if (sourceNode.type === "image") return (sourceData as ImageNodeData).outputUrl || null;
       if (sourceNode.type === "linked" && baseHandleId(input.sourceHandle) === HANDLE_IDS.OUTPUT_CHARACTER_IMAGE) {
@@ -256,7 +251,7 @@ function resolveNodeInputs(
     // Helper: get all image URLs from image-group nodes
     const getAllImageOutputs = (): string[] => {
       if (sourceNode.type === "static-image-group") {
-        return ((sourceData as StaticImageGroupNodeData).images || []).map(i => i.url).filter(Boolean);
+        return galleryOutput(sourceNode, lookup, edges).map((i) => i.url);
       }
       const single = getImageOutput();
       return single ? [single] : [];
@@ -322,6 +317,18 @@ function resolveNodeInputs(
       // Extract params data (strip base fields)
       const { label: _l, status: _s, errorMessage: _e, outputMessageId: _o, modelName: _mn, locked: _lk, type: _t, ...params } = sourceData as Record<string, unknown>;
       paramsOverride = params;
+    }
+  }
+
+  // Escena (local o vinculada): las imágenes conectadas a la entrada
+  // "Galería" de su Guión van como referencia (neutras) y, a un texto, como media.
+  const sceneImages = sceneReferenceImages(nodeId, nodes, edges);
+  if (sceneImages.length > 0) {
+    referenceImageUrl = referenceImageUrl ?? sceneImages[0];
+    referenceGroups.push({ urls: sceneImages, priority: null });
+    const self = lookup(nodeId);
+    if (self?.type === "text" || self?.type === "text-practicante") {
+      for (const url of sceneImages) if (!mediaUrls.some((m) => m.url === url)) mediaUrls.push({ url, type: "image" });
     }
   }
 

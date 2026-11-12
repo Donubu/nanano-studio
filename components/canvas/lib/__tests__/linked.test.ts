@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { HANDLE_IDS, type LinkedNodeData } from "../canvas-types";
-import { buildCharacterSnapshot, linkedImageForEdge, linkedPromptForEdge, linkedStageForEdge, linkedTextForHandle, textOutputOf } from "../linked";
+import { buildCharacterSnapshot, linkedImageForEdge, linkedPromptForEdge, linkedStageForEdge, linkedTextForHandle } from "../linked";
+import { galleryOutput, lookupFrom, nodeTextOutput } from "../node-outputs";
 import { linkPatch } from "../linked-sync";
 import { resolveCharacterImageEdges } from "../character";
 
@@ -24,7 +25,7 @@ describe("buildCharacterSnapshot", () => {
   it("resuelve estilo, fotos disponibles e imagen de cada etapa", () => {
     const snap = buildCharacterSnapshot({
       character,
-      styleNode: style,
+      styleText: "acuarela",
       galleries: [gallery],
       stageImages: [
         { id: "imgA", type: "image", data: { outputUrl: "https://x/a.png" } },
@@ -45,8 +46,18 @@ describe("buildCharacterSnapshot", () => {
   });
 
   it("un texto IA solo aporta estilo si ya terminó", () => {
-    expect(textOutputOf({ type: "text", data: { status: "generating", outputText: "x" } })).toBe("");
-    expect(textOutputOf({ type: "text", data: { status: "completed", outputText: "x" } })).toBe("x");
+    const lk = lookupFrom([]);
+    expect(nodeTextOutput({ id: "t", type: "text", data: { status: "generating", outputText: "x" } }, lk, [])).toBe("");
+    expect(nodeTextOutput({ id: "t", type: "text", data: { status: "completed", outputText: "x" } }, lk, [])).toBe("x");
+  });
+
+  it("las fotos elegidas pueden venir de imágenes conectadas a la galería", () => {
+    const img = { id: "img9", type: "image", data: { outputUrl: "https://x/9.png" } };
+    const gal = { id: "gone", type: "static-image-group", data: { images: [] } };
+    const edges = [{ id: "g1", source: "img9", target: "gone", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, targetHandle: HANDLE_IDS.INPUT_GALLERY_IMAGES }];
+    const lk = lookupFrom([img, gal]);
+    const snap = buildCharacterSnapshot({ character, styleText: "", galleries: [gallery, gal], galleryImages: (g) => galleryOutput(g, lk, edges), stageImages: [] });
+    expect(snap.stages[0].photoUrls).toEqual(["https://x/1.png", "https://x/9.png"]);
   });
 });
 
@@ -88,7 +99,7 @@ describe("lectura por conexión", () => {
     expect(linkedTextForHandle(data, HANDLE_IDS.OUTPUT_CHARACTER_DNA, "e1", false)).toBe("pelo rizado");
     expect(linkedTextForHandle(data, HANDLE_IDS.OUTPUT_CHARACTER_STYLE, "e1", false)).toBe("acuarela");
     expect(linkedTextForHandle(data, HANDLE_IDS.OUTPUT_TEXT, "e1", false)).toBe("");
-    expect(textOutputOf({ type: "linked", data: data as unknown as Record<string, unknown> }, HANDLE_IDS.OUTPUT_CHARACTER_STYLE)).toBe("acuarela");
+    expect(nodeTextOutput({ id: "lnk", type: "linked", data: data as unknown as Record<string, unknown> }, lookupFrom([]), [], { id: "e9", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_STYLE })).toBe("acuarela");
   });
 
   it("escena vinculada: su texto por la salida de texto", () => {

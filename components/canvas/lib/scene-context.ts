@@ -16,20 +16,18 @@ import {
   type SceneNodeData,
 } from "./canvas-types";
 import { getDirectInputs } from "./topological-sort";
+import { lookupFrom, nodeTextOutput, scriptGalleryImages, type OutEdge } from "./node-outputs";
 
 type NodeLike = Pick<Node, "id" | "type" | "data">;
-type EdgeLike = Pick<CanvasEdge, "source" | "target" | "targetHandle">;
+type EdgeLike = OutEdge;
 
 export type { SceneContextInputs };
 
-/** Texto de un nodo de texto usado como reglas (estático o salida de IA). */
-function rulesTextOf(node: NodeLike | undefined): string | null {
-  if (!node) return null;
-  const d = node.data as Record<string, unknown>;
-  let raw: unknown;
-  if (node.type === "static-text") raw = d.content;
-  else if (node.type === "text" || node.type === "text-practicante") raw = d.outputText;
-  return typeof raw === "string" && raw.trim() ? raw.trim() : null;
+/** Texto conectado como reglas (estático con sus piezas, IA, vinculado…). */
+function rulesTextOf(edge: EdgeLike, nodes: NodeLike[], edges: EdgeLike[]): string | null {
+  const lookup = lookupFrom(nodes as never);
+  const raw = nodeTextOutput(lookup(edge.source), lookup, edges, edge);
+  return raw.trim() ? raw.trim() : null;
 }
 
 /** Ingredientes del contexto de una escena, recorriendo su canvas. */
@@ -71,8 +69,9 @@ export function collectSceneContext(sceneId: string, nodes: NodeLike[], edges: E
     const rulesEdge = edges.find(
       (e) => e.target === scriptNodeIdFound && baseHandleId(e.targetHandle) === HANDLE_IDS.INPUT_RULES,
     );
-    if (rulesEdge) rulesText = rulesTextOf(byId.get(rulesEdge.source));
+    if (rulesEdge) rulesText = rulesTextOf(rulesEdge, nodes, edges);
   }
+  const scriptImageUrls = scriptNodeIdFound ? scriptGalleryImages(scriptNodeIdFound, lookupFrom(nodes as never), edges) : [];
 
   let sceneParamsContent: string | null = null;
   const paramsEdge = edges.find(
@@ -93,6 +92,7 @@ export function collectSceneContext(sceneId: string, nodes: NodeLike[], edges: E
     previousScenes,
     sceneParamsContent,
     rulesText,
+    ...(scriptImageUrls.length > 0 ? { scriptImageUrls } : {}),
   };
 }
 
@@ -183,4 +183,21 @@ export function resolveScriptContext(nodeId: string, nodes: NodeLike[], edges: C
     return snap?.kind === "scene" ? composeScriptContext(snap.context) : null;
   }
   return null;
+}
+
+/**
+ * Imágenes de la entrada "Galería" del Guión para un nodo cuyo prompt viene
+ * de una Escena (local o vinculada). Vacío si no viene de una escena.
+ */
+export function sceneReferenceImages(nodeId: string, nodes: NodeLike[], edges: CanvasEdge[]): string[] {
+  const promptInput = getDirectInputs(nodeId, edges).find((i) => i.targetHandle === HANDLE_IDS.INPUT_PROMPT);
+  if (!promptInput) return [];
+  const source = nodes.find((n) => n.id === promptInput.sourceNodeId);
+  if (!source) return [];
+  if (source.type === "scene") return collectSceneContext(source.id, nodes, edges)?.scriptImageUrls ?? [];
+  if (source.type === "linked") {
+    const snap = (source.data as unknown as LinkedNodeData).linkSnapshot;
+    return snap?.kind === "scene" ? snap.context.scriptImageUrls ?? [] : [];
+  }
+  return [];
 }

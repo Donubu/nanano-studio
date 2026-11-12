@@ -20,6 +20,8 @@ const HANDLE_LABELS: Record<string, string> = {
   [HANDLE_IDS.INPUT_LAST_FRAME]: "LAST",
   [HANDLE_IDS.INPUT_MEDIA]: "MEDIA",
   [HANDLE_IDS.INPUT_PARAMS]: "PARAMS",
+  [HANDLE_IDS.INPUT_TEXT_PARTS]: "TEXTO",
+  [HANDLE_IDS.INPUT_GALLERY_IMAGES]: "GALERÍA",
 };
 
 const HANDLE_COLORS: Record<string, string> = {
@@ -29,6 +31,8 @@ const HANDLE_COLORS: Record<string, string> = {
   [HANDLE_IDS.INPUT_LAST_FRAME]: "bg-background border-purple-500/40",
   [HANDLE_IDS.INPUT_MEDIA]: "bg-background text-emerald-400 border-emerald-500/40",
   [HANDLE_IDS.INPUT_PARAMS]: "bg-background border-yellow-400/40",
+  [HANDLE_IDS.INPUT_TEXT_PARTS]: "bg-background text-blue-400 border-blue-500/40",
+  [HANDLE_IDS.INPUT_GALLERY_IMAGES]: "bg-background text-emerald-400 border-emerald-500/40",
 };
 
 // Labels with dual-color for image-related handles

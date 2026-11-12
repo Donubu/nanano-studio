@@ -17,6 +17,7 @@ import { thumbUrl } from "../lib/thumb";
 import type { CharacterNodeData, LinkedNodeData } from "../lib/canvas-types";
 import { stageForImageOutput } from "../lib/character";
 import { linkedStageForEdge } from "../lib/linked";
+import { galleryOutput, lookupFrom } from "../lib/node-outputs";
 
 interface NodeConfigPanelProps {
   node: Node;
@@ -211,6 +212,7 @@ export function NodeConfigPanel({
           <ReferencePriorityList
             referenceEdges={referenceEdges}
             nodes={nodes}
+            edges={edges}
             onUpdateEdgePriority={onUpdateEdgePriority}
             showRefNames={supportsRefMentions}
             maxReferences={videoCaps?.maxReferences}
@@ -330,12 +332,14 @@ export function NodeConfigPanel({
 function ReferencePriorityList({
   referenceEdges,
   nodes,
+  edges,
   onUpdateEdgePriority,
   showRefNames = false,
   maxReferences,
 }: {
   referenceEdges: Array<{ id?: string; source: string; sourceHandle?: string | null; data?: { priority?: number | null } | null }>;
   nodes: Node[];
+  edges: Array<{ id?: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }>;
   onUpdateEdgePriority: (edgeId: string, priority: number | null) => void;
   // Video Omni / Seedance: muestra el nombre @refN de cada referencia
   // (arrobable en el prompt; el backend lo traduce al marcador nativo).
@@ -366,7 +370,7 @@ function ReferencePriorityList({
       return { url, label, count: url ? 1 : 0 };
     }
     if (source.type === "static-image-group") {
-      const images = (d.images as Array<{ url: string }> | undefined) || [];
+      const images = galleryOutput(source as never, lookupFrom(nodes as never), edges as never);
       return { url: images[0]?.url || null, label: `${label} (${images.length})`, count: images.length };
     }
     if (source.type === "image") {

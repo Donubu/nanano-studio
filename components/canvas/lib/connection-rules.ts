@@ -138,6 +138,34 @@ export const VALID_CONNECTIONS: ConnectionRule[] = [
     })),
   ),
   { sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_STYLE, targetType: "character", targetHandle: HANDLE_IDS.INPUT_CHARACTER_STYLE },
+  // === Texto estático: TEXTOS que se concatenan antes del suyo ===
+  ...([
+    ["static-text", HANDLE_IDS.OUTPUT_TEXT],
+    ["text", HANDLE_IDS.OUTPUT_TEXT],
+    ["text-practicante", HANDLE_IDS.OUTPUT_TEXT],
+    ["scene", HANDLE_IDS.OUTPUT_TEXT],
+    ["linked", HANDLE_IDS.OUTPUT_TEXT],
+    ["linked", HANDLE_IDS.OUTPUT_CHARACTER],
+    ["linked", HANDLE_IDS.OUTPUT_CHARACTER_DNA],
+    ["linked", HANDLE_IDS.OUTPUT_CHARACTER_STYLE],
+  ] as const).map(([sourceType, sourceHandle]) => ({
+    sourceType, sourceHandle, targetType: "static-text", targetHandle: HANDLE_IDS.INPUT_TEXT_PARTS,
+  })),
+
+  // === Galería y Guión: imágenes conectadas (se suman a la galería; en el
+  // Guión van como referencia a lo que genera cada escena) ===
+  ...(["static-image-group", "script"] as const).flatMap((targetType) =>
+    ([
+      ["image", HANDLE_IDS.OUTPUT_IMAGE],
+      ["static-image", HANDLE_IDS.OUTPUT_IMAGE],
+      ["static-image-group", HANDLE_IDS.OUTPUT_IMAGE],
+      ["character", HANDLE_IDS.OUTPUT_CHARACTER_IMAGE],
+      ["linked", HANDLE_IDS.OUTPUT_CHARACTER_IMAGE],
+    ] as const).map(([sourceType, sourceHandle]) => ({
+      sourceType, sourceHandle, targetType, targetHandle: HANDLE_IDS.INPUT_GALLERY_IMAGES,
+    })),
+  ),
+
   // Escena vinculada: su texto como prompt, con el contexto del guion.
   ...(["image", "video", "text", "text-practicante"] as const).map((t) => ({
     sourceType: "linked", sourceHandle: HANDLE_IDS.OUTPUT_TEXT, targetType: t, targetHandle: HANDLE_IDS.INPUT_PROMPT,

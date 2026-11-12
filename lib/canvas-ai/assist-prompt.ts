@@ -45,6 +45,8 @@ const INPUT_DOCS: Record<string, string> = {
   params_scene_ref: "estilo reutilizable para todas las escenas del guion (uno)",
   character_style: "estilo global del personaje (un texto; se puede compartir entre personajes)",
   character_gallery: "galería o imagen de donde cada etapa elige sus fotos de referencia (varias permitidas)",
+  text_parts: "textos que el texto estático concatena antes del suyo, separados por una línea en blanco (varios; el orden lo ajusta el usuario)",
+  gallery_images: "imágenes que se suman a una galería, o que el guion manda como referencia a lo que genera cada escena (varias)",
 };
 
 function connectionManual(): string {

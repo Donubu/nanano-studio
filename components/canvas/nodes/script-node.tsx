@@ -904,6 +904,17 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
         title="Galería de referencia visual (alimenta a la primera escena)"
       />
 
+      {/* Input handle: Galería — imágenes (imagen, galería, etapa de un
+          Personaje) que van como referencia a lo que genera CADA escena. */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={HANDLE_IDS.INPUT_GALLERY_IMAGES}
+        className="!w-3 !h-3 !bg-teal-400 !border-2 !border-background"
+        style={{ top: "40%" }}
+        title="Galería: imágenes de referencia para lo que genera cada escena (p. ej. la IMAGEN de una etapa del Personaje)"
+      />
+
       {/* Input handle: extra rules/instructions (text, static-text or
           practicante) — appended to the systemInstruction of every scene
           downstream. Useful for "things to keep", "things to avoid", etc. */}
@@ -937,6 +948,14 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
         className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background"
         style={{ left: "30%" }}
         title="Galería de referencia visual (alimenta a la primera escena)"
+      />
+      <Handle
+        type="target"
+        position={Position.Top}
+        id={topHandleId(HANDLE_IDS.INPUT_GALLERY_IMAGES)}
+        className="!w-3 !h-3 !bg-teal-400 !border-2 !border-background"
+        style={{ left: "40%" }}
+        title="Galería: imágenes de referencia para lo que genera cada escena (p. ej. la IMAGEN de una etapa del Personaje)"
       />
       <Handle
         type="target"

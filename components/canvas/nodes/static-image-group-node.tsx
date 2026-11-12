@@ -1,9 +1,10 @@
 "use client";
 
-import { memo, useCallback, useRef, useState } from "react";
-import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Images, Plus, X, FolderOpen, Loader2, ZoomIn } from "lucide-react";
-import { HANDLE_IDS, type StaticImageGroupNodeData } from "../lib/canvas-types";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { Handle, Position, useStore, type NodeProps } from "@xyflow/react";
+import { Images, Plus, X, FolderOpen, Loader2, ZoomIn, Link2 } from "lucide-react";
+import { HANDLE_IDS, topHandleId, type StaticImageGroupNodeData } from "../lib/canvas-types";
+import { galleryOutput, type OutEdge, type OutNode } from "../lib/node-outputs";
 import { NodeDeleteButton } from "./node-status";
 import { NodeLabel } from "./node-label";
 import { useCanvasContext } from "../canvas-context";
@@ -21,8 +22,24 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
   const images = nodeData.images || [];
   const [uploading, setUploading] = useState(false);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
-  const viewerEntries: MediaViewerEntry[] = images.map((img) => ({
-    url: img.url,
+  // Imágenes que llegan por la entrada (imagen, galería, etapa de un
+  // Personaje…): se suman a las subidas en lo que entrega la galería. Se
+  // muestran marcadas y no se borran desde aquí (se desconectan).
+  const connectedJson = useStore(
+    useCallback(
+      (state: { nodeLookup: Map<string, OutNode>; edges: OutEdge[] }) => {
+        const self = state.nodeLookup.get(id);
+        if (!self || !state.edges.some((e) => e.target === id)) return "[]";
+        const own = new Set(((self.data.images as { url: string }[] | undefined) ?? []).map((i) => i.url));
+        const all = galleryOutput(self, (nid) => state.nodeLookup.get(nid), state.edges);
+        return JSON.stringify(all.filter((i) => !own.has(i.url)).map((i) => i.url));
+      },
+      [id],
+    ) as never,
+  ) as unknown as string;
+  const connected = useMemo(() => JSON.parse(connectedJson) as string[], [connectedJson]);
+  const viewerEntries: MediaViewerEntry[] = [...images.map((img) => img.url), ...connected].map((url) => ({
+    url,
     type: "image" as const,
   }));
 
@@ -104,7 +121,9 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
         <Images className="h-[18px] w-[18px] text-teal-400 shrink-0" />
         <NodeLabel value={nodeData.label || ""} placeholder="Galería" onChange={(label) => updateNodeData(id, { ...nodeData, images: nodeData.images, label })} />
-        <span className="text-[13px] text-muted-foreground">{images.length}</span>
+        <span className="text-[13px] text-muted-foreground" title={connected.length ? `${images.length} subidas + ${connected.length} conectadas` : undefined}>
+          {images.length + connected.length}
+        </span>
         <NodeDeleteButton nodeId={id} />
       </div>
 
@@ -114,6 +133,27 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
           <div className="flex items-center justify-center gap-1.5 py-2 text-muted-foreground mb-1.5">
             <Loader2 className="h-[18px] w-[18px] animate-spin" />
             <span className="text-[13px]">Subiendo...</span>
+          </div>
+        )}
+        {connected.length > 0 && (
+          <div className="mb-1.5 space-y-1">
+            <div className="flex items-center gap-1 text-[12px] text-emerald-700 dark:text-emerald-300">
+              <Link2 className="h-3.5 w-3.5" /> {connected.length} {connected.length === 1 ? "conectada" : "conectadas"}
+            </div>
+            <div className="grid grid-cols-3 gap-1">
+              {connected.map((url, i) => (
+                <div key={url} className="relative rounded overflow-hidden bg-muted/50 ring-1 ring-emerald-500/50 group/img">
+                  <CanvasImg src={url} width={384} alt="" className="w-full aspect-square object-cover" loading="lazy" />
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setViewerIndex(images.length + i); }}
+                    className="nodrag absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/30 opacity-0 group-hover/img:opacity-100 transition-all"
+                    title="Ver en grande (llega por una conexión)"
+                  >
+                    <ZoomIn className="h-5 w-5 text-white drop-shadow" />
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
         {images.length > 0 ? (
@@ -178,6 +218,22 @@ export const StaticImageGroupNodeComponent = memo(function StaticImageGroupNode(
         )}
         <input ref={inputRef} type="file" accept="image/*" multiple onChange={handleFileSelect} className="hidden" />
       </div>
+
+      {/* Entrada: imágenes que se suman a la galería (izquierda + gemelo superior) */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={HANDLE_IDS.INPUT_GALLERY_IMAGES}
+        className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background"
+        title="Imágenes que se suman a la galería (imagen, galería o etapa de un Personaje)"
+      />
+      <Handle
+        type="target"
+        position={Position.Top}
+        id={topHandleId(HANDLE_IDS.INPUT_GALLERY_IMAGES)}
+        className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-background"
+        title="Imágenes que se suman a la galería (imagen, galería o etapa de un Personaje)"
+      />
 
       {/* Output handle */}
       <Handle

@@ -11,6 +11,7 @@ import pool from "@/lib/db";
 import { HANDLE_IDS, baseHandleId, type CharacterNodeData, type LinkState, type LinkedSnapshot, type SceneNodeData } from "@/components/canvas/lib/canvas-types";
 import { buildCharacterSnapshot } from "@/components/canvas/lib/linked";
 import { collectSceneContext } from "@/components/canvas/lib/scene-context";
+import { galleryOutput, lookupFrom, nodeTextOutput, type NodeLookup, type OutEdge } from "@/components/canvas/lib/node-outputs";
 
 export interface LinkUser {
   id: number;
@@ -36,7 +37,7 @@ interface NodeRow extends RowDataPacket {
   deleted_at: string | null;
 }
 
-type NodeLike = { id: string; type: string; data: Record<string, unknown> };
+type NodeLike = { id: string; type?: string; data: Record<string, unknown> };
 
 const MAX_REFS = 50;
 
@@ -88,74 +89,55 @@ function hashSnapshot(snapshot: LinkedSnapshot): string {
   return createHash("sha1").update(JSON.stringify(snapshot)).digest("hex").slice(0, 16);
 }
 
-async function loadNodes(conversationId: number, ids: string[]): Promise<Map<string, NodeLike>> {
-  const byId = new Map<string, NodeLike>();
-  if (ids.length === 0) return byId;
-  const [rows] = await pool.execute<NodeRow[]>(
-    `SELECT id, type, label, config, status, output_url, output_text, deleted_at
-     FROM canvas_nodes
-     WHERE conversation_id = ? AND deleted_at IS NULL AND id IN (${ids.map(() => "?").join(",")})`,
-    [conversationId, ...ids],
-  );
-  for (const r of rows) byId.set(r.id, rowToNode(r));
-  return byId;
-}
-
-/** Vista resuelta de un nodo de su canvas (Personaje o Escena). null si no existe o no se puede vincular. */
-async function resolveNode(conversationId: number, nodeId: string): Promise<LinkedSnapshot | null> {
-  const [rows] = await pool.execute<NodeRow[]>(
-    `SELECT id, type, label, config, status, output_url, output_text, deleted_at
-     FROM canvas_nodes WHERE conversation_id = ? AND id = ?`,
-    [conversationId, nodeId],
-  );
-  const row = rows[0];
-  if (!row || row.deleted_at) return null;
-  if (row.type === "character") return resolveCharacter(conversationId, rowToNode(row));
-  if (row.type === "scene") return resolveScene(conversationId, rowToNode(row));
-  return null;
+interface SourceCanvas {
+  nodes: NodeLike[];
+  edges: OutEdge[];
+  lookup: NodeLookup;
 }
 
 /**
- * Vista de una Escena: su texto y los ingredientes del contexto de guion
- * (escenas anteriores, Params Escena conectado, reglas del Guión). Se leen
- * solo las conexiones de cadena/reglas/estilo y los nodos que tocan.
+ * Canvas de origen completo (nodos y conexiones vivos). Se carga una vez por
+ * llamada y la vista se arma con las mismas funciones puras que usa el
+ * cliente (textos concatenados, galerías con imágenes conectadas, cadena de
+ * escenas), así lo vinculado entrega exactamente lo mismo que el original.
  */
-async function resolveScene(conversationId: number, scene: NodeLike): Promise<LinkedSnapshot | null> {
-  const [edgeRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT source_node_id, target_node_id, target_handle FROM canvas_edges
-     WHERE conversation_id = ? AND deleted_at IS NULL
-       AND (target_handle LIKE 'input-script-chain%' OR target_handle LIKE 'input-rules%' OR target_handle LIKE 'input-scene-params%')`,
+async function loadSourceCanvas(conversationId: number): Promise<SourceCanvas> {
+  const [nodeRows] = await pool.execute<NodeRow[]>(
+    `SELECT id, type, label, config, status, output_url, output_text, deleted_at
+     FROM canvas_nodes WHERE conversation_id = ? AND deleted_at IS NULL`,
     [conversationId],
   );
-  const edges = edgeRows.map((e) => ({
+  const [edgeRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id, source_node_id, source_handle, target_node_id, target_handle FROM canvas_edges
+     WHERE conversation_id = ? AND deleted_at IS NULL
+     ORDER BY created_at ASC`,
+    [conversationId],
+  );
+  const nodes = nodeRows.map(rowToNode);
+  const edges: OutEdge[] = edgeRows.map((e) => ({
+    id: e.id as string,
     source: e.source_node_id as string,
+    sourceHandle: (e.source_handle as string | null) ?? null,
     target: e.target_node_id as string,
     targetHandle: (e.target_handle as string | null) ?? null,
   }));
-  // Nodos que hacen falta: la cadena hacia arriba, el Guión, sus reglas y el
-  // Params Escena de la escena.
+  return { nodes, edges, lookup: lookupFrom(nodes) };
+}
+
+/** Vista resuelta de un nodo (Personaje o Escena). null si no existe o no se puede vincular. */
+function resolveNode(canvas: SourceCanvas, nodeId: string): LinkedSnapshot | null {
+  const node = canvas.lookup(nodeId);
+  if (node?.type === "character") return resolveCharacter(canvas, node);
+  if (node?.type === "scene") return resolveScene(canvas, node);
+  return null;
+}
+
+/** Vista de una Escena: su texto y los ingredientes del contexto de guion. */
+function resolveScene(canvas: SourceCanvas, scene: NodeLike): LinkedSnapshot | null {
   const sceneData = scene.data as unknown as SceneNodeData;
-  const need = new Set<string>();
-  let cursor = scene.id;
-  const seen = new Set([cursor]);
-  for (;;) {
-    const up = edges.find((e) => e.target === cursor && baseHandleId(e.targetHandle) === HANDLE_IDS.INPUT_SCRIPT_CHAIN);
-    if (!up || seen.has(up.source)) break;
-    seen.add(up.source);
-    need.add(up.source);
-    cursor = up.source;
-  }
-  if (sceneData.scriptNodeId) need.add(sceneData.scriptNodeId);
-  for (const e of edges) {
-    const h = baseHandleId(e.targetHandle);
-    if (h === HANDLE_IDS.INPUT_RULES && need.has(e.target)) need.add(e.source);
-    if (h === HANDLE_IDS.INPUT_SCENE_PARAMS && e.target === scene.id) need.add(e.source);
-  }
-  const byId = await loadNodes(conversationId, [...need]);
-  const nodes = [scene, ...byId.values()];
-  const context = collectSceneContext(scene.id, nodes, edges);
+  const context = collectSceneContext(scene.id, canvas.nodes, canvas.edges as never);
   if (!context) return null;
-  const script = sceneData.scriptNodeId ? byId.get(sceneData.scriptNodeId) : undefined;
+  const script = sceneData.scriptNodeId ? canvas.lookup(sceneData.scriptNodeId) : undefined;
   return {
     kind: "scene",
     label: String(scene.data.label || `Escena ${sceneData.sceneIndex}`),
@@ -166,38 +148,22 @@ async function resolveScene(conversationId: number, scene: NodeLike): Promise<Li
 }
 
 /** Vista resuelta de un Personaje. */
-async function resolveCharacter(conversationId: number, character: NodeLike): Promise<LinkedSnapshot> {
-  const nodeId = character.id;
-
-  const [edgeRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT source_node_id, source_handle, target_handle FROM canvas_edges
-     WHERE conversation_id = ? AND target_node_id = ? AND deleted_at IS NULL
-     ORDER BY created_at ASC`,
-    [conversationId, nodeId],
-  );
-  let styleId: string | null = null;
-  let styleHandle: string | null = null;
-  const galleryIds: string[] = [];
-  for (const e of edgeRows) {
-    const handle = baseHandleId(e.target_handle as string | null);
-    if (handle === HANDLE_IDS.INPUT_CHARACTER_STYLE && !styleId) {
-      styleId = e.source_node_id as string;
-      styleHandle = (e.source_handle as string | null) ?? null;
-    }
-    if (handle === HANDLE_IDS.INPUT_CHARACTER_GALLERY) galleryIds.push(e.source_node_id as string);
-  }
-  const stageImageIds = ((character.data as unknown as CharacterNodeData).stages ?? [])
-    .map((s) => s.imageNodeId)
-    .filter((id): id is string => !!id);
-
-  const byId = await loadNodes(conversationId, [...new Set([...(styleId ? [styleId] : []), ...galleryIds, ...stageImageIds])]);
-
+function resolveCharacter(canvas: SourceCanvas, character: NodeLike): LinkedSnapshot {
+  const into = canvas.edges.filter((e) => e.target === character.id);
+  const styleEdge = into.find((e) => baseHandleId(e.targetHandle) === HANDLE_IDS.INPUT_CHARACTER_STYLE);
+  const galleries = into
+    .filter((e) => baseHandleId(e.targetHandle) === HANDLE_IDS.INPUT_CHARACTER_GALLERY)
+    .map((e) => canvas.lookup(e.source))
+    .filter((n): n is NodeLike => !!n);
+  const stageImages = ((character.data as unknown as CharacterNodeData).stages ?? [])
+    .map((s) => (s.imageNodeId ? canvas.lookup(s.imageNodeId) : undefined))
+    .filter((n): n is NodeLike => !!n);
   return buildCharacterSnapshot({
     character,
-    styleNode: styleId ? byId.get(styleId) ?? null : null,
-    styleHandle,
-    galleries: galleryIds.map((id) => byId.get(id)).filter((n): n is NodeLike => !!n),
-    stageImages: stageImageIds.map((id) => byId.get(id)).filter((n): n is NodeLike => !!n),
+    styleText: styleEdge ? nodeTextOutput(canvas.lookup(styleEdge.source), canvas.lookup, canvas.edges, styleEdge) : "",
+    galleries,
+    galleryImages: (g) => galleryOutput(g, canvas.lookup, canvas.edges),
+    stageImages,
   });
 }
 
@@ -223,6 +189,7 @@ export async function resolveLinks(targetConversationId: number, user: LinkUser,
   if (!target) return null;
   const memberCache = new Map<number, boolean>();
   const convCache = new Map<number, ConvRow | null>();
+  const canvasCache = new Map<number, SourceCanvas>();
   const out: LinkResolution[] = [];
   for (const ref of refs.slice(0, MAX_REFS)) {
     const convId = Number(ref.conversationId);
@@ -239,7 +206,8 @@ export async function resolveLinks(targetConversationId: number, user: LinkUser,
       out.push({ ...base, state: "forbidden" });
       continue;
     }
-    const snapshot = await resolveNode(convId, ref.nodeId);
+    if (!canvasCache.has(convId)) canvasCache.set(convId, await loadSourceCanvas(convId));
+    const snapshot = resolveNode(canvasCache.get(convId)!, ref.nodeId);
     const title = source.title || `Canvas ${convId}`;
     if (!snapshot) {
       out.push({ ...base, state: "deleted", sourceCanvasTitle: title });

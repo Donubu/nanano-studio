@@ -20,7 +20,7 @@ import {
   type CharacterStage,
 } from "../lib/canvas-types";
 import { composeCharacterPrompt, stageReferenceUrls } from "../lib/character";
-import { textOutputOf } from "../lib/linked";
+import { lookupFrom, nodeTextOutput } from "../lib/node-outputs";
 import { thumbUrl } from "../lib/thumb";
 
 interface Props {
@@ -50,12 +50,10 @@ export function CharacterInheritedSection({ imageNode, nodes, edges, onUpdateDat
     const styleEdge = inputsOf(HANDLE_IDS.INPUT_CHARACTER_STYLE)[0];
     const styleNode = styleEdge ? nodes.find((n) => n.id === styleEdge.source) : undefined;
     const styleData = (styleNode?.data ?? {}) as Record<string, unknown>;
-    const styleText =
-      styleNode?.type === "linked"
-        ? textOutputOf(styleNode, styleEdge?.sourceHandle)
-        : styleNode?.type === "static-text"
-          ? String(styleData.content ?? "")
-          : String(styleData.outputText ?? "");
+    const lookup = lookupFrom(nodes as never);
+    const styleText = styleEdge
+      ? nodeTextOutput(styleNode as never, lookup, edges as never, styleEdge as never)
+      : "";
     // Otros Personajes que usan el mismo texto de estilo.
     const styleSharedWith = styleNode
       ? edges.filter(

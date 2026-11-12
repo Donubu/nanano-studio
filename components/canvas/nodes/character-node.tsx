@@ -17,7 +17,8 @@ import {
   type CharacterReferenceImage,
   type CharacterStage,
 } from "../lib/canvas-types";
-import { externalConnections, galleryImagesOf, newStageId } from "../lib/character";
+import { externalConnections, newStageId } from "../lib/character";
+import { nodeImages, type OutEdge } from "../lib/node-outputs";
 import { NodeDeleteButton } from "./node-status";
 import { NodeLabel } from "./node-label";
 import { NodeTextarea } from "./node-textarea";
@@ -53,13 +54,15 @@ export const CharacterNodeComponent = memo(function CharacterNode({ id, data, se
   // nodo en cada movimiento del canvas.
   const photosJson = useStore(
     useCallback(
-      (state: { nodeLookup: Map<string, { id: string; type?: string; data: Record<string, unknown> }> }) => {
+      (state: { nodeLookup: Map<string, { id: string; type?: string; data: Record<string, unknown> }>; edges: OutEdge[] }) => {
         const out: GalleryPhoto[] = [];
+        const lookup = (nid: string) => state.nodeLookup.get(nid);
         for (const gid of galleryIdsKey ? galleryIdsKey.split(",") : []) {
           const n = state.nodeLookup.get(gid);
           if (!n) continue;
           const label = String(n.data.label ?? "Galería");
-          for (const img of galleryImagesOf(n)) out.push({ nodeId: n.id, galleryLabel: label, url: img.url, caption: img.caption });
+          // Incluye las imágenes conectadas a la galería (node-outputs).
+          for (const img of nodeImages(n, lookup, state.edges)) out.push({ nodeId: n.id, galleryLabel: label, url: img.url, caption: img.caption });
         }
         return JSON.stringify(out);
       },
