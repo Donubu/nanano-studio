@@ -184,6 +184,13 @@ for (const rule of [...VALID_CONNECTIONS]) {
   }
 }
 
+// Video vinculado: como un video (media de un texto).
+for (const rule of [...VALID_CONNECTIONS]) {
+  if (rule.sourceType === "video" && rule.sourceHandle === HANDLE_IDS.OUTPUT_VIDEO) {
+    VALID_CONNECTIONS.push({ ...rule, sourceType: "linked" });
+  }
+}
+
 /**
  * Checks if a proposed connection is valid based on node types and handles.
  */

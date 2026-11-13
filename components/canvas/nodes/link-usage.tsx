@@ -20,11 +20,11 @@ export function stageUsageText(usage: LinkUsageCanvas[], stageId: string): strin
   return parts.length ? parts.join(", ") : null;
 }
 
-export function LinkUsageRow({ nodeId, kind }: { nodeId: string; kind: "character" | "scene" | "image" }) {
+export function LinkUsageRow({ nodeId, kind }: { nodeId: string; kind: "character" | "scene" | "image" | "video" }) {
   const usage = useLinkUsage(nodeId);
   const { openCanvas } = useCanvasContext();
   if (usage.length === 0) return null;
-  const what = kind === "character" ? "este Personaje" : kind === "scene" ? "esta Escena" : "esta imagen";
+  const what = kind === "character" ? "este Personaje" : kind === "scene" ? "esta Escena" : kind === "video" ? "este video" : "esta imagen";
   return (
     <div className="flex flex-wrap items-center gap-1 text-[12px] text-muted-foreground">
       <Link2 className="h-3.5 w-3.5 text-pink-400 shrink-0" />

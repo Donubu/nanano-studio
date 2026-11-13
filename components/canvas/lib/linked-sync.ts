@@ -32,14 +32,20 @@ export async function fetchLinkResolutions(
     return true;
   });
   if (unique.length === 0) return [];
-  const res = await fetch(`/api/conversations/${conversationId}/canvas/links/resolve`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refs: unique }),
-  });
-  if (!res.ok) throw new Error(`No se pudo actualizar los vinculados (HTTP ${res.status})`);
-  const data = await res.json();
-  return (data.results ?? []) as Resolution[];
+  // En tandas: el servidor resuelve hasta 200 por llamada (un montaje puede
+  // tener muchos videos vinculados).
+  const out: Resolution[] = [];
+  for (let i = 0; i < unique.length; i += 100) {
+    const res = await fetch(`/api/conversations/${conversationId}/canvas/links/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refs: unique.slice(i, i + 100) }),
+    });
+    if (!res.ok) throw new Error(`No se pudo actualizar los vinculados (HTTP ${res.status})`);
+    const data = await res.json();
+    out.push(...((data.results ?? []) as Resolution[]));
+  }
+  return out;
 }
 
 /** Cambios de data que corresponden a un nodo vinculado según su resolución (null = nada cambió). */

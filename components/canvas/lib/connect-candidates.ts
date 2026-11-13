@@ -25,7 +25,7 @@ export function connectGroup(node: Pick<Node, "type" | "data">): ConnectGroup {
   if (type === "linked") {
     const kind = (node.data as { linkSnapshot?: { kind?: string } | null; sourceType?: string }).linkSnapshot?.kind
       ?? (node.data as { sourceType?: string }).sourceType;
-    type = kind === "scene" ? "scene" : kind === "image" ? "image" : "character";
+    type = kind === "scene" ? "scene" : kind === "image" ? "image" : kind === "video" ? "video" : "character";
   }
   switch (type) {
     case "character":

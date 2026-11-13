@@ -1,7 +1,7 @@
 "use client";
 
-// Nodo vinculado: un Personaje o una Escena que vive en otro canvas del mismo
-// proyecto, solo lectura. Muestra la vista guardada (linkSnapshot).
+// Nodo vinculado: un Personaje, una Escena, una imagen o un video que vive en
+// otro canvas del mismo proyecto, solo lectura. Muestra la vista guardada (linkSnapshot).
 // Personaje: PROMPT (ADN + estilo + etapa), IMAGEN (imagen de una etapa), ADN
 // y ESTILO; la etapa se elige en cada conexión. Escena: PROMPT (su texto, con
 // el contexto del guion al ejecutar). Se actualiza al abrir el canvas, antes
@@ -9,7 +9,7 @@
 
 import { memo, useEffect, useState } from "react";
 import { Handle, Position, useReactFlow, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
-import { AlertTriangle, Dna, ExternalLink, Film, ImageIcon, Link2, Loader2, Palette, RefreshCw, UserRound } from "lucide-react";
+import { AlertTriangle, Dna, ExternalLink, Film, ImageIcon, Link2, Loader2, Palette, RefreshCw, UserRound, Video } from "lucide-react";
 import { HANDLE_IDS, type LinkedNodeData } from "../lib/canvas-types";
 import { computeLinkPatches } from "../lib/linked-sync";
 import { NodeDeleteButton } from "./node-status";
@@ -33,6 +33,9 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
   const isScene = scene != null || d.sourceType === "scene";
   const image = d.linkSnapshot?.kind === "image" ? d.linkSnapshot : null;
   const isImage = image != null || d.sourceType === "image";
+  const video = d.linkSnapshot?.kind === "video" ? d.linkSnapshot : null;
+  const isVideo = video != null || d.sourceType === "video";
+  const vertical = (video?.aspectRatio ?? "").startsWith("9:");
   const { conversationId, canEdit, openCanvas } = useCanvasContext();
   const { updateNodeData, updateNodeDataLocal } = useNodeUpdate();
   const { getNode } = useReactFlow();
@@ -64,10 +67,12 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
 
   return (
     <div
-      className={`group bg-card rounded-xl border-2 border-dashed ${isImage ? "border-purple-400/60" : isScene ? "border-violet-400/60" : "border-pink-400/60"} ${selected ? (isImage ? "ring-2 ring-purple-400/40" : isScene ? "ring-2 ring-violet-400/40" : "ring-2 ring-pink-400/40") : ""} transition-all ${isImage ? "w-[330px]" : "min-w-[300px] max-w-[380px]"}`}
+      className={`group bg-card rounded-xl border-2 border-dashed ${isVideo ? "border-amber-400/60" : isImage ? "border-purple-400/60" : isScene ? "border-violet-400/60" : "border-pink-400/60"} ${selected ? (isVideo ? "ring-2 ring-amber-400/40" : isImage ? "ring-2 ring-purple-400/40" : isScene ? "ring-2 ring-violet-400/40" : "ring-2 ring-pink-400/40") : ""} transition-all ${isVideo ? "w-[360px]" : isImage ? "w-[330px]" : "min-w-[300px] max-w-[380px]"}`}
     >
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
-        {isImage ? (
+        {isVideo ? (
+          <Video className="h-[18px] w-[18px] text-amber-400 shrink-0" />
+        ) : isImage ? (
           <ImageIcon className="h-[18px] w-[18px] text-purple-400 shrink-0" />
         ) : isScene ? (
           <Film className="h-[18px] w-[18px] text-violet-400 shrink-0" />
@@ -75,7 +80,7 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
           <UserRound className="h-[18px] w-[18px] text-pink-400 shrink-0" />
         )}
         <span className="min-w-0 flex-1 truncate text-[15px] font-semibold" title={d.linkSnapshot?.label || d.label}>
-          {scene ? `Escena ${scene.context.sceneIndex}${scene.context.variant ?? ""}/${scene.context.totalScenes}` : snap?.label || image?.label || d.label || (isImage ? "Imagen" : "Personaje")}
+          {scene ? `Escena ${scene.context.sceneIndex}${scene.context.variant ?? ""}/${scene.context.totalScenes}` : snap?.label || image?.label || (video ? `${d.sourceCanvasTitle ? `${d.sourceCanvasTitle} · ` : ""}${video.label}` : null) || d.label || (isVideo ? "Video" : isImage ? "Imagen" : "Personaje")}
         </span>
         <span
           className="flex shrink-0 items-center gap-0.5 rounded bg-pink-400/15 px-1 py-0.5 text-[12px] text-pink-700 dark:text-pink-300"
@@ -112,7 +117,11 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
           {" · "}
           {scene
             ? scene.scriptLabel
-            : isImage
+            : isVideo
+              ? video?.scene
+                ? `video final de la escena ${video.scene.sceneIndex}${video.scene.variant ?? ""}/${video.scene.totalScenes}`
+                : "video"
+              : isImage
               ? "imagen"
               : snap
               ? `${snap.stages.length} ${snap.stages.length === 1 ? "etapa" : "etapas"}, ${withImage} con imagen`
@@ -194,8 +203,30 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
             {image.prompt.trim() && <p className="line-clamp-2 text-[12px] text-muted-foreground" title={image.prompt}>{image.prompt}</p>}
           </>
         )}
+        {video && (
+          <>
+            {video.videoUrl ? (
+              <video
+                src={video.videoUrl}
+                controls
+                muted
+                playsInline
+                preload="metadata"
+                className="nodrag w-full rounded-md bg-black/80 object-contain"
+                style={{ aspectRatio: vertical ? "9/16" : "16/9", maxHeight: vertical ? 420 : undefined }}
+              />
+            ) : (
+              <div className="flex h-24 items-center justify-center rounded-md bg-muted/40 text-[13px] text-muted-foreground">
+                El original todavía no tiene video
+              </div>
+            )}
+            {video.prompt.trim() && <p className="line-clamp-2 text-[12px] text-muted-foreground" title={video.prompt}>{video.prompt}</p>}
+          </>
+        )}
         <p className="text-[12px] text-muted-foreground">
-          {isImage
+          {isVideo
+            ? "Si se regenera en su canvas, aquí cambia. VIDEO se conecta como media de un texto."
+            : isImage
             ? "Conecta IMAGEN como fotograma, referencia o a una galería. Si se regenera en su canvas, aquí cambia."
             : isScene
             ? "Conecta PROMPT a una imagen, video o texto. Para cambiarla, edítala en su canvas."
@@ -203,7 +234,19 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
         </p>
       </div>
 
-      {isImage ? (
+      {isVideo ? (
+        <>
+          <Handle
+            type="source"
+            position={Position.Right}
+            id={HANDLE_IDS.OUTPUT_VIDEO}
+            className="!w-3 !h-3 !bg-amber-500 !border-2 !border-background"
+            style={{ top: 60 }}
+            title="El video vinculado"
+          />
+          <OutputLabel top={52} className="text-amber-600 dark:text-amber-300">VIDEO</OutputLabel>
+        </>
+      ) : isImage ? (
         <>
           <Handle
             type="source"

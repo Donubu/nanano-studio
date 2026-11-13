@@ -163,5 +163,21 @@ describe("autoLayoutPositions con Guión y Personajes", () => {
     expect(right("a")).toBeLessThanOrEqual(left("b"));
     expect(overlaps(nodes, pos)).toBe(0);
   });
-});
 
+  it("videos vinculados: una fila por canvas de origen, en orden de escena", () => {
+    const v = (id: string, title: string, conv: number, idx: number, variant?: string, x = 0): Node => ({
+      ...node(id, "linked", x),
+      data: { sourceType: "video", sourceConversationId: conv, sourceCanvasTitle: title, linkSnapshot: { kind: "video", scene: { sceneIndex: idx, totalScenes: 3, variant } } },
+    });
+    const nodes = [v("a2", "ACTO 10", 2, 2, undefined, 0), v("b1", "ACTO 2", 1, 1, undefined, 900), v("a1", "ACTO 10", 2, 1, undefined, 500), v("b2b", "ACTO 2", 1, 2, "B", 100), v("b2", "ACTO 2", 1, 2, "A", 300)];
+    const pos = autoLayoutPositions(nodes, []);
+    const y = (id: string) => pos.get(id)!.y;
+    const x = (id: string) => pos.get(id)!.x;
+    expect(y("b1")).toBe(y("b2"));
+    expect(y("b2")).toBe(y("b2b"));
+    expect(y("a1")).toBeGreaterThan(y("b1")); // ACTO 2 antes que ACTO 10
+    expect(x("b1")).toBeLessThan(x("b2"));
+    expect(x("b2")).toBeLessThan(x("b2b"));
+    expect(x("a1")).toBeLessThan(x("a2"));
+  });
+});

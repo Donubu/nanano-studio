@@ -316,6 +316,10 @@ function resolveNodeInputs(
           mediaUrls.push({ url: vidData.outputUrl, type: "video" });
         }
       }
+      if (sourceNode.type === "linked" && baseHandleId(input.sourceHandle) === HANDLE_IDS.OUTPUT_VIDEO) {
+        const snap = (sourceData as LinkedNodeData).linkSnapshot;
+        if (snap?.kind === "video" && snap.videoUrl) mediaUrls.push({ url: snap.videoUrl, type: "video" });
+      }
     }
 
     if (input.targetHandle === HANDLE_IDS.INPUT_PARAMS) {

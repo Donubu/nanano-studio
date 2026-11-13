@@ -310,7 +310,7 @@ export function CanvasToolbar({
           onClick={onOpenLinkPicker}
           disabled={isExecuting}
           className="gap-1.5 text-xs"
-          title="Vincular un Personaje de otro canvas del proyecto (solo lectura, sigue al original)"
+          title="Vincular un Personaje, una Escena, una imagen o videos de otro canvas del proyecto (solo lectura, sigue al original)"
         >
           <Link2 className="h-3.5 w-3.5" />
           Vincular

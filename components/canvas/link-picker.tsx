@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { Film, Link2, Loader2, UserRound, X } from "lucide-react";
 import { thumbUrl } from "./lib/thumb";
+import { VideoLinkPanel, type VideoLinkGroup } from "./link-videos";
 
 interface LinkableCharacter {
   nodeId: string;
@@ -43,9 +44,13 @@ interface LinkPickerProps {
   conversationId: number;
   onClose: () => void;
   onLink: (source: { conversationId: number; nodeId: string }) => Promise<void>;
+  // Pestaña Videos: vincular varios de una vez (devuelve cuántos creó).
+  onLinkVideos: (groups: VideoLinkGroup[]) => Promise<number>;
+  alreadyLinked: Set<string>;
 }
 
-export function LinkPicker({ isOpen, conversationId, onClose, onLink }: LinkPickerProps) {
+export function LinkPicker({ isOpen, conversationId, onClose, onLink, onLinkVideos, alreadyLinked }: LinkPickerProps) {
+  const [tab, setTab] = useState<"nodes" | "videos">("nodes");
   const [canvases, setCanvases] = useState<LinkableCanvas[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [linking, setLinking] = useState<string | null>(null);
@@ -95,6 +100,27 @@ export function LinkPicker({ isOpen, conversationId, onClose, onLink }: LinkPick
           </button>
         </div>
 
+        <div className="flex gap-1 border-b border-border px-3 pt-2">
+          {([
+            ["nodes", "Personajes, escenas e imágenes"],
+            ["videos", "Videos"],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={`-mb-px border-b-2 px-2 pb-1.5 text-xs font-medium ${tab === key ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "videos" ? (
+          <div className="flex-1 overflow-y-auto p-3">
+            <VideoLinkPanel conversationId={conversationId} alreadyLinked={alreadyLinked} onLinkOne={onLink} onLinkMany={onLinkVideos} />
+          </div>
+        ) : (
         <div className="flex-1 overflow-y-auto p-3 space-y-3">
           <p className="text-xs text-muted-foreground">
             El nodo vinculado no se edita aquí: sigue al original y se actualiza al abrir el canvas y antes de ejecutar.
@@ -204,6 +230,7 @@ export function LinkPicker({ isOpen, conversationId, onClose, onLink }: LinkPick
             ))
           )}
         </div>
+        )}
       </div>
     </div>
   );

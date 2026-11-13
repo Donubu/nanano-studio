@@ -300,7 +300,7 @@ export const MAX_CHARACTER_STAGES = 20;
 // proyecto. El servidor arma una vista resuelta (todo lo que el nodo necesita
 // de su canvas: estilo conectado, fotos, imágenes de etapas) y queda guardada
 // en `linkSnapshot`; se actualiza al abrir el canvas y antes de ejecutar.
-export type LinkedSourceType = "character" | "scene" | "image";
+export type LinkedSourceType = "character" | "scene" | "image" | "video";
 
 export interface LinkedCharacterStage {
   id: string;
@@ -358,7 +358,20 @@ export interface LinkedImageSnapshot {
   prompt: string;
 }
 
-export type LinkedSnapshot = LinkedCharacterSnapshot | LinkedSceneSnapshot | LinkedImageSnapshot;
+// Video de otro canvas (por ejemplo, para armar un montaje con los videos
+// finales de cada Acto). Si es el video final de una escena, lleva cuál.
+export interface LinkedVideoSnapshot {
+  kind: "video";
+  label: string;
+  // null si el original todavía no tiene video.
+  videoUrl: string | null;
+  prompt: string;
+  duration?: number;
+  aspectRatio?: string;
+  scene?: { sceneIndex: number; totalScenes: number; variant?: "A" | "B" } | null;
+}
+
+export type LinkedSnapshot = LinkedCharacterSnapshot | LinkedSceneSnapshot | LinkedImageSnapshot | LinkedVideoSnapshot;
 
 export interface LinkUsageCanvas {
   conversationId: number;

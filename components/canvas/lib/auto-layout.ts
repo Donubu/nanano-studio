@@ -416,8 +416,30 @@ function storyLayout(nodes: Node[], edges: Edge[]): Map<string, Pos> {
     const kind = d.linkSnapshot?.kind ?? d.sourceType;
     return kind === "character" ? 0 : kind === "image" ? 1 : 2;
   };
-  const linked = nodes.filter((n) => n.type === "linked").map((n) => n.id).sort((a, b) => kindRank(a) - kindRank(b) || byOrig(a, b));
+  const isLinkedVideo = (id: string) => {
+    const d = byId.get(id)!.data as { linkSnapshot?: { kind?: string } | null; sourceType?: string };
+    return (d.linkSnapshot?.kind ?? d.sourceType) === "video";
+  };
+  const linked = nodes.filter((n) => n.type === "linked" && !isLinkedVideo(n.id)).map((n) => n.id).sort((a, b) => kindRank(a) - kindRank(b) || byOrig(a, b));
   for (const id of linked) assign(id, `cast:${id}`);
+  // Videos vinculados (montaje): una fila por canvas de origen, en el orden
+  // de las escenas.
+  const montage = new Map<string, string[]>();
+  for (const n of nodes) {
+    if (n.type !== "linked" || !isLinkedVideo(n.id)) continue;
+    const d = n.data as { sourceConversationId?: number; sourceCanvasTitle?: string };
+    const key = `${d.sourceCanvasTitle ?? ""}\u0000${d.sourceConversationId ?? ""}`;
+    if (!montage.has(key)) montage.set(key, []);
+    montage.get(key)!.push(n.id);
+    assign(n.id, "montage");
+  }
+  const sceneOrder = (id: string) => {
+    const sc = (byId.get(id)!.data as { linkSnapshot?: { scene?: { sceneIndex?: number; variant?: string } | null } | null }).linkSnapshot?.scene;
+    return sc ? (sc.sceneIndex ?? 0) * 2 + (sc.variant === "B" ? 1 : 0) : Number.MAX_SAFE_INTEGER;
+  };
+  const montageRows = [...montage.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, "es", { numeric: true, sensitivity: "base" }))
+    .map(([, ids]) => ids.sort((a, b) => sceneOrder(a) - sceneOrder(b) || byOrig(a, b)));
 
   // El destino de cada escena antes de recorrer: la conexión de continuidad
   // entre destinos no debe llevarse el de la escena siguiente.
@@ -509,6 +531,21 @@ function storyLayout(nodes: Node[], edges: Edge[]): Map<string, Pos> {
       rowH = Math.max(rowH, b.height);
     }
     y += rowH + SECTION_GAP;
+  }
+
+  // 2b) Montaje: videos vinculados, una fila por canvas de origen.
+  if (montageRows.length) {
+    for (const ids of montageRows) {
+      let x = ORIGIN_X;
+      let rowH = 0;
+      for (const id of ids) {
+        positions.set(id, { x, y });
+        x += boxes.get(id)!.w + COLUMN_GAP;
+        rowH = Math.max(rowH, boxes.get(id)!.h);
+      }
+      y += rowH + COMPONENT_GAP;
+    }
+    y += SECTION_GAP - COMPONENT_GAP;
   }
 
   // 3) Cada Guión: cabecera y una fila por escena con columnas alineadas.

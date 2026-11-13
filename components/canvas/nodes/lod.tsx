@@ -75,6 +75,7 @@ const LOD_STYLES: Record<string, LodStyle> = {
   "params-scene": { label: "Parámetros", border: "border-amber-400", bg: "bg-amber-400/10" },
   character: { label: "Personaje", border: "border-pink-400", bg: "bg-pink-400/10" },
   linked: { label: "Vinculado", border: "border-pink-400", bg: "bg-pink-400/10" },
+  "linked-video": { label: "Video vinculado", border: "border-amber-400", bg: "bg-amber-400/10" },
   scene: { label: "Escena", border: "border-amber-500", bg: "bg-amber-500/10" },
 };
 
@@ -181,7 +182,7 @@ export function withLod(Comp: ComponentType<NodeProps>) {
         {!zoomedOut && <CollapseToggle id={props.id} collapsed={collapsed} />}
         {zoomedOut && (
           <LodCard
-            type={props.type}
+            type={props.type === "linked" && (data.linkSnapshot as { kind?: string } | undefined)?.kind === "video" ? "linked-video" : props.type}
             label={String(data.label ?? "")}
             preview={lodPreviewUrl(props.type, data)}
             selected={!!props.selected}

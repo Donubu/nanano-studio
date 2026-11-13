@@ -79,6 +79,9 @@ export function characterDelivery(edge: OutEdge, lookup: NodeLookup, edges: OutE
     if (snap.kind === "image") {
       return handle === HANDLE_IDS.OUTPUT_IMAGE ? JSON.stringify({ image: snap.imageUrl }) : null;
     }
+    if (snap.kind === "video") {
+      return handle === HANDLE_IDS.OUTPUT_VIDEO ? JSON.stringify({ video: snap.videoUrl }) : null;
+    }
     const stage = linkedStageForEdge(d, edge.id);
     switch (handle) {
       case HANDLE_IDS.OUTPUT_CHARACTER_IMAGE:

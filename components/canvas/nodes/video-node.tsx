@@ -6,6 +6,7 @@ import { Video, Loader2, AlertCircle, Play, ZoomIn } from "lucide-react";
 import { HANDLE_IDS, topHandleId, type VideoNodeData } from "../lib/canvas-types";
 import { NodeStatus, NodeDeleteButton, AIBadge } from "./node-status";
 import { NodeLabel } from "./node-label";
+import { LinkUsageRow } from "./link-usage";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
 import { useUpstreamPromptLabel } from "../hooks/use-upstream-prompt-label";
@@ -127,6 +128,7 @@ export const VideoNodeComponent = memo(function VideoNode({ id, data, selected }
 
       {/* Handle labels */}
       <div className="px-3 pt-1.5 flex flex-col gap-0.5">
+        <LinkUsageRow nodeId={id} kind="video" />
         <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground/70">
           <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />Prompt
           <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0 ml-2" />First

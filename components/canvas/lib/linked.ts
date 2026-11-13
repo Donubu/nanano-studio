@@ -93,7 +93,7 @@ export function linkedTextForHandle(
   if (!snap) return "";
   const handle = baseHandleId(sourceHandle);
   if (snap.kind === "scene") return handle === HANDLE_IDS.OUTPUT_TEXT ? snap.text : "";
-  if (snap.kind === "image") return "";
+  if (snap.kind === "image" || snap.kind === "video") return "";
   if (handle === HANDLE_IDS.OUTPUT_CHARACTER) return linkedPromptForEdge(data, edgeId, hasReferences);
   if (handle === HANDLE_IDS.OUTPUT_CHARACTER_DNA) return snap.dna;
   if (handle === HANDLE_IDS.OUTPUT_CHARACTER_STYLE) return snap.style;

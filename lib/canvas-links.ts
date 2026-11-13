@@ -12,6 +12,7 @@ import { HANDLE_IDS, baseHandleId, type CharacterNodeData, type LinkState, type 
 import { buildCharacterSnapshot } from "@/components/canvas/lib/linked";
 import { collectSceneContext } from "@/components/canvas/lib/scene-context";
 import { galleryOutput, lookupFrom, nodeTextOutput, type NodeLookup, type OutEdge } from "@/components/canvas/lib/node-outputs";
+import { sceneFinalVideos, sceneOfVideo, sceneVideoLabel, type SceneVideos } from "@/components/canvas/lib/scene-videos";
 
 export interface LinkUser {
   id: number;
@@ -39,7 +40,7 @@ interface NodeRow extends RowDataPacket {
 
 type NodeLike = { id: string; type?: string; data: Record<string, unknown> };
 
-const MAX_REFS = 50;
+const MAX_REFS = 200;
 
 function rowToNode(row: NodeRow): NodeLike {
   const config = typeof row.config === "string" ? JSON.parse(row.config || "{}") : (row.config ?? {});
@@ -93,6 +94,13 @@ interface SourceCanvas {
   nodes: NodeLike[];
   edges: OutEdge[];
   lookup: NodeLookup;
+  // Video final de cada escena (se calcula una vez, al pedirlo).
+  sceneVideos?: SceneVideos[];
+}
+
+function sceneVideosOf(canvas: SourceCanvas): SceneVideos[] {
+  canvas.sceneVideos ??= sceneFinalVideos(canvas.nodes, canvas.edges);
+  return canvas.sceneVideos;
 }
 
 /**
@@ -130,7 +138,24 @@ function resolveNode(canvas: SourceCanvas, nodeId: string): LinkedSnapshot | nul
   if (node?.type === "character") return resolveCharacter(canvas, node);
   if (node?.type === "scene") return resolveScene(canvas, node);
   if (node?.type === "image" || node?.type === "static-image") return resolveImage(node);
+  if (node?.type === "video") return resolveVideo(canvas, node);
   return null;
+}
+
+/** Vista de un video: su URL actual y, si es el final de una escena, cuál. */
+function resolveVideo(canvas: SourceCanvas, node: NodeLike): LinkedSnapshot {
+  const d = node.data;
+  const url = d.status === "completed" ? d.outputUrl : null;
+  const sv = sceneOfVideo(node.id, sceneVideosOf(canvas));
+  return {
+    kind: "video",
+    label: sv ? sceneVideoLabel(sv) : String(d.label || "Video"),
+    videoUrl: typeof url === "string" && url ? url : null,
+    prompt: typeof d.prompt === "string" ? d.prompt : "",
+    ...(typeof d.duration === "number" ? { duration: d.duration } : {}),
+    ...(typeof d.aspectRatio === "string" ? { aspectRatio: d.aspectRatio } : {}),
+    scene: sv ? { sceneIndex: sv.sceneIndex, totalScenes: sv.totalScenes, ...(sv.variant ? { variant: sv.variant } : {}) } : null,
+  };
 }
 
 /** Vista de una imagen generada (o estática): su URL actual. */
@@ -369,6 +394,77 @@ export async function listLinkables(targetConversationId: number, user: LinkUser
     .map((c) => ({ conversationId: c.id, title: c.title || `Canvas ${c.id}`, ...byConv.get(c.id)! }));
 }
 
+
+export interface LinkableVideo {
+  nodeId: string;
+  label: string;
+  videoUrl: string | null;
+  // Solo los videos finales de una escena.
+  sceneIndex?: number;
+  variant?: "A" | "B";
+  scriptLabel?: string;
+}
+
+export interface VideoCanvas {
+  conversationId: number;
+  title: string;
+  // Videos finales de las escenas, en orden (Guión, escena, A antes que B).
+  sceneVideos: LinkableVideo[];
+  // Otros videos con resultado.
+  otherVideos: LinkableVideo[];
+}
+
+/**
+ * Videos de los otros canvas del proyecto: los finales de cada escena en orden
+ * (para "Traer videos del guion") y los demás con resultado. Mismo acceso que
+ * `listLinkables`. Ordenado por título con números naturales (ACTO 1, 2, 10).
+ */
+export async function listVideoLinkables(targetConversationId: number, user: LinkUser): Promise<VideoCanvas[] | null> {
+  const target = await loadConversation(targetConversationId);
+  if (!target) return null;
+  if (target.project_id == null) return [];
+  if (!(await canReadProject(target.project_id, user)) && target.user_id !== user.id) return [];
+  const isMember = user.isAdmin || (await isProjectMember(target.project_id, user.id));
+  const [convs] = await pool.execute<ConvRow[]>(
+    `SELECT c.id, c.user_id, c.project_id, c.title, c.generation_type FROM conversations c
+     WHERE c.project_id = ? AND c.generation_type = 'canvas' AND c.deleted_at IS NULL AND c.id <> ?
+       AND EXISTS (SELECT 1 FROM canvas_nodes n WHERE n.conversation_id = c.id AND n.type = 'video' AND n.deleted_at IS NULL)
+     LIMIT 200`,
+    [target.project_id, targetConversationId],
+  );
+  const visible = convs.filter((c) => isMember || c.user_id === user.id);
+  const out: VideoCanvas[] = [];
+  for (const c of visible) {
+    const canvas = await loadSourceCanvas(c.id);
+    const scriptLabel = (id: string) => String(canvas.lookup(id)?.data.label || "Guión");
+    const urlOf = (id: string) => {
+      const d = canvas.lookup(id)?.data;
+      return d?.status === "completed" && typeof d.outputUrl === "string" && d.outputUrl ? d.outputUrl : null;
+    };
+    const sceneVideos: LinkableVideo[] = [];
+    const inScene = new Set<string>();
+    for (const sv of sceneVideosOf(canvas)) {
+      for (const vid of sv.videoIds) {
+        inScene.add(vid);
+        sceneVideos.push({
+          nodeId: vid,
+          label: sceneVideoLabel(sv),
+          videoUrl: urlOf(vid),
+          sceneIndex: sv.sceneIndex,
+          ...(sv.variant ? { variant: sv.variant } : {}),
+          scriptLabel: scriptLabel(sv.scriptId),
+        });
+      }
+    }
+    const otherVideos: LinkableVideo[] = canvas.nodes
+      .filter((n) => n.type === "video" && !inScene.has(n.id) && urlOf(n.id))
+      .map((n) => ({ nodeId: n.id, label: String(n.data.label || "Video"), videoUrl: urlOf(n.id) }));
+    if (sceneVideos.length || otherVideos.length) {
+      out.push({ conversationId: c.id, title: c.title || `Canvas ${c.id}`, sceneVideos, otherVideos });
+    }
+  }
+  return out.sort((a, b) => a.title.localeCompare(b.title, "es", { numeric: true, sensitivity: "base" }));
+}
 
 /**
  * Uso de los nodos de un canvas como vinculados en OTROS canvas del mismo

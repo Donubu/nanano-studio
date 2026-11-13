@@ -1351,6 +1351,76 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
     [canEdit, ensureConversation, takeSnapshot, screenToFlowPosition, setNodes, persist, collab.emitNodeAdd],
   );
 
+  // Orígenes ya vinculados en este canvas ("conv|nodo"): "Traer videos" no los repite.
+  const alreadyLinked = useMemo(
+    () =>
+      new Set(
+        nodes
+          .filter((n) => n.type === "linked")
+          .map((n) => `${(n.data as LinkedNodeData).sourceConversationId}|${(n.data as LinkedNodeData).sourceNodeId}`),
+      ),
+    [nodes],
+  );
+
+  // "Traer videos del guion": vincula varios videos de una vez y los ordena
+  // como línea de tiempo debajo de lo que ya hay (una fila por canvas, en el
+  // orden de las escenas). Un solo deshacer.
+  const addLinkedVideos = useCallback(
+    async (groups: { conversationId: number; title: string; nodeIds: string[] }[]): Promise<number> => {
+      if (!canEdit) return 0;
+      const convId = await ensureConversation();
+      const refs = groups.flatMap((g) => g.nodeIds.map((nodeId) => ({ conversationId: g.conversationId, nodeId })));
+      const results = await fetchLinkResolutions(convId, refs);
+      const byKey = new Map(results.map((r) => [`${r.conversationId}|${r.nodeId}`, r]));
+      const existing = latestNodesRef.current;
+      const bottom = existing.length
+        ? Math.max(...existing.map((n) => n.position.y + (n.measured?.height ?? (typeof n.height === "number" ? n.height : 300))))
+        : 0;
+      const left = existing.length ? Math.min(...existing.map((n) => n.position.x)) : 100;
+      const COL = 420;
+      const now = new Date().toISOString();
+      const created: Node<CanvasNodeData>[] = [];
+      let y = existing.length ? bottom + 300 : 100;
+      for (const g of groups) {
+        let x = left;
+        let rowH = 0;
+        for (const nodeId of g.nodeIds) {
+          const r = byKey.get(`${g.conversationId}|${nodeId}`);
+          if (!r || r.state !== "ok" || !r.snapshot || r.snapshot.kind !== "video") continue;
+          const vertical = (r.snapshot.aspectRatio ?? "").startsWith("9:");
+          const data: LinkedNodeData = {
+            ...(getDefaultNodeData("linked") as LinkedNodeData),
+            sourceType: "video",
+            sourceConversationId: g.conversationId,
+            sourceNodeId: nodeId,
+            sourceCanvasTitle: r.sourceCanvasTitle,
+            label: `${r.sourceCanvasTitle ?? g.title} · ${r.snapshot.label}`,
+            linkSnapshot: r.snapshot,
+            linkHash: r.hash,
+            linkState: "ok",
+            linkSyncedAt: now,
+            imageOutputs: {},
+          };
+          created.push({ id: newCanvasNodeId(), type: "linked", position: { x, y }, data });
+          x += COL;
+          rowH = Math.max(rowH, vertical ? 720 : 320);
+        }
+        if (rowH) y += rowH + 100;
+      }
+      if (created.length === 0) return 0;
+      takeSnapshot();
+      setNodes((nds) => [...nds, ...created]);
+      for (const n of created) {
+        persist.saveNode(n);
+        collab.emitNodeAdd(n as unknown as Record<string, unknown>);
+      }
+      setLinkPickerOpen(false);
+      setTimeout(() => fitView({ nodes: created.map((n) => ({ id: n.id })), padding: 0.15, duration: 400 }), 100);
+      return created.length;
+    },
+    [canEdit, ensureConversation, takeSnapshot, setNodes, persist, collab.emitNodeAdd, fitView],
+  );
+
   // Update node data — persiste el nodo completo tras el merge (UPSERT
   // en backend). Se invoca el persist con el state ya merged para evitar
   // leer del nodes en clausura (que puede estar desactualizado).
@@ -1773,7 +1843,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
   // al volver a la ventana (otro canvas pudo vincular o desconectar algo).
   const [linkUsage, setLinkUsage] = useState<LinkUsage>({});
   const hasLinkableNodes = useMemo(
-    () => nodes.some((n) => n.type === "character" || n.type === "scene" || n.type === "image" || n.type === "static-image"),
+    () => nodes.some((n) => n.type === "character" || n.type === "scene" || n.type === "image" || n.type === "static-image" || n.type === "video"),
     [nodes],
   );
   useEffect(() => {
@@ -1803,7 +1873,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
       const used = toDelete.filter((n) => (linkUsage[n.id]?.length ?? 0) > 0);
       if (used.length === 0) return { nodes: toDelete, edges: edgesToDelete };
       const lines = used.map((n) => {
-        const label = String((n.data as Record<string, unknown>).label || (n.type === "scene" ? "Escena" : n.type === "character" ? "Personaje" : "Imagen"));
+        const label = String((n.data as Record<string, unknown>).label || (n.type === "scene" ? "Escena" : n.type === "character" ? "Personaje" : n.type === "video" ? "Video" : "Imagen"));
         const where = linkUsage[n.id].map((u) => `${u.title} (${u.connections} ${u.connections === 1 ? "conexión" : "conexiones"})`).join(", ");
         return `• ${label}: ${where}`;
       });
@@ -2290,6 +2360,8 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
           conversationId={realConversationId}
           onClose={() => setLinkPickerOpen(false)}
           onLink={addLinkedNode}
+          onLinkVideos={addLinkedVideos}
+          alreadyLinked={alreadyLinked}
         />
       )}
 
