@@ -2376,6 +2376,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
       )}
 
       <VideosPanel
+        conversationId={realConversationId}
         isOpen={videosOpen}
         nodes={nodes}
         edges={edges}

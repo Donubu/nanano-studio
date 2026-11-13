@@ -1,39 +1,37 @@
 "use client";
 
 // Panel "Videos": todos los videos del canvas (vinculados en orden de montaje
-// y los propios) con su link, para copiarlo, abrirlo o descargarlo. "Descargar
-// todos" los baja uno tras otro con nombres numerados (quedan en orden en la
-// carpeta).
+// y los propios) con su link, para copiarlo, abrirlo o descargarlo. Las
+// descargas las hace el servidor (`…/canvas/videos/file` y `/zip`) con los
+// mismos nombres numerados: "Descargar todos" es UN ZIP (el navegador corta
+// las series largas de descargas sueltas).
 
 import { useMemo, useState } from "react";
-import { Check, ClipboardCopy, Copy, Download, ExternalLink, Film, Loader2, LocateFixed, X } from "lucide-react";
+import { Check, ClipboardCopy, Copy, Download, ExternalLink, Film, LocateFixed, X } from "lucide-react";
 import { listCanvasVideos, videoFileName, type CanvasVideo } from "../lib/canvas-videos";
 
 type N = Parameters<typeof listCanvasVideos>[0][number];
 
-async function downloadVideo(url: string, name: string): Promise<boolean> {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const blob = await res.blob();
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = blob.type.includes("webm") ? name.replace(/\.mp4$/, ".webm") : name;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    return true;
-  } catch {
-    return false;
-  }
+// Descarga por el servidor (nombre numerado, sin cargar el video en la
+// memoria del navegador): un enlace con la ruta, como un clic normal.
+function triggerDownload(href: string) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 export function VideosPanel({
+  conversationId,
   isOpen,
   nodes,
   edges,
   onClose,
   onFocusNode,
 }: {
+  conversationId: number;
   isOpen: boolean;
   nodes: N[];
   edges: Parameters<typeof listCanvasVideos>[1];
@@ -43,8 +41,7 @@ export function VideosPanel({
   const videos = useMemo(() => (isOpen ? listCanvasVideos(nodes, edges) : []), [isOpen, nodes, edges]);
   const ready = videos.filter((v) => v.url);
   const [copied, setCopied] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [progress, setProgress] = useState<{ done: number; total: number; failed: number } | null>(null);
+  const [zipStarted, setZipStarted] = useState(false);
 
   if (!isOpen) return null;
 
@@ -60,25 +57,14 @@ export function VideosPanel({
     }
   };
 
-  const downloadOne = async (v: CanvasVideo) => {
-    if (!v.url || busy) return;
-    setBusy(v.nodeId);
-    const ok = await downloadVideo(v.url, fileNameOf(v));
-    if (!ok) window.open(v.url, "_blank");
-    setBusy(null);
+  const base = `/api/conversations/${conversationId}/canvas/videos`;
+  const downloadOne = (v: CanvasVideo) => {
+    if (v.url) triggerDownload(`${base}/file?node=${encodeURIComponent(v.nodeId)}`);
   };
-
-  const downloadAll = async () => {
-    if (busy || ready.length === 0) return;
-    setBusy("all");
-    let failed = 0;
-    setProgress({ done: 0, total: ready.length, failed: 0 });
-    for (let i = 0; i < ready.length; i++) {
-      const ok = await downloadVideo(ready[i].url!, fileNameOf(ready[i]));
-      if (!ok) failed++;
-      setProgress({ done: i + 1, total: ready.length, failed });
-    }
-    setBusy(null);
+  const downloadAll = () => {
+    if (ready.length === 0) return;
+    triggerDownload(`${base}/zip`);
+    setZipStarted(true);
   };
 
   const allLinks = ready.map((v) => `${v.label}\t${v.url}`).join("\n");
@@ -102,12 +88,12 @@ export function VideosPanel({
         <button
           type="button"
           onClick={downloadAll}
-          disabled={!!busy || ready.length === 0}
+          disabled={ready.length === 0 || conversationId <= 0}
           className="flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          title="Descarga todos los videos listos, numerados en orden (el navegador puede pedir permiso para varias descargas)"
+          title="Un solo ZIP con todos los videos listos, numerados en orden"
         >
-          {busy === "all" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-          Descargar todos ({ready.length})
+          <Download className="h-3.5 w-3.5" />
+          Descargar todos en ZIP ({ready.length})
         </button>
         <button
           type="button"
@@ -119,11 +105,9 @@ export function VideosPanel({
           {copied === "all" ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <ClipboardCopy className="h-3.5 w-3.5" />}
           Copiar todos los links
         </button>
-        {progress && (
+        {zipStarted && (
           <p className="w-full text-xs text-muted-foreground">
-            {progress.done < progress.total
-              ? `Descargando ${progress.done + 1} de ${progress.total}…`
-              : `Listo: ${progress.total - progress.failed} descargados${progress.failed ? `, ${progress.failed} fallaron (usa su link)` : ""}.`}
+            El ZIP se arma mientras se descarga: el navegador no sabe el tamaño total hasta que termina. Puede tardar unos minutos.
           </p>
         )}
       </div>
@@ -153,8 +137,8 @@ export function VideosPanel({
                       <IconButton title="Abrir en una pestaña nueva" onClick={() => window.open(v.url!, "_blank", "noopener")}>
                         <ExternalLink className="h-3.5 w-3.5" />
                       </IconButton>
-                      <IconButton title={`Descargar como "${fileNameOf(v)}"`} onClick={() => downloadOne(v)} disabled={!!busy}>
-                        {busy === v.nodeId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                      <IconButton title={`Descargar como "${fileNameOf(v)}"`} onClick={() => downloadOne(v)} disabled={conversationId <= 0}>
+                        <Download className="h-3.5 w-3.5" />
                       </IconButton>
                     </>
                   )}
