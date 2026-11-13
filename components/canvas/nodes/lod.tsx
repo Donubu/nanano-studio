@@ -84,6 +84,8 @@ const FALLBACK_STYLE: LodStyle = { label: "Nodo", border: "border-border", bg: "
 export function lodPreviewUrl(type: string | undefined, data: Record<string, unknown>): string | null {
   if (type === "video") return null; // el video no tiene miniatura; se ve el tipo
   if (type === "linked") {
+    const snap = data.linkSnapshot as { kind?: string; imageUrl?: string | null } | undefined;
+    if (snap?.kind === "image") return snap.imageUrl ?? null;
     // Personaje vinculado: la primera etapa con imagen.
     const stages = (data.linkSnapshot as { stages?: { imageUrl?: string | null }[] } | undefined)?.stages ?? [];
     return stages.find((s) => s.imageUrl)?.imageUrl ?? null;

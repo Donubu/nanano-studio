@@ -5,6 +5,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { ImagePlus, Upload, FolderOpen, Loader2, ZoomIn } from "lucide-react";
 import { HANDLE_IDS, type StaticImageNodeData } from "../lib/canvas-types";
 import { NodeDeleteButton } from "./node-status";
+import { LinkUsageRow } from "./link-usage";
 import { NodeLabel } from "./node-label";
 import { useCanvasContext } from "../canvas-context";
 import { useNodeUpdate } from "../hooks/use-node-update";
@@ -76,6 +77,9 @@ export const StaticImageNodeComponent = memo(function StaticImageNode({ id, data
 
       {/* Body */}
       <div className={`px-3 py-2 ${isResized ? "flex-1 min-h-0 flex flex-col" : ""}`}>
+        <div className="mb-1.5 empty:hidden">
+          <LinkUsageRow nodeId={id} kind="image" />
+        </div>
         {uploading ? (
           <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin mb-1" />

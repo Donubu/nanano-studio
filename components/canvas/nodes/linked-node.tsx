@@ -9,7 +9,7 @@
 
 import { memo, useEffect, useState } from "react";
 import { Handle, Position, useReactFlow, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
-import { AlertTriangle, Dna, ExternalLink, Film, Link2, Loader2, Palette, RefreshCw, UserRound } from "lucide-react";
+import { AlertTriangle, Dna, ExternalLink, Film, ImageIcon, Link2, Loader2, Palette, RefreshCw, UserRound } from "lucide-react";
 import { HANDLE_IDS, type LinkedNodeData } from "../lib/canvas-types";
 import { computeLinkPatches } from "../lib/linked-sync";
 import { NodeDeleteButton } from "./node-status";
@@ -31,6 +31,8 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
   const snap = d.linkSnapshot?.kind === "character" ? d.linkSnapshot : null;
   const scene = d.linkSnapshot?.kind === "scene" ? d.linkSnapshot : null;
   const isScene = scene != null || d.sourceType === "scene";
+  const image = d.linkSnapshot?.kind === "image" ? d.linkSnapshot : null;
+  const isImage = image != null || d.sourceType === "image";
   const { conversationId, canEdit, openCanvas } = useCanvasContext();
   const { updateNodeData, updateNodeDataLocal } = useNodeUpdate();
   const { getNode } = useReactFlow();
@@ -62,12 +64,18 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
 
   return (
     <div
-      className={`group bg-card rounded-xl border-2 border-dashed ${isScene ? "border-violet-400/60" : "border-pink-400/60"} ${selected ? (isScene ? "ring-2 ring-violet-400/40" : "ring-2 ring-pink-400/40") : ""} transition-all min-w-[300px] max-w-[380px]`}
+      className={`group bg-card rounded-xl border-2 border-dashed ${isImage ? "border-purple-400/60" : isScene ? "border-violet-400/60" : "border-pink-400/60"} ${selected ? (isImage ? "ring-2 ring-purple-400/40" : isScene ? "ring-2 ring-violet-400/40" : "ring-2 ring-pink-400/40") : ""} transition-all ${isImage ? "w-[330px]" : "min-w-[300px] max-w-[380px]"}`}
     >
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
-        {isScene ? <Film className="h-[18px] w-[18px] text-violet-400 shrink-0" /> : <UserRound className="h-[18px] w-[18px] text-pink-400 shrink-0" />}
+        {isImage ? (
+          <ImageIcon className="h-[18px] w-[18px] text-purple-400 shrink-0" />
+        ) : isScene ? (
+          <Film className="h-[18px] w-[18px] text-violet-400 shrink-0" />
+        ) : (
+          <UserRound className="h-[18px] w-[18px] text-pink-400 shrink-0" />
+        )}
         <span className="min-w-0 flex-1 truncate text-[15px] font-semibold" title={d.linkSnapshot?.label || d.label}>
-          {scene ? `Escena ${scene.context.sceneIndex}/${scene.context.totalScenes}` : snap?.label || d.label || "Personaje"}
+          {scene ? `Escena ${scene.context.sceneIndex}/${scene.context.totalScenes}` : snap?.label || image?.label || d.label || (isImage ? "Imagen" : "Personaje")}
         </span>
         <span
           className="flex shrink-0 items-center gap-0.5 rounded bg-pink-400/15 px-1 py-0.5 text-[12px] text-pink-700 dark:text-pink-300"
@@ -104,7 +112,9 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
           {" · "}
           {scene
             ? scene.scriptLabel
-            : snap
+            : isImage
+              ? "imagen"
+              : snap
               ? `${snap.stages.length} ${snap.stages.length === 1 ? "etapa" : "etapas"}, ${withImage} con imagen`
               : "sin datos"}
         </div>
@@ -171,14 +181,41 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
             </div>
           </>
         )}
+        {image && (
+          <>
+            {image.imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={thumbUrl(image.imageUrl, 640)} alt={image.label} className="w-full rounded-md object-contain bg-muted/30 max-h-[260px]" loading="lazy" />
+            ) : (
+              <div className="flex h-24 items-center justify-center rounded-md bg-muted/40 text-[13px] text-muted-foreground">
+                El original todavía no tiene imagen
+              </div>
+            )}
+            {image.prompt.trim() && <p className="line-clamp-2 text-[12px] text-muted-foreground" title={image.prompt}>{image.prompt}</p>}
+          </>
+        )}
         <p className="text-[12px] text-muted-foreground">
-          {isScene
+          {isImage
+            ? "Conecta IMAGEN como fotograma, referencia o a una galería. Si se regenera en su canvas, aquí cambia."
+            : isScene
             ? "Conecta PROMPT a una imagen, video o texto. Para cambiarla, edítala en su canvas."
             : "PROMPT e IMAGEN eligen la etapa en la conexión; ADN y ESTILO van por separado. Para cambiarlo, edítalo en su canvas."}
         </p>
       </div>
 
-      {isScene ? (
+      {isImage ? (
+        <>
+          <Handle
+            type="source"
+            position={Position.Right}
+            id={HANDLE_IDS.OUTPUT_IMAGE}
+            className="!w-3 !h-3 !bg-purple-500 !border-2 !border-background"
+            style={{ top: 60 }}
+            title="La imagen vinculada"
+          />
+          <OutputLabel top={52} className="text-purple-500 dark:text-purple-300">IMAGEN</OutputLabel>
+        </>
+      ) : isScene ? (
         <>
           <Handle
             type="source"

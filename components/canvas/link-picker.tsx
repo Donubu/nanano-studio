@@ -1,7 +1,7 @@
 "use client";
 
-// "Vincular de otro canvas": lista los Personajes y las Escenas de los otros
-// canvas del mismo proyecto. Elegir uno crea en este canvas un nodo vinculado
+// "Vincular de otro canvas": lista los Personajes, las Escenas y las imágenes
+// (generadas o subidas) de los otros canvas del mismo proyecto. Elegir uno crea en este canvas un nodo vinculado
 // (solo lectura) que sigue al original.
 
 import { useEffect, useState } from "react";
@@ -24,11 +24,18 @@ interface LinkableScene {
   excerpt: string;
 }
 
+interface LinkableImage {
+  nodeId: string;
+  label: string;
+  thumbUrl: string;
+}
+
 interface LinkableCanvas {
   conversationId: number;
   title: string;
   characters: LinkableCharacter[];
   scenes: LinkableScene[];
+  images?: LinkableImage[];
 }
 
 interface LinkPickerProps {
@@ -96,12 +103,12 @@ export function LinkPicker({ isOpen, conversationId, onClose, onLink }: LinkPick
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Cargando personajes y escenas...
+              Cargando personajes, escenas e imágenes...
             </div>
           ) : canvases && canvases.length === 0 ? (
             <div className="text-center py-10 text-sm text-muted-foreground">
               <UserRound className="h-8 w-8 mx-auto mb-2 opacity-40" />
-              No hay Personajes ni Escenas en otros canvas de este proyecto.
+              No hay Personajes, Escenas ni imágenes en otros canvas de este proyecto.
             </div>
           ) : (
             canvases?.map((c) => (
@@ -163,6 +170,36 @@ export function LinkPicker({ isOpen, conversationId, onClose, onLink }: LinkPick
                     </div>
                   );
                 })}
+                {/* Imágenes (generadas o subidas), como miniaturas. */}
+                {(c.images?.length ?? 0) > 0 && (
+                  <>
+                    <div className="mt-2 mb-1 text-[11px] uppercase tracking-wider text-muted-foreground">Imágenes</div>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {c.images!.map((img) => {
+                        const key = `${c.conversationId}|${img.nodeId}`;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            disabled={!!linking}
+                            onClick={() => handleLink(c.conversationId, img.nodeId)}
+                            title={`${img.label}: vincular esta imagen`}
+                            className="relative aspect-square overflow-hidden rounded-md border border-border hover:border-primary/60 hover:ring-2 hover:ring-primary/30 transition disabled:opacity-60"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={thumbUrl(img.thumbUrl, 256)} alt={img.label} className="h-full w-full object-cover" loading="lazy" />
+                            <span className="absolute inset-x-0 bottom-0 truncate bg-black/55 px-1 text-[10px] text-white">{img.label}</span>
+                            {linking === key && (
+                              <span className="absolute inset-0 flex items-center justify-center bg-black/40">
+                                <Loader2 className="h-4 w-4 animate-spin text-white" />
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
               </div>
             ))
           )}

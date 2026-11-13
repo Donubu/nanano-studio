@@ -172,6 +172,18 @@ export const VALID_CONNECTIONS: ConnectionRule[] = [
   })),
 ];
 
+// Imagen vinculada de otro canvas: se conecta como una imagen estática, salvo
+// la referencia visual del Guión / Params Escena (lee las imágenes por otro camino).
+for (const rule of [...VALID_CONNECTIONS]) {
+  if (
+    rule.sourceType === "static-image" &&
+    rule.sourceHandle === HANDLE_IDS.OUTPUT_IMAGE &&
+    rule.targetHandle !== HANDLE_IDS.INPUT_VISUAL_REFERENCE
+  ) {
+    VALID_CONNECTIONS.push({ ...rule, sourceType: "linked" });
+  }
+}
+
 /**
  * Checks if a proposed connection is valid based on node types and handles.
  */

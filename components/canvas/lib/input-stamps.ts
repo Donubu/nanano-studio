@@ -76,6 +76,9 @@ export function characterDelivery(edge: OutEdge, lookup: NodeLookup, edges: OutE
     if (snap.kind === "scene") {
       return handle === HANDLE_IDS.OUTPUT_TEXT ? JSON.stringify({ text: snap.text, context: snap.context }) : null;
     }
+    if (snap.kind === "image") {
+      return handle === HANDLE_IDS.OUTPUT_IMAGE ? JSON.stringify({ image: snap.imageUrl }) : null;
+    }
     const stage = linkedStageForEdge(d, edge.id);
     switch (handle) {
       case HANDLE_IDS.OUTPUT_CHARACTER_IMAGE:
@@ -120,7 +123,7 @@ export interface StaleInput {
 function sourceName(src: OutNode, edge: OutEdge): { source: string; stage?: string } {
   if (src.type === "linked") {
     const d = src.data as unknown as LinkedNodeData;
-    const stage = linkedStageForEdge(d, edge.id);
+    const stage = d.linkSnapshot?.kind === "character" ? linkedStageForEdge(d, edge.id) : null;
     return { source: d.linkSnapshot?.label || String(d.label || "Vinculado"), stage: stage?.name || undefined };
   }
   const d = src.data as unknown as CharacterNodeData;

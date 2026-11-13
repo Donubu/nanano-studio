@@ -5,6 +5,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { ImageIcon, Loader2, AlertCircle, ZoomIn } from "lucide-react";
 import { HANDLE_IDS, topHandleId, type ImageNodeData } from "../lib/canvas-types";
 import { NodeStatus, NodeDeleteButton, AIBadge } from "./node-status";
+import { LinkUsageRow } from "./link-usage";
 import { NodeLabel } from "./node-label";
 import { HistoryNav } from "./history-nav";
 import { useNodeUpdate } from "../hooks/use-node-update";
@@ -123,6 +124,7 @@ export const ImageNodeComponent = memo(function ImageNode({ id, data, selected }
 
       {/* Body */}
       <div className={`px-3 py-2 space-y-1.5 ${isResized ? "flex-1 min-h-0 flex flex-col" : ""}`}>
+        <LinkUsageRow nodeId={id} kind="image" />
         <p className={`text-[15px] line-clamp-2 ${nodeData.prompt ? "text-muted-foreground" : upstreamLabel ? "text-violet-400/80 italic" : "text-muted-foreground"}`}>
           {nodeData.prompt || upstreamLabel || "Sin prompt configurado"}
         </p>

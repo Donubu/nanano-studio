@@ -1771,7 +1771,10 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
   // Dónde se usan los Personajes / Escenas de este canvas. Se carga al abrir y
   // al volver a la ventana (otro canvas pudo vincular o desconectar algo).
   const [linkUsage, setLinkUsage] = useState<LinkUsage>({});
-  const hasLinkableNodes = useMemo(() => nodes.some((n) => n.type === "character" || n.type === "scene"), [nodes]);
+  const hasLinkableNodes = useMemo(
+    () => nodes.some((n) => n.type === "character" || n.type === "scene" || n.type === "image" || n.type === "static-image"),
+    [nodes],
+  );
   useEffect(() => {
     if (!isLoaded || !realConversationId || !hasLinkableNodes) return;
     let cancelled = false;
@@ -1799,7 +1802,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
       const used = toDelete.filter((n) => (linkUsage[n.id]?.length ?? 0) > 0);
       if (used.length === 0) return { nodes: toDelete, edges: edgesToDelete };
       const lines = used.map((n) => {
-        const label = String((n.data as Record<string, unknown>).label || (n.type === "scene" ? "Escena" : "Personaje"));
+        const label = String((n.data as Record<string, unknown>).label || (n.type === "scene" ? "Escena" : n.type === "character" ? "Personaje" : "Imagen"));
         const where = linkUsage[n.id].map((u) => `${u.title} (${u.connections} ${u.connections === 1 ? "conexión" : "conexiones"})`).join(", ");
         return `• ${label}: ${where}`;
       });

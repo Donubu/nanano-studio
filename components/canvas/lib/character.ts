@@ -29,6 +29,11 @@ export function galleryImagesOf(node: { type?: string; data: Record<string, unkn
     return [{ url: d.imageUrl, caption: typeof d.caption === "string" ? d.caption : undefined }];
   }
   if (node.type === "image" && typeof d.outputUrl === "string" && d.outputUrl) return [{ url: d.outputUrl }];
+  // Imagen vinculada de otro canvas (la vista guardada en el nodo).
+  if (node.type === "linked") {
+    const snap = d.linkSnapshot as { kind?: string; imageUrl?: string | null } | null | undefined;
+    if (snap?.kind === "image" && snap.imageUrl) return [{ url: snap.imageUrl }];
+  }
   return [];
 }
 

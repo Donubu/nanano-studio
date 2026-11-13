@@ -362,6 +362,12 @@ function imageSourceInfo(
     const url = (d.imageUrl as string) || null;
     return { url, label, count: url ? 1 : 0 };
   }
+  // Imagen vinculada de otro canvas.
+  if (source.type === "linked") {
+    const snap = (d as unknown as LinkedNodeData).linkSnapshot;
+    const url = snap?.kind === "image" ? snap.imageUrl : null;
+    return { url, label: snap?.label ? `${snap.label} (vinculada)` : label, count: url ? 1 : 0 };
+  }
   if (source.type === "static-image-group") {
     const images = galleryOutput(source as never, lookupFrom(nodes as never), edges as never);
     return { url: images[0]?.url || null, label: `${label} (${images.length})`, count: images.length };

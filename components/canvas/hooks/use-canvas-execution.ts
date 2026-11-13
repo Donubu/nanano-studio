@@ -246,6 +246,10 @@ function resolveNodeInputs(
       if (sourceNode.type === "linked" && baseHandleId(input.sourceHandle) === HANDLE_IDS.OUTPUT_CHARACTER_IMAGE) {
         return linkedImageForEdge(sourceData as LinkedNodeData, input.edgeId);
       }
+      if (sourceNode.type === "linked" && baseHandleId(input.sourceHandle) === HANDLE_IDS.OUTPUT_IMAGE) {
+        const snap = (sourceData as LinkedNodeData).linkSnapshot;
+        return snap?.kind === "image" ? snap.imageUrl : null;
+      }
       return null;
     };
 

@@ -129,7 +129,20 @@ function resolveNode(canvas: SourceCanvas, nodeId: string): LinkedSnapshot | nul
   const node = canvas.lookup(nodeId);
   if (node?.type === "character") return resolveCharacter(canvas, node);
   if (node?.type === "scene") return resolveScene(canvas, node);
+  if (node?.type === "image" || node?.type === "static-image") return resolveImage(node);
   return null;
+}
+
+/** Vista de una imagen generada (o estática): su URL actual. */
+function resolveImage(node: NodeLike): LinkedSnapshot {
+  const d = node.data;
+  const url = node.type === "image" ? (d.status === "completed" ? d.outputUrl : null) : d.imageUrl;
+  return {
+    kind: "image",
+    label: String(d.label || (node.type === "image" ? "Imagen" : "Imagen estática")),
+    imageUrl: typeof url === "string" && url ? url : null,
+    prompt: typeof d.prompt === "string" ? d.prompt : "",
+  };
 }
 
 /** Vista de una Escena: su texto y los ingredientes del contexto de guion. */
@@ -234,11 +247,18 @@ export interface LinkableScene {
   excerpt: string;
 }
 
+export interface LinkableImage {
+  nodeId: string;
+  label: string;
+  thumbUrl: string;
+}
+
 export interface LinkableCanvas {
   conversationId: number;
   title: string;
   characters: LinkableCharacter[];
   scenes: LinkableScene[];
+  images: LinkableImage[];
 }
 
 /** Personajes y Escenas de los otros canvas del proyecto del canvas destino. */
@@ -265,7 +285,7 @@ export async function listLinkables(targetConversationId: number, user: LinkUser
   const [nodeRows] = await pool.execute<(NodeRow & { conversation_id: number })[]>(
     `SELECT id, conversation_id, type, label, config, status, output_url, output_text, deleted_at
      FROM canvas_nodes
-     WHERE conversation_id IN (${inConvs}) AND type IN ('character', 'scene', 'script') AND deleted_at IS NULL
+     WHERE conversation_id IN (${inConvs}) AND type IN ('character', 'scene', 'script', 'image', 'static-image') AND deleted_at IS NULL
      ORDER BY created_at ASC`,
     convIds,
   );
@@ -294,13 +314,28 @@ export async function listLinkables(targetConversationId: number, user: LinkUser
     for (const r of imgRows) outputs.set(`${r.conversation_id}|${r.id}`, r.output_url as string);
   }
 
-  const byConv = new Map<number, { characters: LinkableCharacter[]; scenes: LinkableScene[] }>();
+  const byConv = new Map<number, { characters: LinkableCharacter[]; scenes: LinkableScene[]; images: LinkableImage[] }>();
   const bucket = (convId: number) => {
-    const b = byConv.get(convId) ?? { characters: [], scenes: [] };
+    const b = byConv.get(convId) ?? { characters: [], scenes: [], images: [] };
     byConv.set(convId, b);
     return b;
   };
+  // Imágenes de las etapas de un Personaje: ya se vinculan con el Personaje.
+  const stageImageKeys = new Set(
+    parsed.flatMap(({ convId, node }) =>
+      node.type === "character"
+        ? ((node.data as unknown as CharacterNodeData).stages ?? []).filter((s) => s.imageNodeId).map((s) => `${convId}|${s.imageNodeId}`)
+        : [],
+    ),
+  );
   for (const { convId, node } of parsed) {
+    if (node.type === "image" || node.type === "static-image") {
+      // Solo las que tienen imagen (generada o subida).
+      const snap = resolveImage(node) as { imageUrl: string | null; label: string };
+      if (!snap.imageUrl || stageImageKeys.has(`${convId}|${node.id}`)) continue;
+      bucket(convId).images.push({ nodeId: node.id, label: snap.label, thumbUrl: snap.imageUrl });
+      continue;
+    }
     if (node.type === "character") {
       const stages = (node.data as unknown as CharacterNodeData).stages ?? [];
       const thumb = stages.map((s) => (s.imageNodeId ? outputs.get(`${convId}|${s.imageNodeId}`) : undefined)).find(Boolean) ?? null;
@@ -329,7 +364,7 @@ export async function listLinkables(targetConversationId: number, user: LinkUser
   return visible
     .filter((c) => {
       const b = byConv.get(c.id);
-      return !!b && (b.characters.length > 0 || b.scenes.length > 0);
+      return !!b && (b.characters.length > 0 || b.scenes.length > 0 || b.images.length > 0);
     })
     .map((c) => ({ conversationId: c.id, title: c.title || `Canvas ${c.id}`, ...byConv.get(c.id)! }));
 }

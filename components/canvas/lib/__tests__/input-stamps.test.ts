@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { HANDLE_IDS } from "../canvas-types";
 import { computeInputStamps, describeStale, staleInputs } from "../input-stamps";
-import { lookupFrom, type OutEdge, type OutNode } from "../node-outputs";
+import { galleryOutput, lookupFrom, type OutEdge, type OutNode } from "../node-outputs";
+import { isValidConnection } from "../connection-rules";
 
 function linked(stages: { id: string; name: string; text: string; imageUrl: string | null }[], dna = "ADN", imageOutputs: Record<string, string> = {}): OutNode {
   return {
@@ -86,5 +87,46 @@ describe("input stamps", () => {
     const vid = generatedWith(linked(stages, "ADN", outputs));
     vid.data.status = "error";
     expect(staleInputs(vid, lookupFrom([lk, vid]), edges)).toEqual([]);
+  });
+});
+
+describe("imagen vinculada", () => {
+  const linkedImage = (url: string | null): OutNode => ({
+    id: "li",
+    type: "linked",
+    data: { sourceType: "image", linkSnapshot: { kind: "image", label: "Cierre acto 1", imageUrl: url, prompt: "" } },
+  });
+  const edges: OutEdge[] = [
+    { id: "e1", source: "li", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, target: "vid", targetHandle: HANDLE_IDS.INPUT_FIRST_FRAME },
+  ];
+
+  it("regenerar el original desactualiza lo que la usó", () => {
+    const vid: OutNode = { id: "vid", type: "video", data: { status: "completed" } };
+    vid.data.inputStamps = computeInputStamps("vid", lookupFrom([linkedImage("https://x/a.png"), vid]), edges);
+    expect(staleInputs(vid, lookupFrom([linkedImage("https://x/a.png"), vid]), edges)).toEqual([]);
+    expect(staleInputs(vid, lookupFrom([linkedImage("https://x/b.png"), vid]), edges)).toEqual([
+      { edgeId: "e1", source: "Cierre acto 1", stage: undefined },
+    ]);
+  });
+
+  it("una galería conectada la entrega como una foto más", () => {
+    const gallery: OutNode = { id: "g", type: "static-image-group", data: { images: [{ url: "https://x/own.png" }] } };
+    const e: OutEdge[] = [{ id: "e2", source: "li", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, target: "g", targetHandle: HANDLE_IDS.INPUT_GALLERY_IMAGES }];
+    expect(galleryOutput(gallery, lookupFrom([gallery, linkedImage("https://x/a.png")]), e).map((i) => i.url)).toEqual([
+      "https://x/own.png",
+      "https://x/a.png",
+    ]);
+  });
+
+  it("se conecta como una imagen estática (no como referencia visual del Guión)", () => {
+    const nodes = [
+      { id: "li", type: "linked", position: { x: 0, y: 0 }, data: {} },
+      { id: "vid", type: "video", position: { x: 0, y: 0 }, data: {} },
+      { id: "sc", type: "script", position: { x: 0, y: 0 }, data: {} },
+    ];
+    const conn = (target: string, targetHandle: string) => ({ source: "li", sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, target, targetHandle });
+    expect(isValidConnection(conn("vid", HANDLE_IDS.INPUT_FIRST_FRAME), nodes, [])).toBe(true);
+    expect(isValidConnection(conn("sc", HANDLE_IDS.INPUT_GALLERY_IMAGES), nodes, [])).toBe(true);
+    expect(isValidConnection(conn("sc", HANDLE_IDS.INPUT_VISUAL_REFERENCE), nodes, [])).toBe(false);
   });
 });
