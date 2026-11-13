@@ -11,6 +11,7 @@
 
 import type { Part } from "@google/genai";
 import { generateJson, GeminiUsage } from "./gemini-json";
+import { parseDataUrl } from "../data-url";
 import { TemplateDefinition, TemplateLayer } from "./types";
 import {
   LintIssue,
@@ -150,11 +151,11 @@ export function describeTree(def: TemplateDefinition): Record<string, unknown> {
 
 function parseImage(image: LayoutFixRequest["image"]): Part | null {
   if (!image?.data) return null;
-  const m = /^data:([^;]+);base64,([\s\S]*)$/.exec(image.data);
+  const m = parseDataUrl(image.data);
   return {
     inlineData: {
-      mimeType: m ? m[1] : image.mimeType,
-      data: m ? m[2] : image.data,
+      mimeType: m ? m.mimeType : image.mimeType,
+      data: m ? m.base64 : image.data,
     },
   };
 }

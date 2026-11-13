@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { uploadToS3, isS3Configured } from "@/lib/s3";
+import { parseDataUrl } from "@/lib/data-url";
 
 const EXTENSION_BY_MIME: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
+    const matches = parseDataUrl(imageData);
     if (!matches) {
       return NextResponse.json(
         { error: "Formato base64 inválido (se espera data: URI)" },
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const mimeType = matches[1];
+    const mimeType = matches.mimeType;
     if (!EXTENSION_BY_MIME[mimeType]) {
       return NextResponse.json(
         { error: `Tipo de archivo no soportado: ${mimeType}` },
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const buffer = Buffer.from(matches[2], "base64");
+    const buffer = Buffer.from(matches.base64, "base64");
     if (buffer.length > MAX_BYTES) {
       return NextResponse.json(
         { error: "Archivo demasiado grande (máximo 12 MB)" },

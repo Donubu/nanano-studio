@@ -8,6 +8,7 @@ import { generateKlingVideo, isKlingConfigured, KlingVideoConfig, validateKlingV
 import { generateOpenRouterVideo, isOpenRouterConfigured, OpenRouterVideoConfig, validateOpenRouterVideoConfig, OpenRouterImageInputs, getOpenRouterModelCaps, OPENROUTER_MAX_SEED } from "@/lib/openrouter-video";
 import { generateOmniVideo, isOmniConfigured, OmniVideoConfig, validateOmniVideoConfig } from "@/lib/omni-video";
 import { uploadVideoToS3, generateVideoFileName, isS3Configured, uploadToS3, generateFileName } from "@/lib/s3";
+import { parseDataUrl } from "@/lib/data-url";
 import { generateConversationTitle, Labels } from "@/lib/google-ai";
 import { calculateEstimatedCost } from "@/lib/cost-calculator";
 import { acquireSlot, releaseSlot, waitForSlot } from "@/lib/veo-semaphore";
@@ -463,9 +464,9 @@ export async function POST(
                   voiceBindingUrls[assetId] = audioData;
                   continue;
                 }
-                const base64Match = audioData.match(/^data:([^;]+);base64,(.+)$/);
+                const base64Match = parseDataUrl(audioData);
                 if (!base64Match) continue;
-                const [, mimeType, base64Data] = base64Match;
+                const { mimeType, base64: base64Data } = base64Match;
                 const ext = mimeType.split("/")[1] || "mp3";
                 const fileName = generateFileName(id, ext);
                 const buffer = Buffer.from(base64Data, "base64");
@@ -488,9 +489,9 @@ export async function POST(
             const uploadBase64IfNeeded = async (data: string): Promise<string> => {
               if (data.startsWith("http")) return data;
               // Extract base64 data and upload to S3
-              const base64Match = data.match(/^data:([^;]+);base64,(.+)$/);
+              const base64Match = parseDataUrl(data);
               if (!base64Match) return data;
-              const [, mimeType, base64Data] = base64Match;
+              const { mimeType, base64: base64Data } = base64Match;
               const ext = mimeType.split("/")[1] || "png";
               const fileName = generateFileName(id, ext);
               const buffer = Buffer.from(base64Data, "base64");
@@ -661,9 +662,9 @@ export async function POST(
             // OpenRouter requires public URLs for image inputs — upload base64 to S3 first.
             const uploadIfBase64 = async (data: string): Promise<string> => {
               if (data.startsWith("http")) return data;
-              const base64Match = data.match(/^data:([^;]+);base64,(.+)$/);
+              const base64Match = parseDataUrl(data);
               if (!base64Match) return data;
-              const [, mimeType, base64Data] = base64Match;
+              const { mimeType, base64: base64Data } = base64Match;
               const ext = mimeType.split("/")[1] || "png";
               const fileName = generateFileName(id, ext);
               const buffer = Buffer.from(base64Data, "base64");

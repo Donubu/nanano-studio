@@ -22,6 +22,7 @@
  */
 
 import { GeneratedVideo, VideoGenerationProgress } from "./google-ai-video";
+import { parseDataUrl } from "./data-url";
 
 const OMNI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -171,10 +172,10 @@ interface InlineImage {
 }
 
 async function resolveImageInput(source: string): Promise<InlineImage> {
-  const dataUrlMatch = source.match(/^data:(image\/(?:jpeg|jpg|png));base64,(.+)$/);
-  if (dataUrlMatch) {
-    const mime = dataUrlMatch[1] === "image/jpg" ? "image/jpeg" : dataUrlMatch[1];
-    return { data: dataUrlMatch[2], mimeType: mime };
+  const dataUrl = parseDataUrl(source);
+  if (dataUrl && /^image\/(?:jpeg|jpg|png)$/.test(dataUrl.mimeType)) {
+    const mime = dataUrl.mimeType === "image/jpg" ? "image/jpeg" : dataUrl.mimeType;
+    return { data: dataUrl.base64, mimeType: mime };
   }
 
   if (source.startsWith("http://") || source.startsWith("https://")) {

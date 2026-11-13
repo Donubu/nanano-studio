@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { uploadImageToS3, generateUploadFileName, isS3Configured } from "@/lib/s3";
+import { parseDataUrl } from "@/lib/data-url";
 
 interface UploadRow extends RowDataPacket {
   id: number;
@@ -85,16 +86,15 @@ export async function POST(
     }
 
     // Extraer el mime type y el base64 puro
-    const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
-    if (!matches) {
+    const parts = parseDataUrl(imageData);
+    if (!parts) {
       return NextResponse.json(
         { error: "Formato de imagen inválido" },
         { status: 400 }
       );
     }
 
-    const mimeType = matches[1];
-    const base64Data = matches[2];
+    const { mimeType, base64: base64Data } = parts;
     const buffer = Buffer.from(base64Data, "base64");
 
     // Determinar extensión del archivo
@@ -149,7 +149,11 @@ export async function POST(
   } catch (error) {
     console.error("Error uploading image:", error);
     return NextResponse.json(
-      { error: "Error interno del servidor" },
+      {
+        error: "Error interno del servidor",
+        // En desarrollo, el motivo real (en producción no se expone).
+        ...(process.env.NODE_ENV !== "production" && error instanceof Error ? { detail: error.message } : {}),
+      },
       { status: 500 }
     );
   }

@@ -185,6 +185,7 @@ export function ImagePickerModal({
     if (selectedImages.size === 0) return;
 
     setSubmitting(true);
+    const failures: string[] = [];
     try {
       for (const img of selectedImages) {
         if (img.startsWith("data:")) {
@@ -195,7 +196,22 @@ export function ImagePickerModal({
             body: JSON.stringify({ imageData: img, fileName: uploadedFileName }),
           });
           if (!res.ok) {
-            console.error("Error uploading image:", await res.json());
+            // La respuesta puede no ser JSON (proxy, túnel, límite de tamaño):
+            // se lee como texto para no perder el motivo.
+            const raw = await res.text().catch(() => "");
+            let detail = raw;
+            try {
+              detail = (JSON.parse(raw) as { error?: string }).error ?? raw;
+            } catch {
+              // no era JSON
+            }
+            const sizeMb = (img.length * 0.75) / (1024 * 1024);
+            console.error(`Error uploading image (HTTP ${res.status}, ~${sizeMb.toFixed(1)} MB):`, detail.slice(0, 500));
+            failures.push(
+              res.status === 413
+                ? `la imagen es demasiado grande (~${sizeMb.toFixed(1)} MB)`
+                : `HTTP ${res.status}${detail ? `: ${detail.slice(0, 160)}` : ""}`,
+            );
             continue;
           }
           const data = await res.json();
@@ -203,6 +219,9 @@ export function ImagePickerModal({
         } else {
           onSelect(img, showReferenceTypeSelector ? selectedType : undefined);
         }
+      }
+      if (failures.length > 0) {
+        alert(`No se pudo subir ${failures.length === 1 ? "la imagen" : `${failures.length} imágenes`}: ${failures.join("; ")}`);
       }
     } catch (err) {
       console.error("Error processing selection:", err);
