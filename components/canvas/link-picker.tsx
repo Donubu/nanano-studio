@@ -160,8 +160,8 @@ export function LinkPicker({ isOpen, conversationId, onClose, onLink }: LinkPick
                         </div>
                         <span className="min-w-0 flex-1">
                           <span className="block text-sm font-medium truncate">
-                            Escena {sc.sceneIndex}/{sc.totalScenes}
-                            {sc.label && !/^Escena \d+$/.test(sc.label) ? ` · ${sc.label}` : ""}
+                            Escena {/^Escena \d+[AB]$/.test(sc.label) ? sc.label.slice(7) : sc.sceneIndex}/{sc.totalScenes}
+                            {sc.label && !/^Escena \d+[AB]?$/.test(sc.label) ? ` · ${sc.label}` : ""}
                           </span>
                           <span className="block text-xs text-muted-foreground truncate">{sc.excerpt}</span>
                         </span>

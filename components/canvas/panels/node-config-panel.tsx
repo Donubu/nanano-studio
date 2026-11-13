@@ -18,12 +18,14 @@ import type { CharacterNodeData, LinkedNodeData } from "../lib/canvas-types";
 import { stageForImageOutput } from "../lib/character";
 import { linkedStageForEdge } from "../lib/linked";
 import { galleryOutput, lookupFrom } from "../lib/node-outputs";
+import { CharacterStagePicker } from "../edges/character-stage-picker";
+import { handleName } from "../lib/connect-candidates";
 
 interface NodeConfigPanelProps {
   node: Node;
   nodes: Node[];
   generationConfig: CanvasGenerationConfig[];
-  edges: Array<{ id?: string; source: string; target: string; targetHandle?: string | null; data?: { priority?: number | null } | null }>;
+  edges: Array<{ id?: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null; data?: { priority?: number | null } | null }>;
   onUpdateData: (nodeId: string, updates: Partial<CanvasNodeData>) => void;
   // Lleva la vista a otro nodo y lo selecciona.
   onFocusNode?: (nodeId: string) => void;
@@ -118,6 +120,15 @@ export function NodeConfigPanel({
     : [];
   const supportsRefMentions = type === "video" && !!videoCaps?.supportsRefMentions;
   const showReferenceSection = referenceEdges.length >= 1;
+  // Conexiones que vienen de un Personaje y eligen etapa (IMAGEN de un
+  // Personaje local o vinculado, PROMPT de un vinculado): el mismo selector
+  // que está sobre la conexión, para no tener que buscarlo en el canvas.
+  const stageEdges = edges.filter((e) => {
+    if (e.target !== node.id || !e.id) return false;
+    const h = baseHandleId(e.sourceHandle);
+    if (h === HANDLES.OUTPUT_CHARACTER_IMAGE) return true;
+    return h === HANDLES.OUTPUT_CHARACTER && nodes.find((n) => n.id === e.source)?.type === "linked";
+  });
   // Fotogramas inicial/final del video (inicial primero).
   const frameEdges = type === "video"
     ? videoInputEdges
@@ -214,6 +225,37 @@ export function NodeConfigPanel({
         {/* Prioridad de referencias — opt-in: todo parte en Neutro (orden de
             conexión, sin nota en el prompt). Al asignar un número a alguna,
             las referencias se reordenan y se inyecta la nota de prioridad. */}
+        {stageEdges.length > 0 && (
+          <div className="space-y-1.5">
+            <Label className="text-xs">Etapas de Personajes</Label>
+            {stageEdges.map((e) => {
+              const src = nodes.find((n) => n.id === e.source);
+              const sd = (src?.data ?? {}) as Record<string, unknown>;
+              const snap = (sd as unknown as LinkedNodeData).linkSnapshot;
+              const name = (src?.type === "linked" ? snap?.label : (sd.label as string)) || "Personaje";
+              const isPrompt = baseHandleId(e.sourceHandle) === HANDLES.OUTPUT_CHARACTER;
+              return (
+                <div key={e.id} className="space-y-1 rounded-md border border-border/60 px-2 py-1.5">
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="truncate font-medium">{name}{src?.type === "linked" ? " (vinculado)" : ""}</span>
+                    <span className="shrink-0 text-muted-foreground">
+                      {isPrompt ? "Prompt" : "Imagen"} → {handleName(e.targetHandle)}
+                    </span>
+                  </div>
+                  <CharacterStagePicker
+                    edgeId={e.id!}
+                    characterId={e.source}
+                    targetId={node.id}
+                    dimmed={false}
+                    promptOutput={isPrompt}
+                    wide
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {frameEdges.length > 0 && <FrameInputsList frameEdges={frameEdges} nodes={nodes} edges={edges} />}
 
         {showReferenceSection && onUpdateEdgePriority && (

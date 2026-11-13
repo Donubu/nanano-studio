@@ -187,6 +187,9 @@ export interface ScriptSceneAnalysis {
   index: number;            // 1-based
   text: string;             // literal del guion, sin modificar
   targetNodeType: SceneTargetNodeType;
+  // Versión B (casos puntuales): un segundo texto de la misma escena, con su
+  // propio nodo Escena y su destino. La cadena de contexto sigue por la A.
+  variantB?: { text: string; targetNodeType?: SceneTargetNodeType };
 }
 
 export interface ScriptAnalysis {
@@ -238,6 +241,8 @@ export interface SceneNodeData extends BaseNodeData {
   scriptNodeId: string;     // referencia al nodo Guión origen
   generalInfo?: ScriptGeneralInfo; // copia self-contained para inyección de contexto
   targetNodeType?: SceneTargetNodeType;
+  // Solo en escenas con versión B: "A" o "B" (sin versiones, no se define).
+  variant?: "A" | "B";
 }
 
 export const MAX_SCENES_PER_SCRIPT = 30;
@@ -319,6 +324,8 @@ export interface LinkedCharacterSnapshot {
 export interface SceneContextInputs {
   sceneIndex: number;
   totalScenes: number;
+  // Versión de la escena ("A" / "B") cuando tiene versión B.
+  variant?: "A" | "B";
   generalInfo?: ScriptGeneralInfo;
   // Escenas anteriores de la cadena, de la más antigua a la más reciente.
   previousScenes: { sceneIndex: number; text: string }[];

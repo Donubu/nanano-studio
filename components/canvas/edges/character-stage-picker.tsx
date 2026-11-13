@@ -25,6 +25,7 @@ export const CharacterStagePicker = memo(function CharacterStagePicker({
   targetId,
   dimmed,
   promptOutput = false,
+  wide = false,
 }: {
   edgeId: string;
   // Personaje local o nodo vinculado a un Personaje de otro canvas.
@@ -33,6 +34,8 @@ export const CharacterStagePicker = memo(function CharacterStagePicker({
   dimmed: boolean;
   // Salida PROMPT de un vinculado: sin etapa entrega solo ADN + estilo.
   promptOutput?: boolean;
+  // En el panel lateral: ocupa todo el ancho y con letra más grande.
+  wide?: boolean;
 }) {
   const { canEdit, persistNodeData } = useCanvasContext();
   const { getNodes, getEdges } = useReactFlow();
@@ -118,7 +121,7 @@ export const CharacterStagePicker = memo(function CharacterStagePicker({
               ? "Esa etapa todavía no tiene imagen: genérala en su canvas"
               : `Entrega la imagen de la etapa "${current.label}"`
       }
-      className={`nodrag nopan pointer-events-auto max-w-[180px] truncate rounded border bg-background px-1 py-0.5 text-[12px] font-semibold outline-none ${
+      className={`nodrag nopan pointer-events-auto ${wide ? "w-full h-8 px-2 text-sm" : "max-w-[180px] px-1 py-0.5 text-[12px]"} truncate rounded border bg-background font-semibold outline-none ${
         warn ? "border-amber-500/60 text-amber-600 dark:text-amber-300" : "border-pink-400/50 text-pink-600 dark:text-pink-300"
       } ${dimmed ? "opacity-20" : ""}`}
     >

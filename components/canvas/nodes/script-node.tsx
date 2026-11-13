@@ -100,6 +100,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
 
   const analysis = nodeData.scriptAnalysis;
   const sceneCount = analysis?.scenes.length || 0;
+  const variantBCount = analysis?.scenes.filter((s) => s.variantB).length ?? 0;
 
   // Live connections to INPUT_VISUAL_REFERENCE (gallery/static-image as visual
   // context). Read from state so we don't depend on autosave having flushed
@@ -314,6 +315,28 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
         ...a,
         scenes: a.scenes.map((s, i) => (i === position ? { ...s, targetNodeType } : s)),
       }));
+    },
+    [writeAnalysis]
+  );
+
+  // Versión B de una escena (casos puntuales): null la quita.
+  const setSceneVariantB = useCallback(
+    (position: number, variantB: ScriptSceneAnalysis["variantB"] | null, isTextEdit = false) => {
+      writeAnalysis(
+        (a) => ({
+          ...a,
+          scenes: a.scenes.map((s, i) => {
+            if (i !== position) return s;
+            if (!variantB) {
+              const { variantB: _removed, ...rest } = s;
+              void _removed;
+              return rest;
+            }
+            return { ...s, variantB };
+          }),
+        }),
+        isTextEdit ? { isTextEdit: true } : undefined,
+      );
     },
     [writeAnalysis]
   );
@@ -738,6 +761,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
                     total={sceneCount}
                     onTextChange={(text) => updateSceneText(i, text)}
                     onTargetChange={(t) => updateSceneTarget(i, t)}
+                    onVariantBChange={(v, isText) => setSceneVariantB(i, v, isText)}
                     onMoveUp={() => moveScene(i, i - 1)}
                     onMoveDown={() => moveScene(i, i + 1)}
                     onRemove={() => removeSceneAt(i)}
@@ -788,6 +812,7 @@ export const ScriptNodeComponent = memo(function ScriptNode({ id, data, selected
                 <>
                   <Sparkles className="h-4 w-4" />
                   Generar {sceneCount} escena{sceneCount === 1 ? "" : "s"}
+                  {variantBCount > 0 ? ` (+${variantBCount} versión B)` : ""}
                 </>
               )}
             </button>
@@ -930,6 +955,7 @@ function SceneCard({
   total,
   onTextChange,
   onTargetChange,
+  onVariantBChange,
   onMoveUp,
   onMoveDown,
   onRemove,
@@ -939,6 +965,7 @@ function SceneCard({
   total: number;
   onTextChange: (text: string) => void;
   onTargetChange: (t: SceneTargetNodeType) => void;
+  onVariantBChange: (v: ScriptSceneAnalysis["variantB"] | null, isTextEdit?: boolean) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onRemove: () => void;
@@ -955,6 +982,7 @@ function SceneCard({
       <div className="flex items-center gap-1">
         <span className="text-[13px] font-semibold text-fuchsia-400 shrink-0">
           Escena {scene.index}
+          {scene.variantB ? "A" : ""}
         </span>
         <span className="text-[12px] text-muted-foreground inline-flex items-center gap-0.5 ml-1">
           {targetIcon}
@@ -974,6 +1002,15 @@ function SceneCard({
         </select>
         {canEdit && (
           <>
+            {!scene.variantB && (
+              <button
+                onClick={() => onVariantBChange({ text: "" })}
+                className="nodrag px-1 py-0.5 rounded text-[11px] font-semibold text-muted-foreground hover:bg-accent hover:text-fuchsia-400"
+                title="Agregar una versión B: un segundo texto para esta escena, con su propio nodo Escena y su destino"
+              >
+                + B
+              </button>
+            )}
             <button
               onClick={onMoveUp}
               disabled={position === 0}
@@ -1008,6 +1045,45 @@ function SceneCard({
         className="nodrag w-full text-[13px] bg-background/50 rounded px-1.5 py-1 border border-border/30 outline-none resize-y min-h-[60px] max-h-[160px] whitespace-pre-wrap placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
         rows={3}
       />
+      {scene.variantB && (
+        <div className="space-y-1 border-l-2 border-fuchsia-400/40 pl-2 pt-1">
+          <div className="flex items-center gap-1">
+            <span className="text-[13px] font-semibold text-fuchsia-400 shrink-0">Escena {scene.index}B</span>
+            <span className="text-[11px] text-muted-foreground">versión alternativa</span>
+            <select
+              value={scene.variantB.targetNodeType ?? scene.targetNodeType}
+              onChange={(e) => onVariantBChange({ ...scene.variantB!, targetNodeType: e.target.value as SceneTargetNodeType })}
+              onKeyDown={stopProp}
+              disabled={!canEdit}
+              className="nodrag ml-auto text-[13px] bg-background border border-border rounded px-1 py-0.5 disabled:opacity-60"
+              title="Destino de la versión B"
+            >
+              {targetTypeOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            {canEdit && (
+              <button
+                onClick={() => onVariantBChange(null)}
+                className="nodrag p-0.5 rounded hover:bg-red-500/15 text-muted-foreground hover:text-red-400"
+                title="Quitar la versión B"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            )}
+          </div>
+          <NodeTextarea
+            value={scene.variantB.text}
+            onChange={(text) => onVariantBChange({ ...scene.variantB!, text }, true)}
+            onKeyDown={stopProp}
+            placeholder="Texto de la versión B..."
+            className="nodrag w-full text-[13px] bg-background/50 rounded px-1.5 py-1 border border-border/30 outline-none resize-y min-h-[60px] max-h-[160px] whitespace-pre-wrap placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/50"
+            rows={3}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -1551,6 +1551,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
       const d = (n?.data ?? {}) as Record<string, unknown>;
       return {
         key: `${c.nodeId}|${c.handleId}`,
+        group: c.group,
         nodeLabel: (typeof d.label === "string" && d.label.trim()) || nodeTypeLabel(n?.type),
         typeLabel: nodeTypeLabel(n?.type),
         handleLabel: handleName(c.handleId),
@@ -1703,9 +1704,9 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
     if (!canEdit || nodes.length === 0) return;
     const confirmed = window.confirm(
       "¿Reordenar todos los nodos?\n\n" +
-      "Cada flujo se ordena de arriba hacia abajo: cada nodo queda debajo de lo que lo alimenta " +
-      "y las referencias justo encima del nodo que las usa. Los flujos separados se acomodan " +
-      "como bloques uno al lado del otro y en filas.\n\n" +
+      "Con Guión o Personajes: arriba los Personajes (cada uno en su columna con sus etapas) y los " +
+      "vinculados; abajo el Guión con una fila por escena (Escena → Imagen → Video).\n" +
+      "Lo demás se ordena de arriba hacia abajo, cada nodo debajo de lo que lo alimenta.\n\n" +
       "Las posiciones actuales se perderán (puedes deshacer con Ctrl+Z)."
     );
     if (!confirmed) return;

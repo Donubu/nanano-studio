@@ -25,7 +25,8 @@ interface Line {
 }
 
 /**
- * Layout de timeline vertical: el tiempo corre de arriba hacia abajo.
+ * Reordenar. Canvas con Guión, Personajes o vinculados: ver `storyLayout`.
+ * Los demás: layout de timeline vertical: el tiempo corre de arriba hacia abajo.
  *
  * - Cada flujo conectado (componente) se ordena por capas: un nodo queda
  *   debajo de todos los que lo alimentan. Los nodos sin entradas (imágenes de
@@ -44,22 +45,35 @@ export function autoLayoutPositions(
   nodes: Node[],
   edges: Edge[]
 ): Map<string, { x: number; y: number }> {
+  // Canvas con Guión, Personajes o vinculados: orden por estructura.
+  if (nodes.some((n) => n.type === "scene" || n.type === "character" || n.type === "linked")) {
+    return storyLayout(nodes, edges);
+  }
+  return flowLayout(nodes, edges);
+}
+
+function boxOf(n: Node): Box {
+  return {
+    id: n.id,
+    w: (typeof n.width === "number" ? n.width : undefined) ?? n.measured?.width ?? DEFAULT_W,
+    // Colapsado: cuenta su alto real (solo el encabezado), no el tamaño fijo.
+    h: (n.data as { collapsed?: unknown } | undefined)?.collapsed === true
+      ? n.measured?.height ?? 44
+      : (typeof n.height === "number" ? n.height : undefined) ?? n.measured?.height ?? DEFAULT_H,
+    origX: n.position?.x ?? 0,
+    origY: n.position?.y ?? 0,
+  };
+}
+
+function flowLayout(
+  nodes: Node[],
+  edges: Edge[]
+): Map<string, { x: number; y: number }> {
   const positions = new Map<string, { x: number; y: number }>();
   if (nodes.length === 0) return positions;
 
   const boxes = new Map<string, Box>();
-  for (const n of nodes) {
-    boxes.set(n.id, {
-      id: n.id,
-      w: (typeof n.width === "number" ? n.width : undefined) ?? n.measured?.width ?? DEFAULT_W,
-      // Colapsado: cuenta su alto real (solo el encabezado), no el tamaño fijo.
-      h: (n.data as { collapsed?: unknown } | undefined)?.collapsed === true
-        ? n.measured?.height ?? 44
-        : (typeof n.height === "number" ? n.height : undefined) ?? n.measured?.height ?? DEFAULT_H,
-      origX: n.position?.x ?? 0,
-      origY: n.position?.y ?? 0,
-    });
-  }
+  for (const n of nodes) boxes.set(n.id, boxOf(n));
 
   const parents = new Map<string, string[]>();
   const children = new Map<string, string[]>();
@@ -302,4 +316,307 @@ function layoutComponent(
     width = Math.max(width, px + boxes.get(id)!.w);
   }
   return { positions, width, height: Math.max(0, cy - ROW_GAP) };
+}
+
+// ---------------------------------------------------------------------------
+// Orden por estructura (Guión + Personajes + vinculados)
+// ---------------------------------------------------------------------------
+
+type Pos = { x: number; y: number };
+interface Block {
+  positions: Map<string, Pos>; // relativas al bloque
+  width: number;
+  height: number;
+}
+
+const CELL_GAP = 40;
+const SECTION_GAP = 320;
+// Pocos vinculados chicos quedan en una sola fila.
+const MIN_CAST_ROW = 2400;
+
+/**
+ * El orden por capas mezcla todo cuando un Personaje alimenta medio canvas y
+ * las escenas se encadenan entre sí. Acá cada nodo se asigna a un GRUPO según
+ * lo que es, y las conexiones entre grupos (Personaje → imagen de una escena,
+ * continuidad entre destinos) no mueven nada:
+ *
+ * - Reparto (arriba): una columna por Personaje (galerías, Personaje y sus
+ *   etapas encadenadas hacia abajo) y los nodos vinculados. Lo que alimenta a
+ *   varios Personajes (estilo global) va en una fila encima.
+ * - Guión: el Guión y sus entradas (Params Escena, referencias) arriba y
+ *   luego UNA FILA POR ESCENA, de izquierda a derecha: Escena → destino → lo
+ *   que sale de él (el video de esa imagen…), en columnas alineadas entre
+ *   filas. La versión B va en su propia fila, justo debajo de la A.
+ * - El resto, con el orden por capas de siempre, al final.
+ */
+function storyLayout(nodes: Node[], edges: Edge[]): Map<string, Pos> {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const boxes = new Map(nodes.map((n) => [n.id, boxOf(n)]));
+  const kids = new Map<string, string[]>(nodes.map((n) => [n.id, []]));
+  const pars = new Map<string, string[]>(nodes.map((n) => [n.id, []]));
+  const seen = new Set<string>();
+  for (const e of edges) {
+    if (!byId.has(e.source) || !byId.has(e.target) || e.source === e.target) continue;
+    const k = `${e.source}>${e.target}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    kids.get(e.source)!.push(e.target);
+    pars.get(e.target)!.push(e.source);
+  }
+  const byOrig = (a: string, b: string) =>
+    boxes.get(a)!.origX - boxes.get(b)!.origX || boxes.get(a)!.origY - boxes.get(b)!.origY;
+
+  const group = new Map<string, string>();
+  const assign = (id: string, g: string) => {
+    if (!group.has(id)) group.set(id, g);
+  };
+  const spread = (g: string) => {
+    const queue = [...group.entries()].filter(([, gg]) => gg === g).map(([id]) => id);
+    while (queue.length) {
+      const cur = queue.shift()!;
+      for (const c of kids.get(cur)!) {
+        if (group.has(c)) continue;
+        group.set(c, g);
+        queue.push(c);
+      }
+    }
+  };
+
+  // --- Guiones y sus escenas (filas).
+  const scripts = nodes.filter((n) => n.type === "script").map((n) => n.id).sort((a, b) => boxes.get(a)!.origY - boxes.get(b)!.origY || byOrig(a, b));
+  const rowsOf = new Map<string, { key: string; order: number }[]>();
+  for (const sid of scripts) {
+    assign(sid, `head:${sid}`);
+    rowsOf.set(sid, []);
+  }
+  const scenes = nodes.filter((n) => n.type === "scene");
+  for (const sc of scenes) {
+    const d = sc.data as { scriptNodeId?: string; sceneIndex?: number; variant?: string };
+    const sid = d.scriptNodeId && rowsOf.has(d.scriptNodeId) ? d.scriptNodeId : "";
+    if (!rowsOf.has(sid)) rowsOf.set(sid, []);
+    const idx = Number(d.sceneIndex) || 0;
+    const b = d.variant === "B";
+    const key = `row:${sid}:${idx}${b ? "b" : ""}:${sc.id}`;
+    assign(sc.id, key);
+    rowsOf.get(sid)!.push({ key, order: idx * 2 + (b ? 1 : 0) });
+  }
+  const scriptIds = [...scripts, ...(rowsOf.has("") ? [""] : [])];
+  for (const sid of scriptIds) rowsOf.get(sid)!.sort((a, b) => a.order - b.order);
+
+  // --- Personajes (con las imágenes de sus etapas) y vinculados.
+  const characters = nodes.filter((n) => n.type === "character").map((n) => n.id).sort(byOrig);
+  for (const cid of characters) {
+    assign(cid, `char:${cid}`);
+    for (const st of (byId.get(cid)!.data as { stages?: { imageNodeId?: string }[] }).stages ?? []) {
+      if (st.imageNodeId && byId.has(st.imageNodeId)) assign(st.imageNodeId, `char:${cid}`);
+    }
+  }
+  const kindRank = (id: string) => {
+    const d = byId.get(id)!.data as { linkSnapshot?: { kind?: string } | null; sourceType?: string };
+    const kind = d.linkSnapshot?.kind ?? d.sourceType;
+    return kind === "character" ? 0 : kind === "image" ? 1 : 2;
+  };
+  const linked = nodes.filter((n) => n.type === "linked").map((n) => n.id).sort((a, b) => kindRank(a) - kindRank(b) || byOrig(a, b));
+  for (const id of linked) assign(id, `cast:${id}`);
+
+  // El destino de cada escena antes de recorrer: la conexión de continuidad
+  // entre destinos no debe llevarse el de la escena siguiente.
+  const rowKeys = scriptIds.flatMap((sid) => rowsOf.get(sid)!.map((r) => r.key));
+  for (const key of rowKeys) {
+    const sceneId = key.split(":").pop()!;
+    for (const c of kids.get(sceneId)!) if (byId.get(c)!.type !== "scene") assign(c, key);
+  }
+  // Lo que sale de cada grupo es del grupo (primero las escenas, en orden).
+  for (const key of rowKeys) spread(key);
+  for (const cid of characters) spread(`char:${cid}`);
+  for (const id of linked) spread(`cast:${id}`);
+  for (const sid of scripts) spread(`head:${sid}`);
+
+  // Entradas sueltas (galerías, textos, Params Escena…) van con lo que
+  // alimentan; si alimentan varias filas del mismo Guión, a su cabecera; si
+  // alimentan varios Personajes, a la fila común de arriba.
+  const merge = (gs: Set<string>): string | null => {
+    if (gs.size === 1) return [...gs][0];
+    const list = [...gs];
+    const sidOf = (g: string) => (g.startsWith("row:") || g.startsWith("head:") ? g.split(":")[1] : null);
+    const sid = sidOf(list[0]);
+    if (sid != null && list.every((g) => sidOf(g) === sid)) return sid ? `head:${sid}` : null;
+    if (list.every((g) => g.startsWith("char:") || g.startsWith("cast:") || g === "shared")) return "shared";
+    return null;
+  };
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const n of nodes) {
+      if (group.has(n.id)) continue;
+      const ks = kids.get(n.id)!;
+      if (ks.length === 0 || ks.some((c) => !group.has(c))) continue;
+      const g = merge(new Set(ks.map((c) => group.get(c)!)));
+      if (!g) continue;
+      group.set(n.id, g);
+      changed = true;
+    }
+  }
+
+  const members = new Map<string, string[]>();
+  for (const n of nodes) {
+    const g = group.get(n.id) ?? "rest";
+    if (!members.has(g)) members.set(g, []);
+    members.get(g)!.push(n.id);
+  }
+  const blockOf = (ids: string[]): Block => {
+    const set = new Set(ids);
+    const sub = nodes.filter((n) => set.has(n.id));
+    const pos = flowLayout(sub, edges.filter((e) => set.has(e.source) && set.has(e.target)));
+    return normalize(pos, ids, boxes);
+  };
+
+  const positions = new Map<string, Pos>();
+  const put = (block: Block, ox: number, oy: number) => {
+    for (const [id, p] of block.positions) positions.set(id, { x: Math.round(ox + p.x), y: Math.round(oy + p.y) });
+  };
+  let y = ORIGIN_Y;
+
+  // 1) Lo que comparten los Personajes, en una fila.
+  const shared = (members.get("shared") ?? []).sort(byOrig);
+  if (shared.length) {
+    let x = ORIGIN_X;
+    let h = 0;
+    for (const id of shared) {
+      positions.set(id, { x, y });
+      x += boxes.get(id)!.w + COLUMN_GAP;
+      h = Math.max(h, boxes.get(id)!.h);
+    }
+    y += h + COMPONENT_GAP;
+  }
+
+  // 2) Reparto: una columna por Personaje y los vinculados, en filas.
+  const cast = [...characters.map((c) => `char:${c}`), ...linked.map((l) => `cast:${l}`)]
+    .filter((g) => members.has(g))
+    .map((g) => blockOf(members.get(g)!));
+  if (cast.length) {
+    const area = cast.reduce((s, b) => s + (b.width + COMPONENT_GAP) * (b.height + COMPONENT_GAP), 0);
+    const maxRow = Math.max(MIN_CAST_ROW, ...cast.map((b) => b.width), Math.sqrt(area * TARGET_RATIO));
+    let x = ORIGIN_X;
+    let rowH = 0;
+    for (const b of cast) {
+      if (x > ORIGIN_X && x - ORIGIN_X + b.width > maxRow) {
+        x = ORIGIN_X;
+        y += rowH + COMPONENT_GAP;
+        rowH = 0;
+      }
+      put(b, x, y);
+      x += b.width + COMPONENT_GAP;
+      rowH = Math.max(rowH, b.height);
+    }
+    y += rowH + SECTION_GAP;
+  }
+
+  // 3) Cada Guión: cabecera y una fila por escena con columnas alineadas.
+  for (const sid of scriptIds) {
+    const head = members.get(`head:${sid}`);
+    if (head?.length) {
+      const b = blockOf(head);
+      put(b, ORIGIN_X, y);
+      y += b.height + COMPONENT_GAP;
+    }
+    const rows = rowsOf.get(sid)!.map((r) => rowCells(members.get(r.key) ?? [], r.key.split(":").pop()!, kids, boxes, byOrig));
+    if (rows.length === 0) continue;
+    const cols = Math.max(...rows.map((r) => r.length));
+    const colW = Array.from({ length: cols }, (_, c) =>
+      Math.max(0, ...rows.map((r) => (r[c] ? Math.max(0, ...r[c].map((id) => boxes.get(id)!.w)) : 0))),
+    );
+    const colX: number[] = [];
+    let cx = ORIGIN_X;
+    for (let c = 0; c < cols; c++) {
+      colX.push(cx);
+      cx += colW[c] + COLUMN_GAP * 2;
+    }
+    for (const row of rows) {
+      let rowH = 0;
+      row.forEach((cell, c) => {
+        let cy = y;
+        for (const id of cell) {
+          positions.set(id, { x: colX[c], y: cy });
+          cy += boxes.get(id)!.h + CELL_GAP;
+        }
+        rowH = Math.max(rowH, cy - CELL_GAP - y);
+      });
+      y += rowH + ROW_GAP;
+    }
+    y += SECTION_GAP - ROW_GAP;
+  }
+
+  // 4) Lo demás, como siempre.
+  const rest = members.get("rest");
+  if (rest?.length) {
+    const set = new Set(rest);
+    const pos = flowLayout(nodes.filter((n) => set.has(n.id)), edges.filter((e) => set.has(e.source) && set.has(e.target)));
+    const b = normalize(pos, rest, boxes);
+    put(b, ORIGIN_X, y);
+  }
+  return positions;
+}
+
+function normalize(pos: Map<string, Pos>, ids: string[], boxes: Map<string, Box>): Block {
+  const minX = Math.min(...ids.map((id) => pos.get(id)!.x));
+  const minY = Math.min(...ids.map((id) => pos.get(id)!.y));
+  const positions = new Map<string, Pos>();
+  let width = 0;
+  let height = 0;
+  for (const id of ids) {
+    const p = { x: pos.get(id)!.x - minX, y: pos.get(id)!.y - minY };
+    positions.set(id, p);
+    width = Math.max(width, p.x + boxes.get(id)!.w);
+    height = Math.max(height, p.y + boxes.get(id)!.h);
+  }
+  return { positions, width, height };
+}
+
+/**
+ * Una fila de escena en columnas: la columna de cada nodo es el largo del
+ * camino desde la escena (Escena → Imagen → Video). Una entrada suelta va en
+ * la columna anterior a lo que alimenta, debajo de lo que haya ahí.
+ */
+function rowCells(
+  ids: string[],
+  scene: string,
+  kids: Map<string, string[]>,
+  boxes: Map<string, Box>,
+  byOrig: (a: string, b: string) => number,
+): string[][] {
+  const set = new Set(ids);
+  const chi = (id: string) => kids.get(id)!.filter((c) => set.has(c));
+  const indeg = new Map(ids.map((id) => [id, 0]));
+  for (const id of ids) for (const c of chi(id)) indeg.set(c, indeg.get(c)! + 1);
+  const rank = new Map<string, number>();
+  let queue = ids.filter((id) => indeg.get(id) === 0);
+  for (const id of queue) rank.set(id, 0);
+  while (queue.length) {
+    const next: string[] = [];
+    for (const id of queue) {
+      for (const c of chi(id)) {
+        rank.set(c, Math.max(rank.get(c) ?? 0, rank.get(id)! + 1));
+        indeg.set(c, indeg.get(c)! - 1);
+        if (indeg.get(c) === 0) next.push(c);
+      }
+    }
+    queue = next;
+  }
+  for (const id of ids) if (!rank.has(id)) rank.set(id, 0); // ciclo: no debería pasar
+  // La escena es la única raíz "de verdad": las demás entradas se acercan a
+  // lo que alimentan.
+  for (const id of ids) {
+    if (id === scene || ids.some((p) => chi(p).includes(id))) continue;
+    const ks = chi(id);
+    if (ks.length) rank.set(id, Math.max(0, Math.min(...ks.map((k) => rank.get(k)!)) - 1));
+  }
+  const cols: string[][] = [];
+  for (const id of ids) {
+    const r = rank.get(id)!;
+    while (cols.length <= r) cols.push([]);
+    cols[r].push(id);
+  }
+  // La escena primero en su columna; el resto en el orden en que estaban.
+  for (const col of cols) col.sort((a, b) => (a === scene ? -1 : b === scene ? 1 : boxes.get(a)!.origY - boxes.get(b)!.origY || byOrig(a, b)));
+  return cols;
 }

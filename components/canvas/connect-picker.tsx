@@ -10,6 +10,8 @@ import { thumbUrl } from "./lib/thumb";
 
 export interface ConnectPickerItem {
   key: string;
+  // Encabezado de grupo (los ítems vienen ordenados por grupo).
+  group?: string;
   nodeLabel: string;
   typeLabel: string;
   handleLabel: string;
@@ -97,8 +99,11 @@ export function ConnectPicker({
             </p>
           )}
           {filtered.map((item, i) => (
+            <div key={item.key}>
+            {item.group && item.group !== filtered[i - 1]?.group && (
+              <div className="px-2 pt-2 pb-0.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{item.group}</div>
+            )}
             <button
-              key={item.key}
               onClick={() => onPick(item.key)}
               onMouseEnter={() => { setActive(i); onHover?.(item.key); }}
               className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left transition-colors ${i === active ? "bg-accent" : ""}`}
@@ -118,6 +123,7 @@ export function ConnectPicker({
                 {item.handleLabel}
               </span>
             </button>
+            </div>
           ))}
           {createOptions.length > 0 && (
             <>

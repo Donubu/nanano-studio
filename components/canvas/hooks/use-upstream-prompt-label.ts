@@ -28,7 +28,7 @@ export function useUpstreamPromptLabel(): string | null {
   switch (sourceNode.type) {
     case "scene": {
       const data = sourceNode.data as unknown as SceneNodeData;
-      return `Escena ${data.sceneIndex} conectada como prompt`;
+      return `Escena ${data.sceneIndex}${(data as { variant?: string }).variant ?? ""} conectada como prompt`;
     }
     case "character": {
       const data = sourceNode.data as unknown as CharacterNodeData;
@@ -40,7 +40,7 @@ export function useUpstreamPromptLabel(): string | null {
     case "linked": {
       const d = sourceNode.data as unknown as LinkedNodeData;
       const snap = d.linkSnapshot;
-      if (snap?.kind === "scene") return `Escena ${snap.context.sceneIndex} vinculada de "${d.sourceCanvasTitle ?? "otro canvas"}"`;
+      if (snap?.kind === "scene") return `Escena ${snap.context.sceneIndex}${snap.context.variant ?? ""} vinculada de "${d.sourceCanvasTitle ?? "otro canvas"}"`;
       return `${snap?.label || d.label || "Personaje"} (vinculado) conectado como prompt`;
     }
     case "text":

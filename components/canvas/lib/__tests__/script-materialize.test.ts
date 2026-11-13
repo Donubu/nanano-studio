@@ -4,7 +4,7 @@ import { HANDLE_IDS } from "../canvas-types";
 import { planScriptMaterialize, type ScriptMaterializePlan } from "../script-materialize";
 
 const generalInfo = { synopsis: "s", tone: "t", genre: "g", visualStyle: "v", characters: [], settings: [] };
-type SceneSpec = { index: number; text: string; targetNodeType: "image" | "video" | "text-practicante" | "none" };
+type SceneSpec = { index: number; text: string; targetNodeType: "image" | "video" | "text-practicante" | "none"; variantB?: { text: string; targetNodeType?: "image" | "video" | "text-practicante" | "none" } };
 const script = (scenes: SceneSpec[], extra: Record<string, unknown> = {}): Node => ({
   id: "g", type: "script", position: { x: 0, y: 0 },
   data: { type: "script", label: "Guión", status: "completed", prompt: "", scriptAnalysis: { generalInfo, scenes }, ...extra },
@@ -91,5 +91,84 @@ describe("planScriptMaterialize", () => {
     expect(plan.removeEdgeIds).toEqual(expect.arrayContaining(["edge-chain-g-3", "edge-target-g-3", "edge-params-scene-g-3"]));
     // Las demás escenas se actualizan por el total de escenas.
     expect(plan.updateNodes.map((u) => u.id).sort()).toEqual(["scene-g-1", "scene-g-2"]);
+  });
+
+  it("reusa el Params Escena propio que ya alimenta las escenas (no crea uno vacío)", () => {
+    const s = script(three);
+    let st = apply([s], [], planScriptMaterialize(s, [s], [], { idPrefix: "a" }));
+    // El usuario reemplaza el automático por el suyo (con contenido) y lo
+    // conecta a las escenas, sin conectarlo al Guión.
+    st = {
+      nodes: [
+        ...st.nodes.filter((n) => n.id !== "params-scene-g"),
+        { id: "mio", type: "params-scene", position: { x: 0, y: 0 }, data: { type: "params-scene", content: "REGLAS" } },
+      ],
+      edges: [
+        ...st.edges.filter((e) => e.source !== "params-scene-g"),
+        ...[1, 2, 3].map((i) => ({ id: `u${i}`, source: "mio", sourceHandle: HANDLE_IDS.OUTPUT_PARAMS, target: `scene-g-${i}`, targetHandle: HANDLE_IDS.INPUT_SCENE_PARAMS })),
+      ],
+    };
+    const again = planScriptMaterialize(st.nodes.find((n) => n.id === "g")!, st.nodes, st.edges, { idPrefix: "b" });
+    expect(again.addNodes).toEqual([]);
+    expect(again.addEdges).toEqual([]);
+    expect(again.removeEdgeIds).toEqual([]);
+    // Una escena nueva también recibe el del usuario.
+    const four = script([...three, { index: 4, text: "cuatro", targetNodeType: "image" }]);
+    const nodes4 = st.nodes.map((n) => (n.id === "g" ? four : n));
+    const plan4 = planScriptMaterialize(four, nodes4, st.edges, { idPrefix: "c" });
+    expect(plan4.addNodes.some((n) => n.type === "params-scene")).toBe(false);
+    expect(plan4.addEdges.find((e) => e.id === "edge-params-scene-g-4")).toMatchObject({ source: "mio", target: "scene-g-4" });
+  });
+
+  it("respeta un Params Escena distinto puesto a mano en una escena", () => {
+    const s = script(three);
+    let st = apply([s], [], planScriptMaterialize(s, [s], [], { idPrefix: "a" }));
+    st = {
+      nodes: [...st.nodes, { id: "especial", type: "params-scene", position: { x: 0, y: 0 }, data: { type: "params-scene", content: "noche" } }],
+      edges: [
+        ...st.edges.filter((e) => e.id !== "edge-params-scene-g-2"),
+        { id: "u2", source: "especial", sourceHandle: HANDLE_IDS.OUTPUT_PARAMS, target: "scene-g-2", targetHandle: HANDLE_IDS.INPUT_SCENE_PARAMS },
+      ],
+    };
+    const again = planScriptMaterialize(st.nodes.find((n) => n.id === "g")!, st.nodes, st.edges, { idPrefix: "b" });
+    expect(again.addEdges).toEqual([]);
+    expect(again.removeEdgeIds).toEqual([]);
+  });
+
+  it("versión B: crea su escena y su destino; la cadena sigue por la A", () => {
+    const withB: SceneSpec[] = [
+      three[0],
+      { ...three[1] },
+      three[2],
+    ];
+    const s = script(withB.map((sc) => (sc.index === 2 ? { ...sc, variantB: { text: "dos bis" } } : sc)) as SceneSpec[]);
+    const plan = planScriptMaterialize(s, [s], [], { idPrefix: "a" });
+    const ids = plan.addNodes.map((n) => n.id);
+    expect(ids).toContain("scene-g-2-b");
+    expect(ids).toContain("dst-g-2-b");
+    const b = plan.addNodes.find((n) => n.id === "scene-g-2-b")!;
+    expect(b.data).toMatchObject({ label: "Escena 2B", text: "dos bis", sceneIndex: 2, variant: "B" });
+    expect(plan.addNodes.find((n) => n.id === "scene-g-2")!.data).toMatchObject({ label: "Escena 2A", variant: "A" });
+    expect(plan.addNodes.find((n) => n.id === "scene-g-1")!.data).not.toHaveProperty("variant");
+    expect(plan.addNodes.find((n) => n.id === "dst-g-2-b")!.data).toMatchObject({ label: "Imagen 2B" });
+    // La B recibe el contexto de la escena 1; la 3 sigue desde la 2A.
+    expect(plan.addEdges.find((e) => e.id === "edge-chain-g-2b")).toMatchObject({ source: "scene-g-1", target: "scene-g-2-b" });
+    expect(plan.addEdges.find((e) => e.id === "edge-chain-g-3")).toMatchObject({ source: "scene-g-2", target: "scene-g-3" });
+    expect(plan.addEdges.find((e) => e.id === "edge-target-g-2b")).toMatchObject({ source: "scene-g-2-b", target: "dst-g-2-b" });
+    expect(plan.addEdges.find((e) => e.id === "edge-params-scene-g-2b")).toMatchObject({ target: "scene-g-2-b" });
+    expect(plan.scriptData.sceneTargetIds).toMatchObject({ "2": "dst-g-2", "2b": "dst-g-2-b" });
+  });
+
+  it("quitar la versión B borra su escena y su destino vacío, y la A vuelve a ser la escena", () => {
+    const sB = script(three.map((sc) => (sc.index === 2 ? { ...sc, variantB: { text: "dos bis", targetNodeType: "video" as const } } : sc)) as SceneSpec[]);
+    const st = apply([sB], [], planScriptMaterialize(sB, [sB], [], { idPrefix: "a" }));
+    expect(st.nodes.find((n) => n.id === "dst-g-2-b")?.type).toBe("video");
+    const sNoB = { ...st.nodes.find((n) => n.id === "g")!, data: { ...st.nodes.find((n) => n.id === "g")!.data, scriptAnalysis: { generalInfo, scenes: three } } };
+    const nodes = st.nodes.map((n) => (n.id === "g" ? sNoB : n));
+    const again = planScriptMaterialize(sNoB, nodes, st.edges, { idPrefix: "b" });
+    expect(again.removeNodeIds.sort()).toEqual(["dst-g-2-b", "scene-g-2-b"]);
+    const a = again.updateNodes.find((u) => u.id === "scene-g-2")!;
+    expect(a.data.label).toBe("Escena 2");
+    expect(a.data).not.toHaveProperty("variant");
   });
 });

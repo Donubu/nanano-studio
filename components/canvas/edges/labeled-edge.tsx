@@ -117,7 +117,9 @@ export const LabeledEdge = memo(function LabeledEdge({
       [baseSource, source],
     ) as never,
   ) as unknown as boolean;
-  const stagePicker = baseSource === HANDLE_IDS.OUTPUT_CHARACTER_IMAGE || linkedPrompt;
+  // El selector solo aparece con el nodo destino (o el Personaje) seleccionado:
+  // con muchas conexiones tapaba el canvas. También está en el panel lateral.
+  const stagePicker = (baseSource === HANDLE_IDS.OUTPUT_CHARACTER_IMAGE || linkedPrompt) && highlighted;
 
   return (
     <>
@@ -145,7 +147,7 @@ export const LabeledEdge = memo(function LabeledEdge({
             className="absolute z-10"
             style={{ transform: `translate(-50%, 15%) translate(${labelX}px,${labelY}px)` }}
           >
-            <CharacterStagePicker edgeId={id} characterId={source} targetId={target} dimmed={dimmed} promptOutput={linkedPrompt} />
+            <CharacterStagePicker edgeId={id} characterId={source} targetId={target} dimmed={false} promptOutput={linkedPrompt} />
           </div>
         </EdgeLabelRenderer>
       )}

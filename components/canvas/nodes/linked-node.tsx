@@ -75,7 +75,7 @@ export const LinkedNodeComponent = memo(function LinkedNode({ id, data, selected
           <UserRound className="h-[18px] w-[18px] text-pink-400 shrink-0" />
         )}
         <span className="min-w-0 flex-1 truncate text-[15px] font-semibold" title={d.linkSnapshot?.label || d.label}>
-          {scene ? `Escena ${scene.context.sceneIndex}/${scene.context.totalScenes}` : snap?.label || image?.label || d.label || (isImage ? "Imagen" : "Personaje")}
+          {scene ? `Escena ${scene.context.sceneIndex}${scene.context.variant ?? ""}/${scene.context.totalScenes}` : snap?.label || image?.label || d.label || (isImage ? "Imagen" : "Personaje")}
         </span>
         <span
           className="flex shrink-0 items-center gap-0.5 rounded bg-pink-400/15 px-1 py-0.5 text-[12px] text-pink-700 dark:text-pink-300"

@@ -96,3 +96,72 @@ describe("autoLayoutPositions", () => {
     expect(overlaps(nodes, pos)).toBe(0);
   });
 });
+
+describe("autoLayoutPositions con Guión y Personajes", () => {
+  const withData = (n: Node, data: Record<string, unknown>): Node => ({ ...n, data });
+
+  it("una fila por escena (Escena → Imagen → Video) y el reparto arriba", () => {
+    const nodes: Node[] = [
+      node("lk", "linked", 900),
+      node("sc", "script", 0, 400, 600),
+      node("ps", "params-scene"),
+    ];
+    const edges: Edge[] = [];
+    for (let i = 1; i <= 3; i++) {
+      nodes.push(withData(node(`s${i}`, "scene", i * 50), { scriptNodeId: "sc", sceneIndex: i }), node(`d${i}`, "image", 2000 - i * 300), node(`v${i}`, "video", i * 700));
+      edges.push(edge(i === 1 ? "sc" : `s${i - 1}`, `s${i}`), edge(`s${i}`, `d${i}`), edge(`d${i}`, `v${i}`), edge("ps", `s${i}`), edge("lk", `d${i}`));
+      if (i > 1) edges.push(edge(`d${i - 1}`, `d${i}`)); // continuidad entre destinos
+    }
+    // Versión B de la escena 2, en su fila debajo de la 2.
+    nodes.push(withData(node("s2b", "scene"), { scriptNodeId: "sc", sceneIndex: 2, variant: "B" }), node("d2b", "image"));
+    edges.push(edge("s1", "s2b"), edge("s2b", "d2b"));
+
+    const pos = autoLayoutPositions(nodes, edges);
+    const y = (id: string) => pos.get(id)!.y;
+    const x = (id: string) => pos.get(id)!.x;
+    for (const i of [1, 2, 3]) {
+      expect(y(`d${i}`)).toBe(y(`s${i}`));
+      expect(y(`v${i}`)).toBe(y(`s${i}`));
+      expect(x(`d${i}`)).toBeGreaterThan(x(`s${i}`));
+      expect(x(`v${i}`)).toBeGreaterThan(x(`d${i}`));
+      expect(x(`d${i}`)).toBe(x("d1"));
+    }
+    expect(y("s2")).toBeLessThan(y("s2b"));
+    expect(y("s2b")).toBeLessThan(y("s3"));
+    expect(y("d2b")).toBe(y("s2b"));
+    expect(y("lk")).toBeLessThan(y("sc"));
+    expect(y("sc")).toBeLessThan(y("s1"));
+    expect(overlaps(nodes, pos)).toBe(0);
+  });
+
+  it("una columna por Personaje con sus etapas; el estilo común arriba", () => {
+    const nodes: Node[] = [node("style", "static-text")];
+    const edges: Edge[] = [];
+    for (const c of ["a", "b"]) {
+      const stages = [1, 2, 3].map((i) => ({ id: `${c}st${i}`, name: "", text: "", imageNodeId: `${c}${i}` }));
+      nodes.push(withData(node(c, "character", c === "a" ? 0 : 500, 400, 500), { stages }), node(`${c}g`, "static-image-group"));
+      edges.push(edge("style", c), edge(`${c}g`, c));
+      for (const i of [1, 2, 3]) {
+        // Las etapas quedaron desordenadas e intercaladas con el otro Personaje.
+        nodes.push(node(`${c}${i}`, "image", (4 - i) * 700 + (c === "a" ? 300 : 0)));
+        edges.push(edge(c, `${c}${i}`));
+        if (i > 1) edges.push(edge(`${c}${i - 1}`, `${c}${i}`));
+      }
+    }
+    const pos = autoLayoutPositions(nodes, edges);
+    for (const c of ["a", "b"]) {
+      const xs = new Set([1, 2, 3].map((i) => pos.get(`${c}${i}`)!.x));
+      expect(xs.size).toBe(1);
+      expect(pos.get(`${c}1`)!.y).toBeGreaterThan(pos.get(c)!.y);
+      expect(pos.get(`${c}2`)!.y).toBeGreaterThan(pos.get(`${c}1`)!.y);
+      expect(pos.get(`${c}g`)!.y).toBeLessThan(pos.get(c)!.y);
+      expect(pos.get("style")!.y).toBeLessThan(pos.get(`${c}g`)!.y);
+    }
+    // Columnas separadas: todo lo de "a" a la izquierda de lo de "b".
+    const right = (c: string) => Math.max(...["", "1", "2", "3", "g"].map((s) => pos.get(`${c}${s}`)!.x + 400));
+    const left = (c: string) => Math.min(...["", "1", "2", "3", "g"].map((s) => pos.get(`${c}${s}`)!.x));
+    expect(right("a")).toBeLessThanOrEqual(left("b"));
+    expect(overlaps(nodes, pos)).toBe(0);
+  });
+});
+

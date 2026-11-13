@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Node, Edge } from "@xyflow/react";
 import { HANDLE_IDS, topHandleId } from "../canvas-types";
-import { listConnectCandidates, type HandlesOf } from "../connect-candidates";
+import { connectGroup, listConnectCandidates, type HandlesOf } from "../connect-candidates";
 
 const node = (id: string, type: string, x = 0, y = 0): Node => ({ id, type, position: { x, y }, data: {} });
 
@@ -36,14 +36,14 @@ describe("listConnectCandidates", () => {
       handlesFor(nodes),
     );
     const keys = out.map((c) => `${c.nodeId}:${c.handleId}`);
-    // El video está más cerca: va primero.
+    // Imágenes antes que videos, aunque el video esté más cerca.
     expect(keys).toEqual([
+      `img:${HANDLE_IDS.INPUT_REFERENCE}`,
       `vid:${HANDLE_IDS.INPUT_FIRST_FRAME}`,
       `vid:${HANDLE_IDS.INPUT_LAST_FRAME}`,
       `vid:${HANDLE_IDS.INPUT_REFERENCE}`,
-      `img:${HANDLE_IDS.INPUT_REFERENCE}`,
     ]);
-    expect(out[3].connection).toEqual({
+    expect(out[0].connection).toEqual({
       source: "ch",
       sourceHandle: HANDLE_IDS.OUTPUT_CHARACTER_IMAGE,
       target: "img",
@@ -78,5 +78,36 @@ describe("listConnectCandidates", () => {
     expect(fromB.map((c) => c.nodeId)).not.toContain("a"); // ciclo
     const fromT2 = listConnectCandidates({ nodeId: "t2", handleId: HANDLE_IDS.OUTPUT_TEXT, handleType: "source" }, nodes, edges, handlesFor(nodes));
     expect(fromT2.some((c) => c.nodeId === "ch" && c.handleId === HANDLE_IDS.INPUT_CHARACTER_STYLE)).toBe(false); // un solo estilo
+  });
+});
+
+describe("connectGroup", () => {
+  it("agrupa por tipo y los vinculados van con lo que vinculan", () => {
+    const g = (type: string, data: Record<string, unknown> = {}) => connectGroup({ type, data });
+    expect(g("character")).toBe("Personajes");
+    expect(g("linked", { linkSnapshot: { kind: "character" } })).toBe("Personajes");
+    expect(g("scene")).toBe("Escenas");
+    expect(g("linked", { sourceType: "scene" })).toBe("Escenas");
+    expect(g("static-image-group")).toBe("Imágenes");
+    expect(g("linked", { linkSnapshot: { kind: "image" } })).toBe("Imágenes");
+    expect(g("static-text")).toBe("Otros");
+    expect(g("video")).toBe("Videos");
+  });
+
+  it("dentro de un grupo, el más cercano primero; los grupos en orden", () => {
+    const nodes = [
+      node("img0", "image"),
+      node("vidNear", "video", 50),
+      node("chFar", "character", 2000),
+      node("imgNear", "image", 100),
+      node("imgFar", "image", 900),
+    ];
+    const out = listConnectCandidates(
+      { nodeId: "img0", handleId: HANDLE_IDS.OUTPUT_IMAGE, handleType: "source" },
+      nodes,
+      [],
+      handlesFor(nodes),
+    );
+    expect([...new Set(out.map((c) => c.nodeId))]).toEqual(["chFar", "imgNear", "imgFar", "vidNear"]);
   });
 });

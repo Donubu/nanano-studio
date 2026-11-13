@@ -14,7 +14,37 @@ export interface HandleRef {
   handleType: "source" | "target";
 }
 
+// Grupos de la lista, en este orden. "Otros" (textos, params, guiones…) va
+// antes de los videos, que quedan al final.
+export const CONNECT_GROUPS = ["Personajes", "Escenas", "Imágenes", "Otros", "Videos"] as const;
+export type ConnectGroup = (typeof CONNECT_GROUPS)[number];
+
+/** Grupo de un nodo (los vinculados van con lo que vinculan). */
+export function connectGroup(node: Pick<Node, "type" | "data">): ConnectGroup {
+  let type = node.type;
+  if (type === "linked") {
+    const kind = (node.data as { linkSnapshot?: { kind?: string } | null; sourceType?: string }).linkSnapshot?.kind
+      ?? (node.data as { sourceType?: string }).sourceType;
+    type = kind === "scene" ? "scene" : kind === "image" ? "image" : "character";
+  }
+  switch (type) {
+    case "character":
+      return "Personajes";
+    case "scene":
+      return "Escenas";
+    case "image":
+    case "static-image":
+    case "static-image-group":
+      return "Imágenes";
+    case "video":
+      return "Videos";
+    default:
+      return "Otros";
+  }
+}
+
 export interface ConnectCandidate {
+  group: ConnectGroup;
   nodeId: string;
   /** Conector del otro nodo (id base, sin el gemelo superior). */
   handleId: string;
@@ -89,7 +119,8 @@ function center(n: Node): { x: number; y: number } {
 /**
  * Conectores de otros nodos que se pueden conectar con `origin`: válidos según
  * las reglas (tipos, entradas únicas), sin ciclos y sin repetir una conexión
- * que ya existe. Ordenados del nodo más cercano al más lejano.
+ * que ya existe. Ordenados por grupo (Personajes, Escenas, Imágenes, Otros,
+ * Videos) y, dentro de cada grupo, del nodo más cercano al más lejano.
  */
 export function listConnectCandidates(
   origin: HandleRef,
@@ -126,8 +157,9 @@ export function listConnectCandidates(
       );
       if (exists) continue;
       const c = center(node);
-      out.push({ nodeId: node.id, handleId, connection, distance: Math.hypot(c.x - from.x, c.y - from.y) });
+      out.push({ group: connectGroup(node), nodeId: node.id, handleId, connection, distance: Math.hypot(c.x - from.x, c.y - from.y) });
     }
   }
-  return out.sort((a, b) => a.distance - b.distance);
+  const rank = (g: ConnectGroup) => CONNECT_GROUPS.indexOf(g);
+  return out.sort((a, b) => rank(a.group) - rank(b.group) || a.distance - b.distance);
 }

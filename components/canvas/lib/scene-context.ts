@@ -88,6 +88,7 @@ export function collectSceneContext(sceneId: string, nodes: NodeLike[], edges: E
   return {
     sceneIndex: sceneData.sceneIndex,
     totalScenes: sceneData.totalScenes,
+    ...(sceneData.variant ? { variant: sceneData.variant } : {}),
     generalInfo: sceneData.generalInfo,
     previousScenes,
     sceneParamsContent,
@@ -159,7 +160,9 @@ export function composeScriptContext(ctx: SceneContextInputs): string | null {
   if (parts.length === 1) return null;
 
   parts.push(
-    `[Tu tarea]\nVas a generar contenido para la Escena ${ctx.sceneIndex} de ${ctx.totalScenes}. El prompt que recibes es el texto literal de esa escena (más el prompt local del nodo si lo hay). Aplica la información general, las escenas anteriores y las directrices de estilo como contexto — no las repitas en la salida. Respeta SIEMPRE las reglas obligatorias de arriba.`,
+    `[Tu tarea]\nVas a generar contenido para la Escena ${ctx.sceneIndex}${ctx.variant ?? ""} de ${ctx.totalScenes}${
+      ctx.variant === "B" ? ` (versión B: una alternativa de la escena ${ctx.sceneIndex}, no su continuación)` : ""
+    }. El prompt que recibes es el texto literal de esa escena (más el prompt local del nodo si lo hay). Aplica la información general, las escenas anteriores y las directrices de estilo como contexto — no las repitas en la salida. Respeta SIEMPRE las reglas obligatorias de arriba.`,
   );
 
   return parts.join("\n\n");

@@ -76,7 +76,7 @@ export const SceneNodeComponent = memo(function SceneNode({ id, data, selected }
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
         <Film className="h-[18px] w-[18px] text-violet-400 shrink-0" />
         <span className="text-[15px] font-medium flex-1 truncate">
-          Escena {nodeData.sceneIndex}
+          Escena {nodeData.sceneIndex}{nodeData.variant ?? ""}
           <span className="text-muted-foreground">/{nodeData.totalScenes}</span>
         </span>
         {TargetIcon && (

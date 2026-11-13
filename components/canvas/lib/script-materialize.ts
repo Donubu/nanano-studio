@@ -32,6 +32,25 @@ const SCENE_Y_SPACING = 340;
 export const sceneIdFor = (scriptId: string, idx: number) => `scene-${scriptId}-${idx}`;
 const defaultTargetIdFor = (scriptId: string, idx: number) => `dst-${scriptId}-${idx}`;
 
+// Versión B de una escena: ids y clave propios ("3b"), mismo número.
+export const sceneBIdFor = (scriptId: string, idx: number) => `scene-${scriptId}-${idx}-b`;
+const defaultTargetBIdFor = (scriptId: string, idx: number) => `dst-${scriptId}-${idx}-b`;
+
+/**
+ * Una escena del análisis produce una unidad (A) o dos (A y B). Cada unidad
+ * es un nodo Escena con su destino; `key` identifica el destino en
+ * `sceneTargetIds` ("3" o "3b") y el sufijo de sus conexiones.
+ */
+interface SceneUnit {
+  key: string;
+  idx: number;
+  variant?: "A" | "B";
+  sceneId: string;
+  defaultTargetId: string;
+  text: string;
+  targetNodeType: SceneTargetNodeType;
+}
+
 /** Prefijos de las conexiones que pone "Generar escenas" para un Guión. */
 export function managedEdgePrefixes(scriptId: string): string[] {
   return [
@@ -60,8 +79,9 @@ function defaultDataForTarget(type: SceneTargetNodeType, label: string): Record<
   }
 }
 
-function targetLabel(type: SceneTargetNodeType, idx: number): string {
-  return type === "image" ? `Imagen ${idx}` : type === "video" ? `Video ${idx}` : `Practicante ${idx}`;
+function targetLabel(type: SceneTargetNodeType, idx: number, variant?: "A" | "B"): string {
+  const n = `${idx}${variant ?? ""}`;
+  return type === "image" ? `Imagen ${n}` : type === "video" ? `Video ${n}` : `Practicante ${n}`;
 }
 
 function hasResults(n: Node): boolean {
@@ -119,7 +139,6 @@ export function planScriptMaterialize(
   const totalScenes = scenes.length;
   const sceneTargets: Record<string, string> = {};
   const prevTargets = (data.sceneTargetIds as Record<string, string> | undefined) ?? {};
-  const targetIdOf = (idx: number) => prevTargets[String(idx)] ?? defaultTargetIdFor(sid, idx);
 
   // Conexiones que no puso este plan, para no borrar nodos que el usuario usa.
   const userEdges = edges.filter((e) => !isManagedEdge(e.id, sid));
@@ -131,76 +150,112 @@ export function planScriptMaterialize(
     else warnings.push(`"${String((node.data as Record<string, unknown>).label || node.id)}" ${reason}; se conservó porque tiene resultados o conexiones.`);
   };
 
-  // 1. Escenas y destinos.
-  const scenePos = new Map<number, { x: number; y: number }>();
-  const targetOf = new Map<number, string>();
-  scenes.forEach((scene, i) => {
+  // 1. Escenas y destinos (una unidad por escena, dos si tiene versión B).
+  const units: SceneUnit[] = scenes.flatMap((scene) => {
     const idx = scene.index;
-    const id = sceneIdFor(sid, idx);
+    const hasB = !!scene.variantB;
+    const a: SceneUnit = {
+      key: String(idx),
+      idx,
+      variant: hasB ? "A" : undefined,
+      sceneId: sceneIdFor(sid, idx),
+      defaultTargetId: defaultTargetIdFor(sid, idx),
+      text: scene.text,
+      targetNodeType: scene.targetNodeType,
+    };
+    if (!hasB) return [a];
+    const b: SceneUnit = {
+      key: `${idx}b`,
+      idx,
+      variant: "B",
+      sceneId: sceneBIdFor(sid, idx),
+      defaultTargetId: defaultTargetBIdFor(sid, idx),
+      text: scene.variantB!.text ?? "",
+      targetNodeType: (scene.variantB!.targetNodeType ?? scene.targetNodeType) as SceneTargetNodeType,
+    };
+    return [a, b];
+  });
+  const scenePos = new Map<string, { x: number; y: number }>();
+  const targetOf = new Map<string, string>();
+  const unitTargetId = (u: { key: string; defaultTargetId: string }) => prevTargets[u.key] ?? u.defaultTargetId;
+  units.forEach((unit) => {
+    const { idx, key } = unit;
+    const id = unit.sceneId;
     const existing = byId.get(id);
-    const desired = {
+    const name = `${idx}${unit.variant ?? ""}`;
+    const desired: Record<string, unknown> = {
       type: "scene",
-      label: `Escena ${idx}`,
+      label: `Escena ${name}`,
       status: "completed",
       sceneIndex: idx,
       totalScenes,
-      text: scene.text,
+      text: unit.text,
       scriptNodeId: sid,
       generalInfo: analysis?.generalInfo,
-      targetNodeType: scene.targetNodeType,
+      targetNodeType: unit.targetNodeType,
+      variant: unit.variant,
     };
     if (existing && existing.type === "scene") {
       const cur = existing.data as Record<string, unknown>;
-      const changed = (Object.keys(desired) as (keyof typeof desired)[]).some(
-        (k) => JSON.stringify(cur[k]) !== JSON.stringify(desired[k]),
-      );
+      const changed = Object.keys(desired).some((k) => JSON.stringify(cur[k]) !== JSON.stringify(desired[k]));
       if (changed) {
-        updateNodes.push({ id, data: { ...cur, ...desired } });
+        const next: Record<string, unknown> = { ...cur, ...desired };
+        if (unit.variant === undefined) delete next.variant;
+        updateNodes.push({ id, data: next });
         counts.scenesUpdated++;
       }
-      scenePos.set(idx, existing.position);
+      scenePos.set(key, existing.position);
     } else {
-      // Debajo de la escena anterior si existe; si no, en el layout base.
-      const prev = i > 0 ? scenePos.get(scenes[i - 1].index) : undefined;
-      const pos = prev
-        ? { x: prev.x, y: prev.y + SCENE_Y_SPACING }
-        : { x: script.position.x + SCENE_X_OFFSET, y: script.position.y + i * SCENE_Y_SPACING };
+      if (unit.variant === undefined) delete desired.variant;
+      // La B, a la derecha del destino de su A; la A (o sin versiones),
+      // debajo de la escena anterior si existe; si no, en el layout base.
+      let pos: { x: number; y: number };
+      const posA = scenePos.get(String(idx));
+      if (unit.variant === "B" && posA) {
+        pos = { x: posA.x + TARGET_FROM_SCENE_X * 2, y: posA.y };
+      } else {
+        const i = scenes.findIndex((sc) => sc.index === idx);
+        const prev = i > 0 ? scenePos.get(String(scenes[i - 1].index)) : undefined;
+        pos = prev
+          ? { x: prev.x, y: prev.y + SCENE_Y_SPACING }
+          : { x: script.position.x + SCENE_X_OFFSET, y: script.position.y + Math.max(0, i) * SCENE_Y_SPACING };
+      }
       addNodes.push({ id, type: "scene", position: pos, data: desired });
-      scenePos.set(idx, pos);
+      scenePos.set(key, pos);
       counts.scenesAdded++;
     }
 
     // Destino.
-    const type = scene.targetNodeType;
-    const currentTarget = byId.get(targetIdOf(idx));
+    const type = unit.targetNodeType;
+    const currentTarget = byId.get(unitTargetId(unit));
     if (type === "none") {
       if (currentTarget) retire(currentTarget, "ya no es destino de su escena");
       return;
     }
     if (currentTarget && currentTarget.type === type) {
-      targetOf.set(idx, currentTarget.id);
-      sceneTargets[String(idx)] = currentTarget.id;
+      targetOf.set(key, currentTarget.id);
+      sceneTargets[key] = currentTarget.id;
       return;
     }
-    if (currentTarget) retire(currentTarget, `cambió de tipo en la escena ${idx}`);
+    if (currentTarget) retire(currentTarget, `cambió de tipo en la escena ${name}`);
     // Si el id fijo está ocupado (o se elimina en este mismo plan: borrar y
     // crear el mismo id a la vez es frágil), el nuevo destino lleva sufijo.
-    const def = defaultTargetIdFor(sid, idx);
+    const def = unit.defaultTargetId;
     const newId = byId.has(def) ? `${def}-${prefix}` : def;
-    const sp = scenePos.get(idx)!;
+    const sp = scenePos.get(key)!;
     addNodes.push({
       id: newId,
       type,
       position: { x: sp.x + TARGET_FROM_SCENE_X, y: sp.y },
-      data: defaultDataForTarget(type, targetLabel(type, idx)),
+      data: defaultDataForTarget(type, targetLabel(type, idx, unit.variant)),
     });
-    targetOf.set(idx, newId);
-    sceneTargets[String(idx)] = newId;
+    targetOf.set(key, newId);
+    sceneTargets[key] = newId;
     counts.targetsAdded++;
   });
 
   // 2. Escenas de este Guión que ya no están en el análisis (y sus destinos).
-  const wanted = new Set(scenes.map((s) => sceneIdFor(sid, s.index)));
+  const wanted = new Set(units.map((u) => u.sceneId));
   for (const n of nodes) {
     if (n.type !== "scene" || wanted.has(n.id)) continue;
     const d = n.data as Record<string, unknown>;
@@ -208,12 +263,38 @@ export function planScriptMaterialize(
     removeNodeIds.add(n.id);
     counts.scenesRemoved++;
     const idx = Number(d.sceneIndex);
-    const t = Number.isFinite(idx) ? byId.get(targetIdOf(idx)) : undefined;
-    if (t && !Object.values(sceneTargets).includes(t.id)) retire(t, `quedó sin escena (la escena ${idx} ya no existe)`);
+    if (!Number.isFinite(idx)) continue;
+    const isB = d.variant === "B" || n.id === sceneBIdFor(sid, idx);
+    const key = isB ? `${idx}b` : String(idx);
+    const t = byId.get(unitTargetId({ key, defaultTargetId: isB ? defaultTargetBIdFor(sid, idx) : defaultTargetIdFor(sid, idx) }));
+    if (t && !Object.values(sceneTargets).includes(t.id)) {
+      retire(t, isB ? `quedó sin escena (se quitó la versión B de la escena ${idx})` : `quedó sin escena (la escena ${idx} ya no existe)`);
+    }
   }
 
-  // 3. Params Escena: el propio del usuario o el automático (se crea si falta).
-  const paramsSceneId = opts.paramsSceneSourceId || `params-scene-${sid}`;
+  // 3. Params Escena, en este orden: el conectado al Guión; el que YA alimenta
+  // las escenas de este Guión (uno propio del usuario aunque no esté conectado
+  // al Guión, o el de una corrida anterior); el automático (se crea si falta).
+  // Antes se usaba siempre el automático: si el usuario tenía el suyo, se
+  // creaba uno vacío y las escenas quedaban apuntando a él.
+  const scriptSceneIds = new Set(
+    nodes
+      .filter((n) => n.type === "scene" && ((n.data as Record<string, unknown>).scriptNodeId === sid || n.id.startsWith(`scene-${sid}-`)))
+      .map((n) => n.id),
+  );
+  const isSceneParamsEdge = (e: Edge) => scriptSceneIds.has(e.target) && baseHandleId(e.targetHandle) === HANDLE_IDS.INPUT_SCENE_PARAMS;
+  const feedingCount = new Map<string, number>();
+  for (const e of edges) {
+    if (!isSceneParamsEdge(e) || byId.get(e.source)?.type !== "params-scene") continue;
+    feedingCount.set(e.source, (feedingCount.get(e.source) ?? 0) + 1);
+  }
+  const feeding = [...feedingCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const paramsSceneId = opts.paramsSceneSourceId || feeding || `params-scene-${sid}`;
+  // Escenas a las que el usuario les puso su propio Params Escena (otro nodo,
+  // conexión que no es del plan): se respeta, no se agrega un segundo.
+  const ownSceneParams = new Set(
+    edges.filter((e) => isSceneParamsEdge(e) && !isManagedEdge(e.id, sid) && e.source !== paramsSceneId).map((e) => e.target),
+  );
   if (!opts.paramsSceneSourceId && !byId.has(paramsSceneId) && scenes.length > 0) {
     addNodes.push({
       id: paramsSceneId,
@@ -223,33 +304,35 @@ export function planScriptMaterialize(
     });
   }
 
-  // 4. Conexiones deseadas (ids fijos por escena).
+  // 4. Conexiones deseadas (ids fijos por unidad). La cadena sigue por las A:
+  // la B recibe el contexto de las escenas anteriores pero no lo pasa.
   const desired: DesiredEdge[] = [];
-  scenes.forEach((scene, i) => {
-    const idx = scene.index;
-    const sceneId = sceneIdFor(sid, idx);
+  units.forEach((unit) => {
+    const i = scenes.findIndex((sc) => sc.index === unit.idx);
     desired.push({
-      id: `edge-chain-${sid}-${idx}`,
+      id: `edge-chain-${sid}-${unit.key}`,
       source: i === 0 ? sid : sceneIdFor(sid, scenes[i - 1].index),
       sourceHandle: HANDLE_IDS.OUTPUT_SCRIPT_CHAIN,
-      target: sceneId,
+      target: unit.sceneId,
       targetHandle: HANDLE_IDS.INPUT_SCRIPT_CHAIN,
     });
-    desired.push({
-      id: `edge-params-scene-${sid}-${idx}`,
-      source: paramsSceneId,
-      sourceHandle: HANDLE_IDS.OUTPUT_PARAMS,
-      target: sceneId,
-      targetHandle: HANDLE_IDS.INPUT_SCENE_PARAMS,
-    });
-    const t = targetOf.get(idx);
+    if (!ownSceneParams.has(unit.sceneId)) {
+      desired.push({
+        id: `edge-params-scene-${sid}-${unit.key}`,
+        source: paramsSceneId,
+        sourceHandle: HANDLE_IDS.OUTPUT_PARAMS,
+        target: unit.sceneId,
+        targetHandle: HANDLE_IDS.INPUT_SCENE_PARAMS,
+      });
+    }
+    const t = targetOf.get(unit.key);
     if (t) {
-      desired.push({ id: `edge-target-${sid}-${idx}`, source: sceneId, sourceHandle: HANDLE_IDS.OUTPUT_TEXT, target: t, targetHandle: HANDLE_IDS.INPUT_PROMPT });
+      desired.push({ id: `edge-target-${sid}-${unit.key}`, source: unit.sceneId, sourceHandle: HANDLE_IDS.OUTPUT_TEXT, target: t, targetHandle: HANDLE_IDS.INPUT_PROMPT });
     }
   });
   // Referencia visual del Guión → destino de la primera escena.
   const first = scenes[0];
-  const firstTarget = first ? targetOf.get(first.index) : undefined;
+  const firstTarget = first ? targetOf.get(String(first.index)) : undefined;
   if (opts.visualReferenceSourceId && first && firstTarget) {
     const handle =
       first.targetNodeType === "image" ? HANDLE_IDS.INPUT_REFERENCE :
@@ -259,28 +342,31 @@ export function planScriptMaterialize(
       desired.push({ id: `edge-visual-ref-${sid}`, source: opts.visualReferenceSourceId, sourceHandle: HANDLE_IDS.OUTPUT_IMAGE, target: firstTarget, targetHandle: handle });
     }
   }
-  // Continuidad entre destinos (opcional).
+  // Continuidad entre destinos (opcional): del destino de la escena anterior
+  // (su A) al de esta, y también al de su versión B.
   if (opts.linkPreviousOutput) {
     for (let i = 1; i < scenes.length; i++) {
       const prev = scenes[i - 1];
-      const curr = scenes[i];
-      const a = targetOf.get(prev.index);
-      const b = targetOf.get(curr.index);
-      if (!a || !b) continue;
-      let sourceHandle: string | null = null;
-      let targetHandle: string | null = null;
-      if (prev.targetNodeType === "image" && curr.targetNodeType === "image") {
-        sourceHandle = HANDLE_IDS.OUTPUT_IMAGE;
-        targetHandle = HANDLE_IDS.INPUT_REFERENCE;
-      } else if (prev.targetNodeType === "image" && curr.targetNodeType === "video") {
-        sourceHandle = HANDLE_IDS.OUTPUT_IMAGE;
-        targetHandle = HANDLE_IDS.INPUT_FIRST_FRAME;
-      } else if ((prev.targetNodeType === "image" || prev.targetNodeType === "video") && curr.targetNodeType === "text-practicante") {
-        sourceHandle = prev.targetNodeType === "image" ? HANDLE_IDS.OUTPUT_IMAGE : HANDLE_IDS.OUTPUT_VIDEO;
-        targetHandle = HANDLE_IDS.INPUT_MEDIA;
-      }
-      if (sourceHandle && targetHandle) {
-        desired.push({ id: `edge-link-${sid}-${curr.index}`, source: a, sourceHandle, target: b, targetHandle });
+      const a = targetOf.get(String(prev.index));
+      if (!a) continue;
+      for (const unit of units.filter((u) => u.idx === scenes[i].index)) {
+        const b = targetOf.get(unit.key);
+        if (!b) continue;
+        let sourceHandle: string | null = null;
+        let targetHandle: string | null = null;
+        if (prev.targetNodeType === "image" && unit.targetNodeType === "image") {
+          sourceHandle = HANDLE_IDS.OUTPUT_IMAGE;
+          targetHandle = HANDLE_IDS.INPUT_REFERENCE;
+        } else if (prev.targetNodeType === "image" && unit.targetNodeType === "video") {
+          sourceHandle = HANDLE_IDS.OUTPUT_IMAGE;
+          targetHandle = HANDLE_IDS.INPUT_FIRST_FRAME;
+        } else if ((prev.targetNodeType === "image" || prev.targetNodeType === "video") && unit.targetNodeType === "text-practicante") {
+          sourceHandle = prev.targetNodeType === "image" ? HANDLE_IDS.OUTPUT_IMAGE : HANDLE_IDS.OUTPUT_VIDEO;
+          targetHandle = HANDLE_IDS.INPUT_MEDIA;
+        }
+        if (sourceHandle && targetHandle) {
+          desired.push({ id: `edge-link-${sid}-${unit.key}`, source: a, sourceHandle, target: b, targetHandle });
+        }
       }
     }
   }
