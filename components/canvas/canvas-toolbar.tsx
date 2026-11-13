@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ImageIcon, Video, MessageSquare, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History, Eye, BookmarkPlus, LayoutTemplate, UserRound, Link2, Magnet, Grid3x3, ChevronsDownUp, ChevronsUpDown, AlertTriangle } from "lucide-react";
+import { ImageIcon, Video, MessageSquare, Plus, Check, Loader2, AlertCircle, Save, Zap, StickyNote, ImagePlus, Images, Type, Copy, Lock, Unlock, Settings, Bot, Sparkles, Palette, LayoutGrid, Hand, MousePointer2, History, Eye, BookmarkPlus, LayoutTemplate, UserRound, Link2, Magnet, Grid3x3, ChevronsDownUp, ChevronsUpDown, AlertTriangle, Film } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CanvasNodeType } from "./lib/canvas-types";
 
@@ -33,6 +33,9 @@ interface CanvasToolbarProps {
   canvasMode: "pan" | "select";
   onCanvasModeChange: (mode: "pan" | "select") => void;
   onOpenHistory: () => void;
+  // Panel con los links y descargas de los videos del canvas (si tiene).
+  videoCount?: number;
+  onOpenVideos?: () => void;
   // Lock de edición: si false, el usuario está en solo-ver y se ocultan todas
   // las herramientas de escritura, mostrando un badge con quién edita.
   canEdit: boolean;
@@ -84,6 +87,8 @@ export function CanvasToolbar({
   canvasMode,
   onCanvasModeChange,
   onOpenHistory,
+  videoCount = 0,
+  onOpenVideos,
   canEdit,
   editorName,
 }: CanvasToolbarProps) {
@@ -144,6 +149,22 @@ export function CanvasToolbar({
           {editorName && (
             <span className="text-muted-foreground">· edita {editorName}</span>
           )}
+        </div>
+      )}
+      {!canEdit && videoCount > 0 && onOpenVideos && (
+        <div className="flex items-center bg-background/90 backdrop-blur-sm border border-border rounded-lg p-1 shadow-lg">
+  {videoCount > 0 && onOpenVideos && (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={onOpenVideos}
+      className="gap-1.5 text-xs"
+      title="Links y descargas de los videos de este canvas"
+    >
+      <Film className="h-3.5 w-3.5" />
+      Videos ({videoCount})
+    </Button>
+  )}
         </div>
       )}
 
@@ -342,6 +363,18 @@ export function CanvasToolbar({
           <History className="h-3.5 w-3.5" />
           Historial
         </Button>
+        {videoCount > 0 && onOpenVideos && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onOpenVideos}
+            className="gap-1.5 text-xs"
+            title="Links y descargas de los videos de este canvas"
+          >
+            <Film className="h-3.5 w-3.5" />
+            Videos ({videoCount})
+          </Button>
+        )}
       </div>
       )}
     </div>
