@@ -1,9 +1,12 @@
 "use client";
 
-import { memo } from "react";
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { memo, useCallback } from "react";
+import { Handle, Position, useNodesData, type NodeProps } from "@xyflow/react";
 import { Film, ImageIcon, Video, Bot } from "lucide-react";
-import { HANDLE_IDS, topHandleId, type SceneNodeData } from "../lib/canvas-types";
+import { HANDLE_IDS, topHandleId, type SceneNodeData, type ScriptNodeData } from "../lib/canvas-types";
+import { managedSceneId, sceneEditToScript } from "../lib/script-materialize";
+import { useNodeUpdate } from "../hooks/use-node-update";
+import { NodeTextarea } from "./node-textarea";
 import { NodeDeleteButton } from "./node-status";
 import { ResizeHandle, nodeSizeClass, useHasFixedSize } from "./resize-handle";
 import { LinkUsageRow } from "./link-usage";
@@ -27,6 +30,33 @@ export const SceneNodeComponent = memo(function SceneNode({ id, data, selected }
   const nodeData = data as unknown as SceneNodeData;
   const targetType = nodeData.targetNodeType || "none";
   const TargetIcon = targetIconMap[targetType];
+  const { updateNodeData } = useNodeUpdate();
+
+  // El texto se edita acá y se escribe también en el Guión (su escena o su
+  // versión B), así no hay que subir al Guión y volver a "Generar escenas".
+  // Si el Guión cambió desde que se generó esta escena, no se edita (se
+  // pisaría otra escena): primero hay que volver a "Generar escenas". Una
+  // escena suelta (copiada, de plantilla o sin Guión) se edita solo acá.
+  const scriptId = nodeData.scriptNodeId;
+  const script = useNodesData(scriptId ?? "");
+  const managedScript =
+    script?.type === "script" && id === managedSceneId(scriptId, nodeData.sceneIndex, nodeData.variant)
+      ? (script.data as unknown as ScriptNodeData)
+      : null;
+  const sceneRef = { id, sceneIndex: nodeData.sceneIndex, variant: nodeData.variant, text: nodeData.text || "" };
+  const inSync = !managedScript || sceneEditToScript(scriptId, managedScript, sceneRef, sceneRef.text) !== null;
+
+  const handleTextChange = useCallback(
+    (text: string) => {
+      if (managedScript) {
+        const updates = sceneEditToScript(scriptId, managedScript, { id, sceneIndex: nodeData.sceneIndex, variant: nodeData.variant, text: nodeData.text || "" }, text);
+        if (!updates) return;
+        updateNodeData(scriptId, updates);
+      }
+      updateNodeData(id, { text });
+    },
+    [id, nodeData.sceneIndex, nodeData.variant, nodeData.text, managedScript, scriptId, updateNodeData],
+  );
 
   return (
     <div
@@ -91,14 +121,24 @@ export const SceneNodeComponent = memo(function SceneNode({ id, data, selected }
         <NodeDeleteButton nodeId={id} />
       </div>
 
-      {/* Body: literal scene text (read-only) */}
+      {/* Body: texto de la escena, editable (se sincroniza con el Guión) */}
       <div className="px-3 py-2">
         <div className="mb-1.5 empty:hidden">
           <LinkUsageRow nodeId={id} kind="scene" />
         </div>
-        <div className="nowheel bg-muted/40 rounded-md p-2 max-h-[180px] overflow-y-auto">
-          <p className="text-[15px] whitespace-pre-wrap">{nodeData.text || "(sin texto)"}</p>
-        </div>
+        <NodeTextarea
+          value={nodeData.text || ""}
+          onChange={handleTextChange}
+          readOnly={!inSync}
+          placeholder="Texto de la escena..."
+          title={inSync ? "Se actualiza también en el Guión" : undefined}
+          className="w-full text-[15px] bg-muted/40 rounded-md p-2 outline-none border border-transparent focus:border-violet-500/40 resize-none min-h-[80px] h-[180px] whitespace-pre-wrap placeholder:text-muted-foreground"
+        />
+        {!inSync && (
+          <p className="mt-1 text-[12px] text-amber-500">
+            El Guión cambió: usa &quot;Generar escenas&quot; para poder editar esta escena aquí.
+          </p>
+        )}
       </div>
 
       {/* Output to next scene (chain) */}

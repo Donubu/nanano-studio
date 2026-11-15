@@ -416,3 +416,39 @@ export function planScriptMaterialize(
     counts,
   };
 }
+
+/**
+ * Edición de una Escena desde su propio nodo, de vuelta al Guión. Devuelve la
+ * data del Guión a escribir (análisis activo y su alternativa) o null si la
+ * Escena ya no corresponde a lo que el Guión generaría en ese lugar: id
+ * distinto del fijo, escena o versión B inexistente, o texto distinto (el
+ * Guión cambió y falta "Generar escenas"). En ese caso no se edita, para no
+ * pisar otra escena.
+ */
+/** Id fijo de la Escena (o de su versión B) que genera un Guión. */
+export const managedSceneId = (scriptId: string, idx: number, variant?: "A" | "B") =>
+  variant === "B" ? sceneBIdFor(scriptId, idx) : sceneIdFor(scriptId, idx);
+
+export function sceneEditToScript(
+  scriptId: string,
+  script: ScriptNodeData,
+  scene: { id: string; sceneIndex: number; variant?: "A" | "B"; text: string },
+  text: string,
+): Partial<ScriptNodeData> | null {
+  const analysis = script.scriptAnalysis;
+  const isB = scene.variant === "B";
+  if (!analysis || scene.id !== managedSceneId(scriptId, scene.sceneIndex, scene.variant)) return null;
+  const pos = analysis.scenes.findIndex((s) => s.index === scene.sceneIndex);
+  if (pos < 0) return null;
+  const cur = analysis.scenes[pos];
+  if (isB ? !cur.variantB || cur.variantB.text !== scene.text : cur.text !== scene.text) return null;
+  const nextScene = isB ? { ...cur, variantB: { ...cur.variantB!, text } } : { ...cur, text };
+  const next: ScriptAnalysis = { ...analysis, scenes: analysis.scenes.map((s, i) => (i === pos ? nextScene : s)) };
+  const updates: Partial<ScriptNodeData> = { scriptAnalysis: next };
+  const alts = script.scriptAnalysisAlternatives;
+  if (alts && alts.length > 0) {
+    const active = script.activeAnalysisIndex ?? 0;
+    updates.scriptAnalysisAlternatives = alts.map((alt, i) => (i === active ? { ...alt, ...next } : alt));
+  }
+  return updates;
+}

@@ -237,7 +237,7 @@ export interface SceneNodeData extends BaseNodeData {
   type: "scene";
   sceneIndex: number;       // 1-based
   totalScenes: number;
-  text: string;             // texto íntegro de la escena, no editable
+  text: string;             // texto de la escena; editarlo en el nodo lo escribe en el Guión (sceneEditToScript)
   scriptNodeId: string;     // referencia al nodo Guión origen
   generalInfo?: ScriptGeneralInfo; // copia self-contained para inyección de contexto
   targetNodeType?: SceneTargetNodeType;

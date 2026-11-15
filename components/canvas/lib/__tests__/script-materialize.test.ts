@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Edge, Node } from "@xyflow/react";
 import { HANDLE_IDS } from "../canvas-types";
-import { planScriptMaterialize, type ScriptMaterializePlan } from "../script-materialize";
+import { planScriptMaterialize, sceneEditToScript, type ScriptMaterializePlan } from "../script-materialize";
 
 const generalInfo = { synopsis: "s", tone: "t", genre: "g", visualStyle: "v", characters: [], settings: [] };
 type SceneSpec = { index: number; text: string; targetNodeType: "image" | "video" | "text-practicante" | "none"; variantB?: { text: string; targetNodeType?: "image" | "video" | "text-practicante" | "none" } };
@@ -170,5 +170,32 @@ describe("planScriptMaterialize", () => {
     const a = again.updateNodes.find((u) => u.id === "scene-g-2")!;
     expect(a.data.label).toBe("Escena 2");
     expect(a.data).not.toHaveProperty("variant");
+  });
+});
+
+describe("sceneEditToScript", () => {
+  const data = (scenes: SceneSpec[], extra: Record<string, unknown> = {}) =>
+    script(scenes, extra).data as unknown as Parameters<typeof sceneEditToScript>[1];
+
+  it("escribe el texto de la escena A en el análisis y en la alternativa activa", () => {
+    const d = data(three, { scriptAnalysisAlternatives: [{ generalInfo, scenes: three }, { generalInfo, scenes: [] }], activeAnalysisIndex: 0 });
+    const up = sceneEditToScript("g", d, { id: "scene-g-2", sceneIndex: 2, text: "dos" }, "dos editado")!;
+    expect(up.scriptAnalysis!.scenes.map((s) => s.text)).toEqual(["uno", "dos editado", "tres"]);
+    expect(up.scriptAnalysisAlternatives![0].scenes[1].text).toBe("dos editado");
+    expect(up.scriptAnalysisAlternatives![1].scenes).toEqual([]);
+  });
+
+  it("la versión B escribe en variantB sin tocar la A", () => {
+    const d = data([{ index: 1, text: "a", targetNodeType: "image", variantB: { text: "b" } }]);
+    const up = sceneEditToScript("g", d, { id: "scene-g-1-b", sceneIndex: 1, variant: "B", text: "b" }, "b2")!;
+    expect(up.scriptAnalysis!.scenes[0]).toMatchObject({ text: "a", variantB: { text: "b2" } });
+  });
+
+  it("no edita si el Guión cambió desde que se generó la escena", () => {
+    const d = data(three);
+    expect(sceneEditToScript("g", d, { id: "scene-g-2", sceneIndex: 2, text: "viejo" }, "x")).toBeNull();
+    expect(sceneEditToScript("g", d, { id: "scene-g-9", sceneIndex: 9, text: "" }, "x")).toBeNull();
+    expect(sceneEditToScript("g", d, { id: "otra", sceneIndex: 2, text: "dos" }, "x")).toBeNull();
+    expect(sceneEditToScript("g", d, { id: "scene-g-2-b", sceneIndex: 2, variant: "B", text: "dos" }, "x")).toBeNull();
   });
 });
