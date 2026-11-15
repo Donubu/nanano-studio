@@ -1,5 +1,6 @@
-// Descargas de los videos de un canvas (panel "Videos"): la lista se arma en
-// el servidor desde el canvas guardado (mismo orden y nombres que el panel),
+// Descargas de los videos y las imágenes de un canvas (paneles "Videos" e
+// "Imágenes"): la lista se arma en el servidor desde el canvas guardado
+// (mismo orden y nombres que el panel),
 // así las rutas no reciben URLs del cliente. Solo se bajan archivos de
 // nuestro bucket.
 
@@ -7,6 +8,7 @@ import type { RowDataPacket } from "mysql2";
 import pool from "@/lib/db";
 import { isOwnStorageUrl } from "@/lib/s3";
 import { listCanvasVideos, videoFileName } from "@/components/canvas/lib/canvas-videos";
+import { imageFileName, listCanvasImages } from "@/components/canvas/lib/canvas-images";
 
 export interface DownloadUser {
   id: number;
@@ -19,12 +21,19 @@ export interface CanvasVideoFile {
   url: string;
 }
 
+type CanvasNode = { id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> };
+
 /**
- * Videos listos del canvas con su nombre de archivo numerado. null si el
- * canvas no existe o el usuario no puede leerlo (admin, dueño o miembro del
- * proyecto).
+ * Canvas guardado con acceso de lectura (admin, dueño o miembro del
+ * proyecto); null si no existe o el usuario no puede leerlo. Los nodos de
+ * `fullTypes` vienen con su config; los demás solo con id y tipo (las escenas
+ * los necesitan para recorrer sus destinos).
  */
-export async function canvasVideoFiles(conversationId: number, user: DownloadUser): Promise<{ title: string; files: CanvasVideoFile[] } | null> {
+async function loadCanvas(
+  conversationId: number,
+  user: DownloadUser,
+  fullTypes: string[],
+): Promise<{ title: string; nodes: CanvasNode[]; edges: { source: string; target: string }[] } | null> {
   const [convs] = await pool.execute<RowDataPacket[]>(
     `SELECT id, user_id, project_id, title FROM conversations WHERE id = ? AND deleted_at IS NULL AND generation_type = 'canvas'`,
     [conversationId],
@@ -37,22 +46,21 @@ export async function canvasVideoFiles(conversationId: number, user: DownloadUse
     if (m.length === 0) return null;
   }
 
+  const inTypes = fullTypes.map(() => "?").join(",");
   const [nodeRows] = await pool.execute<RowDataPacket[]>(
     `SELECT id, type, label, position_x, position_y, config, status, output_url
-     FROM canvas_nodes WHERE conversation_id = ? AND deleted_at IS NULL AND type IN ('video', 'linked', 'scene')`,
-    [conversationId],
+     FROM canvas_nodes WHERE conversation_id = ? AND deleted_at IS NULL AND type IN (${inTypes})`,
+    [conversationId, ...fullTypes],
   );
   const [edgeRows] = await pool.execute<RowDataPacket[]>(
     `SELECT source_node_id, target_node_id FROM canvas_edges WHERE conversation_id = ? AND deleted_at IS NULL`,
     [conversationId],
   );
-  // Las escenas necesitan sus destinos (imagen → video) para saber qué video
-  // es el final de cada una: se cargan también los nodos intermedios.
   const [midRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, type FROM canvas_nodes WHERE conversation_id = ? AND deleted_at IS NULL AND type NOT IN ('video', 'linked', 'scene')`,
-    [conversationId],
+    `SELECT id, type FROM canvas_nodes WHERE conversation_id = ? AND deleted_at IS NULL AND type NOT IN (${inTypes})`,
+    [conversationId, ...fullTypes],
   );
-  const nodes = [
+  const nodes: CanvasNode[] = [
     ...nodeRows.map((r) => {
       const config = typeof r.config === "string" ? JSON.parse(r.config || "{}") : (r.config ?? {});
       return {
@@ -65,12 +73,35 @@ export async function canvasVideoFiles(conversationId: number, user: DownloadUse
     ...midRows.map((r) => ({ id: r.id as string, type: r.type as string, position: { x: 0, y: 0 }, data: {} })),
   ];
   const edges = edgeRows.map((e) => ({ source: e.source_node_id as string, target: e.target_node_id as string }));
+  return { title: String(conv.title || `Canvas ${conversationId}`), nodes, edges };
+}
 
-  const all = listCanvasVideos(nodes, edges);
+/** Videos listos del canvas con su nombre de archivo numerado (null: sin acceso). */
+export async function canvasVideoFiles(conversationId: number, user: DownloadUser): Promise<{ title: string; files: CanvasVideoFile[] } | null> {
+  const canvas = await loadCanvas(conversationId, user, ["video", "linked", "scene"]);
+  if (!canvas) return null;
+  const all = listCanvasVideos(canvas.nodes, canvas.edges);
   const files = all
     .map((v, i) => ({ nodeId: v.nodeId, url: v.url, fileName: videoFileName(i, all.length, v.label) }))
     .filter((f): f is CanvasVideoFile => !!f.url && isOwnStorageUrl(f.url));
-  return { title: String(conv.title || `Canvas ${conversationId}`), files };
+  return { title: canvas.title, files };
+}
+
+export interface CanvasImageFile {
+  key: string;
+  fileName: string;
+  url: string;
+}
+
+/** Imágenes del canvas (propias y vinculadas) con su nombre numerado, en el orden del panel "Imágenes". */
+export async function canvasImageFiles(conversationId: number, user: DownloadUser): Promise<{ title: string; files: CanvasImageFile[] } | null> {
+  const canvas = await loadCanvas(conversationId, user, ["image", "static-image", "static-image-group", "linked", "scene"]);
+  if (!canvas) return null;
+  const all = listCanvasImages(canvas.nodes, canvas.edges);
+  const files = all
+    .map((img, i) => ({ key: img.key, url: img.url, fileName: imageFileName(i, all.length, img) }))
+    .filter((f) => isOwnStorageUrl(f.url));
+  return { title: canvas.title, files };
 }
 
 /** Content-Disposition con nombre UTF-8 (y uno ASCII de respaldo). */

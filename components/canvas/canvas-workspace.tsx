@@ -49,6 +49,8 @@ import { ScriptConfigPanel } from "./panels/script-config-panel";
 import { DryRunPanel } from "./panels/dryrun-panel";
 import { HistoryPanel } from "./panels/history-panel";
 import { VideosPanel } from "./panels/videos-panel";
+import { ImagesPanel } from "./panels/images-panel";
+import { countCanvasImages } from "./lib/canvas-images";
 import { useCanvasPersist } from "./hooks/use-canvas-persist";
 import { useCanvasExecution } from "./hooks/use-canvas-execution";
 import { useUndoRedo } from "./hooks/use-undo-redo";
@@ -159,6 +161,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
   const [canvasMode, setCanvasMode] = useState<"pan" | "select">("pan");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [videosOpen, setVideosOpen] = useState(false);
+  const [imagesOpen, setImagesOpen] = useState(false);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
@@ -1431,6 +1434,9 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
     [nodes],
   );
 
+  // Imágenes del canvas (propias y vinculadas), para el botón "Imágenes".
+  const imageCount = useMemo(() => countCanvasImages(nodes as never), [nodes]);
+
   // Orígenes ya vinculados en este canvas ("conv|nodo"): "Traer videos" no los repite.
   const alreadyLinked = useMemo(
     () =>
@@ -2279,7 +2285,9 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
               onCanvasModeChange={setCanvasMode}
               onOpenHistory={() => setHistoryOpen(true)}
               videoCount={videoCount}
-              onOpenVideos={() => setVideosOpen(true)}
+              onOpenVideos={() => { setImagesOpen(false); setVideosOpen(true); }}
+              imageCount={imageCount}
+              onOpenImages={() => { setVideosOpen(false); setImagesOpen(true); }}
               canEdit={canEdit}
               editorName={editorName}
             />
@@ -2454,6 +2462,18 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
         nodes={nodes}
         edges={edges}
         onClose={() => setVideosOpen(false)}
+        onFocusNode={(nodeId) => {
+          setNodes((nds) => nds.map((n) => (n.selected === (n.id === nodeId) ? n : { ...n, selected: n.id === nodeId })));
+          fitView({ nodes: [{ id: nodeId }], padding: 0.6, duration: 400, maxZoom: 1 });
+        }}
+      />
+
+      <ImagesPanel
+        conversationId={realConversationId}
+        isOpen={imagesOpen}
+        nodes={nodes}
+        edges={edges}
+        onClose={() => setImagesOpen(false)}
         onFocusNode={(nodeId) => {
           setNodes((nds) => nds.map((n) => (n.selected === (n.id === nodeId) ? n : { ...n, selected: n.id === nodeId })));
           fitView({ nodes: [{ id: nodeId }], padding: 0.6, duration: 400, maxZoom: 1 });

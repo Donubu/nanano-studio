@@ -13,6 +13,9 @@ export interface SceneVideos {
   variant?: "A" | "B";
   // Videos finales (sin otro video después dentro de la escena). Casi siempre uno.
   videoIds: string[];
+  // Todo lo que genera la escena (destino y lo que sale de él), en orden de
+  // recorrido: el panel "Imágenes" lo usa para nombrar las imágenes por escena.
+  nodeIds: string[];
 }
 
 /**
@@ -86,6 +89,7 @@ export function sceneFinalVideos(nodes: N[], edges: E[]): SceneVideos[] {
       totalScenes: Number(d.totalScenes) || 0,
       ...(d.variant === "A" || d.variant === "B" ? { variant: d.variant } : {}),
       videoIds: videos.filter((v) => !hasVideoAfter(v)),
+      nodeIds: [...reached],
     });
   }
   return out;

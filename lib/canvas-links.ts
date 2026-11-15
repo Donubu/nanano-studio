@@ -8,6 +8,8 @@
 import { createHash } from "crypto";
 import type { RowDataPacket } from "mysql2";
 import pool from "@/lib/db";
+import { isOwnStorageUrl } from "@/lib/s3";
+import { imageFileName } from "@/components/canvas/lib/canvas-images";
 import { HANDLE_IDS, baseHandleId, type CharacterNodeData, type LinkState, type LinkedSnapshot, type LinkUsage, type LinkUsageCanvas, type SceneNodeData } from "@/components/canvas/lib/canvas-types";
 import { buildCharacterSnapshot } from "@/components/canvas/lib/linked";
 import { collectSceneContext } from "@/components/canvas/lib/scene-context";
@@ -530,4 +532,30 @@ export async function listLinkUsage(sourceConversationId: number, user: LinkUser
   }
   for (const list of Object.values(usage)) list.sort((a, b) => a.title.localeCompare(b.title));
   return usage;
+}
+
+export interface LinkableImageFile {
+  nodeId: string;
+  fileName: string;
+  url: string;
+}
+
+/**
+ * Imágenes de OTRO canvas del proyecto para bajarlas desde la pestaña
+ * "Imágenes" de Vincular: las mismas (y en el mismo orden) que lista
+ * `listLinkables`, con el mismo acceso, nombre numerado y solo URLs de
+ * nuestro bucket. null si ese canvas no es visible para el usuario.
+ */
+export async function linkableImageFiles(
+  targetConversationId: number,
+  user: LinkUser,
+  sourceConversationId: number,
+): Promise<{ title: string; files: LinkableImageFile[] } | null> {
+  const canvases = await listLinkables(targetConversationId, user);
+  const source = canvases?.find((c) => c.conversationId === sourceConversationId);
+  if (!source) return null;
+  const files = source.images
+    .map((img, i) => ({ nodeId: img.nodeId, url: img.thumbUrl, fileName: imageFileName(i, source.images.length, { label: img.label, url: img.thumbUrl }) }))
+    .filter((f) => isOwnStorageUrl(f.url));
+  return { title: source.title, files };
 }

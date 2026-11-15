@@ -36,6 +36,9 @@ interface CanvasToolbarProps {
   // Panel con los links y descargas de los videos del canvas (si tiene).
   videoCount?: number;
   onOpenVideos?: () => void;
+  // Catálogo de las imágenes del canvas, propias y vinculadas (si tiene).
+  imageCount?: number;
+  onOpenImages?: () => void;
   // Lock de edición: si false, el usuario está en solo-ver y se ocultan todas
   // las herramientas de escritura, mostrando un badge con quién edita.
   canEdit: boolean;
@@ -89,294 +92,328 @@ export function CanvasToolbar({
   onOpenHistory,
   videoCount = 0,
   onOpenVideos,
+  imageCount = 0,
+  onOpenImages,
   canEdit,
   editorName,
 }: CanvasToolbarProps) {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
 
   return (
-    <div className="flex items-center gap-1.5">
-      {/* Mode toggle: Pan vs Select */}
-      <div className="flex items-center gap-0.5 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-1 shadow-lg">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => onCanvasModeChange("pan")}
-          className={`h-7 w-7 p-0 ${canvasMode === "pan" ? "bg-accent text-foreground" : "text-muted-foreground"}`}
-          title="Mover canvas (H)"
-        >
-          <Hand className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => onCanvasModeChange("select")}
-          className={`h-7 w-7 p-0 ${canvasMode === "select" ? "bg-accent text-foreground" : "text-muted-foreground"}`}
-          title="Seleccionar con rectángulo (V)"
-        >
-          <MousePointer2 className="h-3.5 w-3.5" />
-        </Button>
+    <div className="flex flex-col items-start gap-1.5">
+      {/* Dos filas: en una sola no caben todas las herramientas. La primera
+          va encima (relative z-10): el menú "+ Nodo" queda dentro de una barra
+          con backdrop-blur (su propio contexto de apilamiento) y sin esto la
+          segunda fila lo tapaba. */}
+      <div className="relative z-10 flex flex-wrap items-center gap-1.5">
+        {/* Mode toggle: Pan vs Select */}
+        <div className="flex items-center gap-0.5 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-1 shadow-lg">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onCanvasModeChange("pan")}
+            className={`h-7 w-7 p-0 ${canvasMode === "pan" ? "bg-accent text-foreground" : "text-muted-foreground"}`}
+            title="Mover canvas (H)"
+          >
+            <Hand className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onCanvasModeChange("select")}
+            className={`h-7 w-7 p-0 ${canvasMode === "select" ? "bg-accent text-foreground" : "text-muted-foreground"}`}
+            title="Seleccionar con rectángulo (V)"
+          >
+            <MousePointer2 className="h-3.5 w-3.5" />
+          </Button>
+          {canEdit && (
+            <>
+              <div className="w-px h-5 bg-border mx-0.5" />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onSnapChange({ guides: !snapGuides })}
+                className={`h-7 w-7 p-0 ${snapGuides ? "bg-accent text-foreground" : "text-muted-foreground"}`}
+                title={`Guías inteligentes: ${snapGuides ? "activadas" : "desactivadas"} (alinea con otros nodos; mantén Alt para mover libre)`}
+              >
+                <Magnet className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onSnapChange({ grid: !snapGrid })}
+                className={`h-7 w-7 p-0 ${snapGrid ? "bg-accent text-foreground" : "text-muted-foreground"}`}
+                title={`Ajustar a la cuadrícula: ${snapGrid ? "activado" : "desactivado"}`}
+              >
+                <Grid3x3 className="h-3.5 w-3.5" />
+              </Button>
+            </>
+          )}
+        </div>
+
+        {/* Solo-lectura: badge con quién está editando. No hay herramientas de escritura. */}
+        {!canEdit && (
+          <div className="flex items-center gap-1.5 bg-background/90 backdrop-blur-sm border border-amber-500/40 rounded-lg px-2.5 py-1.5 shadow-lg text-xs text-amber-500">
+            <Eye className="h-3.5 w-3.5" />
+            <span className="font-medium">Solo lectura</span>
+            {editorName && (
+              <span className="text-muted-foreground">· edita {editorName}</span>
+            )}
+          </div>
+        )}
+
+        {/* Primary toolbar: Node, Save — solo para el editor */}
         {canEdit && (
-          <>
-            <div className="w-px h-5 bg-border mx-0.5" />
+        <div className="flex items-center gap-2 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-1.5 shadow-lg">
+          {/* Add Node */}
+          <div className="relative">
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => onSnapChange({ guides: !snapGuides })}
-              className={`h-7 w-7 p-0 ${snapGuides ? "bg-accent text-foreground" : "text-muted-foreground"}`}
-              title={`Guías inteligentes: ${snapGuides ? "activadas" : "desactivadas"} (alinea con otros nodos; mantén Alt para mover libre)`}
+              onClick={() => setAddMenuOpen(!addMenuOpen)}
+              className="gap-1.5 text-xs"
             >
-              <Magnet className="h-3.5 w-3.5" />
+              <Plus className="h-3.5 w-3.5" />
+              Nodo
             </Button>
+            {addMenuOpen && (
+              <div className="absolute top-full left-0 mt-1 bg-popover border border-border rounded-lg shadow-lg p-1 min-w-[190px] z-50">
+                <div className="px-3 py-1 text-[10px] text-muted-foreground uppercase tracking-wider">Generación</div>
+                {nodeOptions.filter(o => o.isAI).map(({ type, icon: Icon, label }) => (
+                  <button
+                    key={type}
+                    onClick={() => { onAddNode(type); setAddMenuOpen(false); }}
+                    className="flex items-center gap-2 w-full px-3 py-1.5 text-sm rounded-md hover:bg-accent transition-colors"
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {label}
+                    <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1 py-0.5 rounded bg-primary/10 text-primary ml-auto"><Zap className="h-2.5 w-2.5" />IA</span>
+                  </button>
+                ))}
+                <div className="my-1 border-t border-border/50" />
+                <div className="px-3 py-1 text-[10px] text-muted-foreground uppercase tracking-wider">Estático</div>
+                {nodeOptions.filter(o => !o.isAI).map(({ type, icon: Icon, label }) => (
+                  <button
+                    key={type}
+                    onClick={() => { onAddNode(type); setAddMenuOpen(false); }}
+                    className="flex items-center gap-2 w-full px-3 py-1.5 text-sm rounded-md hover:bg-accent transition-colors"
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {label}
+                  </button>
+                ))}
+                <div className="my-1 border-t border-border/50" />
+                <div className="px-3 py-1 text-[10px] text-muted-foreground uppercase tracking-wider">Parámetros</div>
+                {paramsOptions.map(({ type, icon: Icon, label }) => (
+                  <button
+                    key={type}
+                    onClick={() => { onAddNode(type); setAddMenuOpen(false); }}
+                    className="flex items-center gap-2 w-full px-3 py-1.5 text-sm rounded-md hover:bg-accent transition-colors whitespace-nowrap"
+                  >
+                    <Settings className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <Icon className="h-3.5 w-3.5 shrink-0" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="w-px h-5 bg-border" />
+
+          {/* Save status */}
+          <SaveStatus saveStatus={saveStatus} lastSavedAt={lastSavedAt} />
+        </div>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {!canEdit && ((videoCount > 0 && onOpenVideos) || (imageCount > 0 && onOpenImages)) && (
+          <div className="flex items-center bg-background/90 backdrop-blur-sm border border-border rounded-lg p-1 shadow-lg">
+    {videoCount > 0 && onOpenVideos && (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onOpenVideos}
+        className="gap-1.5 text-xs"
+        title="Links y descargas de los videos de este canvas"
+      >
+        <Film className="h-3.5 w-3.5" />
+        Videos ({videoCount})
+      </Button>
+    )}
+    {imageCount > 0 && onOpenImages && (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onOpenImages}
+        className="gap-1.5 text-xs"
+        title="Catálogo, links y descargas de las imágenes de este canvas (también las vinculadas)"
+      >
+        <Images className="h-3.5 w-3.5" />
+        Imágenes ({imageCount})
+      </Button>
+    )}
+          </div>
+        )}
+
+        {/* Secondary toolbar: Reorder, Clone, Lock All — solo para el editor */}
+        {canEdit && (
+        <div className="flex items-center gap-1 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-1.5 shadow-lg">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onReorder}
+            disabled={isExecuting || nodeCount === 0}
+            className="gap-1.5 text-xs"
+            title="Reordenar todos los nodos en columnas según sus dependencias"
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+            Reordenar
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onCollapseAll}
+            disabled={!canCollapseAll}
+            className="gap-1.5 text-xs"
+            title="Colapsar todos los nodos (solo el título). Cada nodo también tiene su propio botón."
+          >
+            <ChevronsDownUp className="h-3.5 w-3.5" />
+            Colapsar todos
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onExpandAll}
+            disabled={!canExpandAll}
+            className="gap-1.5 text-xs"
+            title="Expandir todos los nodos"
+          >
+            <ChevronsUpDown className="h-3.5 w-3.5" />
+            Expandir todos
+          </Button>
+
+          {staleCount > 0 && onShowStale && (
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => onSnapChange({ grid: !snapGrid })}
-              className={`h-7 w-7 p-0 ${snapGrid ? "bg-accent text-foreground" : "text-muted-foreground"}`}
-              title={`Ajustar a la cuadrícula: ${snapGrid ? "activado" : "desactivado"}`}
+              onClick={onShowStale}
+              className="gap-1.5 text-xs text-amber-700 dark:text-amber-300 hover:text-amber-700 dark:hover:text-amber-300"
+              title="Generaciones hechas con una versión anterior de un Personaje o Escena vinculada. Clic para seleccionarlas y verlas."
             >
-              <Grid3x3 className="h-3.5 w-3.5" />
+              <AlertTriangle className="h-3.5 w-3.5" />
+              {staleCount} {staleCount === 1 ? "desactualizado" : "desactualizados"}
             </Button>
-          </>
-        )}
-      </div>
+          )}
 
-      {/* Solo-lectura: badge con quién está editando. No hay herramientas de escritura. */}
-      {!canEdit && (
-        <div className="flex items-center gap-1.5 bg-background/90 backdrop-blur-sm border border-amber-500/40 rounded-lg px-2.5 py-1.5 shadow-lg text-xs text-amber-500">
-          <Eye className="h-3.5 w-3.5" />
-          <span className="font-medium">Solo lectura</span>
-          {editorName && (
-            <span className="text-muted-foreground">· edita {editorName}</span>
+          <div className="w-px h-5 bg-border" />
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onClone}
+            disabled={isExecuting || nodeCount === 0}
+            className="gap-1.5 text-xs"
+            title="Clonar canvas en nueva conversación"
+          >
+            <Copy className="h-3.5 w-3.5" />
+            Clonar
+          </Button>
+
+          <div className="w-px h-5 bg-border" />
+
+          {/* Templates: guardar el canvas actual como template global, e
+              insertar un template como snippet (canvas vacío o con contenido). */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onSaveTemplate}
+            disabled={isExecuting || nodeCount === 0}
+            className="gap-1.5 text-xs"
+            title="Guardar este canvas como template reutilizable"
+          >
+            <BookmarkPlus className="h-3.5 w-3.5" />
+            Template
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onOpenTemplates}
+            disabled={isExecuting}
+            className="gap-1.5 text-xs"
+            title="Insertar un template guardado en este canvas"
+          >
+            <LayoutTemplate className="h-3.5 w-3.5" />
+            Insertar
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onOpenLinkPicker}
+            disabled={isExecuting}
+            className="gap-1.5 text-xs"
+            title="Vincular un Personaje, una Escena, una imagen o videos de otro canvas del proyecto (solo lectura, sigue al original)"
+          >
+            <Link2 className="h-3.5 w-3.5" />
+            Vincular
+          </Button>
+
+          <div className="w-px h-5 bg-border" />
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onLockAll}
+            disabled={nodeCount === 0}
+            className={`gap-1.5 text-xs ${isAllLocked ? "text-amber-500" : ""}`}
+            title={isAllLocked ? "Desbloquear todos los nodos" : "Bloquear todos los nodos"}
+          >
+            {isAllLocked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+            {isAllLocked ? "Bloqueado" : "Bloquear"}
+          </Button>
+
+          <div className="w-px h-5 bg-border" />
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onOpenHistory}
+            className="gap-1.5 text-xs"
+            title="Papelera y snapshots del canvas"
+          >
+            <History className="h-3.5 w-3.5" />
+            Historial
+          </Button>
+          {videoCount > 0 && onOpenVideos && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onOpenVideos}
+              className="gap-1.5 text-xs"
+              title="Links y descargas de los videos de este canvas"
+            >
+              <Film className="h-3.5 w-3.5" />
+              Videos ({videoCount})
+            </Button>
+          )}
+          {imageCount > 0 && onOpenImages && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onOpenImages}
+              className="gap-1.5 text-xs"
+              title="Catálogo, links y descargas de las imágenes de este canvas (también las vinculadas)"
+            >
+              <Images className="h-3.5 w-3.5" />
+              Imágenes ({imageCount})
+            </Button>
           )}
         </div>
-      )}
-      {!canEdit && videoCount > 0 && onOpenVideos && (
-        <div className="flex items-center bg-background/90 backdrop-blur-sm border border-border rounded-lg p-1 shadow-lg">
-  {videoCount > 0 && onOpenVideos && (
-    <Button
-      variant="ghost"
-      size="sm"
-      onClick={onOpenVideos}
-      className="gap-1.5 text-xs"
-      title="Links y descargas de los videos de este canvas"
-    >
-      <Film className="h-3.5 w-3.5" />
-      Videos ({videoCount})
-    </Button>
-  )}
-        </div>
-      )}
-
-      {/* Primary toolbar: Node, Save — solo para el editor */}
-      {canEdit && (
-      <div className="flex items-center gap-2 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-1.5 shadow-lg">
-        {/* Add Node */}
-        <div className="relative">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setAddMenuOpen(!addMenuOpen)}
-            className="gap-1.5 text-xs"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Nodo
-          </Button>
-          {addMenuOpen && (
-            <div className="absolute top-full left-0 mt-1 bg-popover border border-border rounded-lg shadow-lg p-1 min-w-[190px] z-50">
-              <div className="px-3 py-1 text-[10px] text-muted-foreground uppercase tracking-wider">Generación</div>
-              {nodeOptions.filter(o => o.isAI).map(({ type, icon: Icon, label }) => (
-                <button
-                  key={type}
-                  onClick={() => { onAddNode(type); setAddMenuOpen(false); }}
-                  className="flex items-center gap-2 w-full px-3 py-1.5 text-sm rounded-md hover:bg-accent transition-colors"
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                  {label}
-                  <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1 py-0.5 rounded bg-primary/10 text-primary ml-auto"><Zap className="h-2.5 w-2.5" />IA</span>
-                </button>
-              ))}
-              <div className="my-1 border-t border-border/50" />
-              <div className="px-3 py-1 text-[10px] text-muted-foreground uppercase tracking-wider">Estático</div>
-              {nodeOptions.filter(o => !o.isAI).map(({ type, icon: Icon, label }) => (
-                <button
-                  key={type}
-                  onClick={() => { onAddNode(type); setAddMenuOpen(false); }}
-                  className="flex items-center gap-2 w-full px-3 py-1.5 text-sm rounded-md hover:bg-accent transition-colors"
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                  {label}
-                </button>
-              ))}
-              <div className="my-1 border-t border-border/50" />
-              <div className="px-3 py-1 text-[10px] text-muted-foreground uppercase tracking-wider">Parámetros</div>
-              {paramsOptions.map(({ type, icon: Icon, label }) => (
-                <button
-                  key={type}
-                  onClick={() => { onAddNode(type); setAddMenuOpen(false); }}
-                  className="flex items-center gap-2 w-full px-3 py-1.5 text-sm rounded-md hover:bg-accent transition-colors whitespace-nowrap"
-                >
-                  <Settings className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <Icon className="h-3.5 w-3.5 shrink-0" />
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="w-px h-5 bg-border" />
-
-        {/* Save status */}
-        <SaveStatus saveStatus={saveStatus} lastSavedAt={lastSavedAt} />
-      </div>
-      )}
-
-      {/* Secondary toolbar: Reorder, Clone, Lock All — solo para el editor */}
-      {canEdit && (
-      <div className="flex items-center gap-1 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-1.5 shadow-lg">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onReorder}
-          disabled={isExecuting || nodeCount === 0}
-          className="gap-1.5 text-xs"
-          title="Reordenar todos los nodos en columnas según sus dependencias"
-        >
-          <LayoutGrid className="h-3.5 w-3.5" />
-          Reordenar
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onCollapseAll}
-          disabled={!canCollapseAll}
-          className="gap-1.5 text-xs"
-          title="Colapsar todos los nodos (solo el título). Cada nodo también tiene su propio botón."
-        >
-          <ChevronsDownUp className="h-3.5 w-3.5" />
-          Colapsar todos
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onExpandAll}
-          disabled={!canExpandAll}
-          className="gap-1.5 text-xs"
-          title="Expandir todos los nodos"
-        >
-          <ChevronsUpDown className="h-3.5 w-3.5" />
-          Expandir todos
-        </Button>
-
-        {staleCount > 0 && onShowStale && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onShowStale}
-            className="gap-1.5 text-xs text-amber-700 dark:text-amber-300 hover:text-amber-700 dark:hover:text-amber-300"
-            title="Generaciones hechas con una versión anterior de un Personaje o Escena vinculada. Clic para seleccionarlas y verlas."
-          >
-            <AlertTriangle className="h-3.5 w-3.5" />
-            {staleCount} {staleCount === 1 ? "desactualizado" : "desactualizados"}
-          </Button>
-        )}
-
-        <div className="w-px h-5 bg-border" />
-
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onClone}
-          disabled={isExecuting || nodeCount === 0}
-          className="gap-1.5 text-xs"
-          title="Clonar canvas en nueva conversación"
-        >
-          <Copy className="h-3.5 w-3.5" />
-          Clonar
-        </Button>
-
-        <div className="w-px h-5 bg-border" />
-
-        {/* Templates: guardar el canvas actual como template global, e
-            insertar un template como snippet (canvas vacío o con contenido). */}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onSaveTemplate}
-          disabled={isExecuting || nodeCount === 0}
-          className="gap-1.5 text-xs"
-          title="Guardar este canvas como template reutilizable"
-        >
-          <BookmarkPlus className="h-3.5 w-3.5" />
-          Template
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onOpenTemplates}
-          disabled={isExecuting}
-          className="gap-1.5 text-xs"
-          title="Insertar un template guardado en este canvas"
-        >
-          <LayoutTemplate className="h-3.5 w-3.5" />
-          Insertar
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onOpenLinkPicker}
-          disabled={isExecuting}
-          className="gap-1.5 text-xs"
-          title="Vincular un Personaje, una Escena, una imagen o videos de otro canvas del proyecto (solo lectura, sigue al original)"
-        >
-          <Link2 className="h-3.5 w-3.5" />
-          Vincular
-        </Button>
-
-        <div className="w-px h-5 bg-border" />
-
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onLockAll}
-          disabled={nodeCount === 0}
-          className={`gap-1.5 text-xs ${isAllLocked ? "text-amber-500" : ""}`}
-          title={isAllLocked ? "Desbloquear todos los nodos" : "Bloquear todos los nodos"}
-        >
-          {isAllLocked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
-          {isAllLocked ? "Bloqueado" : "Bloquear"}
-        </Button>
-
-        <div className="w-px h-5 bg-border" />
-
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onOpenHistory}
-          className="gap-1.5 text-xs"
-          title="Papelera y snapshots del canvas"
-        >
-          <History className="h-3.5 w-3.5" />
-          Historial
-        </Button>
-        {videoCount > 0 && onOpenVideos && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onOpenVideos}
-            className="gap-1.5 text-xs"
-            title="Links y descargas de los videos de este canvas"
-          >
-            <Film className="h-3.5 w-3.5" />
-            Videos ({videoCount})
-          </Button>
         )}
       </div>
-      )}
     </div>
   );
 }
