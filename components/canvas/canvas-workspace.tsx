@@ -1353,6 +1353,78 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
     [canEdit, ensureConversation, takeSnapshot, screenToFlowPosition, setNodes, persist, collab.emitNodeAdd],
   );
 
+  // Vincular varios de una vez (Personajes, Escenas, imágenes): una sola
+  // resolución, un solo deshacer. Quedan debajo de lo que ya hay, una fila
+  // por canvas de origen (en el orden recibido) que se parte cada 6 nodos.
+  // Devuelve cuántos creó y cuántos no se pudieron vincular.
+  const addLinkedNodes = useCallback(
+    async (refs: { conversationId: number; nodeId: string }[]): Promise<{ created: number; failed: number }> => {
+      if (!canEdit || refs.length === 0) return { created: 0, failed: 0 };
+      const convId = await ensureConversation();
+      const results = await fetchLinkResolutions(convId, refs);
+      const byKey = new Map(results.map((r) => [`${r.conversationId}|${r.nodeId}`, r]));
+      const existing = latestNodesRef.current;
+      const bottom = existing.length
+        ? Math.max(...existing.map((n) => n.position.y + (n.measured?.height ?? (typeof n.height === "number" ? n.height : 300))))
+        : 0;
+      const left = existing.length ? Math.min(...existing.map((n) => n.position.x)) : 100;
+      const COL = 420;
+      const PER_ROW = 6;
+      const heightOf = (kind: string) => (kind === "character" ? 640 : kind === "image" ? 420 : 320);
+      const now = new Date().toISOString();
+      const created: Node<CanvasNodeData>[] = [];
+      let failed = 0;
+      let y = existing.length ? bottom + 300 : 100;
+      let col = 0;
+      let rowH = 0;
+      let rowConv: number | null = null;
+      const seen = new Set<string>();
+      for (const ref of refs) {
+        const key = `${ref.conversationId}|${ref.nodeId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const r = byKey.get(key);
+        if (!r || r.state !== "ok" || !r.snapshot) {
+          failed++;
+          continue;
+        }
+        if (col > 0 && (col >= PER_ROW || rowConv !== ref.conversationId)) {
+          y += rowH + 100;
+          col = 0;
+          rowH = 0;
+        }
+        rowConv = ref.conversationId;
+        const data: LinkedNodeData = {
+          ...(getDefaultNodeData("linked") as LinkedNodeData),
+          sourceType: r.snapshot.kind,
+          sourceConversationId: ref.conversationId,
+          sourceNodeId: ref.nodeId,
+          sourceCanvasTitle: r.sourceCanvasTitle,
+          label: r.snapshot.label,
+          linkSnapshot: r.snapshot,
+          linkHash: r.hash,
+          linkState: "ok",
+          linkSyncedAt: now,
+          imageOutputs: {},
+        };
+        created.push({ id: newCanvasNodeId(), type: "linked", position: { x: left + col * COL, y }, data });
+        col++;
+        rowH = Math.max(rowH, heightOf(r.snapshot.kind));
+      }
+      if (created.length === 0) return { created: 0, failed };
+      takeSnapshot();
+      setNodes((nds) => [...nds, ...created]);
+      for (const n of created) {
+        persist.saveNode(n);
+        collab.emitNodeAdd(n as unknown as Record<string, unknown>);
+      }
+      if (failed === 0) setLinkPickerOpen(false);
+      setTimeout(() => fitView({ nodes: created.map((n) => ({ id: n.id })), padding: 0.15, duration: 400 }), 100);
+      return { created: created.length, failed };
+    },
+    [canEdit, ensureConversation, takeSnapshot, setNodes, persist, collab.emitNodeAdd, fitView],
+  );
+
   // Videos del canvas (propios y vinculados), para el botón "Videos".
   const videoCount = useMemo(
     () => nodes.filter((n) => n.type === "video" || (n.type === "linked" && (n.data as LinkedNodeData).linkSnapshot?.kind === "video")).length,
@@ -2370,6 +2442,7 @@ function CanvasWorkspaceInner({ conversationId, projectId, generationConfig = EM
           conversationId={realConversationId}
           onClose={() => setLinkPickerOpen(false)}
           onLink={addLinkedNode}
+          onLinkMany={addLinkedNodes}
           onLinkVideos={addLinkedVideos}
           alreadyLinked={alreadyLinked}
         />
